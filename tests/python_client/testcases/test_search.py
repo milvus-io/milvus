@@ -1728,6 +1728,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -1767,7 +1768,48 @@ class TestCollectionSearch(TestcaseBase):
                                              "limit": default_limit,
                                              "_async": _async})
 
+    @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[9:14],
+                                 ct.default_index_params[9:14]))
+    def test_search_after_different_index_with_params_gpu(self, dim, index, params, auto_id, _async):
+        """
+        target: test search after different index
+        method: test search after different index and corresponding search params
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=False)[0:5]
+        # 2. create index and load
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. search
+        search_params = cf.gen_search_param(index)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
+            
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
@@ -1804,12 +1846,93 @@ class TestCollectionSearch(TestcaseBase):
                                              "ids": insert_ids,
                                              "limit": default_limit,
                                              "_async": _async})
+            
+    @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[9:14],
+                                 ct.default_index_params[9:14]))
+    def test_search_after_different_index_with_min_dim_gpu(self, index, params, auto_id, _async):
+        """
+        target: test search after different index with min dim
+        method: test search after different index and corresponding search params with dim = 1
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=min_dim, is_index=False)[0:5]
+        # 2. create index and load
+        if params.get("m"):
+            params["m"] = min_dim
+        if params.get("PQM"):
+            params["PQM"] = min_dim
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. search
+        search_params = cf.gen_search_param(index)
+        vectors = [[random.random() for _ in range(min_dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
     def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async):
+        """
+        target: test search with different metric type
+        method: test search with different metric type
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=False)[0:5]
+        # 2. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_after_index_different_metric_type: Created index-%s" % index)
+        collection_w.load()
+        # 3. search
+        search_params = cf.gen_search_param(index, "IP")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[9:14],
+                                 ct.default_index_params[9:14]))
+    def test_search_after_index_different_metric_type_gpu(self, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type
         method: test search with different metric type
