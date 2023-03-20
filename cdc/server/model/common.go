@@ -20,8 +20,8 @@ package model
 type MilvusConnectParam struct {
 	Host            string `json:"host" mapstructure:"host"`
 	Port            int    `json:"port" mapstructure:"port"`
-	Username        string `json:"username" mapstructure:"username"`
-	Password        string `json:"password" mapstructure:"password"`
+	Username        string `json:"username,omitempty" mapstructure:"username"`
+	Password        string `json:"password,omitempty" mapstructure:"password"`
 	EnableTls       bool   `json:"enable_tls" mapstructure:"enable_tls"`
 	IgnorePartition bool   `json:"ignore_partition" mapstructure:"ignore_partition"`
 	// ConnectTimeout unit: s

@@ -22,6 +22,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/cdc/core/pb"
+
 	"github.com/cockroachdb/errors"
 	"github.com/goccy/go-json"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -64,6 +67,17 @@ var (
 		CollectionInfos: []model.CollectionInfo{
 			{
 				Name: collectionName,
+			},
+		},
+	}
+	starRequest = &request.CreateRequest{
+		MilvusConnectParam: model.MilvusConnectParam{
+			Host: "localhost",
+			Port: 19530,
+		},
+		CollectionInfos: []model.CollectionInfo{
+			{
+				Name: "*",
 			},
 		},
 	}
@@ -235,6 +249,12 @@ func TestValidCreateRequest(t *testing.T) {
 		}
 		assertion.Error(cdc.validCreateRequest(createRequest))
 
+		createRequest.CollectionInfos = []model.CollectionInfo{
+			{Name: "*"},
+			{Name: "foooooo"},
+		}
+		assertion.Error(cdc.validCreateRequest(createRequest))
+
 		// fail connect milvus
 		createRequest.CollectionInfos = []model.CollectionInfo{
 			{Name: "fo"},
@@ -338,11 +358,28 @@ func TestCreateRequest(t *testing.T) {
 			assertion.NotEmpty(resp.TaskID)
 			assertion.NoError(err)
 			cdc.cdcTasks.RLock()
-			defer cdc.cdcTasks.RUnlock()
 			assert.NotNil(t, cdc.cdcTasks.data[resp.TaskID])
+			cdc.cdcTasks.RUnlock()
 
 			// duplicate collection
 			_, err = cdc.Create(createRequest)
+			assertion.Error(err)
+
+			// star collection
+			_, err = cdc.Create(starRequest)
+			assertion.NoError(err)
+
+			_, err = cdc.Create(&request.CreateRequest{
+				MilvusConnectParam: model.MilvusConnectParam{
+					Host: "localhost",
+					Port: 19530,
+				},
+				CollectionInfos: []model.CollectionInfo{
+					{
+						Name: "col2",
+					},
+				},
+			})
 			assertion.Error(err)
 		})
 	})
@@ -382,6 +419,13 @@ func TestDeleteRequest(t *testing.T) {
 				return factoryMock
 			}
 			info := &meta.TaskInfo{
+				CollectionInfos: []model.CollectionInfo{
+					{Name: collectionName},
+				},
+				MilvusConnectParam: model.MilvusConnectParam{
+					Host: "localhost",
+					Port: 19530,
+				},
 				State: meta.TaskStateInitial,
 			}
 			infoByte, _ := json.Marshal(info)
@@ -402,6 +446,9 @@ func TestDeleteRequest(t *testing.T) {
 			assertion.NotEmpty(createResp.TaskID)
 			assertion.NoError(err)
 
+			_, err = cdc.Create(starRequest)
+			assertion.NoError(err)
+
 			call3 := mockEtcdCli.On("Txn", mock.Anything).Return(&MockTxn{err: errors.New("txn error")})
 			_, err = cdc.Delete(&request.DeleteRequest{TaskID: createResp.TaskID})
 			assertion.Error(err)
@@ -411,6 +458,22 @@ func TestDeleteRequest(t *testing.T) {
 			defer call3.Unset()
 			resp, err = cdc.Delete(&request.DeleteRequest{TaskID: createResp.TaskID})
 			assertion.NotNil(resp)
+			assertion.NoError(err)
+
+			_, err = cdc.Create(&request.CreateRequest{
+				MilvusConnectParam: model.MilvusConnectParam{
+					Host: "localhost",
+					Port: 19530,
+				},
+				CollectionInfos: []model.CollectionInfo{
+					{
+						Name: "col2",
+					},
+				},
+			})
+			assertion.Error(err)
+
+			_, err = cdc.Create(createRequest)
 			assertion.NoError(err)
 		})
 	})
@@ -512,5 +575,42 @@ func TestPauseResumeRequest(t *testing.T) {
 			assertion.NoError(err)
 		})
 
+	})
+}
+
+func TestGetShouldReadFunc(t *testing.T) {
+	t.Run("base", func(t *testing.T) {
+		f := GetShouldReadFunc(&meta.TaskInfo{
+			CollectionInfos: []model.CollectionInfo{
+				{Name: "foo1"},
+				{Name: "foo2"},
+			},
+		})
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo1"}}))
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo2"}}))
+		assert.False(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo"}}))
+	})
+
+	t.Run("star", func(t *testing.T) {
+		f := GetShouldReadFunc(&meta.TaskInfo{
+			CollectionInfos: []model.CollectionInfo{
+				{Name: "*"},
+			},
+		})
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo1"}}))
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo2"}}))
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo"}}))
+	})
+
+	t.Run("mix star", func(t *testing.T) {
+		f := GetShouldReadFunc(&meta.TaskInfo{
+			CollectionInfos: []model.CollectionInfo{
+				{Name: "*"},
+			},
+			ExcludeCollections: []string{"foo1", "foo2"},
+		})
+		assert.False(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo1"}}))
+		assert.False(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo2"}}))
+		assert.True(t, f(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "foo"}}))
 	})
 }

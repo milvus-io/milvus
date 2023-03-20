@@ -76,3 +76,11 @@ func FactoryCreatorOption(f FactoryCreator) config.Option[*MilvusCollectionReade
 		}
 	})
 }
+
+func ShouldReadFuncOption(f ShouldReadFunc) config.Option[*MilvusCollectionReader] {
+	return config.OptionFunc[*MilvusCollectionReader](func(object *MilvusCollectionReader) {
+		if f != nil {
+			object.shouldReadFunc = f
+		}
+	})
+}

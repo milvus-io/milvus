@@ -58,10 +58,6 @@ func (s *ReaderMonitor) OnSuccessGetACollectionInfo(collectionID int64, collecti
 	streamingCollectionCountVec.WithLabelValues(s.taskID, successStatusLabel).Inc()
 }
 
-func (s *ReaderMonitor) OnSuccessGetAllCollectionInfo() {
-	s.log.Info("success to get all collection info")
-}
-
 func (s *ReaderMonitor) WatchChanClosed() {
 	s.log.Info("watch chan closed")
 }

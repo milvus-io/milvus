@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/cdc/core/config"
+	"github.com/milvus-io/milvus/cdc/core/pb"
 	cdcreader "github.com/milvus-io/milvus/cdc/core/reader"
 	"github.com/milvus-io/milvus/cdc/core/util"
 	cdcwriter "github.com/milvus-io/milvus/cdc/core/writer"
@@ -46,8 +47,9 @@ type MetaCDC struct {
 	// collectionNames are used to make sure no duplicate task for a collection.
 	// key -> milvus ip:port, value -> collection names
 	collectionNames struct {
-		sync.Mutex
-		data map[string][]string
+		sync.RWMutex
+		data        map[string][]string
+		excludeData map[string][]string
 	}
 	cdcTasks struct {
 		sync.RWMutex
@@ -76,6 +78,7 @@ func NewMetaCDC(serverConfig *CDCServerConfig) *MetaCDC {
 		config:   serverConfig,
 	}
 	cdc.collectionNames.data = make(map[string][]string)
+	cdc.collectionNames.excludeData = make(map[string][]string)
 	cdc.cdcTasks.data = make(map[string]*CDCTask)
 	cdc.factoryCreator = NewCDCFactory
 	return cdc
@@ -100,6 +103,7 @@ func (e *MetaCDC) ReloadTask() {
 			return t.Name
 		})
 		e.collectionNames.data[milvusAddress] = append(e.collectionNames.data[milvusAddress], newCollectionNames...)
+		e.collectionNames.excludeData[milvusAddress] = append(e.collectionNames.excludeData[milvusAddress], info.ExcludeCollections...)
 	}
 	for _, taskInfo := range taskInfos {
 		task, err := e.newCdcTask(taskInfo)
@@ -130,21 +134,48 @@ func (e *MetaCDC) Create(req *request.CreateRequest) (resp *request.CreateRespon
 	})
 	e.collectionNames.Lock()
 	if names, ok := e.collectionNames.data[milvusAddress]; ok {
+		existAll := lo.Contains(names, cdcreader.AllCollection)
 		duplicateCollections := lo.Filter(req.CollectionInfos, func(info model.CollectionInfo, _ int) bool {
-			return lo.Contains(names, info.Name)
+			return (!existAll && lo.Contains(names, info.Name)) || (existAll && info.Name == cdcreader.AllCollection)
 		})
 		if len(duplicateCollections) > 0 {
 			e.collectionNames.Unlock()
-			return nil, NewClientError(fmt.Sprintf("some collections are duplicate with existing tasks, %v", duplicateCollections))
+			return nil, NewClientError(fmt.Sprintf("some collections are duplicate with existing tasks, %v", lo.Map(duplicateCollections, func(t model.CollectionInfo, i int) string {
+				return t.Name
+			})))
+		}
+		if existAll {
+			excludeCollectionNames := lo.Filter(e.collectionNames.excludeData[milvusAddress], func(s string, _ int) bool {
+				return !lo.Contains(names, s)
+			})
+			duplicateCollections = lo.Filter(req.CollectionInfos, func(info model.CollectionInfo, _ int) bool {
+				return !lo.Contains(excludeCollectionNames, info.Name)
+			})
+			if len(duplicateCollections) > 0 {
+				e.collectionNames.Unlock()
+				return nil, NewClientError(fmt.Sprintf("some collections are duplicate with existing tasks, check the `*` collection task and other tasks, %v", lo.Map(duplicateCollections, func(t model.CollectionInfo, i int) string {
+					return t.Name
+				})))
+			}
 		}
 	}
 	// release lock early to accept other requests
+	var excludeCollectionNames []string
+	if newCollectionNames[0] == cdcreader.AllCollection {
+		existCollectionNames := e.collectionNames.data[milvusAddress]
+		excludeCollectionNames = make([]string, len(existCollectionNames))
+		copy(excludeCollectionNames, existCollectionNames)
+		e.collectionNames.excludeData[milvusAddress] = excludeCollectionNames
+	}
 	e.collectionNames.data[milvusAddress] = append(e.collectionNames.data[milvusAddress], newCollectionNames...)
 	e.collectionNames.Unlock()
 
 	revertCollectionNames := func() {
 		e.collectionNames.Lock()
 		defer e.collectionNames.Unlock()
+		if newCollectionNames[0] == cdcreader.AllCollection {
+			e.collectionNames.excludeData[milvusAddress] = []string{}
+		}
 		e.collectionNames.data[milvusAddress] = lo.Without(e.collectionNames.data[milvusAddress], newCollectionNames...)
 	}
 
@@ -152,6 +183,7 @@ func (e *MetaCDC) Create(req *request.CreateRequest) (resp *request.CreateRespon
 		TaskID:             e.getUuid(),
 		MilvusConnectParam: req.MilvusConnectParam,
 		CollectionInfos:    req.CollectionInfos,
+		ExcludeCollections: excludeCollectionNames,
 		WriterCacheConfig:  req.BufferConfig,
 		State:              meta.TaskStateInitial,
 	}
@@ -238,6 +270,12 @@ func (e *MetaCDC) checkCollectionInfos(infos []model.CollectionInfo) error {
 		if info.Name == "" {
 			emptyName = true
 		}
+		if info.Name == cdcreader.AllCollection && len(infos) > 1 {
+			return NewClientError(fmt.Sprintf("make sure the only one collection if you want to use the '*' collection param, current param: %v",
+				lo.Map(infos, func(t model.CollectionInfo, _ int) string {
+					return t.Name
+				})))
+		}
 		if len(info.Name) > e.config.MaxNameLength {
 			longNames = append(longNames, info.Name)
 		}
@@ -303,6 +341,7 @@ func (e *MetaCDC) newCdcTask(info *meta.TaskInfo) (*CDCTask, error) {
 			cdcreader.EtcdOption(etcdConfig),
 			cdcreader.MqOption(sourceConfig.Pulsar, sourceConfig.Kafka),
 			cdcreader.MonitorOption(monitor),
+			cdcreader.ShouldReadFuncOption(GetShouldReadFunc(info)),
 			cdcreader.ChanLenOption(sourceConfig.ReadChanLen))...)
 		if err != nil {
 			return nil, errors.WithMessage(err, "fail to new the reader, task_id: "+info.TaskID)
@@ -368,6 +407,9 @@ func (e *MetaCDC) Delete(req *request.DeleteRequest) (*request.DeleteResponse, e
 		milvusAddress := fmt.Sprintf("%s:%d", info.MilvusConnectParam.Host, info.MilvusConnectParam.Port)
 		collectionNames := info.CollectionNames()
 		e.collectionNames.Lock()
+		if collectionNames[0] == cdcreader.AllCollection {
+			e.collectionNames.excludeData[milvusAddress] = []string{}
+		}
 		e.collectionNames.data[milvusAddress] = lo.Without(e.collectionNames.data[milvusAddress], collectionNames...)
 		e.collectionNames.Unlock()
 
@@ -457,4 +499,19 @@ func (e *MetaCDC) List(req *request.ListRequest) (*request.ListResponse, error) 
 			return request.GetTask(t)
 		}),
 	}, nil
+}
+
+func GetShouldReadFunc(taskInfo *meta.TaskInfo) cdcreader.ShouldReadFunc {
+	isAll := taskInfo.CollectionInfos[0].Name == cdcreader.AllCollection
+	return func(collectionInfo *pb.CollectionInfo) bool {
+		currentCollectionName := collectionInfo.Schema.Name
+		notStarContains := !isAll && lo.ContainsBy(taskInfo.CollectionInfos, func(taskCollectionInfo model.CollectionInfo) bool {
+			return taskCollectionInfo.Name == currentCollectionName
+		})
+		starContains := isAll && !lo.ContainsBy(taskInfo.ExcludeCollections, func(s string) bool {
+			return s == currentCollectionName
+		})
+
+		return notStarContains || starContains
+	}
 }

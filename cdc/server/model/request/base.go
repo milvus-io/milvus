@@ -43,7 +43,7 @@ type Task struct {
 	MilvusConnectParam model.MilvusConnectParam `json:"milvus_connect_param" mapstructure:"milvus_connect_param"`
 	CollectionInfos    []model.CollectionInfo   `json:"collection_infos" mapstructure:"collection_infos"`
 	State              string                   `json:"state" mapstructure:"state"`
-	LastFailReason     string                   `json:"reason" mapstructure:"reason"`
+	LastFailReason     string                   `json:"reason,omitempty" mapstructure:"reason"`
 }
 
 func GetTask(taskInfo *meta.TaskInfo) Task {

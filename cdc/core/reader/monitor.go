@@ -25,10 +25,7 @@ type Monitor interface {
 	OnFailUnKnowCollection(key string, err error)
 	OnFailGetCollectionInfo(collectionID int64, collectionName string, err error)
 	OnFailReadStream(collectionID int64, collectionName string, vchannel string, err error)
-
 	OnSuccessGetACollectionInfo(collectionID int64, collectionName string)
-	OnSuccessGetAllCollectionInfo()
-
 	WatchChanClosed()
 	OnFilterReadMsg(msgType string)
 }
@@ -51,9 +48,6 @@ func (d *DefaultMonitor) OnFailReadStream(collectionID int64, collectionName str
 }
 
 func (d *DefaultMonitor) OnSuccessGetACollectionInfo(collectionID int64, collectionName string) {
-}
-
-func (d *DefaultMonitor) OnSuccessGetAllCollectionInfo() {
 }
 
 func (d *DefaultMonitor) WatchChanClosed() {

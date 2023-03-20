@@ -43,10 +43,16 @@ import (
 
 var log = util.Log
 
+const (
+	AllCollection = "*"
+)
+
 type CollectionInfo struct {
 	collectionName string
 	positions      map[string]*commonpb.KeyDataPair
 }
+
+type ShouldReadFunc func(*pb.CollectionInfo) bool
 
 type MilvusCollectionReader struct {
 	DefaultReader
@@ -57,12 +63,12 @@ type MilvusCollectionReader struct {
 	monitor     Monitor
 	dataChanLen int
 
-	etcdCli            util.KVApi
-	factoryCreator     FactoryCreator
-	allCollectionNames []string
-	dataChan           chan *model.CDCData
-	cancelWatch        context.CancelFunc
-	closeStreamFuncs   util.Value[[]func()]
+	etcdCli          util.KVApi
+	factoryCreator   FactoryCreator
+	shouldReadFunc   ShouldReadFunc
+	dataChan         chan *model.CDCData
+	cancelWatch      context.CancelFunc
+	closeStreamFuncs util.Value[[]func()]
 
 	startOnce sync.Once
 	quitOnce  sync.Once
@@ -79,6 +85,7 @@ func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]
 		factoryCreator: NewDefaultFactoryCreator(),
 		dataChanLen:    10,
 	}
+	reader.shouldReadFunc = reader.getDefaultShouldReadFunc()
 	for _, option := range options {
 		option.Apply(reader)
 	}
@@ -89,9 +96,6 @@ func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]
 		return nil, err
 	}
 	reader.dataChan = make(chan *model.CDCData, reader.dataChanLen)
-	reader.allCollectionNames = lo.Map(reader.collections, func(t CollectionInfo, _ int) string {
-		return t.collectionName
-	})
 	reader.isQuit.Store(false)
 	reader.closeStreamFuncs.Store([]func(){})
 	return reader, nil
@@ -107,6 +111,14 @@ func (reader *MilvusCollectionReader) StartRead(ctx context.Context) <-chan *mod
 	})
 
 	return reader.dataChan
+}
+
+func (reader *MilvusCollectionReader) getDefaultShouldReadFunc() ShouldReadFunc {
+	return func(i *pb.CollectionInfo) bool {
+		return lo.ContainsBy(reader.collections, func(info CollectionInfo) bool {
+			return reader.collectionName(i) == info.collectionName
+		})
+	}
 }
 
 func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context) {
@@ -136,7 +148,8 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 						}
 						if info.State == pb.CollectionState_CollectionCreated {
 							go func() {
-								if lo.Contains(reader.allCollectionNames, reader.collectionName(info)) {
+								// shouldReadCollection()
+								if reader.shouldReadFunc(info) {
 									err := util.Do(context.Background(), func() error {
 										err := reader.fillCollectionField(info)
 										if err != nil {
@@ -163,29 +176,22 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 }
 
 func (reader *MilvusCollectionReader) goGetAllCollections() {
-	wg := &sync.WaitGroup{}
-	wg.Add(len(reader.allCollectionNames))
 	go func() {
 		var (
 			existedCollectionInfos []*pb.CollectionInfo
 			err                    error
 		)
 
-		existedCollectionInfos, err = reader.getCollectionInfo(reader.allCollectionNames)
+		existedCollectionInfos, err = reader.getCollectionInfo()
 		if err != nil {
 			log.Warn("fail to get collection", zap.Error(err))
 			reader.monitor.OnFailUnKnowCollection(reader.collectionPrefix(), err)
 		}
 		for _, info := range existedCollectionInfos {
 			if info.State == pb.CollectionState_CollectionCreated {
-				wg.Done()
 				go reader.readStreamData(info, false)
 			}
 		}
-	}()
-	go func() {
-		wg.Wait()
-		reader.monitor.OnSuccessGetAllCollectionInfo()
 	}()
 }
 
@@ -206,7 +212,7 @@ func (reader *MilvusCollectionReader) collectionName(info *pb.CollectionInfo) st
 // getCollectionInfo The return value meanings are respectively:
 // 1. collection infos that the collection have existed
 // 2. error message
-func (reader *MilvusCollectionReader) getCollectionInfo(collectionNames []string) ([]*pb.CollectionInfo, error) {
+func (reader *MilvusCollectionReader) getCollectionInfo() ([]*pb.CollectionInfo, error) {
 	resp, err := util.EtcdGet(reader.etcdCli, reader.collectionPrefix()+"/", clientv3.WithPrefix())
 	if err != nil {
 		log.Warn("fail to get all collection data", zap.Error(err))
@@ -221,8 +227,8 @@ func (reader *MilvusCollectionReader) getCollectionInfo(collectionNames []string
 			log.Warn("fail to unmarshal collection info, maybe it's a deleted collection", zap.String("key", util.ToString(kv.Key)), zap.String("value", util.Base64Encode(kv.Value)), zap.Error(err))
 			continue
 		}
-		if lo.Contains(collectionNames, info.Schema.Name) {
-			log.Info("get the collection that it need to be replicated", zap.String("name", info.Schema.Name), zap.String("key", util.ToString(kv.Key)))
+		if reader.shouldReadFunc(info) {
+			log.Info("get the collection that it need to be replicated", zap.String("name", reader.collectionName(info)), zap.String("key", util.ToString(kv.Key)))
 			err = reader.fillCollectionField(info)
 			if err != nil {
 				return existedCollectionInfos, err

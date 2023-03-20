@@ -141,7 +141,6 @@ func (c *CDCTask) handle() {
 				done <- struct{}{}
 			}
 			c.current.Store(meta.TaskStateTerminate)
-			close(c.signaler)
 			c.handleDone(s.done, nil)
 			return
 		default:
@@ -237,13 +236,14 @@ func (c *CDCTask) sendSignal(s *signal) {
 		c.handleDone(s.done, err)
 		return
 	}
-	select {
-	case <-c.signaler:
+
+	if c.current.Load() == meta.TaskStateTerminate {
 		log.Warn("the task has terminated")
 		c.handleDone(s.done, fmt.Errorf("the task has terminated"))
-	default:
-		c.signaler <- s
+		return
 	}
+
+	c.signaler <- s
 }
 
 //go:generate mockery --name=CDCFactory --filename=cdc_factory_mock.go --output=./mocks
