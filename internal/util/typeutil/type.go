@@ -48,27 +48,26 @@ const (
 	IndexNodeRole = "indexnode"
 )
 
+var (
+	serverTypeSet = NewSet(
+		StandaloneRole,
+		RootCoordRole,
+		ProxyRole,
+		QueryCoordRole,
+		QueryNodeRole,
+		IndexNodeRole,
+		DataCoordRole,
+		DataNodeRole,
+	)
+	serverTypeList = serverTypeSet.Collect()
+)
+
 const Unlimited int64 = -1
 
-func ServerTypeMap() map[string]interface{} {
-	return map[string]interface{}{
-		EmbeddedRole:   nil,
-		StandaloneRole: nil,
-		RootCoordRole:  nil,
-		ProxyRole:      nil,
-		QueryCoordRole: nil,
-		QueryNodeRole:  nil,
-		IndexNodeRole:  nil,
-		DataCoordRole:  nil,
-		DataNodeRole:   nil,
-	}
+func ServerTypeSet() Set[string] {
+	return serverTypeSet
 }
 
 func ServerTypeList() []string {
-	serverTypeMap := ServerTypeMap()
-	types := make([]string, 0, len(serverTypeMap))
-	for key := range serverTypeMap {
-		types = append(types, key)
-	}
-	return types
+	return serverTypeList
 }
