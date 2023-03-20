@@ -1624,8 +1624,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [127, 129, 200])
-    @pytest.mark.xfail(reason="issue #22777")
+    @pytest.mark.parametrize("dim", [120, 129, 200])
     def test_upsert_binary_dim_unmatch(self, dim):
         """
         target: test upsert with unmatched vector dim
