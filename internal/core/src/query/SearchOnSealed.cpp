@@ -58,7 +58,7 @@ SearchOnSealedIndex(const Schema& schema,
     if (round_decimal != -1) {
         const float multiplier = pow(10.0, round_decimal);
         for (int i = 0; i < total_num; i++) {
-            distances[i] = round(distances[i] * multiplier) / multiplier;
+            distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
     result.seg_offsets_.resize(total_num);
