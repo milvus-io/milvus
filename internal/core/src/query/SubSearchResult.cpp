@@ -89,9 +89,8 @@ SubSearchResult::round_values() {
     if (round_decimal_ == -1)
         return;
     const float multiplier = pow(10.0, round_decimal_);
-    for (auto it = this->distances_.begin(); it != this->distances_.end();
-         it++) {
-        *it = round(*it * multiplier) / multiplier;
+    for (float& distance : this->distances_) {
+        distance = std::round(distance * multiplier) / multiplier;
     }
 }
 

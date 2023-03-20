@@ -34,11 +34,11 @@ class SubSearchResult {
           distances_(num_queries * topk, init_value(metric_type)) {
     }
 
-    SubSearchResult(SubSearchResult&& other)
+    SubSearchResult(SubSearchResult&& other) noexcept
         : num_queries_(other.num_queries_),
           topk_(other.topk_),
           round_decimal_(other.round_decimal_),
-          metric_type_(other.metric_type_),
+          metric_type_(std::move(other.metric_type_)),
           seg_offsets_(std::move(other.seg_offsets_)),
           distances_(std::move(other.distances_)) {
     }

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <limits>
+#include <utility>
 
 #include "common/Consts.h"
 #include "common/Types.h"
@@ -33,7 +34,7 @@ struct SearchResultPair {
                      int64_t index,
                      int64_t lb,
                      int64_t rb)
-        : primary_key_(primary_key),
+        : primary_key_(std::move(primary_key)),
           distance_(distance),
           search_result_(result),
           segment_index_(index),
@@ -43,7 +44,7 @@ struct SearchResultPair {
 
     bool
     operator>(const SearchResultPair& other) const {
-        if (fabs(distance_ - other.distance_) < 0.000001f) {
+        if (std::fabs(distance_ - other.distance_) < 0.000001f) {
             return primary_key_ < other.primary_key_;
         }
         return distance_ > other.distance_;

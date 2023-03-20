@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "index/VectorMemIndex.h"
+
+#include <cmath>
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "exceptions/EasyAssert.h"
@@ -129,7 +131,7 @@ VectorMemIndex::Query(const DatasetPtr dataset,
     if (round_decimal != -1) {
         const float multiplier = pow(10.0, round_decimal);
         for (int i = 0; i < total_num; i++) {
-            distances[i] = round(distances[i] * multiplier) / multiplier;
+            distances[i] = std::round(distances[i] * multiplier) / multiplier;
         }
     }
     auto result = std::make_unique<SearchResult>();
