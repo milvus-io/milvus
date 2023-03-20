@@ -232,6 +232,14 @@ var (
 			Name:      "hook_func_count",
 			Help:      "the hook function count",
 		}, []string{functionLabelName, fullMethodLabelName})
+
+	UserRPCCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "user_rpc_count",
+			Help:      "the rpc count of a user",
+		}, []string{usernameLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -267,6 +275,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyLimiterRate)
 	registry.MustRegister(ProxyHookFunc)
+	registry.MustRegister(UserRPCCounter)
 }
 
 // SetRateGaugeByRateType sets ProxyLimiterRate metrics.
