@@ -424,7 +424,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		if searchErr != nil {
 			log.Warn("first search failed, updating shardleader caches and retry search",
 				zap.Error(searchErr))
-			globalMetaCache.ClearShards(t.collectionName)
+			globalMetaCache.DeprecateShardCache(t.collectionName)
 		}
 		return searchErr
 	}, retry.Attempts(Params.CommonCfg.GrpcRetryTimes))
@@ -515,12 +515,14 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode search return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
+		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
 	errCode := result.GetStatus().GetErrorCode()
 	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
+		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
 	if errCode != commonpb.ErrorCode_Success {
