@@ -39,8 +39,8 @@ milvus-gpu: build-cpp-gpu print-build-info
 	@echo "Building Milvus-gpu ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus-gpu $(PWD)/cmd/main.go 1>/dev/null
+		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -122,6 +122,7 @@ integration-test:
     		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
+BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
 BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
@@ -282,6 +283,16 @@ install: milvus
 	-cp -r -P $(PWD)/internal/core/output/lib64/*.so* $(LIBRARY_PATH) 2>/dev/null
 	@echo "Installation successful."
 
+gpu-install: milvus-gpu
+	@echo "Installing binary to './bin'"
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
+	@mkdir -p $(LIBRARY_PATH)
+	-cp -r -P $(PWD)/internal/core/output/lib/*.dylib* $(LIBRARY_PATH) 2>/dev/null
+	-cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH) 2>/dev/null
+	-cp -r -P $(PWD)/internal/core/output/lib64/*.so* $(LIBRARY_PATH) 2>/dev/null
+	@echo "Installation successful."
+
+
 clean:
 	@echo "Cleaning up all the generated files"
 	@find . -name '*.test' | xargs rm -fv
@@ -348,3 +359,4 @@ generate-mockery: getdeps
 	$(PWD)/bin/mockery --name=QueryCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/types --filename=mock_querycoord.go --with-expecter --structname=MockQueryCoord --outpkg=types --inpackage
 	$(PWD)/bin/mockery --name=QueryNodeComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/types --filename=mock_querynode.go --with-expecter --structname=MockQueryNode --outpkg=types --inpackage
 ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp codecov-go
+
