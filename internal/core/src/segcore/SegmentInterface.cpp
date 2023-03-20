@@ -133,16 +133,17 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
                     auto int_ids = ids->mutable_int_id();
-                    auto src_data = col_data->scalars().long_data();
+                    auto& src_data = col_data->scalars().long_data();
                     int_ids->mutable_data()->Add(src_data.data().begin(),
                                                  src_data.data().end());
                     break;
                 }
                 case DataType::VARCHAR: {
                     auto str_ids = ids->mutable_str_id();
-                    auto src_data = col_data->scalars().string_data();
-                    for (auto i = 0; i < src_data.data_size(); ++i)
+                    auto& src_data = col_data->scalars().string_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
                         *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
                     break;
                 }
                 default: {

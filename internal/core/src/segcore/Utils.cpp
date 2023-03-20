@@ -25,7 +25,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
             break;
         }
         case DataType::VARCHAR: {
-            auto src_data = data.scalars().string_data().data();
+            auto& src_data = data.scalars().string_data().data();
             std::copy(src_data.begin(), src_data.end(), pks.begin());
             break;
         }
@@ -47,7 +47,7 @@ ParsePksFromIDs(std::vector<PkType>& pks,
             break;
         }
         case DataType::VARCHAR: {
-            auto source_data = data.str_id().data();
+            auto& source_data = data.str_id().data();
             std::copy(source_data.begin(), source_data.end(), pks.begin());
             break;
         }
@@ -363,7 +363,7 @@ MergeDataArray(
                 continue;
             }
             case DataType::VARCHAR: {
-                auto data = src_field_data->scalars().string_data();
+                auto& data = src_field_data->scalars().string_data();
                 auto obj = scalar_array->mutable_string_data();
                 *(obj->mutable_data()->Add()) = data.data(src_offset);
                 continue;
