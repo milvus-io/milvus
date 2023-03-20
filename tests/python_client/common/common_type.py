@@ -182,10 +182,13 @@ get_wrong_format_dict = [
 ]
 
 """ Specially defined list """
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
+                   "GPU_FLAT", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_IVF_SQ8", "RAFT_IVF_FLAT", "RAFT_IVF_PQ"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {}, {"nlist": 128}, {"nlist": 128}]
+                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {}, {"nlist": 128}, {"nlist": 128},
+                        {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8}, {"nlist": 128},
+                        {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8}]
 
 Handler_type = ["GRPC", "HTTP"]
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]
@@ -250,6 +253,8 @@ class CaseLabel:
             loadbalance testcases which need to be run in multi query nodes
         ClusterOnly:
             For functions only suitable to cluster mode
+        GPU:
+            For GPU supported cases
     """
     L0 = "L0"
     L1 = "L1"
@@ -258,3 +263,4 @@ class CaseLabel:
     Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi query nodes
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
     MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
+    GPU = "GPU"
