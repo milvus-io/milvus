@@ -15,6 +15,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <fmt/core.h>
 
 #include "storage/LocalChunkManager.h"
 
@@ -60,22 +61,22 @@ TEST_F(LocalChunkManagerTest, FilePositive) {
 
 TEST_F(LocalChunkManagerTest, WritePositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
-
-    string file = test_dir + "/test-write-positive";
-    auto exist = lcm.Exist(file);
-    EXPECT_EQ(exist, false);
+    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = path_prefix.append("/local-test-dir/");
+    string file = test_dir.append("test-write-positive");
+    ASSERT_NO_THROW(lcm.Remove(file));
     lcm.CreateFile(file);
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     lcm.Write(file, data, sizeof(data));
 
-    exist = lcm.Exist(file);
+    auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, true);
     auto size = lcm.Size(file);
     EXPECT_EQ(size, 5);
 
     int datasize = 10000;
+
     uint8_t* bigdata = new uint8_t[datasize];
     srand((unsigned)time(NULL));
     for (int i = 0; i < datasize; ++i) {
@@ -93,10 +94,11 @@ TEST_F(LocalChunkManagerTest, WritePositive) {
 
 TEST_F(LocalChunkManagerTest, ReadPositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
+    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = path_prefix.append("/local-test-dir/");
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
-    string path = test_dir + "/test-read-positive";
+    string path = test_dir.append("test-read-positive");
     lcm.CreateFile(path);
     lcm.Write(path, data, sizeof(data));
     bool exist = lcm.Exist(path);
@@ -140,13 +142,12 @@ TEST_F(LocalChunkManagerTest, ReadPositive) {
 
 TEST_F(LocalChunkManagerTest, WriteOffset) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
-
-    string file = test_dir + "/test-write-offset";
-    auto exist = lcm.Exist(file);
-    EXPECT_EQ(exist, false);
+    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = path_prefix.append("/local-test-dir/");
+    string file = test_dir.append("test-write-offset");
+    ASSERT_NO_THROW(lcm.Remove(file));
     lcm.CreateFile(file);
-    exist = lcm.Exist(file);
+    auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, true);
 
     int offset = 0;
@@ -220,8 +221,9 @@ TEST_F(LocalChunkManagerTest, ReadOffset) {
 
 TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
     auto& lcm = LocalChunkManager::GetInstance();
-    auto test_dir = lcm.GetPathPrefix() + "/local-test-dir";
-    EXPECT_EQ(lcm.DirExist(test_dir), false);
+    auto path_prefix = lcm.GetPathPrefix();
+    auto test_dir = path_prefix + "/" + "test_dir/";
+    ASSERT_NO_THROW(lcm.RemoveDir(test_dir));
     lcm.CreateDir(test_dir);
     EXPECT_EQ(lcm.DirExist(test_dir), true);
     EXPECT_EQ(lcm.GetSizeOfDir(test_dir), 0);
