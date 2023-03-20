@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -206,7 +207,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		log.Warn("failed to addSegment, collection mismatch",
 			zap.Int64("current collection ID", req.collID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return fmt.Errorf("failed to addSegment, mismatch collection, ID=%d", req.collID)
+		return merr.WrapErrParameterInvalid(c.collectionID, req.collID, "collection not match")
 	}
 	log.Info("adding segment",
 		zap.String("type", req.segType.String()),
@@ -533,7 +534,7 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 		log.Warn("failed to getCollectionSchema, collection mismatch",
 			zap.Int64("current collection ID", collID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return nil, fmt.Errorf("failed to getCollectionSchema, mismatch collection, want %d, actual %d", c.collectionID, collID)
+		return nil, merr.WrapErrParameterInvalid(c.collectionID, collID, "collection not match")
 	}
 
 	c.schemaMut.RLock()
@@ -569,7 +570,7 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 		log.Warn("failed to mergeFlushedSegments, collection mismatch",
 			zap.Int64("current collection ID", seg.collectionID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return errors.Newf("failed to mergeFlushedSegments, mismatch collection, ID=%d", seg.collectionID)
+		return merr.WrapErrParameterInvalid(c.collectionID, seg.collectionID, "collection not match")
 	}
 
 	var inValidSegments []UniqueID
@@ -619,7 +620,7 @@ func (c *ChannelMeta) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, n
 		log.Warn("failed to addFlushedSegmentWithPKs, collection mismatch",
 			zap.Int64("current collection ID", collID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return fmt.Errorf("failed to addFlushedSegmentWithPKs, mismatch collection, ID=%d", collID)
+		return merr.WrapErrParameterInvalid(c.collectionID, collID, "collection not match")
 	}
 
 	log.Info("Add Flushed segment",

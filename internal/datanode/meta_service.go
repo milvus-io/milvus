@@ -18,12 +18,12 @@ package datanode
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.uber.org/zap"
 
@@ -74,11 +74,14 @@ func (mService *metaService) getCollectionInfo(ctx context.Context, collID Uniqu
 
 	response, err := mService.rootCoord.DescribeCollectionInternal(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
+		log.Error("grpc error when describe", zap.Int64("collectionID", collID), zap.Error(err))
+		return nil, err
 	}
 
 	if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("describe collection %v from rootcoord wrong: %s", collID, response.GetStatus().GetReason())
+		err := merr.Error(response.Status)
+		log.Error("describe collection from rootcoord failed", zap.Int64("collectionID", collID), zap.Error(err))
+		return nil, err
 	}
 
 	return response, nil
