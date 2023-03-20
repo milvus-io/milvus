@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +40,9 @@ type channelStateTimer struct {
 	runningTimerStops sync.Map // channel name to timer stop channels
 	etcdWatcher       clientv3.WatchChan
 	timeoutWatcher    chan *ackEvent
+	//Modifies afterwards must guarantee that runningTimerCount is updated synchronized with runningTimers
+	//in order to keep consistency
+	runningTimerCount atomic.Int32
 }
 
 func newChannelStateTimer(kv kv.MetaKv) *channelStateTimer {
@@ -92,35 +96,40 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 	}
 
 	stop := make(chan struct{})
-	timer := time.NewTimer(timeout)
+	ticker := time.NewTimer(timeout)
 	c.removeTimers([]string{channelName})
 	c.runningTimerStops.Store(channelName, stop)
-	c.runningTimers.Store(channelName, timer)
-
+	c.runningTimers.Store(channelName, ticker)
+	c.runningTimerCount.Inc()
 	go func() {
 		log.Info("timer started",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName),
 			zap.Duration("check interval", timeout))
-		defer timer.Stop()
+		defer ticker.Stop()
 
 		select {
-		case <-timer.C:
+		case <-ticker.C:
 			// check tickle at path as :tickle/[prefix]/{channel_name}
+			c.removeTimers([]string{channelName})
 			log.Info("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
-				zap.Duration("timeout interval", timeout))
+				zap.Duration("timeout interval", timeout),
+				zap.Int32("runningTimerCount", c.runningTimerCount.Load()))
 			ackType := getAckType(watchState)
 			c.notifyTimeoutWatcher(&ackEvent{ackType, channelName, nodeID})
+			return
 		case <-stop:
 			log.Info("stop timer before timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
-				zap.Duration("timeout interval", timeout))
+				zap.Duration("timeout interval", timeout),
+				zap.Int32("runningTimerCount", c.runningTimerCount.Load()))
+			return
 		}
 	}()
 }
@@ -134,6 +143,9 @@ func (c *channelStateTimer) removeTimers(channels []string) {
 		if stop, ok := c.runningTimerStops.LoadAndDelete(channel); ok {
 			close(stop.(chan struct{}))
 			c.runningTimers.Delete(channel)
+			c.runningTimerCount.Dec()
+			log.Info("remove timer for channel", zap.String("channel", channel),
+				zap.Int32("timerCount", c.runningTimerCount.Load()))
 		}
 	}
 }
@@ -143,6 +155,9 @@ func (c *channelStateTimer) stopIfExist(e *ackEvent) {
 	if ok && e.ackType != watchTimeoutAck && e.ackType != releaseTimeoutAck {
 		close(stop.(chan struct{}))
 		c.runningTimers.Delete(e.channelName)
+		c.runningTimerCount.Dec()
+		log.Info("stop timer for channel", zap.String("channel", e.channelName),
+			zap.Int32("timerCount", c.runningTimerCount.Load()))
 	}
 }
 
@@ -151,6 +166,12 @@ func (c *channelStateTimer) resetIfExist(channel string, interval time.Duration)
 		timer := value.(*time.Timer)
 		timer.Reset(interval)
 	}
+}
+
+// Note here the reading towards c.running are not protected by mutex
+// because it's meaningless, since we cannot guarantee the following add/delete node operations
+func (c *channelStateTimer) hasRunningTimers() bool {
+	return c.runningTimerCount.Load() != 0
 }
 
 func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {

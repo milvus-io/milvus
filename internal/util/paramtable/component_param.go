@@ -1622,7 +1622,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 type dataCoordConfig struct {
 
 	// --- CHANNEL ---
-	WatchTimeoutInterval ParamItem `refreshable:"false"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -1676,6 +1678,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
+
+	p.ChannelBalanceSilentDuration = ParamItem{
+		Key:          "dataCoord.channel.balanceSilentDuration",
+		Version:      "2.2.3",
+		DefaultValue: "300",
+		Doc:          "The duration after which the channel manager start background channel balancing",
+		Export:       true,
+	}
+	p.ChannelBalanceSilentDuration.Init(base.mgr)
+
+	p.ChannelBalanceInterval = ParamItem{
+		Key:          "dataCoord.channel.balanceInterval",
+		Version:      "2.2.3",
+		DefaultValue: "360",
+		Doc:          "The interval with which the channel manager check dml channel balance status",
+		Export:       true,
+	}
+	p.ChannelBalanceInterval.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",

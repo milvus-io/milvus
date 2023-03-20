@@ -733,6 +733,45 @@ func TestChannelManager(t *testing.T) {
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, channelName, collectionID)
 	})
+
+	t.Run("test background check silent", func(t *testing.T) {
+		metakv.RemoveWithPrefix("")
+		defer metakv.RemoveWithPrefix("")
+		prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
+		var (
+			collectionID      = UniqueID(9)
+			channelNamePrefix = t.Name()
+			nodeID            = UniqueID(111)
+		)
+		cName := channelNamePrefix + "TestBgChecker"
+
+		//1. set up channel_manager
+		ctx, cancel := context.WithCancel(context.TODO())
+		defer cancel()
+		chManager, err := NewChannelManager(metakv, newMockHandler(), withBgChecker())
+		require.NoError(t, err)
+		assert.NotNil(t, chManager.bgChecker)
+		chManager.Startup(ctx, []int64{nodeID})
+
+		//2. test isSilent function running correctly
+		Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "3")
+		assert.False(t, chManager.isSilent())
+		assert.False(t, chManager.stateTimer.hasRunningTimers())
+
+		//3. watch one channel
+		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
+		assert.False(t, chManager.isSilent())
+		assert.True(t, chManager.stateTimer.hasRunningTimers())
+		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
+		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndCheckState(t, metakv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
+
+		//4. wait for duration and check silent again
+		time.Sleep(Params.DataCoordCfg.ChannelBalanceSilentDuration.GetAsDuration(time.Second))
+		chManager.stateTimer.removeTimers([]string{cName})
+		assert.True(t, chManager.isSilent())
+		assert.False(t, chManager.stateTimer.hasRunningTimers())
+	})
 }
 
 func TestChannelManager_Reload(t *testing.T) {
