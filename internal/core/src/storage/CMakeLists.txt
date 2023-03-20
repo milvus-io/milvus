@@ -43,6 +43,8 @@ if(BUILD_DISK_ANN STREQUAL "ON")
         ${STORAGE_FILES}
         LocalChunkManager.cpp
         MinioChunkManager.cpp
+        AliyunSTSClient.cpp
+        AliyunCredentialsProvider.cpp
         DiskFileManagerImpl.cpp)
 endif()
 
