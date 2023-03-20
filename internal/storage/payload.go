@@ -70,8 +70,8 @@ type PayloadReaderInterface interface {
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetPayloadLengthFromReader() (int, error)
-	ReleasePayloadReader()
-	Close()
+	ReleasePayloadReader() error
+	Close() error
 }
 
 // PayloadWriter writes data into payload

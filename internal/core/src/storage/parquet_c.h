@@ -74,8 +74,11 @@ ReleasePayloadWriter(CPayloadWriter handler);
 
 //============= payload reader ======================
 typedef void* CPayloadReader;
-CPayloadReader
-NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size);
+CStatus
+NewPayloadReader(int columnType,
+                 uint8_t* buffer,
+                 int64_t buf_size,
+                 CPayloadReader* c_reader);
 CStatus
 GetBoolFromPayload(CPayloadReader payloadReader, int idx, bool* value);
 CStatus
@@ -116,7 +119,8 @@ GetFloatVectorFromPayload(CPayloadReader payloadReader,
 
 int
 GetPayloadLengthFromReader(CPayloadReader payloadReader);
-void
+
+CStatus
 ReleasePayloadReader(CPayloadReader payloadReader);
 
 #ifdef __cplusplus

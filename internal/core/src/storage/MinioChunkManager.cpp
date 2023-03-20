@@ -352,21 +352,18 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
 
+    request.SetResponseStreamFactory([buf, size]() {
+        std::unique_ptr<Aws::StringStream> stream(
+            Aws::New<Aws::StringStream>(""));
+        stream->rdbuf()->pubsetbuf(static_cast<char*>(buf), size);
+        return stream.release();
+    });
     auto outcome = client_->GetObject(request);
 
     if (!outcome.IsSuccess()) {
         THROWS3ERROR(GetObjectBuffer);
     }
-    std::stringstream ss;
-    ss << outcome.GetResultWithOwnership().GetBody().rdbuf();
-    uint64_t realSize = size;
-    if (ss.str().size() <= size) {
-        memcpy(buf, ss.str().data(), ss.str().size());
-        realSize = ss.str().size();
-    } else {
-        memcpy(buf, ss.str().data(), size);
-    }
-    return realSize;
+    return size;
 }
 
 std::vector<std::string>

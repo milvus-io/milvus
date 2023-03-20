@@ -26,12 +26,12 @@
 namespace milvus::storage {
 
 StorageType
-ReadMediumType(PayloadInputStream* input_stream) {
-    AssertInfo(input_stream->Tell().Equals(arrow::Result<int64_t>(0)),
+ReadMediumType(BinlogReaderPtr reader) {
+    AssertInfo(reader->Tell() == 0,
                "medium type must be parsed from stream header");
     int32_t magic_num;
-    auto ret = input_stream->Read(sizeof(magic_num), &magic_num);
-    AssertInfo(ret.ok(), "read input stream failed");
+    auto ret = reader->Read(sizeof(magic_num), &magic_num);
+    AssertInfo(ret.ok(), "read binlog failed");
     if (magic_num == MAGIC_NUM) {
         return StorageType::Remote;
     }
@@ -243,98 +243,6 @@ CreateArrowSchema(DataType data_type, int dim) {
         default: {
             PanicInfo("unsupported vector data type");
         }
-    }
-}
-
-// TODO ::handle string type
-int64_t
-GetPayloadSize(const Payload* payload) {
-    switch (payload->data_type) {
-        case DataType::BOOL:
-            return payload->rows * sizeof(bool);
-        case DataType::INT8:
-            return payload->rows * sizeof(int8_t);
-        case DataType::INT16:
-            return payload->rows * sizeof(int16_t);
-        case DataType::INT32:
-            return payload->rows * sizeof(int32_t);
-        case DataType::INT64:
-            return payload->rows * sizeof(int64_t);
-        case DataType::FLOAT:
-            return payload->rows * sizeof(float);
-        case DataType::DOUBLE:
-            return payload->rows * sizeof(double);
-        case DataType::VECTOR_FLOAT: {
-            Assert(payload->dimension.has_value());
-            return payload->rows * payload->dimension.value() * sizeof(float);
-        }
-        case DataType::VECTOR_BINARY: {
-            Assert(payload->dimension.has_value());
-            return payload->rows * payload->dimension.value();
-        }
-        default:
-            PanicInfo("unsupported data type");
-    }
-}
-
-const uint8_t*
-GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> data,
-                           DataType data_type) {
-    switch (data_type) {
-        case DataType::INT8: {
-            AssertInfo(data->type()->id() == arrow::Type::type::INT8,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::Int8Array>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::INT16: {
-            AssertInfo(data->type()->id() == arrow::Type::type::INT16,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::Int16Array>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::INT32: {
-            AssertInfo(data->type()->id() == arrow::Type::type::INT32,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::Int32Array>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::INT64: {
-            AssertInfo(data->type()->id() == arrow::Type::type::INT64,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::Int64Array>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::FLOAT: {
-            AssertInfo(data->type()->id() == arrow::Type::type::FLOAT,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::FloatArray>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::DOUBLE: {
-            AssertInfo(data->type()->id() == arrow::Type::type::DOUBLE,
-                       "inconsistent data type");
-            auto array = std::dynamic_pointer_cast<arrow::DoubleArray>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::VECTOR_FLOAT: {
-            AssertInfo(
-                data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
-                "inconsistent data type");
-            auto array =
-                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        case DataType::VECTOR_BINARY: {
-            AssertInfo(
-                data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
-                "inconsistent data type");
-            auto array =
-                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
-            return reinterpret_cast<const uint8_t*>(array->raw_values());
-        }
-        default:
-            PanicInfo("unsupported data type");
     }
 }
 

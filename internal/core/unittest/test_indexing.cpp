@@ -291,6 +291,10 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         storage_config_ = get_default_storage_config();
+        // auto rcm = std::make_shared<storage::MinioChunkManager>(storage_config_);
+        // if (!rcm->BucketExists(storage_config_.bucket_name)) {
+        //     rcm->CreateBucket(storage_config_.bucket_name);
+        // }
 
         auto param = GetParam();
         index_type = param.first;

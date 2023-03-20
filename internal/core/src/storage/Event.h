@@ -23,8 +23,8 @@
 
 #include "common/Types.h"
 #include "storage/Types.h"
-#include "storage/PayloadStream.h"
 #include "storage/FieldData.h"
+#include "storage/BinlogReader.h"
 
 namespace milvus::storage {
 
@@ -36,7 +36,7 @@ struct EventHeader {
 
     EventHeader() {
     }
-    explicit EventHeader(PayloadInputStream* input);
+    explicit EventHeader(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
     Serialize();
@@ -53,7 +53,7 @@ struct DescriptorEventDataFixPart {
 
     DescriptorEventDataFixPart() {
     }
-    explicit DescriptorEventDataFixPart(PayloadInputStream* input);
+    explicit DescriptorEventDataFixPart(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
     Serialize();
@@ -68,7 +68,7 @@ struct DescriptorEventData {
 
     DescriptorEventData() {
     }
-    explicit DescriptorEventData(PayloadInputStream* input);
+    explicit DescriptorEventData(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
     Serialize();
@@ -77,11 +77,11 @@ struct DescriptorEventData {
 struct BaseEventData {
     Timestamp start_timestamp;
     Timestamp end_timestamp;
-    std::shared_ptr<FieldData> field_data;
+    FieldDataPtr field_data;
 
     BaseEventData() {
     }
-    explicit BaseEventData(PayloadInputStream* input,
+    explicit BaseEventData(BinlogReaderPtr reader,
                            int event_length,
                            DataType data_type);
 
@@ -95,7 +95,7 @@ struct DescriptorEvent {
 
     DescriptorEvent() {
     }
-    explicit DescriptorEvent(PayloadInputStream* input);
+    explicit DescriptorEvent(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
     Serialize();
@@ -107,7 +107,7 @@ struct BaseEvent {
 
     BaseEvent() {
     }
-    explicit BaseEvent(PayloadInputStream* input, DataType data_type);
+    explicit BaseEvent(BinlogReaderPtr reader, DataType data_type);
 
     std::vector<uint8_t>
     Serialize();
@@ -138,13 +138,7 @@ int
 GetEventFixPartSize(EventType EventTypeCode);
 
 struct LocalInsertEvent {
-    int row_num;
-    int dimension;
-    std::shared_ptr<FieldData> field_data;
-
-    LocalInsertEvent() {
-    }
-    explicit LocalInsertEvent(PayloadInputStream* input, DataType data_type);
+    FieldDataPtr field_data;
 
     std::vector<uint8_t>
     Serialize();
@@ -153,11 +147,11 @@ struct LocalInsertEvent {
 struct LocalIndexEvent {
     uint64_t index_size;
     uint32_t degree;
-    std::shared_ptr<FieldData> field_data;
+    FieldDataPtr field_data;
 
     LocalIndexEvent() {
     }
-    explicit LocalIndexEvent(PayloadInputStream* input);
+    explicit LocalIndexEvent(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
     Serialize();

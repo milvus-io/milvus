@@ -23,12 +23,13 @@
 #include "storage/Types.h"
 #include "storage/FieldData.h"
 #include "storage/PayloadStream.h"
+#include "storage/BinlogReader.h"
 
 namespace milvus::storage {
 
 class DataCodec {
  public:
-    explicit DataCodec(std::shared_ptr<FieldData> data, CodecType type)
+    explicit DataCodec(FieldDataPtr data, CodecType type)
         : field_data_(data), codec_type_(type) {
     }
 
@@ -62,33 +63,25 @@ class DataCodec {
         return field_data_->get_data_type();
     }
 
-    std::unique_ptr<Payload>
-    GetPayload() const {
-        return field_data_->get_payload();
+    FieldDataPtr
+    GetFieldData() const {
+        return field_data_;
     }
 
  protected:
     CodecType codec_type_;
     std::pair<Timestamp, Timestamp> time_range_;
-    std::shared_ptr<FieldData> field_data_;
+    FieldDataPtr field_data_;
 };
 
 // Deserialize the data stream of the file obtained from remote or local
 std::unique_ptr<DataCodec>
-DeserializeFileData(const uint8_t* input, int64_t length);
+DeserializeFileData(const std::shared_ptr<uint8_t[]> input, int64_t length);
 
 std::unique_ptr<DataCodec>
-DeserializeLocalInsertFileData(const uint8_t* input_data,
-                               int64_t length,
-                               DataType data_type);
+DeserializeRemoteFileData(BinlogReaderPtr reader);
 
 std::unique_ptr<DataCodec>
-DeserializeLocalIndexFileData(const uint8_t* input_data, int64_t length);
-
-std::unique_ptr<DataCodec>
-DeserializeRemoteFileData(PayloadInputStream* input_stream);
-
-std::unique_ptr<DataCodec>
-DeserializeLocalFileData(PayloadInputStream* input_stream);
+DeserializeLocalFileData(BinlogReaderPtr reader);
 
 }  // namespace milvus::storage

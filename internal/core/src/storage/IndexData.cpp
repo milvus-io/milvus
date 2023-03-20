@@ -85,7 +85,7 @@ IndexData::serialize_to_remote_file() {
             GetEventFixPartSize(EventType(i)));
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] =
-        std::to_string(field_data_->get_data_size());
+        std::to_string(field_data_->Size());
     des_event_data.extras[INDEX_BUILD_ID_KEY] =
         std::to_string(index_meta_->build_id);
 

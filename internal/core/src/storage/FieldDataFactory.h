@@ -17,39 +17,32 @@
 #pragma once
 
 #include <string>
-#include <memory>
-#include <vector>
 
-#include "storage/DataCodec.h"
+#include "storage/FieldData.h"
 
 namespace milvus::storage {
 
-// TODO :: indexParams storage in a single file
-class IndexData : public DataCodec {
+class FieldDataFactory {
+ private:
+    FieldDataFactory() = default;
+    FieldDataFactory(const FieldDataFactory&) = delete;
+    FieldDataFactory
+    operator=(const FieldDataFactory&) = delete;
+
  public:
-    explicit IndexData(FieldDataPtr data)
-        : DataCodec(data, CodecType::IndexDataType) {
+    static FieldDataFactory&
+    GetInstance() {
+        static FieldDataFactory inst;
+        return inst;
     }
 
-    std::vector<uint8_t>
-    Serialize(StorageType medium) override;
+    std::string
+    GetName() const {
+        return "FieldDataFactory";
+    }
 
-    void
-    SetFieldDataMeta(const FieldDataMeta& meta) override;
-
- public:
-    void
-    set_index_meta(const IndexMeta& meta);
-
-    std::vector<uint8_t>
-    serialize_to_remote_file();
-
-    std::vector<uint8_t>
-    serialize_to_local_file();
-
- private:
-    std::optional<FieldDataMeta> field_data_meta_;
-    std::optional<IndexMeta> index_meta_;
+    FieldDataPtr
+    CreateFieldData(const DataType& type, const int64_t dim = 1);
 };
 
 }  // namespace milvus::storage

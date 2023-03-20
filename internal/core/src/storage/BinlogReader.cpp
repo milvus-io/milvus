@@ -14,42 +14,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include <string>
-#include <memory>
-#include <vector>
-
-#include "storage/DataCodec.h"
+#include "storage/BinlogReader.h"
 
 namespace milvus::storage {
 
-// TODO :: indexParams storage in a single file
-class IndexData : public DataCodec {
- public:
-    explicit IndexData(FieldDataPtr data)
-        : DataCodec(data, CodecType::IndexDataType) {
+Status
+BinlogReader::Read(int64_t nbytes, void* out) {
+    auto remain = size_ - tell_;
+    if (nbytes > remain) {
+        return Status(SERVER_UNEXPECTED_ERROR, "out range of binlog data");
     }
+    std::memcpy(out, data_.get() + tell_, nbytes);
+    tell_ += nbytes;
+    return Status(SERVER_SUCCESS, "");
+}
 
-    std::vector<uint8_t>
-    Serialize(StorageType medium) override;
-
-    void
-    SetFieldDataMeta(const FieldDataMeta& meta) override;
-
- public:
-    void
-    set_index_meta(const IndexMeta& meta);
-
-    std::vector<uint8_t>
-    serialize_to_remote_file();
-
-    std::vector<uint8_t>
-    serialize_to_local_file();
-
- private:
-    std::optional<FieldDataMeta> field_data_meta_;
-    std::optional<IndexMeta> index_meta_;
-};
+std::pair<Status, std::shared_ptr<uint8_t[]>>
+BinlogReader::Read(int64_t nbytes) {
+    auto remain = size_ - tell_;
+    if (nbytes > remain) {
+        return std::make_pair(
+            Status(SERVER_UNEXPECTED_ERROR, "out range of binlog data"),
+            nullptr);
+    }
+    auto res = std::shared_ptr<uint8_t[]>(new uint8_t[nbytes]);
+    std::memcpy(res.get(), data_.get() + tell_, nbytes);
+    tell_ += nbytes;
+    return std::make_pair(Status(SERVER_SUCCESS, ""), res);
+}
 
 }  // namespace milvus::storage

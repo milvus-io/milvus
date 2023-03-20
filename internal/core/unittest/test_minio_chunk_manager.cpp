@@ -125,11 +125,11 @@ TEST_F(MinioChunkManagerTest, ReadPositive) {
     bool exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, true);
     auto size = chunk_manager_->Size(path);
-    EXPECT_EQ(size, 5);
+    EXPECT_EQ(size, sizeof(data));
 
     uint8_t readdata[20] = {0};
-    size = chunk_manager_->Read(path, readdata, 20);
-    EXPECT_EQ(size, 5);
+    size = chunk_manager_->Read(path, readdata, sizeof(data));
+    EXPECT_EQ(size, sizeof(data));
     EXPECT_EQ(readdata[0], 0x17);
     EXPECT_EQ(readdata[1], 0x32);
     EXPECT_EQ(readdata[2], 0x45);
@@ -147,9 +147,9 @@ TEST_F(MinioChunkManagerTest, ReadPositive) {
     exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, true);
     size = chunk_manager_->Size(path);
-    EXPECT_EQ(size, 5);
-    size = chunk_manager_->Read(path, readdata, 20);
-    EXPECT_EQ(size, 5);
+    EXPECT_EQ(size, sizeof(dataWithNULL));
+    size = chunk_manager_->Read(path, readdata, sizeof(dataWithNULL));
+    EXPECT_EQ(size, sizeof(dataWithNULL));
     EXPECT_EQ(readdata[0], 0x17);
     EXPECT_EQ(readdata[1], 0x32);
     EXPECT_EQ(readdata[2], 0x00);

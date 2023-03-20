@@ -73,8 +73,8 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 }
 
 // ReleasePayloadReader release payload reader.
-func (r *PayloadReader) ReleasePayloadReader() {
-	r.Close()
+func (r *PayloadReader) ReleasePayloadReader() error {
+	return r.Close()
 }
 
 // GetBoolFromPayload returns bool slice from payload.
@@ -308,8 +308,8 @@ func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {
 }
 
 // Close closes the payload reader
-func (r *PayloadReader) Close() {
-	r.reader.Close()
+func (r *PayloadReader) Close() error {
+	return r.reader.Close()
 }
 
 // ReadDataFromAllRowGroups iterates all row groups of file.Reader, and convert column to E.

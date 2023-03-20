@@ -28,9 +28,10 @@ func NewPayloadReaderCgo(colType schemapb.DataType, buf []byte) (*PayloadReaderC
 	if len(buf) == 0 {
 		return nil, errors.New("create Payload reader failed, buffer is empty")
 	}
-	r := C.NewPayloadReader(C.int(colType), (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.int64_t(len(buf)))
-	if r == nil {
-		return nil, errors.New("failed to read parquet from buffer")
+	var r C.CPayloadReader
+	status := C.NewPayloadReader(C.int(colType), (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.int64_t(len(buf)), &r)
+	if err := HandleCStatus(&status, "NewPayloadReader failed"); err != nil {
+		return nil, err
 	}
 	return &PayloadReaderCgo{payloadReaderPtr: r, colType: colType}, nil
 }
@@ -81,8 +82,13 @@ func (r *PayloadReaderCgo) GetDataFromPayload() (interface{}, int, error) {
 }
 
 // ReleasePayloadReader release payload reader.
-func (r *PayloadReaderCgo) ReleasePayloadReader() {
-	C.ReleasePayloadReader(r.payloadReaderPtr)
+func (r *PayloadReaderCgo) ReleasePayloadReader() error {
+	status := C.ReleasePayloadReader(r.payloadReaderPtr)
+	if err := HandleCStatus(&status, "ReleasePayloadReader failed"); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // GetBoolFromPayload returns bool slice from payload.
@@ -303,8 +309,8 @@ func (r *PayloadReaderCgo) GetPayloadLengthFromReader() (int, error) {
 }
 
 // Close closes the payload reader
-func (r *PayloadReaderCgo) Close() {
-	r.ReleasePayloadReader()
+func (r *PayloadReaderCgo) Close() error {
+	return r.ReleasePayloadReader()
 }
 
 // HandleCStatus deal with the error returned from CGO

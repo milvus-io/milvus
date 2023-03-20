@@ -19,6 +19,7 @@
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
+#include "storage/FieldData.h"
 #include "common/CGoHelper.h"
 
 using Payload = milvus::storage::Payload;
@@ -218,8 +219,11 @@ ReleasePayloadWriter(CPayloadWriter handler) {
     }
 }
 
-extern "C" CPayloadReader
-NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size) {
+extern "C" CStatus
+NewPayloadReader(int columnType,
+                 uint8_t* buffer,
+                 int64_t buf_size,
+                 CPayloadReader* c_reader) {
     auto column_type = static_cast<milvus::DataType>(columnType);
     switch (column_type) {
         case milvus::DataType::BOOL:
@@ -236,19 +240,26 @@ NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size) {
             break;
         }
         default: {
-            return nullptr;
+            return milvus::FailureCStatus(UnexpectedError,
+                                          "unsupported data type");
         }
     }
 
-    auto p = std::make_unique<PayloadReader>(buffer, buf_size, column_type);
-    return reinterpret_cast<CPayloadReader>(p.release());
+    try {
+        auto p = std::make_unique<PayloadReader>(buffer, buf_size, column_type);
+        *c_reader = (CPayloadReader)(p.release());
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
 }
 
 extern "C" CStatus
 GetBoolFromPayload(CPayloadReader payloadReader, int idx, bool* value) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        *value = p->get_bool_payload(idx);
+        auto field_data = p->get_field_data();
+        *value = *reinterpret_cast<const bool*>(field_data->RawValue(idx));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -259,10 +270,10 @@ extern "C" CStatus
 GetInt8FromPayload(CPayloadReader payloadReader, int8_t** values, int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<int8_t*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<int8_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -275,10 +286,10 @@ GetInt16FromPayload(CPayloadReader payloadReader,
                     int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<int16_t*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<int16_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -291,10 +302,10 @@ GetInt32FromPayload(CPayloadReader payloadReader,
                     int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<int32_t*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<int32_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -307,10 +318,10 @@ GetInt64FromPayload(CPayloadReader payloadReader,
                     int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<int64_t*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<int64_t*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -321,10 +332,10 @@ extern "C" CStatus
 GetFloatFromPayload(CPayloadReader payloadReader, float** values, int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<float*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<float*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -337,10 +348,10 @@ GetDoubleFromPayload(CPayloadReader payloadReader,
                      int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<double*>(raw_data);
-        *length = ret->rows;
+        auto field_data = p->get_field_data();
+        *length = field_data->get_num_rows();
+        *values =
+            reinterpret_cast<double*>(const_cast<void*>(field_data->Data()));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -354,7 +365,9 @@ GetOneStringFromPayload(CPayloadReader payloadReader,
                         int* str_size) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        p->get_one_string_Payload(idx, cstr, str_size);
+        auto field_data = p->get_field_data();
+        *cstr = (char*)(const_cast<void*>(field_data->RawValue(idx)));
+        *str_size = field_data->get_element_size(idx);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -368,10 +381,10 @@ GetBinaryVectorFromPayload(CPayloadReader payloadReader,
                            int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        *values = const_cast<uint8_t*>(ret->raw_data);
-        *length = ret->rows;
-        *dimension = ret->dimension.value();
+        auto field_data = p->get_field_data();
+        *values = (uint8_t*)field_data->Data();
+        *dimension = field_data->get_dim();
+        *length = field_data->get_num_rows();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -385,11 +398,10 @@ GetFloatVectorFromPayload(CPayloadReader payloadReader,
                           int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-        auto ret = p->get_payload();
-        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
-        *values = reinterpret_cast<float*>(raw_data);
-        *length = ret->rows;
-        *dimension = ret->dimension.value();
+        auto field_data = p->get_field_data();
+        *values = (float*)field_data->Data();
+        *dimension = field_data->get_dim();
+        *length = field_data->get_num_rows();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -399,12 +411,20 @@ GetFloatVectorFromPayload(CPayloadReader payloadReader,
 extern "C" int
 GetPayloadLengthFromReader(CPayloadReader payloadReader) {
     auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-    return p->get_payload_length();
+    auto field_data = p->get_field_data();
+    return field_data->get_num_rows();
 }
 
-extern "C" void
+extern "C" CStatus
 ReleasePayloadReader(CPayloadReader payloadReader) {
-    auto p = reinterpret_cast<PayloadReader*>(payloadReader);
-    delete (p);
-    ReleaseArrowUnused();
+    try {
+        AssertInfo(payloadReader != nullptr,
+                   "released payloadReader should not be null pointer");
+        auto p = reinterpret_cast<PayloadReader*>(payloadReader);
+        delete (p);
+        ReleaseArrowUnused();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
 }

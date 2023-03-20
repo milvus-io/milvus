@@ -22,39 +22,27 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
-class LocalChunkManagerTest : public testing::Test {
- public:
-    LocalChunkManagerTest() {
-    }
-    ~LocalChunkManagerTest() {
-    }
-
-    virtual void
-    SetUp() {
-        std::string local_path_prefix = "/tmp/local-test-dir";
-        ChunkMangerConfig::SetLocalRootPath(local_path_prefix);
-    }
-};
+class LocalChunkManagerTest : public testing::Test {};
 
 TEST_F(LocalChunkManagerTest, DirPositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
-    lcm.RemoveDir(path_prefix);
-    lcm.CreateDir(path_prefix);
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir/";
+    lcm.RemoveDir(test_dir);
+    lcm.CreateDir(test_dir);
 
-    bool exist = lcm.DirExist(path_prefix);
+    bool exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, true);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, FilePositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
 
-    string file = "/tmp/local-test-dir/test-file";
+    string file = test_dir + "/test-file";
     auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, false);
     lcm.CreateFile(file);
@@ -65,16 +53,16 @@ TEST_F(LocalChunkManagerTest, FilePositive) {
     exist = lcm.Exist(file);
     EXPECT_EQ(exist, false);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, WritePositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
 
-    string file = "/tmp/local-test-dir/test-write-positive";
+    string file = test_dir + "/test-write-positive";
     auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, false);
     lcm.CreateFile(file);
@@ -98,17 +86,17 @@ TEST_F(LocalChunkManagerTest, WritePositive) {
     EXPECT_EQ(size, datasize);
     delete[] bigdata;
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, ReadPositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
-    string path = "/tmp/local-test-dir/test-read-positive";
+    string path = test_dir + "/test-read-positive";
     lcm.CreateFile(path);
     lcm.Write(path, data, sizeof(data));
     bool exist = lcm.Exist(path);
@@ -145,16 +133,16 @@ TEST_F(LocalChunkManagerTest, ReadPositive) {
     EXPECT_EQ(readdata[3], 0x34);
     EXPECT_EQ(readdata[4], 0x23);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, WriteOffset) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
 
-    string file = "/tmp/local-test-dir/test-write-offset";
+    string file = test_dir + "/test-write-offset";
     auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, false);
     lcm.CreateFile(file);
@@ -189,16 +177,16 @@ TEST_F(LocalChunkManagerTest, WriteOffset) {
     EXPECT_EQ(read_data[8], 0x34);
     EXPECT_EQ(read_data[9], 0x23);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, ReadOffset) {
     auto& lcm = LocalChunkManager::GetInstance();
-    string path_prefix = lcm.GetPathPrefix();
+    string test_dir = lcm.GetPathPrefix() + "/local-test-dir";
 
-    string file = "/tmp/local-test-dir/test-read-offset";
+    string file = test_dir + "/test-read-offset";
     lcm.CreateFile(file);
     auto exist = lcm.Exist(file);
     EXPECT_EQ(exist, true);
@@ -225,15 +213,14 @@ TEST_F(LocalChunkManagerTest, ReadOffset) {
     EXPECT_EQ(size, 1);
     EXPECT_EQ(read_data[0], 0x98);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
     auto& lcm = LocalChunkManager::GetInstance();
-    auto path_prefix = lcm.GetPathPrefix();
-    auto test_dir = path_prefix + "/" + "test_dir/";
+    auto test_dir = lcm.GetPathPrefix() + "/local-test-dir";
     EXPECT_EQ(lcm.DirExist(test_dir), false);
     lcm.CreateDir(test_dir);
     EXPECT_EQ(lcm.DirExist(test_dir), true);
@@ -241,7 +228,7 @@ TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
 
     uint8_t data[] = {0x17, 0x32, 0x00, 0x34, 0x23, 0x23, 0x87, 0x98};
     // test get size of file in test_dir
-    auto file1 = test_dir + "file";
+    auto file1 = test_dir + "/file";
     auto res = lcm.CreateFile(file1);
     EXPECT_EQ(res, true);
     lcm.Write(file1, data, sizeof(data));
@@ -251,15 +238,15 @@ TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
     EXPECT_EQ(exist, false);
 
     // test get dir size with nested dirs
-    auto nest_dir = test_dir + "nest_dir/";
-    auto file2 = nest_dir + "file";
+    auto nest_dir = test_dir + "/nest_dir";
+    auto file2 = nest_dir + "/file";
     res = lcm.CreateFile(file2);
     EXPECT_EQ(res, true);
     lcm.Write(file2, data, sizeof(data));
     EXPECT_EQ(lcm.GetSizeOfDir(test_dir), sizeof(data));
     lcm.RemoveDir(test_dir);
 
-    lcm.RemoveDir(path_prefix);
-    exist = lcm.DirExist(path_prefix);
+    lcm.RemoveDir(test_dir);
+    exist = lcm.DirExist(test_dir);
     EXPECT_EQ(exist, false);
 }
