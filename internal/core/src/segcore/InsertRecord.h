@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -264,6 +265,7 @@ struct InsertRecord {
 
     void
     seal_pks() {
+        std::lock_guard lck(shared_mutex_);
         pk2offset_->seal();
     }
 
