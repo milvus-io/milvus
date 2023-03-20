@@ -272,7 +272,7 @@ func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 		return ErrRGNotExist
 	}
 
-	if rm.nodeMgr.Get(node) == nil || !rm.groups[rgName].containsNode(node) {
+	if !rm.groups[rgName].containsNode(node) {
 		// remove non exist node should be tolerable
 		return nil
 	}
@@ -476,10 +476,6 @@ func (rm *ResourceManager) HandleNodeDown(node int64) (string, error) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	if rm.nodeMgr.Get(node) == nil {
-		return "", ErrNodeNotExist
-	}
-
 	rgName, err := rm.findResourceGroupByNode(node)
 	if err != nil {
 		return "", ErrNodeNotAssignToRG
@@ -554,6 +550,12 @@ func (rm *ResourceManager) TransferNode(from string, to string, numNode int) ([]
 			// interrupt transfer, unreachable logic path
 			return nil, err
 		}
+
+		log.Info("transfer node",
+			zap.String("sourceRG", from),
+			zap.String("targetRG", to),
+			zap.Int64("nodeID", node),
+		)
 	}
 
 	return movedNodes, nil
@@ -615,6 +617,7 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) ([]int64, err
 
 	ret := make([]int64, 0)
 
+	rm.checkRGNodeStatus(DefaultResourceGroupName)
 	rm.checkRGNodeStatus(rgName)
 	lackNodesNum := rm.groups[rgName].LackOfNodes()
 	nodesInDefault := rm.groups[DefaultResourceGroupName].GetNodes()
@@ -633,6 +636,11 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) ([]int64, err
 			rm.assignNode(DefaultResourceGroupName, node)
 			return ret, err
 		}
+
+		log.Info("move node from default rg to recover",
+			zap.String("targetRG", rgName),
+			zap.Int64("nodeID", node),
+		)
 
 		ret = append(ret, node)
 	}

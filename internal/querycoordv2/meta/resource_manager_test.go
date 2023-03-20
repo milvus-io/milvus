@@ -321,6 +321,23 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.manager.AutoRecoverResourceGroup("rg")
 	lackNodes = suite.manager.CheckLackOfNode("rg")
 	suite.Equal(lackNodes, 0)
+
+	// test auto recover behavior when all node down
+	suite.manager.nodeMgr.Remove(1)
+	suite.manager.nodeMgr.Remove(2)
+	suite.manager.AutoRecoverResourceGroup("rg")
+	nodes, _ := suite.manager.GetNodes("rg")
+	suite.Len(nodes, 0)
+	nodes, _ = suite.manager.GetNodes(DefaultResourceGroupName)
+	suite.Len(nodes, 0)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.manager.HandleNodeUp(1)
+	suite.manager.AutoRecoverResourceGroup("rg")
+	nodes, _ = suite.manager.GetNodes("rg")
+	suite.Len(nodes, 1)
+	nodes, _ = suite.manager.GetNodes(DefaultResourceGroupName)
+	suite.Len(nodes, 0)
 }
 
 func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
