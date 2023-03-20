@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	uatomic "go.uber.org/atomic"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -841,4 +842,43 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 		assert.NoError(t, err)
 		return len(nodeInfos["channel-1"]) == 3 && len(nodeInfos["channel-2"]) == 3
 	}, 3*time.Second, 1*time.Second)
+}
+
+func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
+	shards := map[string][]nodeInfo{
+		"channel-1": {
+			{
+				nodeID:  1,
+				address: "localhost:9000",
+			},
+			{
+				nodeID:  2,
+				address: "localhost:9000",
+			},
+			{
+				nodeID:  3,
+				address: "localhost:9000",
+			},
+		},
+	}
+	sl := &shardLeaders{
+		deprecated:   uatomic.NewBool(false),
+		idx:          uatomic.NewInt64(5),
+		shardLeaders: shards,
+	}
+
+	reader := sl.GetReader()
+	result := reader.Shuffle()
+	assert.Len(t, result["channel-1"], 3)
+	assert.Equal(t, int64(1), result["channel-1"][0].nodeID)
+
+	reader = sl.GetReader()
+	result = reader.Shuffle()
+	assert.Len(t, result["channel-1"], 3)
+	assert.Equal(t, int64(2), result["channel-1"][0].nodeID)
+
+	reader = sl.GetReader()
+	result = reader.Shuffle()
+	assert.Len(t, result["channel-1"], 3)
+	assert.Equal(t, int64(3), result["channel-1"][0].nodeID)
 }
