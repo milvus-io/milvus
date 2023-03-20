@@ -1168,8 +1168,8 @@ class TestPartitionOperations(TestcaseBase):
 
         # query and check the results
         expr = "int64 == 0"
-        res1 = partition_1.query(expr, [ct.default_float_field_name])[0]
-        res2 = partition_2.query(expr, [ct.default_float_field_name])[0]
+        res1 = partition_1.query(expr, [ct.default_float_field_name], consistency_level="Strong")[0]
+        res2 = partition_2.query(expr, [ct.default_float_field_name], consistency_level="Strong")[0]
         assert res1 == res2
 
     @pytest.mark.tags(CaseLabel.L0)
