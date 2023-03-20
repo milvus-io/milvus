@@ -86,6 +86,9 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate after partition release", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		collection, err := his.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		collection.setLoadType(loadTypeCollection)
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})

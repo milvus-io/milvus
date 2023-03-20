@@ -71,18 +71,6 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		fg.collectionID = defaultCollectionID
 	})
 
-	t.Run("test no partition", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
-		assert.NoError(t, err)
-		msg.PartitionID = UniqueID(1000)
-		fg, err := getFilterDMNode()
-		assert.NoError(t, err)
-
-		res, err := fg.filterInvalidInsertMessage(msg, loadTypePartition)
-		assert.NoError(t, err)
-		assert.Nil(t, res)
-	})
-
 	t.Run("test not target collection", func(t *testing.T) {
 		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
@@ -160,17 +148,6 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 		res, err := fg.filterInvalidDeleteMessage(msg, loadTypeCollection)
 		assert.NoError(t, err)
 		assert.NotNil(t, res)
-	})
-
-	t.Run("test delete no partition", func(t *testing.T) {
-		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		msg.PartitionID = UniqueID(1000)
-		fg, err := getFilterDMNode()
-		assert.NoError(t, err)
-
-		res, err := fg.filterInvalidDeleteMessage(msg, loadTypePartition)
-		assert.NoError(t, err)
-		assert.Nil(t, res)
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {

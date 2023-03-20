@@ -1980,7 +1980,7 @@ func TestProxy(t *testing.T) {
 			Type:           milvuspb.ShowType_InMemory,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		// default partition
 		assert.Equal(t, 0, len(resp.PartitionNames))
 

@@ -314,15 +314,6 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	var err error
 	if msg.PartitionID != -1 {
 		partitionIDs = []UniqueID{msg.GetPartitionID()}
-	} else {
-		partitionIDs, err = replica.getPartitionIDs(msg.GetCollectionID())
-		if err != nil {
-			log.Warn("the collection has been released, ignore it",
-				zap.Int64("collectionID", msg.GetCollectionID()),
-				zap.Error(err),
-			)
-			return err
-		}
 	}
 	var resultSegmentIDs []UniqueID
 	resultSegmentIDs, err = replica.getSegmentIDsByVChannel(partitionIDs, vchannelName, segType)

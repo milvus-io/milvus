@@ -74,6 +74,8 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 
 	balancer := suite.createMockBalancer()
 	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer)
+
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *ChannelCheckerTestSuite) TearDownTest() {

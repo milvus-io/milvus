@@ -76,6 +76,10 @@ func TestHistorical_statistic(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
+		collection, err := his.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		collection.setLoadType(loadTypeCollection)
+
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
@@ -152,6 +156,10 @@ func TestStreaming_statistics(t *testing.T) {
 	t.Run("test no partitions in collection", func(t *testing.T) {
 		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
+
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		collection.setLoadType(loadTypeCollection)
 
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)

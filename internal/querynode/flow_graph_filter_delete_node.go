@@ -139,12 +139,12 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 		return nil, nil
 	}
 
-	if loadType == loadTypePartition {
-		if !fddNode.metaReplica.hasPartition(msg.PartitionID) {
-			// filter out msg which not belongs to the loaded partitions
-			return nil, nil
-		}
-	}
+	//if loadType == loadTypePartition {
+	//	if !fddNode.metaReplica.hasPartition(msg.PartitionID) {
+	//		// filter out msg which not belongs to the loaded partitions
+	//		return nil, nil
+	//	}
+	//}
 	return msg, nil
 }
 

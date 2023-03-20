@@ -94,6 +94,10 @@ func (m *MockQueryNode) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	return m.status, m.err
 }
 
+func (m *MockQueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 func (m *MockQueryNode) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }
@@ -259,6 +263,13 @@ func Test_NewServer(t *testing.T) {
 	t.Run("ReleaseCollection", func(t *testing.T) {
 		req := &querypb.ReleaseCollectionRequest{}
 		resp, err := server.ReleaseCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("LoadPartitions", func(t *testing.T) {
+		req := &querypb.LoadPartitionsRequest{}
+		resp, err := server.LoadPartitions(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})

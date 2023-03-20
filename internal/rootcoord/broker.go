@@ -48,6 +48,8 @@ type watchInfo struct {
 // Broker communicates with other components.
 type Broker interface {
 	ReleaseCollection(ctx context.Context, collectionID UniqueID) error
+	ReleasePartitions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error
+	SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error
 	GetQuerySegmentInfo(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error)
 
 	WatchChannels(ctx context.Context, info *watchInfo) error
@@ -90,6 +92,49 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 	}
 
 	log.Info("done to release collection", zap.Int64("collection", collectionID))
+	return nil
+}
+
+func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+	if len(partitionIDs) == 0 {
+		return nil
+	}
+	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log.Info("releasing partitions")
+	resp, err := b.s.queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+		return fmt.Errorf("release partition failed, reason: %s", resp.GetReason())
+	}
+
+	log.Info("release partitions done")
+	return nil
+}
+
+func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partitionID", partitionID))
+	log.Info("begin to sync new partition")
+	resp, err := b.s.queryCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+		return fmt.Errorf("sync new partition failed, reason: %s", resp.GetReason())
+	}
+
+	log.Info("sync new partition done")
 	return nil
 }
 

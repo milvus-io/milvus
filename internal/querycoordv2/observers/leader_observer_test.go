@@ -97,6 +97,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -152,6 +153,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -209,6 +211,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -247,6 +251,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -340,6 +345,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))

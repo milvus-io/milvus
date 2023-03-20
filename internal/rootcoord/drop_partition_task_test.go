@@ -177,6 +177,9 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			return nil
 		}
+		broker.ReleasePartitionsFunc = func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+			return nil
+		}
 
 		core := newTestCore(
 			withValidProxyManager(),

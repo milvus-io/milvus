@@ -106,22 +106,10 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 
-	partitionIDs := make([]int64, 0)
-	collection := mgr.meta.GetCollection(collectionID)
-	if collection != nil {
-		var err error
-		partitionIDs, err = mgr.broker.GetPartitions(context.Background(), collectionID)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitions := mgr.meta.GetPartitionsByCollection(collectionID)
-		if partitions != nil {
-			partitionIDs = lo.Map(partitions, func(partition *Partition, i int) int64 {
-				return partition.PartitionID
-			})
-		}
-	}
+	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
+	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
+		return partition.PartitionID
+	})
 
 	return mgr.updateCollectionNextTarget(collectionID, partitionIDs...)
 }
@@ -146,14 +134,27 @@ func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partiti
 	return nil
 }
 
-func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
+func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (*CollectionTarget, error) {
 	log.Info("start to pull next targets for partition",
 		zap.Int64("collectionID", collectionID),
-		zap.Int64s("partitionIDs", partitionIDs))
+		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
 
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	for _, partitionID := range partitionIDs {
+	dmChannels := make(map[string]*DmChannel)
+
+	if len(chosenPartitionIDs) == 0 {
+		return NewCollectionTarget(segments, dmChannels), nil
+	}
+
+	fullPartitions, err := broker.GetPartitions(context.Background(), collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// we should pull `channel targets` from all partitions because QueryNodes need to load
+	// the complete growing segments. And we should pull `segments targets` only from the chosen partitions.
+	for _, partitionID := range fullPartitions {
 		log.Debug("get recovery info...",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID))
@@ -161,7 +162,12 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, part
 		if err != nil {
 			return nil, err
 		}
-
+		for _, info := range vChannelInfos {
+			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
+		}
+		if !lo.Contains(chosenPartitionIDs, partitionID) {
+			continue
+		}
 		for _, binlog := range binlogs {
 			segments[binlog.GetSegmentID()] = &datapb.SegmentInfo{
 				ID:            binlog.GetSegmentID(),
@@ -174,18 +180,12 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, part
 				Deltalogs:     binlog.GetDeltalogs(),
 			}
 		}
-
-		for _, info := range vChannelInfos {
-			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
-		}
 	}
 
-	dmChannels := make(map[string]*DmChannel)
 	for _, infos := range channelInfos {
 		merged := mgr.mergeDmChannelInfo(infos)
 		dmChannels[merged.GetChannelName()] = merged
 	}
-
 	return NewCollectionTarget(segments, dmChannels), nil
 }
 

@@ -26,4 +26,5 @@ var (
 	ErrCollectionLoaded        = errors.New("CollectionLoaded")
 	ErrLoadParameterMismatched = errors.New("LoadParameterMismatched")
 	ErrNoEnoughNode            = errors.New("NoEnoughNode")
+	ErrPartitionNotInTarget    = errors.New("PartitionNotInLoadingTarget")
 )

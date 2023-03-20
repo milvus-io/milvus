@@ -142,6 +142,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
+	suite.targetObserver.Start(context.Background())
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
 		err := suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
@@ -311,7 +312,6 @@ func (suite *ServiceSuite) TestLoadCollection() {
 
 	// Test load all collections
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadCollectionRequest{
@@ -776,6 +776,10 @@ func (suite *ServiceSuite) TestLoadPartition() {
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).
+			Return(append(suite.partitions[collection], 999), nil)
+		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, int64(999)).
+			Return(nil, nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -808,6 +812,36 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
+	// Test load with collection loaded
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+		}
+		resp, err := server.LoadPartitions(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
+	// Test load with more partitions
+	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+			continue
+		}
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: append(suite.partitions[collection], 999),
+		}
+		resp, err := server.LoadPartitions(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	req = &querypb.LoadPartitionsRequest{
@@ -830,36 +864,6 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 			CollectionID:  collection,
 			PartitionIDs:  suite.partitions[collection],
 			ReplicaNumber: suite.replicaNumber[collection] + 1,
-		}
-		resp, err := server.LoadPartitions(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
-	}
-
-	// Test load with collection loaded
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-		}
-		resp, err := server.LoadPartitions(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
-	}
-
-	// Test load with more partitions
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: append(suite.partitions[collection], 999),
 		}
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
@@ -910,6 +914,8 @@ func (suite *ServiceSuite) TestReleasePartition() {
 	server := suite.server
 
 	// Test release all partitions
+	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
@@ -917,11 +923,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 		}
 		resp, err := server.ReleasePartitions(ctx, req)
 		suite.NoError(err)
-		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
-			suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		} else {
-			suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 		suite.assertPartitionLoaded(collection, suite.partitions[collection][1:]...)
 	}
 
@@ -933,11 +935,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 		}
 		resp, err := server.ReleasePartitions(ctx, req)
 		suite.NoError(err)
-		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
-			suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		} else {
-			suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-		}
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 		suite.assertPartitionLoaded(collection, suite.partitions[collection][1:]...)
 	}
 
@@ -957,7 +955,6 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 	defer cancel()
 	server := suite.server
 
-	suite.targetObserver.Start(context.Background())
 	suite.server.collectionObserver.Start(context.Background())
 
 	// Test refresh all collections.
@@ -970,7 +967,6 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 
 	// Test load all collections
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadCollectionRequest{
@@ -1023,7 +1019,6 @@ func (suite *ServiceSuite) TestRefreshPartitions() {
 	defer cancel()
 	server := suite.server
 
-	suite.targetObserver.Start(context.Background())
 	suite.server.collectionObserver.Start(context.Background())
 
 	// Test refresh all partitions.
@@ -1636,8 +1631,6 @@ func (suite *ServiceSuite) loadAll() {
 	for _, collection := range suite.collections {
 		suite.expectGetRecoverInfo(collection)
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-
 			req := &querypb.LoadCollectionRequest{
 				CollectionID:  collection,
 				ReplicaNumber: suite.replicaNumber[collection],
@@ -1647,7 +1640,9 @@ func (suite *ServiceSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.cluster,
 				suite.targetMgr,
+				suite.targetObserver,
 				suite.broker,
 				suite.nodeMgr,
 			)
@@ -1669,7 +1664,9 @@ func (suite *ServiceSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.cluster,
 				suite.targetMgr,
+				suite.targetObserver,
 				suite.broker,
 				suite.nodeMgr,
 			)
@@ -1741,6 +1738,7 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 }
 
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 	vChannels := []*datapb.VchannelInfo{}
 	for _, channel := range suite.channels[collection] {
 		vChannels = append(vChannels, &datapb.VchannelInfo{
@@ -1848,7 +1846,7 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 		}
 		collection.CollectionLoadInfo.Status = status
 		suite.meta.UpdateCollection(collection)
-	} else {
+
 		partitions := suite.meta.GetPartitionsByCollection(collectionID)
 		for _, partition := range partitions {
 			partition := partition.Clone()
@@ -1867,6 +1865,10 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 		node := suite.nodeMgr.Get(node)
 		node.SetLastHeartbeat(time)
 	}
+}
+
+func (suite *ServiceSuite) TearDownTest() {
+	suite.targetObserver.Stop()
 }
 
 func TestService(t *testing.T) {

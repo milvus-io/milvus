@@ -247,7 +247,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get schema of collection", zap.Error(err))
 		return err
 	}
-	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, ex.broker, task.CollectionID())
+	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return err
@@ -388,7 +388,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get schema of collection")
 		return err
 	}
-	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, ex.broker, task.CollectionID())
+	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get partitions of collection")
 		return err
