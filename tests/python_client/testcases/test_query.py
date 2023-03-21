@@ -884,6 +884,52 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_ignore_growing(self):
+        """
+        target: test query ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. query with param ignore_growing=True
+        expected: query successfully
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(start=10000)
+        collection_w.insert(data)
+
+        # 3. query with param ignore_growing=True
+        res = collection_w.query('int64 >= 0', ignore_growing=True)[0]
+        assert len(res) == ct.default_nb
+        for ids in [res[i][default_int_field_name] for i in range(ct.default_nb)]:
+            assert ids < 10000
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[:8])
+    def test_query_invalid_ignore_growing_param(self, ignore_growing):
+        """
+        target: test query ignoring growing segment param invalid
+        method: 1. create a collection, insert data and load
+                2. insert data again
+                3. query with ignore_growing type invalid
+        expected: run as ignore_growing=False
+        """
+        if ignore_growing == 1:
+            pytest.skip("number is valid")
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(start=10000)
+        collection_w.insert(data)
+
+        # 3. query with param ignore_growing invalid
+        error = {ct.err_code: 1, ct.err_msg: "parse search growing failed"}
+        collection_w.query('int64 >= 0', ignore_growing=ignore_growing,
+                           check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.fixture(scope="function", params=[0, 10, 100])
     def offset(self, request):
         yield request.param
