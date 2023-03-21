@@ -73,7 +73,7 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 		wg.Add(1)
 		go func(handler *distHandler) {
 			defer wg.Done()
-			handler.getDistribution(ctx, nil)
+			handler.getDistribution(ctx)
 		}(h)
 	}
 	wg.Wait()

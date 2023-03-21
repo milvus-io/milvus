@@ -18,7 +18,6 @@ package dist
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"go.uber.org/zap"
 )
 
@@ -55,52 +55,32 @@ type distHandler struct {
 
 func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
-	logger := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qnv2.distHandler", 1, 60)
-	logger.Info("start dist handler")
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qnv2.distHandler", 1, 60)
+	log.Info("start dist handler")
 	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("close dist handler due to context done")
+			log.Info("close dist handler due to context done")
 			return
 		case <-dh.c:
-			logger.Info("close dist handelr")
+			log.Info("close dist handler")
 			return
 		case <-ticker.C:
-			dh.getDistribution(ctx, func(isFail bool) {
-				if isFail {
-					failures++
-					node := dh.nodeManager.Get(dh.nodeID)
-					if node != nil {
-						log.RatedDebug(30.0, "failed to get node's data distribution",
-							zap.Int64("nodeID", dh.nodeID),
-							zap.Time("lastHeartbeat", node.LastHeartbeat()),
-						)
-					}
-				} else {
-					failures = 0
+			err := dh.getDistribution(ctx)
+			if err != nil {
+				node := dh.nodeManager.Get(dh.nodeID)
+				fields := []zap.Field{zap.Int("times", failures)}
+				if node != nil {
+					fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
 				}
-
-				if failures >= maxFailureTimes {
-					log.RatedInfo(30.0, fmt.Sprintf("can not get data distribution from node %d for %d times", dh.nodeID, failures))
-					// TODO: kill the querynode server and stop the loop?
-				}
-			})
+				log.RatedWarn(30.0, "failed to get data distribution", fields...)
+			} else {
+				failures = 0
+			}
 		}
-	}
-}
-
-func (dh *distHandler) logFailureInfo(resp *querypb.GetDataDistributionResponse, err error) {
-	log := log.With(zap.Int64("nodeID", dh.nodeID))
-	if err != nil {
-		log.Warn("failed to get data distribution",
-			zap.Error(err))
-	} else if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("failed to get data distribution",
-			zap.Any("errorCode", resp.GetStatus().GetErrorCode()),
-			zap.Any("reason", resp.GetStatus().GetReason()))
 	}
 }
 
@@ -217,27 +197,26 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
 }
 
-func (dh *distHandler) getDistribution(ctx context.Context, fn func(isFail bool)) {
+func (dh *distHandler) getDistribution(ctx context.Context) error {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
-	cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
-	resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
+	ctx, cancel := context.WithTimeout(ctx, distReqTimeout)
+	defer cancel()
+	resp, err := dh.client.GetDataDistribution(ctx, dh.nodeID, &querypb.GetDataDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
 		),
 	})
-	cancel()
 
-	isFail := err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success
-	if isFail {
-		dh.logFailureInfo(resp, err)
-	} else {
-		dh.handleDistResp(resp)
+	if err != nil {
+		return err
+	}
+	if !merr.Ok(resp.GetStatus()) {
+		return merr.Error(resp.GetStatus())
 	}
 
-	if fn != nil {
-		fn(isFail)
-	}
+	dh.handleDistResp(resp)
+	return nil
 }
 
 func (dh *distHandler) stop() {
