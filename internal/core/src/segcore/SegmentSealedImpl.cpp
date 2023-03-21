@@ -221,9 +221,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         AssertInfo(data_type == DataType(info.field_data->type()),
                    "field type of load data is inconsistent with the schema");
 
-        // write data under lock
-        std::unique_lock lck(mutex_);
-
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id),
                    "field data can't be loaded when indexing exists");
@@ -234,11 +231,13 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             VariableField field(get_segment_id(), field_meta, info);
             size = field.size();
             field_data = reinterpret_cast<void*>(field.data());
+            std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(field));
         } else {
             field_data = CreateMap(get_segment_id(), field_meta, info);
-            fixed_fields_[field_id] = field_data;
             size = field_meta.get_sizeof() * info.row_count;
+            std::unique_lock lck(mutex_);
+            fixed_fields_[field_id] = field_data;
         }
 
         // set pks to offset
