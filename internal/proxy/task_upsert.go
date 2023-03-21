@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -415,10 +416,18 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		ts := it.upsertMsg.DeleteMsg.Timestamps[index]
 		_, ok := result[key]
 		if !ok {
+			msgid, err := it.idAllocator.AllocOne()
+			if err != nil {
+				errors.Wrap(err, "failed to allocate MsgID for delete of upsert")
+			}
 			sliceRequest := msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithTimeStamp(ts),
+					// id of upsertTask were set as ts in scheduler
+					// msgid of delete msg must be set
+					// or it will be seen as duplicated msg in mq
+					commonpbutil.WithMsgID(msgid),
 					commonpbutil.WithSourceID(proxyID),
 				),
 				CollectionID:   collectionID,

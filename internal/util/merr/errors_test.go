@@ -108,6 +108,7 @@ func (s *ErrSuite) TestWrap() {
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)
+
 }
 
 func (s *ErrSuite) TestCombine() {

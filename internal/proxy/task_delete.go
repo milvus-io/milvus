@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -37,6 +39,7 @@ type deleteTask struct {
 	vChannels []vChan
 	pChannels []pChan
 
+	idAllocator  *allocator.IDAllocator
 	collectionID UniqueID
 	schema       *schemapb.CollectionSchema
 }
@@ -252,10 +255,16 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		ts := dt.deleteMsg.Timestamps[index]
 		_, ok := result[key]
 		if !ok {
+			msgid, err := dt.idAllocator.AllocOne()
+			if err != nil {
+				return errors.Wrap(err, "failed to allocate MsgID of delete")
+			}
 			sliceRequest := msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-					commonpbutil.WithMsgID(dt.deleteMsg.Base.MsgID),
+					// msgid of delete msg must be set
+					// or it will be seen as duplicated msg in mq
+					commonpbutil.WithMsgID(msgid),
 					commonpbutil.WithTimeStamp(ts),
 					commonpbutil.WithSourceID(proxyID),
 				),

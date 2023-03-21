@@ -2184,8 +2184,9 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 				// RowData: transfer column based request to this
 			},
 		},
-		chMgr:    node.chMgr,
-		chTicker: node.chTicker,
+		idAllocator: node.rowIDAllocator,
+		chMgr:       node.chMgr,
+		chTicker:    node.chTicker,
 	}
 
 	log.Debug("Enqueue delete request in Proxy",
