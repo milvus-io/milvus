@@ -138,6 +138,11 @@ func (s *ErrSuite) TestCombineOnlyNil() {
 	s.Nil(err)
 }
 
+func (s *ErrSuite) TestCombineCode() {
+	err := Combine(WrapErrIoFailed("test"), WrapErrCollectionNotFound(1))
+	s.Equal(Code(ErrCollectionNotFound), Code(err))
+}
+
 func TestErrors(t *testing.T) {
 	suite.Run(t, new(ErrSuite))
 }
