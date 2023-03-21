@@ -3179,6 +3179,37 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_ignore_growing(self, nq, dim, _async):
+        """
+        target: test search ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. search with param ignore_growing=True
+        expected: searched successfully
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True, dim=dim)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(dim=dim, start=10000)
+        collection_w.insert(data)
+
+        # 3. search with param ignore_growing=True
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": True}
+        vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
+                                  default_search_exp, _async=_async,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "limit": default_limit,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        for ids in res[0].ids:
+            assert ids < 10000
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
     def test_search_collection_naming_rules(self, nq, dim, name, index_name, _async):

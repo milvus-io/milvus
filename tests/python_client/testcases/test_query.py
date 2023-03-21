@@ -901,6 +901,28 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_ignore_growing(self):
+        """
+        target: test search ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. query with param ignore_growing=True
+        expected: query successfully
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(start=10000)
+        collection_w.insert(data)
+
+        # 3. query with param ignore_growing=True
+        res = collection_w.query('int64 >= 0', ignore_growing=True)[0]
+        assert len(res) == ct.default_nb
+        for ids in [res[i][default_int_field_name] for i in range(ct.default_nb)]:
+            assert ids < 10000
+
     @pytest.fixture(scope="function", params=[0, 10, 100])
     def offset(self, request):
         yield request.param
