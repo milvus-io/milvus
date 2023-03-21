@@ -62,7 +62,7 @@ func TestMain(t *testing.M) {
 	defer os.RemoveAll(path)
 
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")
-	Params.Init()
+	Params.InitOnce()
 	// change to specific channel for test
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 

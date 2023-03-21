@@ -24,6 +24,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -33,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type (
@@ -88,6 +90,10 @@ type Channel interface {
 	setCurDeleteBuffer(segmentID UniqueID, buf *DelDataBuf)
 	rollDeleteBuffer(segmentID UniqueID)
 	evictHistoryDeleteBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition)
+
+	// getTotalMemorySize returns the sum of memory sizes of segments.
+	getTotalMemorySize() int64
+	forceToSync()
 }
 
 // ChannelMeta contains channel meta and the latest segments infos of the channel.
@@ -100,6 +106,7 @@ type ChannelMeta struct {
 	segMu    sync.RWMutex
 	segments map[UniqueID]*Segment
 
+	needToSync   *atomic.Bool
 	syncPolicies []segmentSyncPolicy
 
 	metaService  *metaService
@@ -118,6 +125,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		segments: make(map[UniqueID]*Segment),
 
+		needToSync: atomic.NewBool(false),
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
 			syncMemoryTooHigh(),
@@ -252,20 +260,14 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 		validSegs = append(validSegs, seg)
 	}
 
-	segIDsToSync := make([]UniqueID, 0)
-	toSyncSegIDDict := make(map[UniqueID]bool, 0)
+	segIDsToSync := typeutil.NewUniqueSet()
 	for _, policy := range c.syncPolicies {
-		toSyncSegments := policy(validSegs, ts)
-		for _, segID := range toSyncSegments {
-			if _, ok := toSyncSegIDDict[segID]; ok {
-				continue
-			} else {
-				toSyncSegIDDict[segID] = true
-				segIDsToSync = append(segIDsToSync, segID)
-			}
+		segments := policy(validSegs, ts, c.needToSync)
+		for _, segID := range segments {
+			segIDsToSync.Insert(segID)
 		}
 	}
-	return segIDsToSync
+	return segIDsToSync.Collect()
 }
 
 func (c *ChannelMeta) setSegmentLastSyncTs(segID UniqueID, ts Timestamp) {
@@ -801,4 +803,18 @@ func (c *ChannelMeta) evictHistoryDeleteBuffer(segmentID UniqueID, endPos *inter
 		return
 	}
 	log.Warn("cannot find segment when evictHistoryDeleteBuffer", zap.Int64("segmentID", segmentID))
+}
+
+func (c *ChannelMeta) forceToSync() {
+	c.needToSync.Store(true)
+}
+
+func (c *ChannelMeta) getTotalMemorySize() int64 {
+	c.segMu.RLock()
+	defer c.segMu.RUnlock()
+	var res int64
+	for _, segment := range c.segments {
+		res += segment.memorySize
+	}
+	return res
 }
