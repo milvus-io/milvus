@@ -195,10 +195,19 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			}
 		}
 
+		var version int64
+		for _, channel := range resp.GetChannels() {
+			if channel.GetChannel() == lview.GetChannel() {
+				version = channel.GetVersion()
+				break
+			}
+		}
+
 		view := &meta.LeaderView{
 			ID:              resp.GetNodeID(),
 			CollectionID:    lview.GetCollection(),
 			Channel:         lview.GetChannel(),
+			Version:         version,
 			Segments:        lview.GetSegmentDist(),
 			GrowingSegments: segments,
 		}

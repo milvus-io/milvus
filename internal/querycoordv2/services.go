@@ -859,6 +859,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
 		leaders := s.dist.LeaderViewManager.GetLeadersByShard(channel.GetChannelName())
+		leaders = filterDupLeaders(s.meta.ReplicaManager, leaders)
 		ids := make([]int64, 0, len(leaders))
 		addrs := make([]string, 0, len(leaders))
 
