@@ -166,6 +166,12 @@ func (e multiErrors) Unwrap() error {
 	if len(e.errs) <= 1 {
 		return nil
 	}
+	// To make merr work for multi errors,
+	// we need cause of multi errors, which defined as the last error
+	if len(e.errs) == 2 {
+		return e.errs[1]
+	}
+
 	return multiErrors{
 		errs: e.errs[1:],
 	}
