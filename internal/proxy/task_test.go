@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -1139,7 +1140,7 @@ func TestDropPartitionTask(t *testing.T) {
 
 		mockCache := newMockCache()
 		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 0, ErrPartitionNotExist(task.PartitionName)
+			return 0, merr.WrapErrPartitionNotFound(partitionName)
 		})
 		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 			return 1, nil

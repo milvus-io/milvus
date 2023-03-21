@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
@@ -1458,10 +1459,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 			}
 		}
 		return &milvuspb.GetLoadingProgressResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}
 	}
 	if err := validateCollectionName(request.CollectionName); err != nil {
@@ -1532,10 +1530,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		return &milvuspb.GetLoadStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: merr.Status(err),
 		}
 	}
 
@@ -3244,16 +3239,14 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(errProxyIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgProxyIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status:   merr.Status(err),
 			Response: "",
 		}, nil
 	}
@@ -3322,14 +3315,12 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("Proxy.GetProxyMetrics failed",
-			zap.Error(errProxyIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgProxyIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 

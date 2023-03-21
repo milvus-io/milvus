@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -733,7 +734,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
-		return []string{}, ErrProxyNotReady()
+		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
 	return globalMetaCache.GetUserRole(username), nil
 }
@@ -912,7 +913,7 @@ func checkLengthOfFieldsData(schema *schemapb.CollectionSchema, insertMsg *msgst
 	}
 
 	if len(insertMsg.FieldsData) < neededFieldsNum {
-		return errFieldsLessThanNeeded(len(insertMsg.FieldsData), neededFieldsNum)
+		return merr.WrapErrParameterInvalid(neededFieldsNum, len(insertMsg.FieldsData), "the length of passed fields is less than needed")
 	}
 
 	return nil
@@ -922,7 +923,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
-		return nil, errNumRowsLessThanOrEqualToZero(rowNums)
+		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
 	if err := checkLengthOfFieldsData(schema, insertMsg); err != nil {
