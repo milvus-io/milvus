@@ -21,7 +21,7 @@ func (n *NodeSqlStatements) Accept(v Visitor) interface{} {
 	return v.VisitSqlStatements(n)
 }
 
-func NewNodeSqlStatements(statements []*NodeSqlStatement, text string) *NodeSqlStatements {
+func NewNodeSqlStatements(text string, statements []*NodeSqlStatement) *NodeSqlStatements {
 	return &NodeSqlStatements{
 		baseNode:   newBaseNode(text),
 		Statements: statements,
