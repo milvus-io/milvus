@@ -40,7 +40,7 @@ func (v *AstBuilder) VisitSqlStatements(ctx *parsergen.SqlStatementsContext) int
 		}
 		sqlStatements = append(sqlStatements, n)
 	}
-	return planner.NewNodeSqlStatements(sqlStatements, GetOriginalText(ctx))
+	return planner.NewNodeSqlStatements(GetOriginalText(ctx), sqlStatements)
 }
 
 func (v *AstBuilder) VisitSqlStatement(ctx *parsergen.SqlStatementContext) interface{} {

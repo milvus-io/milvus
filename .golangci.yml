@@ -12,9 +12,10 @@ run:
   skip-files:
     # The worst lint rule of golang.
     - internal/mysqld/parser/antlrparser/ast_builder.go
-    - internal/mysqld/parser/antlrparser/node_ret.go
+    - internal/mysqld/parser/antlrparser/node_ret_wrong_var_naming.go
     - internal/mysqld/planner/sql_statement.go
     - internal/mysqld/planner/sql_statements.go
+    - internal/mysqld/planner/visitor_json_wrong_var_naming.go
 
 linters:
   disable-all: true

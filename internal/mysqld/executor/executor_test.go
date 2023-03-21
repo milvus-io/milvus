@@ -37,7 +37,7 @@ func Test_defaultExecutor_Run(t *testing.T) {
 			planner.NewNodeSqlStatement("sql2"),
 		}
 		plan := &planner.PhysicalPlan{
-			Node: planner.NewNodeSqlStatements(stmts, "sql1; sql2"),
+			Node: planner.NewNodeSqlStatements("sql1; sql2", stmts),
 		}
 		_, err := e.Run(context.TODO(), plan)
 		assert.Error(t, err)
@@ -108,7 +108,7 @@ func Test_defaultExecutor_Run(t *testing.T) {
 			)),
 		}
 		plan := &planner.PhysicalPlan{
-			Node: planner.NewNodeSqlStatements(stmts, ""),
+			Node: planner.NewNodeSqlStatements("", stmts),
 		}
 		sqlRes, err := e.Run(context.TODO(), plan)
 		assert.NoError(t, err)
@@ -500,4 +500,222 @@ func Test_getOutputFieldsOrMatchCountRule(t *testing.T) {
 		assert.False(t, match)
 		assert.ElementsMatch(t, []string{"field1", "field2"}, outputFields)
 	})
+}
+
+func Test_defaultExecutor_execCountWithFilter(t *testing.T) {
+	t.Run("failed to query", func(t *testing.T) {
+		s := mocks.NewProxyComponent(t)
+		s.On("Query",
+			mock.Anything, // context.Context
+			mock.Anything, // milvuspb.QueryRequest
+		).Return(nil, errors.New("error mock Query"))
+		e := NewDefaultExecutor(s).(*defaultExecutor)
+		_, err := e.execCountWithFilter(context.TODO(), "t", "a > 2")
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		s := mocks.NewProxyComponent(t)
+		res := &milvuspb.QueryResults{
+			Status: &commonpb.Status{},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "field",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{
+									Data: []int64{1, 2, 3, 4},
+								},
+							},
+						},
+					},
+				},
+			},
+			CollectionName: "test",
+		}
+		s.On("Query",
+			mock.Anything, // context.Context
+			mock.Anything, // *milvuspb.QueryRequest
+		).Return(res, nil)
+		e := NewDefaultExecutor(s).(*defaultExecutor)
+		sqlRes, err := e.execCountWithFilter(context.TODO(), "t", "a > 2")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(sqlRes.Fields))
+		assert.Equal(t, "count(*)", sqlRes.Fields[0].Name)
+		assert.Equal(t, querypb.Type_INT64, sqlRes.Fields[0].Type)
+		assert.Equal(t, 1, len(sqlRes.Rows))
+		assert.Equal(t, 1, len(sqlRes.Rows[0]))
+		assert.Equal(t, querypb.Type_INT64, sqlRes.Rows[0][0].Type())
+	})
+}
+
+func Test_defaultExecutor_execQuery(t *testing.T) {
+	t.Run("rpc failure", func(t *testing.T) {
+		s := mocks.NewProxyComponent(t)
+		s.On("Query",
+			mock.Anything, // context.Context
+			mock.Anything, // milvuspb.QueryRequest
+		).Return(nil, errors.New("error mock Query"))
+		e := NewDefaultExecutor(s).(*defaultExecutor)
+		_, err := e.execQuery(context.TODO(), "t", "a > 2", []string{"a"})
+		assert.Error(t, err)
+	})
+
+	t.Run("not success", func(t *testing.T) {
+		s := mocks.NewProxyComponent(t)
+		s.On("Query",
+			mock.Anything, // context.Context
+			mock.Anything, // milvuspb.QueryRequest
+		).Return(&milvuspb.QueryResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "error mock reason",
+			},
+		}, nil)
+		e := NewDefaultExecutor(s).(*defaultExecutor)
+		_, err := e.execQuery(context.TODO(), "t", "a > 2", []string{"a"})
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		s := mocks.NewProxyComponent(t)
+		s.On("Query",
+			mock.Anything, // context.Context
+			mock.Anything, // milvuspb.QueryRequest
+		).Return(&milvuspb.QueryResults{
+			Status: &commonpb.Status{},
+		}, nil)
+		e := NewDefaultExecutor(s).(*defaultExecutor)
+		_, err := e.execQuery(context.TODO(), "t", "a > 2", []string{"a"})
+		assert.NoError(t, err)
+	})
+}
+
+func Test_wrapCountResult(t *testing.T) {
+	sqlRes := wrapCountResult(100, "count(*)")
+	assert.Equal(t, 1, len(sqlRes.Fields))
+	assert.Equal(t, "count(*)", sqlRes.Fields[0].Name)
+	assert.Equal(t, querypb.Type_INT64, sqlRes.Fields[0].Type)
+	assert.Equal(t, 1, len(sqlRes.Rows))
+	assert.Equal(t, 1, len(sqlRes.Rows[0]))
+	assert.Equal(t, querypb.Type_INT64, sqlRes.Rows[0][0].Type())
+}
+
+func Test_wrapQueryResults(t *testing.T) {
+	res := &milvuspb.QueryResults{
+		Status: &commonpb.Status{},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "field",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+		},
+		CollectionName: "test",
+	}
+	sqlRes := wrapQueryResults(res)
+	assert.Equal(t, 1, len(sqlRes.Fields))
+	assert.Equal(t, 4, len(sqlRes.Rows))
+	assert.Equal(t, "field", sqlRes.Fields[0].Name)
+	assert.Equal(t, querypb.Type_INT64, sqlRes.Fields[0].Type)
+	assert.Equal(t, 1, len(sqlRes.Rows[0]))
+	assert.Equal(t, querypb.Type_INT64, sqlRes.Rows[0][0].Type())
+}
+
+func Test_getSQLField(t *testing.T) {
+	f := &schemapb.FieldData{
+		FieldName: "a",
+		Type:      schemapb.DataType_Int64,
+	}
+	sf := getSQLField("t", f)
+	assert.Equal(t, "a", sf.Name)
+	assert.Equal(t, querypb.Type_INT64, sf.Type)
+	assert.Equal(t, "t", sf.Table)
+}
+
+func Test_toSQLType(t *testing.T) {
+	type args struct {
+		t schemapb.DataType
+	}
+	tests := []struct {
+		name string
+		args args
+		want querypb.Type
+	}{
+		{
+			args: args{
+				t: schemapb.DataType_Bool,
+			},
+			want: querypb.Type_UINT8,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Int8,
+			},
+			want: querypb.Type_INT8,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Int16,
+			},
+			want: querypb.Type_INT16,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Int32,
+			},
+			want: querypb.Type_INT32,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Int64,
+			},
+			want: querypb.Type_INT64,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Float,
+			},
+			want: querypb.Type_FLOAT32,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_Double,
+			},
+			want: querypb.Type_FLOAT64,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_VarChar,
+			},
+			want: querypb.Type_VARCHAR,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_FloatVector,
+			},
+			want: querypb.Type_NULL_TYPE,
+		},
+		{
+			args: args{
+				t: schemapb.DataType_BinaryVector,
+			},
+			want: querypb.Type_NULL_TYPE,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, toSQLType(tt.args.t), "toSQLType(%v)", tt.args.t)
+		})
+	}
 }
