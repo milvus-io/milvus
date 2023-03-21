@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -262,7 +263,7 @@ type dropHandler struct {
 
 // rendezvousFlushManager makes sure insert & del buf all flushed
 type rendezvousFlushManager struct {
-	allocatorInterface
+	allocator.Allocator
 	storage.ChunkManager
 	Channel
 
@@ -371,7 +372,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	}
 
 	// binlogs
-	start, _, err := m.allocIDBatch(uint32(len(binLogs) + len(statsBinlogs)))
+	start, _, err := m.Alloc(uint32(len(binLogs) + len(statsBinlogs)))
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +388,6 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 		logidx := start + int64(idx)
 
-		// no error raise if alloc=false
 		k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		// [rootPath]/[insert_log]/key
@@ -413,7 +413,6 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 		logidx := start + UniqueID(len(binLogs)+idx)
 
-		// no error raise if alloc=false
 		k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
@@ -458,7 +457,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 		return err
 	}
 
-	logID, err := m.allocID()
+	logID, err := m.AllocOne()
 	if err != nil {
 		log.Error("failed to alloc ID", zap.Error(err))
 		return err
@@ -618,12 +617,12 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 }
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
-func NewRendezvousFlushManager(allocator allocatorInterface, cm storage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+func NewRendezvousFlushManager(allocator allocator.Allocator, cm storage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
 	fm := &rendezvousFlushManager{
-		allocatorInterface: allocator,
-		ChunkManager:       cm,
-		notifyFunc:         f,
-		Channel:            channel,
+		Allocator:    allocator,
+		ChunkManager: cm,
+		notifyFunc:   f,
+		Channel:      channel,
 		dropHandler: dropHandler{
 			flushAndDrop: drop,
 		},

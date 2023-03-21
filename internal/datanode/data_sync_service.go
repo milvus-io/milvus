@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
@@ -48,9 +49,9 @@ type dataSyncService struct {
 	cancelFn     context.CancelFunc
 	fg           *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
 	flushCh      chan flushMsg
-	resendTTCh   chan resendTTMsg   // chan to ask for resending DataNode time tick message.
-	channel      Channel            // channel stores meta of channel
-	idAllocator  allocatorInterface // id/timestamp allocator
+	resendTTCh   chan resendTTMsg    // chan to ask for resending DataNode time tick message.
+	channel      Channel             // channel stores meta of channel
+	idAllocator  allocator.Allocator // id/timestamp allocator
 	dispClient   msgdispatcher.Client
 	msFactory    msgstream.Factory
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
@@ -73,7 +74,7 @@ func newDataSyncService(ctx context.Context,
 	flushCh chan flushMsg,
 	resendTTCh chan resendTTMsg,
 	channel Channel,
-	alloc allocatorInterface,
+	alloc allocator.Allocator,
 	dispClient msgdispatcher.Client,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
@@ -135,7 +136,7 @@ type nodeConfig struct {
 	collectionID UniqueID
 	vChannelName string
 	channel      Channel // Channel info
-	allocator    allocatorInterface
+	allocator    allocator.Allocator
 	serverID     int64
 	// defaults
 	parallelConfig

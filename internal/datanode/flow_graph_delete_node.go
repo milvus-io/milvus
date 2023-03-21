@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -39,7 +40,7 @@ type deleteNode struct {
 	channelName      string
 	delBufferManager *DelBufferManager // manager of delete msg
 	channel          Channel
-	idAllocator      allocatorInterface
+	idAllocator      allocator.Allocator
 	flushManager     flushManager
 
 	clearSignal chan<- string

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -158,7 +159,8 @@ func TestRendezvousFlushManager(t *testing.T) {
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+	alloc := allocator.NewMockAllocator(t)
+	m := NewRendezvousFlushManager(alloc, cm, newTestChannel(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)
@@ -199,7 +201,8 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	finish.Add(size)
 	var packMut sync.Mutex
 	packs := make([]*segmentFlushPack, 0, size+3)
-	m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+	alloc := allocator.NewMockAllocator(t)
+	m := NewRendezvousFlushManager(alloc, cm, newTestChannel(), func(pack *segmentFlushPack) {
 		packMut.Lock()
 		packs = append(packs, pack)
 		packMut.Unlock()
@@ -297,7 +300,7 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 
 	channel := newTestChannel()
 	channel.collSchema = &schemapb.CollectionSchema{}
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {
+	fm := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, channel, func(*segmentFlushPack) {
 	}, emptyFlushAndDropFunc)
 
 	// non exists segment
@@ -330,7 +333,7 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	var counter atomic.Int64
 	var finish sync.WaitGroup
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, newTestChannel(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)
@@ -402,7 +405,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		var result []*segmentFlushPack
 		signal := make(chan struct{})
 
-		m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+		m := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, newTestChannel(), func(pack *segmentFlushPack) {
 		}, func(packs []*segmentFlushPack) {
 			mut.Lock()
 			result = packs
@@ -456,7 +459,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		var result []*segmentFlushPack
 		signal := make(chan struct{})
 
-		m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+		m := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, newTestChannel(), func(pack *segmentFlushPack) {
 		}, func(packs []*segmentFlushPack) {
 			mut.Lock()
 			result = packs
@@ -518,7 +521,7 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, cm, newTestChannel(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, newTestChannel(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)

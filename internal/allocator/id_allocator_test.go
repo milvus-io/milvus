@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockIDAllocator struct {
@@ -64,4 +65,17 @@ func TestIDAllocator(t *testing.T) {
 	id, err = idAllocator.AllocOne()
 	assert.Nil(t, err)
 	assert.Equal(t, id, int64(20002))
+}
+
+func TestIDAllocatorClose(t *testing.T) {
+	a, err := NewIDAllocator(context.TODO(), newMockIDAllocator(), 1)
+	require.NoError(t, err)
+
+	err = a.Start()
+	assert.NoError(t, err)
+
+	a.Close()
+
+	_, _, err = a.Alloc(10)
+	assert.Error(t, err)
 }

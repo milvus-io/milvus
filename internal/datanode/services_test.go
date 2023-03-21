@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -32,7 +33,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -81,6 +84,16 @@ func (s *DataNodeServicesSuite) SetupTest() {
 
 	err := s.node.Init()
 	s.Require().NoError(err)
+
+	alloc := &allocator.MockAllocator{}
+	alloc.EXPECT().Start().Return(nil).Maybe()
+	alloc.EXPECT().Close().Maybe()
+	alloc.EXPECT().GetIDAlloactor().Return(&allocator2.IDAllocator{}).Maybe()
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil).Maybe()
+	s.node.allocator = alloc
 
 	err = s.node.Start()
 	s.Require().NoError(err)
