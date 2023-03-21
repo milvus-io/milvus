@@ -37,6 +37,7 @@ import (
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -299,15 +300,6 @@ func (s *Segment) getMemSize() int64 {
 }
 
 func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*SearchResult, error) {
-	/*
-		CStatus
-		Search(void* plan,
-			void* placeholder_groups,
-			uint64_t* timestamps,
-			int num_groups,
-			long int* result_ids,
-			float* result_distances);
-	*/
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
@@ -325,9 +317,21 @@ func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*Search
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
 		zap.Bool("loadIndex", loadIndex))
+	span := trace.SpanFromContext(ctx)
+
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceCtx := C.CTraceContext{
+		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		flag:    C.uchar(span.SpanContext().TraceFlags()),
+	}
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-	status := C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
+	status := C.Search(s.segmentPtr,
+		searchReq.plan.cSearchPlan,
+		searchReq.cPlaceholderGroup,
+		traceCtx,
 		C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(tr.CtxElapse(ctx, "finish cgoSearch").Milliseconds()))
@@ -342,7 +346,7 @@ func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*Search
 	return &searchResult, nil
 }
 
-func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *Segment) retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
@@ -355,7 +359,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryLabel).Observe(float64(tr.CtxElapse(ctx, "finish cgoRetrieve").Milliseconds()))
 	log.Debug("do retrieve on segment",
 		zap.Int64("msgID", plan.msgID),
 		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
