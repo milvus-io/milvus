@@ -205,6 +205,16 @@ func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterA
 	}, nil
 }
 
+func (coord *RootCoordMock) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (coord *RootCoordMock) ListAliases(ctx context.Context, req *milvuspb.ListAliasRequest) (*milvuspb.ListAliasesResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (coord *RootCoordMock) updateState(state commonpb.StateCode) {
 	coord.state.Store(state)
 }

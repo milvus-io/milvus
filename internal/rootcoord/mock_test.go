@@ -66,6 +66,8 @@ type mockMetaTable struct {
 	CreateAliasFunc                  func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
 	AlterAliasFunc                   func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
 	DropAliasFunc                    func(ctx context.Context, alias string, ts Timestamp) error
+	DescribeAliasFunc                func(ctx context.Context, alias string, ts Timestamp) (string, error)
+	ListAliasesFunc                  func(ctx context.Context, ts Timestamp) ([]string, error)
 	IsAliasFunc                      func(name string) bool
 	ListAliasesByIDFunc              func(collID UniqueID) []string
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
@@ -121,6 +123,14 @@ func (m mockMetaTable) AlterAlias(ctx context.Context, alias string, collectionN
 
 func (m mockMetaTable) DropAlias(ctx context.Context, alias string, ts Timestamp) error {
 	return m.DropAliasFunc(ctx, alias, ts)
+}
+
+func (m mockMetaTable) DescribeAlias(ctx context.Context, alias string, ts Timestamp) (string, error) {
+	return m.DescribeAliasFunc(ctx, alias, ts)
+}
+
+func (m mockMetaTable) ListAliases(ctx context.Context, ts Timestamp) ([]string, error) {
+	return m.ListAliasesFunc(ctx, ts)
 }
 
 func (m mockMetaTable) IsAlias(name string) bool {

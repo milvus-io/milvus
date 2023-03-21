@@ -187,6 +187,14 @@ func (m *MockRootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 	return nil, nil
 }
 
+func (m *MockRootCoord) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) ListAliases(ctx context.Context, req *milvuspb.ListAliasRequest) (*milvuspb.ListAliasesResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return nil, nil
 }
@@ -663,6 +671,14 @@ func (m *MockProxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRe
 }
 
 func (m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) ListAliases(ctx context.Context, request *milvuspb.ListAliasRequest) (*milvuspb.ListAliasesResponse, error) {
 	return nil, nil
 }
 

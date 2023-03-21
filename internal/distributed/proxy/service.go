@@ -711,6 +711,16 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 	return s.proxy.AlterAlias(ctx, request)
 }
 
+// DescribeAlias show the alias-collection relation for the specified alias.
+func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return s.proxy.DescribeAlias(ctx, request)
+}
+
+// ListAliases list all the alias for the specified db, collection.
+func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasRequest) (*milvuspb.ListAliasesResponse, error) {
+	return s.proxy.ListAliases(ctx, request)
+}
+
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return s.proxy.GetCompactionState(ctx, req)

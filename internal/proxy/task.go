@@ -73,6 +73,8 @@ const (
 	CreateAliasTaskName           = "CreateAliasTask"
 	DropAliasTaskName             = "DropAliasTask"
 	AlterAliasTaskName            = "AlterAliasTask"
+	DescribeAliasTaskName         = "DescribeAliasTask"
+	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
@@ -1904,6 +1906,132 @@ func (a *AlterAliasTask) Execute(ctx context.Context) error {
 }
 
 func (a *AlterAliasTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// DescribeAliasTask is the task to describe alias
+type DescribeAliasTask struct {
+	Condition
+	nodeID UniqueID
+	*milvuspb.DescribeAliasRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.DescribeAliasResponse
+}
+
+func (a *DescribeAliasTask) TraceCtx() context.Context {
+	return a.ctx
+}
+
+func (a *DescribeAliasTask) ID() UniqueID {
+	return a.Base.MsgID
+}
+
+func (a *DescribeAliasTask) SetID(uid UniqueID) {
+	a.Base.MsgID = uid
+}
+
+func (a *DescribeAliasTask) Name() string {
+	return DescribeAliasTaskName
+}
+
+func (a *DescribeAliasTask) Type() commonpb.MsgType {
+	return a.Base.MsgType
+}
+
+func (a *DescribeAliasTask) BeginTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *DescribeAliasTask) EndTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *DescribeAliasTask) SetTs(ts Timestamp) {
+	a.Base.Timestamp = ts
+}
+
+func (a *DescribeAliasTask) OnEnqueue() error {
+	a.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (a *DescribeAliasTask) PreExecute(ctx context.Context) error {
+	a.Base.MsgType = commonpb.MsgType_AlterAlias
+	a.Base.SourceID = a.nodeID
+	return nil
+}
+
+func (a *DescribeAliasTask) Execute(ctx context.Context) error {
+	var err error
+	a.result, err = a.rootCoord.DescribeAlias(ctx, a.DescribeAliasRequest)
+	return err
+}
+
+func (a *DescribeAliasTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// ListAliasesTask is the task to list aliases
+type ListAliasesTask struct {
+	Condition
+	nodeID UniqueID
+	*milvuspb.ListAliasRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.ListAliasesResponse
+}
+
+func (a *ListAliasesTask) TraceCtx() context.Context {
+	return a.ctx
+}
+
+func (a *ListAliasesTask) ID() UniqueID {
+	return a.Base.MsgID
+}
+
+func (a *ListAliasesTask) SetID(uid UniqueID) {
+	a.Base.MsgID = uid
+}
+
+func (a *ListAliasesTask) Name() string {
+	return ListAliasesTaskName
+}
+
+func (a *ListAliasesTask) Type() commonpb.MsgType {
+	return a.Base.MsgType
+}
+
+func (a *ListAliasesTask) BeginTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *ListAliasesTask) EndTs() Timestamp {
+	return a.Base.Timestamp
+}
+
+func (a *ListAliasesTask) SetTs(ts Timestamp) {
+	a.Base.Timestamp = ts
+}
+
+func (a *ListAliasesTask) OnEnqueue() error {
+	a.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
+	a.Base.MsgType = commonpb.MsgType_ListAliases
+	a.Base.SourceID = a.nodeID
+	return nil
+}
+
+func (a *ListAliasesTask) Execute(ctx context.Context) error {
+	var err error
+	a.result, err = a.rootCoord.ListAliases(ctx, a.ListAliasRequest)
+	return err
+}
+
+func (a *ListAliasesTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

@@ -56,6 +56,8 @@ type IMetaTable interface {
 	CreateAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error
 	DropAlias(ctx context.Context, alias string, ts Timestamp) error
 	AlterAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error
+	DescribeAlias(ctx context.Context, alias string, ts Timestamp) (string, error)
+	ListAliases(ctx context.Context, ts Timestamp) ([]string, error)
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error
 
@@ -698,6 +700,35 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, alias string, collectionNam
 	mt.collAlias2ID[alias] = collectionID
 	log.Info("alter alias", zap.String("alias", alias), zap.String("collection", collectionName), zap.Uint64("ts", ts))
 	return nil
+}
+
+func (mt *MetaTable) DescribeAlias(ctx context.Context, alias string, ts Timestamp) (string, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// check if alias exists.
+	collectionID, ok := mt.collAlias2ID[alias]
+	if !ok {
+		return "", fmt.Errorf("failed to describe alias, alias does not exist: %s", alias)
+	}
+
+	collectionMeta, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return "", fmt.Errorf("failed to describe alias, collection with ID does not exist: %d", collectionID)
+	}
+
+	return collectionMeta.Name, nil
+}
+
+func (mt *MetaTable) ListAliases(ctx context.Context, ts Timestamp) ([]string, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	var aliases []string
+	for alias := range mt.collAlias2ID {
+		aliases = append(aliases, alias)
+	}
+	return aliases, nil
 }
 
 func (mt *MetaTable) IsAlias(name string) bool {

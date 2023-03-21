@@ -116,6 +116,15 @@ func (m *GrpcRootCoordClient) DropAlias(ctx context.Context, in *milvuspb.DropAl
 func (m *GrpcRootCoordClient) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+func (m *GrpcRootCoordClient) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *GrpcRootCoordClient) ListAliases(ctx context.Context, in *milvuspb.ListAliasRequest, opts ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
 
 func (m *GrpcRootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{}, m.Err
