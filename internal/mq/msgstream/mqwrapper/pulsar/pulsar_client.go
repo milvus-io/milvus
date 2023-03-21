@@ -19,7 +19,6 @@ package pulsar
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
@@ -114,15 +112,12 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       fullTopicName,
 		SubscriptionName:            options.SubscriptionName,
-		Type:                        pulsar.Exclusive,
+		Type:                        pulsar.Failover,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 		MessageChannel:              receiveChannel,
 	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		if strings.Contains(err.Error(), "ConsumerBusy") {
-			return nil, retry.Unrecoverable(err)
-		}
 		return nil, err
 	}
 

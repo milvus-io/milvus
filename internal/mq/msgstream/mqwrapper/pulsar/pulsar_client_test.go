@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -646,20 +645,6 @@ func (c *mockPulsarClient) TopicPartitions(topic string) ([]string, error) {
 
 // Close Closes the Client and free associated resources
 func (c *mockPulsarClient) Close() {
-}
-
-func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
-	t.Run("exclusive pulsar consumer failure", func(t *testing.T) {
-		pc := &pulsarClient{
-			tenant:    DefaultPulsarTenant,
-			namespace: DefaultPulsarNamespace,
-			client:    &mockPulsarClient{},
-		}
-
-		_, err := pc.Subscribe(mqwrapper.ConsumerOptions{Topic: "test_topic_name"})
-		assert.Error(t, err)
-		assert.True(t, retry.IsUnRecoverable(err))
-	})
 }
 
 func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
