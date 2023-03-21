@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/atomic"
 )
 
 var insertNodeTestDir = "/tmp/milvus_test/insert_node"
@@ -349,6 +350,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
+		needToSync:   atomic.NewBool(false),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
@@ -589,6 +591,7 @@ func TestRollBF(t *testing.T) {
 	channel := &ChannelMeta{
 		collectionID: collMeta.ID,
 		segments:     make(map[UniqueID]*Segment),
+		needToSync:   atomic.NewBool(false),
 	}
 
 	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)

@@ -533,6 +533,8 @@ func (node *DataNode) Start() error {
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)
 
+	go node.flowgraphManager.start()
+
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
 }
@@ -566,6 +568,7 @@ func (node *DataNode) Stop() error {
 
 	node.cancel()
 	node.flowgraphManager.dropAll()
+	node.flowgraphManager.stop()
 
 	if node.rowIDAllocator != nil {
 		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))

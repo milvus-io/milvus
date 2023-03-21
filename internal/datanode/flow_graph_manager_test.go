@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -190,5 +191,50 @@ func TestFlowGraphManager(t *testing.T) {
 		fg, ok := fm.getFlowgraphService("channel-not-exist")
 		assert.False(t, ok)
 		assert.Nil(t, fg)
+	})
+
+	t.Run("test execute", func(t *testing.T) {
+		tests := []struct {
+			testName         string
+			totalMemory      uint64
+			watermark        float64
+			memorySizes      []int64
+			expectNeedToSync []bool
+		}{
+			{"test over the watermark", 100, 0.5,
+				[]int64{15, 16, 17, 18}, []bool{false, false, false, true}},
+			{"test below the watermark", 100, 0.5,
+				[]int64{1, 2, 3, 4}, []bool{false, false, false, false}},
+		}
+
+		fm.dropAll()
+		const channelPrefix = "by-dev-rootcoord-dml-test-fg-mgr-execute-"
+		for _, test := range tests {
+			t.Run(test.testName, func(t *testing.T) {
+				var baseParams = Params.BaseTable
+				baseParams.Save(Params.DataNodeCfg.MemoryWatermark.Key, fmt.Sprintf("%f", test.watermark))
+				for i, memorySize := range test.memorySizes {
+					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
+					vchan := &datapb.VchannelInfo{
+						ChannelName: vchannel,
+					}
+					err = fm.addAndStart(node, vchan, nil, genTestTickler())
+					assert.NoError(t, err)
+					fg, ok := fm.flowgraphs.Load(vchannel)
+					assert.True(t, ok)
+					err = fg.(*dataSyncService).channel.addSegment(addSegmentReq{segID: 0})
+					assert.NoError(t, err)
+					fg.(*dataSyncService).channel.updateSegmentMemorySize(0, memorySize)
+					fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Store(false)
+				}
+				fm.execute(test.totalMemory)
+				for i, needToSync := range test.expectNeedToSync {
+					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
+					fg, ok := fm.flowgraphs.Load(vchannel)
+					assert.True(t, ok)
+					assert.Equal(t, needToSync, fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Load())
+				}
+			})
+		}
 	})
 }

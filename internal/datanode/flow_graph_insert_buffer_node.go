@@ -62,7 +62,6 @@ type insertBufferNode struct {
 	ttLogger       *timeTickLogger
 	ttMerger       *mergedTimeTickerSender
 
-	syncPolicies  []segmentSyncPolicy
 	lastTimestamp Timestamp
 }
 
@@ -295,9 +294,14 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 // updateSegmentsMemorySize updates segments' memory size in channel meta
 func (ibNode *insertBufferNode) updateSegmentsMemorySize(seg2Upload []UniqueID) {
 	for _, segID := range seg2Upload {
-		if bd, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
-			ibNode.channel.updateSegmentMemorySize(segID, bd.memorySize())
+		var memorySize int64
+		if buffer, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
+			memorySize += buffer.memorySize()
 		}
+		if buffer, ok := ibNode.channel.getCurDeleteBuffer(segID); ok {
+			memorySize += buffer.GetLogSize()
+		}
+		ibNode.channel.updateSegmentMemorySize(segID, memorySize)
 	}
 }
 
@@ -452,6 +456,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *msgpb.MsgPosition) []UniqueID {
 	syncTasks := ibNode.FillInSyncTasks(fgMsg, seg2Upload)
 	segmentsToSync := make([]UniqueID, 0, len(syncTasks))
+	ibNode.channel.(*ChannelMeta).needToSync.Store(false)
 
 	for _, task := range syncTasks {
 		log.Info("insertBufferNode syncing BufferData",

@@ -14,6 +14,7 @@ package paramtable
 import (
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,8 +22,11 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/zap"
 
 	config "github.com/milvus-io/milvus/internal/config"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 const (
@@ -1999,9 +2003,9 @@ type dataNodeConfig struct {
 	IOConcurrency ParamItem `refreshable:"false"`
 
 	// memory management
-	MemoryForceSyncEnable       ParamItem `refreshable:"true"`
-	MemoryForceSyncThreshold    ParamItem `refreshable:"true"`
-	MemoryForceSyncSegmentRatio ParamItem `refreshable:"true"`
+	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
+	MemoryWatermark           ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2041,19 +2045,34 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.MemoryForceSyncEnable.Init(base.mgr)
 
-	p.MemoryForceSyncThreshold = ParamItem{
-		Key:          "datanode.memory.forceSyncThreshold",
+	p.MemoryForceSyncSegmentNum = ParamItem{
+		Key:          "datanode.memory.forceSyncSegmentNum",
 		Version:      "2.2.4",
-		DefaultValue: "0.6",
+		DefaultValue: "1",
 	}
-	p.MemoryForceSyncThreshold.Init(base.mgr)
+	p.MemoryForceSyncSegmentNum.Init(base.mgr)
 
-	p.MemoryForceSyncSegmentRatio = ParamItem{
-		Key:          "datanode.memory.forceSyncSegmentRatio",
-		Version:      "2.2.4",
-		DefaultValue: "0.3",
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkStandalone",
+			Version:      "2.2.4",
+			DefaultValue: "0.2",
+		}
+	} else if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.ClusterDeployMode {
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkCluster",
+			Version:      "2.2.4",
+			DefaultValue: "0.5",
+		}
+	} else {
+		log.Warn("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkCluster",
+			Version:      "2.2.4",
+			DefaultValue: "0.5",
+		}
 	}
-	p.MemoryForceSyncSegmentRatio.Init(base.mgr)
+	p.MemoryWatermark.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",
