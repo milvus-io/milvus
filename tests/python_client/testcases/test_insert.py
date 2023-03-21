@@ -1486,8 +1486,7 @@ class TestUpsertValid(TestcaseBase):
         res1 = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
         assert [res1[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #22563")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_pk_concurrently(self):
         """
         target: test upsert the same pk concurrently

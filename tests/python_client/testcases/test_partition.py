@@ -257,7 +257,7 @@ class TestPartitionParams(TestcaseBase):
         """
         target: test release the partition after load partition
         method: load partition1 and load another partition
-        expected: raise exception
+        expected: raise no exception
         """
         self._connect()
         collection_w = self.init_collection_wrap()
@@ -267,9 +267,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w2.insert(cf.gen_default_list_data())
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w1.load()
-        error = {ct.err_code: 5, ct.err_msg: f'load the partition after load collection is not supported'}
-        partition_w2.load(check_task=CheckTasks.err_res,
-                          check_items=error)
+        partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitions_after_release(self):
