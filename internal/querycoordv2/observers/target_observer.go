@@ -267,8 +267,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
-	log.Warn("observer trigger update current target",
-		zap.Int64("collectionID", collectionID))
+	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
 	ob.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 
 	ob.mut.Lock()
