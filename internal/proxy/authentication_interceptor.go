@@ -4,11 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"google.golang.org/grpc/metadata"
-
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util"
-
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"google.golang.org/grpc/metadata"
 )
 
 // validAuth validates the authentication
@@ -27,8 +26,11 @@ func validAuth(ctx context.Context, authorization []string) bool {
 	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
 	username := secrets[0]
 	password := secrets[1]
-
-	return passwordVerify(ctx, username, password, globalMetaCache)
+	isSuccess := passwordVerify(ctx, username, password, globalMetaCache)
+	if isSuccess {
+		metrics.UserRPCCounter.WithLabelValues(username).Inc()
+	}
+	return isSuccess
 }
 
 func validSourceID(ctx context.Context, authorization []string) bool {
