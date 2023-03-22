@@ -252,7 +252,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             }
             insert_record_.seal_pks();
         }
-
+        std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
     std::unique_lock lck(mutex_);
