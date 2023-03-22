@@ -1358,10 +1358,11 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 			if err != nil {
 				return fmt.Errorf(err.Error())
 			}
-			if resp.ErrorCode != commonpb.ErrorCode_Success && resp.ErrorCode != commonpb.ErrorCode_NotReadyServe {
-				return retry.Unrecoverable(fmt.Errorf("failed to save import segment, reason = %s", resp.Reason))
-			} else if resp.ErrorCode == commonpb.ErrorCode_NotReadyServe {
-				return fmt.Errorf("failed to save import segment: %s", resp.GetReason())
+			// A bulkinsert task could call assignSegmentFunc() and saveSegmentFunc() in a short time.
+			// The datacoord process the two requests asynchronously, sometimes the SaveImportSegment()
+			// might be executed before the the segment is ready. So we always retry here.
+			if resp.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("failed to save import segment, reason = %s", resp.Reason)
 			}
 			return nil
 		})
