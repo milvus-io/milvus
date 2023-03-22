@@ -325,6 +325,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 			return coll, nil
 		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
+		}
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -369,6 +372,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		meta := newMockMetaTable()
 		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 			return coll, nil
+		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
 		}
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
@@ -470,6 +476,25 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			schema:   schema,
 		}
 
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return nil, errors.New("mock error")
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
+
+		originValue := Params.QuotaConfig.MaxCollectionNum
+		Params.QuotaConfig.MaxCollectionNum = 10
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			maxNum := Params.QuotaConfig.MaxCollectionNum
+			return make([]*model.Collection, maxNum), nil
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
+		Params.QuotaConfig.MaxCollectionNum = originValue
+
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
+		}
 		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
@@ -490,6 +515,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		}
 		meta.AddCollectionFunc = func(ctx context.Context, coll *model.Collection) error {
 			return nil
+		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
 		}
 		// inject error here.
 		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {

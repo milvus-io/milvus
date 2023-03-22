@@ -14,6 +14,14 @@ import (
 
 // validAuth validates the authentication
 func TestValidAuth(t *testing.T) {
+	validAuth := func(ctx context.Context, authorization []string) bool {
+		username, password := parseMD(authorization)
+		if username == "" || password == "" {
+			return false
+		}
+		return passwordVerify(ctx, username, password, globalMetaCache)
+	}
+
 	ctx := context.Background()
 	Params.InitOnce()
 	// no metadata

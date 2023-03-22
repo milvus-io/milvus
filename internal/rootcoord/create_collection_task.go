@@ -309,6 +309,17 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
+	existedCollInfos, err := t.core.meta.ListCollections(ctx, typeutil.MaxTimestamp)
+	if err != nil {
+		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
+		return fmt.Errorf("fail to list collections for checking the collection count")
+	}
+	if len(existedCollInfos) >= Params.QuotaConfig.MaxCollectionNum {
+		errMsg := "unable to create collection because the number of collection has reached the limit"
+		log.Error(errMsg, zap.Int("max_collection_num", Params.QuotaConfig.MaxCollectionNum))
+		return errors.New(errMsg)
+	}
+
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
