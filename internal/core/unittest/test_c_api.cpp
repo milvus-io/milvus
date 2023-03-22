@@ -184,8 +184,7 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
 // VecIndexPtr
 // generate_index(
 //    void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, knowhere::IndexType index_type) {
-//    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type,
-//    knowhere::IndexMode::MODE_CPU);
+//    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
 //
 //    auto database = knowhere::GenDataset(N, dim, raw_data);
 //    indexing->Train(database, conf);
@@ -1681,15 +1680,10 @@ TEST(CApiTest, LoadIndexInfo) {
     std::string index_param_value1 = "IVF_PQ";
     status = AppendIndexParam(
         c_load_index_info, index_param_key1.data(), index_param_value1.data());
-    std::string index_param_key2 = "index_mode";
-    std::string index_param_value2 = "CPU";
+    std::string index_param_key2 = knowhere::meta::METRIC_TYPE;
+    std::string index_param_value2 = knowhere::metric::L2;
     status = AppendIndexParam(
         c_load_index_info, index_param_key2.data(), index_param_value2.data());
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_param_key3 = knowhere::meta::METRIC_TYPE;
-    std::string index_param_value3 = knowhere::metric::L2;
-    status = AppendIndexParam(
-        c_load_index_info, index_param_key3.data(), index_param_value3.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
     status =
@@ -1733,10 +1727,7 @@ TEST(CApiTest, LoadIndex_Search) {
     milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = "IVF_PQ";
-    index_params["index_mode"] = "CPU";
-    auto mode = knowhere::IndexMode::MODE_CPU;
-    load_index_info.index = std::make_unique<VectorMemIndex>(
-        index_params["index_type"], knowhere::metric::L2, mode);
+    load_index_info.index = std::make_unique<VectorMemIndex>(index_params["index_type"], knowhere::metric::L2);
     load_index_info.index->Load(binary_set);
 
     // search
@@ -1859,15 +1850,11 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2009,15 +1996,11 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2175,15 +2158,11 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2354,15 +2333,11 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2516,15 +2491,11 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2688,15 +2659,11 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2853,15 +2820,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3032,15 +2995,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3196,15 +3155,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3391,15 +3346,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3578,15 +3529,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -3888,15 +3835,11 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);

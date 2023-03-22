@@ -46,7 +46,6 @@ class IndexBase {
 
  protected:
     IndexType index_type_ = "";
-    IndexMode index_mode_ = IndexMode::MODE_CPU;
 };
 
 using IndexBasePtr = std::unique_ptr<IndexBase>;

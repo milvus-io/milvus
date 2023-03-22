@@ -33,11 +33,8 @@ namespace milvus::index {
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
-                         const IndexMode& index_mode,
                          const MetricType& metric_type)
-        : index_type_(index_type),
-          index_mode_(index_mode),
-          metric_type_(metric_type) {
+        : index_type_(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -63,11 +60,6 @@ class VectorIndex : public IndexBase {
         return metric_type_;
     }
 
-    IndexMode
-    GetIndexMode() const {
-        return index_mode_;
-    }
-
     int64_t
     GetDim() const {
         return dim_;
@@ -84,7 +76,6 @@ class VectorIndex : public IndexBase {
 
  private:
     IndexType index_type_;
-    IndexMode index_mode_;
     MetricType metric_type_;
     int64_t dim_;
 };

@@ -122,26 +122,6 @@ GetIndexTypeFromConfig(const Config& config) {
     return index_type.value();
 }
 
-IndexMode
-GetIndexModeFromConfig(const Config& config) {
-    auto mode = GetValueFromConfig<std::string>(config, INDEX_MODE);
-    return mode.has_value() ? GetIndexMode(mode.value())
-                            : knowhere::IndexMode::MODE_CPU;
-}
-
-IndexMode
-GetIndexMode(const std::string_view index_mode) {
-    if (index_mode.compare("CPU") == 0 || index_mode.compare("cpu") == 0) {
-        return IndexMode::MODE_CPU;
-    }
-
-    if (index_mode.compare("GPU") == 0 || index_mode.compare("gpu") == 0) {
-        return IndexMode::MODE_GPU;
-    }
-
-    PanicInfo("unsupported index mode");
-}
-
 // TODO :: too ugly
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config) {

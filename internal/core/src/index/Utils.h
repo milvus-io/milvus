@@ -108,12 +108,6 @@ GetMetricTypeFromConfig(const Config& config);
 std::string
 GetIndexTypeFromConfig(const Config& config);
 
-IndexMode
-GetIndexModeFromConfig(const Config& config);
-
-IndexMode
-GetIndexMode(const std::string_view index_mode);
-
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config);
 

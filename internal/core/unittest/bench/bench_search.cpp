@@ -118,7 +118,6 @@ Search_Sealed(benchmark::State& state) {
         info.index = std::move(indexing);
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
         info.index_params["index_type"] = "IVF";
-        info.index_params["index_mode"] = "CPU";
         info.index_params["metric_type"] = knowhere::metric::L2;
         segment->DropFieldData(milvus::FieldId(100));
         segment->LoadIndex(info);

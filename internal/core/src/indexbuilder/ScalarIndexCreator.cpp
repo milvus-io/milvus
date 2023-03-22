@@ -43,7 +43,6 @@ ScalarIndexCreator::ScalarIndexCreator(DataType dtype,
     milvus::index::CreateIndexInfo index_info;
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
-    index_info.index_mode = IndexMode::MODE_CPU;
     index_ =
         index::IndexFactory::GetInstance().CreateIndex(index_info, nullptr);
 }

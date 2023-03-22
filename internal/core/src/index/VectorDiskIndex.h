@@ -30,7 +30,6 @@ class VectorDiskAnnIndex : public VectorIndex {
  public:
     explicit VectorDiskAnnIndex(const IndexType& index_type,
                                 const MetricType& metric_type,
-                                const IndexMode& index_mode,
                                 storage::FileManagerImplPtr file_manager);
     BinarySet
     Serialize(const Config& config) override {

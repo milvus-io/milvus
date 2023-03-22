@@ -31,7 +31,6 @@ constexpr const char* MARISA_TRIE_INDEX = "marisa_trie_index";
 constexpr const char* MARISA_STR_IDS = "marisa_trie_str_ids";
 
 constexpr const char* INDEX_TYPE = "index_type";
-constexpr const char* INDEX_MODE = "index_mode";
 constexpr const char* METRIC_TYPE = "metric_type";
 
 // scalar index type
