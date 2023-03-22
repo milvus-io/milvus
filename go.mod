@@ -28,7 +28,7 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230309062747-133bf302bb11
 	github.com/minio/minio-go/v7 v7.0.17
-	github.com/panjf2000/ants/v2 v2.4.8
+	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.11.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
@@ -48,7 +48,7 @@ require (
 	go.uber.org/zap v1.17.0
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17
-	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
+	golang.org/x/sync v0.1.0
 	google.golang.org/grpc v1.52.3
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	google.golang.org/protobuf v1.28.1
@@ -186,10 +186,10 @@ require (
 )
 
 require (
-	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
-	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	cloud.google.com/go/compute v1.12.1 // indirect
 	cloud.google.com/go/compute/metadata v0.2.1 // indirect
+	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
+	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
