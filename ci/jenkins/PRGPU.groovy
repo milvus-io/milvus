@@ -125,6 +125,7 @@ pipeline {
                                                 --skip-test \
                                                 --skip-build \
                                                 --skip-build-image \
+                                                --gpu \
                                                 --install-extra-arg "
                                                 --set etcd.metrics.enabled=true \
                                                 --set etcd.metrics.podMonitor.enabled=true \
@@ -165,7 +166,7 @@ pipeline {
                                 }
                                 dir ('tests/scripts') {
                                     script {
-                                        def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                                        def release_name=sh(returnStdout: true, script: 'MODE=\"gpu\" ./get_release_name.sh')
                                         def clusterEnabled = 'false'
                                         if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                             clusterEnabled = "true"
@@ -203,7 +204,7 @@ pipeline {
                         container('main') {
                             dir ('tests/scripts') {  
                                 script {
-                                    def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                                    def release_name=sh(returnStdout: true, script: 'MODE=\"gpu\" ./get_release_name.sh')
                                     sh "kubectl get pods -n ${MILVUS_HELM_NAMESPACE} | grep ${release_name} "
                                     sh "./uninstall_milvus.sh --release-name ${release_name}"
                                     sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
@@ -235,5 +236,5 @@ pipeline {
     //                 }
     //             }
     //         }
-    //     }
+    // }
 }

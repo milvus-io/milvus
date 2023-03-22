@@ -207,11 +207,13 @@ if [[ -n "${GPU_BUILD:-}" ]]; then
   export BUILD_SCRIPT="builder_gpu.sh"
   export BUILD_IMAGE_SCRIPT="build_image_gpu.sh"
   export TAG="${TAG:-gpu-latest}"
+  export MODE="gpu"
 else
   export BUILD_COMMAND="${BUILD_COMMAND:-make install}"
   export BUILD_SCRIPT="builder.sh"
   export BUILD_IMAGE_SCRIPT="build_image.sh"
   export TAG="${TAG:-latest}"
+  export MODE="cpu"
 fi
 
 export MANUAL="${MANUAL:-}"
