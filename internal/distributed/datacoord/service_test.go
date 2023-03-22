@@ -61,6 +61,7 @@ type MockDataCoord struct {
 	compactionPlansResp       *milvuspb.GetCompactionPlansResponse
 	watchChannelsResp         *datapb.WatchChannelsResponse
 	getFlushStateResp         *milvuspb.GetFlushStateResponse
+	getFlushAllStateResp      *milvuspb.GetFlushAllStateResponse
 	dropVChanResp             *datapb.DropVirtualChannelResponse
 	setSegmentStateResp       *datapb.SetSegmentStateResponse
 	importResp                *datapb.ImportTaskResponse
@@ -201,6 +202,10 @@ func (m *MockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChan
 
 func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return m.getFlushStateResp, m.err
+}
+
+func (m *MockDataCoord) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return m.getFlushAllStateResp, m.err
 }
 
 func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
@@ -447,6 +452,15 @@ func Test_NewServer(t *testing.T) {
 			getFlushStateResp: &milvuspb.GetFlushStateResponse{},
 		}
 		resp, err := server.GetFlushState(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("GetFlushAllState", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getFlushAllStateResp: &milvuspb.GetFlushAllStateResponse{},
+		}
+		resp, err := server.GetFlushAllState(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

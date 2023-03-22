@@ -39,6 +39,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
@@ -664,6 +665,10 @@ func (s *Server) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanc
 	return s.proxy.CalcDistance(ctx, request)
 }
 
+func (s *Server) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	return s.proxy.FlushAll(ctx, request)
+}
+
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.proxy.GetDdChannel(ctx, request)
 }
@@ -711,6 +716,14 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 	return s.proxy.AlterAlias(ctx, request)
 }
 
+func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	panic("TODO: implement me")
+}
+
+func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	panic("TODO: implement me")
+}
+
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return s.proxy.GetCompactionState(ctx, req)
@@ -728,6 +741,11 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
+}
+
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return s.proxy.GetFlushAllState(ctx, req)
 }
 
 func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
@@ -891,4 +909,12 @@ func (s *Server) TransferReplica(ctx context.Context, req *milvuspb.TransferRepl
 
 func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	return s.proxy.ListResourceGroups(ctx, req)
+}
+
+func (s *Server) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
+	panic("TODO: implement me")
+}
+
+func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
+	panic("TODO: implement me")
 }

@@ -1169,6 +1169,51 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	return resp, nil
 }
 
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	resp := &milvuspb.GetFlushAllStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
+	if s.isClosed() {
+		log.Warn("DataCoord receive GetFlushAllState request, server closed")
+		resp.Status.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
+		return resp, nil
+	}
+
+	showColRsp, err := s.rootCoordClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+		)})
+	if err = VerifyResponse(showColRsp, err); err != nil {
+		log.Warn("failed to ShowCollections", zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	for _, collection := range showColRsp.GetCollectionIds() {
+		describeColRsp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			),
+			CollectionID: collection,
+		})
+		if err = VerifyResponse(describeColRsp, err); err != nil {
+			log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+		for _, channel := range describeColRsp.GetVirtualChannelNames() {
+			channelCP := s.meta.GetChannelCheckpoint(channel)
+			if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
+				resp.Flushed = false
+				resp.Status.ErrorCode = commonpb.ErrorCode_Success
+				return resp, nil
+			}
+		}
+	}
+	resp.Flushed = true
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
 // Import distributes the import tasks to dataNodes.
 // It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {

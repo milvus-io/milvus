@@ -131,8 +131,13 @@ func (m *GrpcDataCoordClient) GetCompactionStateWithPlans(ctx context.Context, r
 func (m *GrpcDataCoordClient) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return &datapb.WatchChannelsResponse{}, m.Err
 }
+
 func (m *GrpcDataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushAllStateResponse, error) {
+	return &milvuspb.GetFlushAllStateResponse{}, m.Err
 }
 
 func (m *GrpcDataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {

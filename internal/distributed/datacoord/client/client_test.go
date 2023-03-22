@@ -196,6 +196,9 @@ func Test_NewClient(t *testing.T) {
 		r39, err := client.UpdateChannelCheckpoint(ctx, nil)
 		retCheck(retNotNil, r39, err)
 
+		r, err := client.GetFlushAllState(ctx, nil)
+		retCheck(retNotNil, r, err)
+
 		{
 			ret, err := client.BroadcastAlteredCollection(ctx, nil)
 			retCheck(retNotNil, ret, err)

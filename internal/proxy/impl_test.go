@@ -28,12 +28,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -352,5 +354,136 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+	})
+}
+
+func TestProxy_FlushAll(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+	node.dataCoord = mocks.NewDataCoord(t)
+	node.rootCoord = mocks.NewRootCoord(t)
+
+	// set expectations
+	cache := newMockCache()
+	getIDFunc := func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+		return UniqueID(0), nil
+	}
+	cache.getIDFunc = getIDFunc
+	globalMetaCache = cache
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	node.dataCoord.(*mocks.DataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
+		Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
+	node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+		Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
+
+	t.Run("FlushAll", func(t *testing.T) {
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	})
+
+	t.Run("FlushAll failed, server is abnormal", func(t *testing.T) {
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+	})
+
+	t.Run("FlushAll failed, get id failed", func(t *testing.T) {
+		globalMetaCache.(*mockCache).getIDFunc = func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return 0, errors.New("mock error")
+		}
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		globalMetaCache.(*mockCache).getIDFunc = getIDFunc
+	})
+
+	t.Run("FlushAll failed, DataCoord flush failed", func(t *testing.T) {
+		node.dataCoord.(*mocks.DataCoord).ExpectedCalls = nil
+		node.dataCoord.(*mocks.DataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
+			Return(&datapb.FlushResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err",
+				},
+			}, nil).Maybe()
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
+		node.rootCoord.(*mocks.RootCoord).ExpectedCalls = nil
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+			Return(&milvuspb.ShowCollectionsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err",
+				},
+			}, nil).Maybe()
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+}
+
+func TestProxy_GetFlushAllState(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.dataCoord = mocks.NewDataCoord(t)
+	node.rootCoord = mocks.NewRootCoord(t)
+
+	// set expectations
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	node.dataCoord.(*mocks.DataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
+		Return(&milvuspb.GetFlushAllStateResponse{Status: successStatus}, nil).Maybe()
+
+	t.Run("GetFlushAllState success", func(t *testing.T) {
+		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	})
+
+	t.Run("GetFlushAllState failed, server is abnormal", func(t *testing.T) {
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+	})
+
+	t.Run("DataCoord GetFlushAllState failed", func(t *testing.T) {
+		node.dataCoord.(*mocks.DataCoord).ExpectedCalls = nil
+		node.dataCoord.(*mocks.DataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
+			Return(&milvuspb.GetFlushAllStateResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err",
+				},
+			}, nil)
+		resp, err := node.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 	})
 }

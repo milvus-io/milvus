@@ -258,6 +258,10 @@ func (coord *DataCoordMock) GetFlushState(ctx context.Context, req *milvuspb.Get
 	return &milvuspb.GetFlushStateResponse{}, nil
 }
 
+func (coord *DataCoordMock) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return &milvuspb.GetFlushAllStateResponse{}, nil
+}
+
 func (coord *DataCoordMock) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
