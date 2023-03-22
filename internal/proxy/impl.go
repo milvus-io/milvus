@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -3484,6 +3485,71 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	return task.Execute(ctx, request)
 }
 
+// FlushAll notifies Proxy to flush all collection's DML messages.
+func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-FlushAll")
+	defer sp.Finish()
+
+	resp := &milvuspb.FlushAllResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+	}
+	if !node.checkHealthy() {
+		resp.Status.Reason = "proxy is not healthy"
+		return resp, nil
+	}
+	log.Info(rpcReceived("FlushAll"))
+
+	// Flush all collections to accelerate the flushAll progress
+	showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
+	})
+	if err != nil {
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Warn("FlushAll failed", zap.String("err", err.Error()))
+		return resp, nil
+	}
+	if showColRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("FlushAll failed", zap.String("err", showColRsp.GetStatus().GetReason()))
+		resp.Status = showColRsp.GetStatus()
+		return resp, nil
+	}
+	flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
+		Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
+		CollectionNames: showColRsp.GetCollectionNames(),
+	})
+	if err != nil {
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Warn("FlushAll failed", zap.String("err", err.Error()))
+		return resp, nil
+	}
+	if flushRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("FlushAll failed", zap.String("err", flushRsp.GetStatus().GetReason()))
+		resp.Status = flushRsp.GetStatus()
+		return resp, nil
+	}
+
+	// allocate current ts as FlushAllTs
+	ts, err := node.tsoAllocator.AllocOne(ctx)
+	if err != nil {
+		log.Warn("FlushAll failed", zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	resp.FlushAllTs = ts
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+
+	log.Info(rpcDone("FlushAll"), zap.Uint64("FlushAllTs", ts),
+		zap.Time("FlushAllTime", tsoutil.PhysicalTime(ts)))
+	return resp, nil
+}
+
 // GetDdChannel returns the used channel for dd operations.
 func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("implement me")
@@ -4007,6 +4073,36 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 		return nil, err
 	}
 	log.Info("received get flush state response", zap.Any("response", resp))
+	return resp, err
+}
+
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetFlushAllState")
+	defer sp.Finish()
+
+	log := log.Ctx(ctx).With(zap.Uint64("FlushAllTs", req.GetFlushAllTs()),
+		zap.Time("FlushAllTime", tsoutil.PhysicalTime(req.GetFlushAllTs())))
+	log.Debug("receive GetFlushAllState request")
+
+	var err error
+	resp := &milvuspb.GetFlushAllStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		log.Warn("GetFlushAllState failed, closed server")
+		return resp, nil
+	}
+
+	resp, err = node.dataCoord.GetFlushAllState(ctx, req)
+	if err != nil {
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Warn("GetFlushAllState failed", zap.String("err", err.Error()))
+		return resp, nil
+	}
+	log.Debug("GetFlushAllState done", zap.Bool("flushed", resp.GetFlushed()))
 	return resp, err
 }
 
