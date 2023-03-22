@@ -425,7 +425,7 @@ func (p *quotaConfig) initDQLMinQueryRate() {
 }
 
 func (p *quotaConfig) initMaxCollectionNum() {
-	p.MaxCollectionNum = p.Base.ParseIntWithDefault("quotaAndLimits.limits.collection.maxNum", 64)
+	p.MaxCollectionNum = p.Base.ParseIntWithDefault("quotaAndLimits.limits.collection.maxNum", 65535)
 }
 
 func (p *quotaConfig) initForceDenyWriting() {
