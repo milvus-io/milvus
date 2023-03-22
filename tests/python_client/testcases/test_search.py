@@ -5164,14 +5164,14 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": [],
                                          "limit": 0})
         # 4. range search with IP
-        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 1}}
+        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
-                                         "ids": [],
-                                         "limit": 0})
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
