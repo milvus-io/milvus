@@ -22,7 +22,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "type_c.h"
+#include "common/type_c.h"
 
 void
 InitIndexSliceSize(const int64_t);
