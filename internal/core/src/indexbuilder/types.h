@@ -14,18 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
+#include <stdint.h>
+#include <string>
 #include <vector>
-#include <memory>
-#include "index/ScalarIndexSort.h"
+#include "common/Types.h"
+#include "index/Index.h"
+#include "storage/Types.h"
 
-namespace milvus::index {
-
-using BoolIndexPtr = std::shared_ptr<ScalarIndexSort<bool>>;
-
-inline BoolIndexPtr
-CreateBoolIndex(storage::FileManagerImplPtr file_manager = nullptr) {
-    return std::make_unique<ScalarIndexSort<bool>>(file_manager);
-}
-}  // namespace milvus::index
+struct BuildIndexInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    int64_t segment_id;
+    int64_t field_id;
+    milvus::DataType field_type;
+    int64_t index_id;
+    int64_t index_build_id;
+    int64_t index_version;
+    std::vector<std::string> insert_files;
+    milvus::storage::StorageConfig storage_config;
+    milvus::Config config;
+};

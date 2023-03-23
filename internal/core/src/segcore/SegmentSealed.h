@@ -13,8 +13,8 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
-#include "common/LoadInfo.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
@@ -28,11 +28,11 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
-    virtual void
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
+    virtual void
+    LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_datas) = 0;
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;

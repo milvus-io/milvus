@@ -819,6 +819,8 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 					segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
 
 				if segIdx.IndexState == commonpb.IndexState_Finished {
+					indexParams := i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+					indexParams = append(indexParams, i.metaTable.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
 							SegmentID:      segID,
@@ -826,7 +828,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 							IndexID:        segIdx.IndexID,
 							BuildID:        segIdx.BuildID,
 							IndexName:      i.metaTable.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
-							IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
+							IndexParams:    indexParams,
 							IndexFilePaths: indexFilePaths,
 							SerializedSize: segIdx.IndexSize,
 							IndexVersion:   segIdx.IndexVersion,

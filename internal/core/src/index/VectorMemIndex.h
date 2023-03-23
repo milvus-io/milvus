@@ -23,12 +23,16 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "index/VectorIndex.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 
 class VectorMemIndex : public VectorIndex {
  public:
-    explicit VectorMemIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode);
+    explicit VectorMemIndex(const IndexType& index_type,
+                            const MetricType& metric_type,
+                            const IndexMode& index_mode,
+                            storage::FileManagerImplPtr file_manager = nullptr);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -37,7 +41,13 @@ class VectorMemIndex : public VectorIndex {
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     void
+    Load(const Config& config = {}) override;
+
+    void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
+
+    void
+    Build(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -47,6 +57,9 @@ class VectorMemIndex : public VectorIndex {
     std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
 
+    BinarySet
+    Upload(const Config& config = {}) override;
+
  protected:
     void
     parse_config(Config& config);
@@ -54,6 +67,7 @@ class VectorMemIndex : public VectorIndex {
  protected:
     Config config_;
     knowhere::VecIndexPtr index_ = nullptr;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 };
 
 using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex>;

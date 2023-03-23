@@ -226,7 +226,7 @@ BaseEventData::Serialize() {
 
 BaseEvent::BaseEvent(BinlogReaderPtr reader, DataType data_type) {
     event_header = EventHeader(reader);
-    auto event_data_length = event_header.event_length_ - event_header.next_position_;
+    auto event_data_length = event_header.event_length_ - GetEventHeaderSize(event_header);
     event_data = BaseEventData(reader, event_data_length, data_type);
 }
 
@@ -235,8 +235,8 @@ BaseEvent::Serialize() {
     auto data = event_data.Serialize();
     int data_size = data.size();
 
-    event_header.next_position_ = GetEventHeaderSize(event_header);
-    event_header.event_length_ = event_header.next_position_ + data_size;
+    event_header.event_length_ = GetEventHeaderSize(event_header) + data_size;
+    event_header.next_position_ = event_header.event_length_ + event_offset;
     auto header = event_header.Serialize();
     int header_size = header.size();
 
@@ -257,12 +257,11 @@ DescriptorEvent::DescriptorEvent(BinlogReaderPtr reader) {
 
 std::vector<uint8_t>
 DescriptorEvent::Serialize() {
+    event_header.event_type_ = EventType::DescriptorEvent;
     auto data = event_data.Serialize();
     int data_size = data.size();
 
-    event_header.event_type_ = EventType::DescriptorEvent;
-    event_header.next_position_ = GetEventHeaderSize(event_header);
-    event_header.event_length_ = event_header.next_position_ + data_size;
+    event_header.event_length_ = GetEventHeaderSize(event_header) + data_size;
     auto header = event_header.Serialize();
     int header_size = header.size();
 
@@ -274,6 +273,8 @@ DescriptorEvent::Serialize() {
     memcpy(res.data() + offset, header.data(), header_size);
     offset += header_size;
     memcpy(res.data() + offset, data.data(), data_size);
+    offset += data_size;
+    event_header.next_position_ = offset;
 
     return res;
 }

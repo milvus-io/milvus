@@ -35,7 +35,7 @@ class VectorDiskAnnIndex : public VectorIndex {
                                 const IndexMode& index_mode,
                                 storage::FileManagerImplPtr file_manager);
     BinarySet
-    Serialize(const Config& config) override {
+    Serialize(const Config& config) override {  // deprecated
         auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
         BinarySet binary_set;
         for (auto& file : remote_paths_to_size) {
@@ -44,6 +44,9 @@ class VectorDiskAnnIndex : public VectorIndex {
 
         return binary_set;
     }
+
+    BinarySet
+    Upload(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -54,7 +57,13 @@ class VectorDiskAnnIndex : public VectorIndex {
     Load(const BinarySet& binary_set /* not used */, const Config& config = {}) override;
 
     void
+    Load(const Config& config = {}) override;
+
+    void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
+
+    void
+    Build(const Config& config = {}) override;
 
     std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;

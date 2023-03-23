@@ -24,6 +24,15 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	}
 }
 
+// Only for test
+func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *DefaultFactory {
+	return &DefaultFactory{
+		standAlone:          standAlone,
+		msgStreamFactory:    msgstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
+		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
+	}
+}
+
 func NewFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{standAlone: standAlone}
 }

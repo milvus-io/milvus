@@ -32,9 +32,61 @@ namespace milvus::index {
 
 #if defined(__linux__) || defined(__APPLE__)
 
+StringIndexMarisa::StringIndexMarisa(storage::FileManagerImplPtr file_manager) {
+    if (file_manager != nullptr) {
+        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(file_manager);
+    }
+}
+
 int64_t
 StringIndexMarisa::Size() {
     return trie_.size();
+}
+
+bool
+valid_str_id(size_t str_id) {
+    return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
+}
+
+void
+StringIndexMarisa::Build(const Config& config) {
+    if (built_) {
+        throw std::runtime_error("index has been built");
+    }
+
+    auto insert_files = GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
+    AssertInfo(insert_files.has_value(), "insert file paths is empty when build index");
+    auto field_datas = file_manager_->CacheRawDataToMemory(insert_files.value());
+    int64_t total_num_rows = 0;
+
+    // fill key set.
+    marisa::Keyset keyset;
+    for (auto data : field_datas) {
+        auto slice_num = data->get_num_rows();
+        for (size_t i = 0; i < slice_num; ++i) {
+            keyset.push_back(reinterpret_cast<const char*>(data->RawValue(i)));
+        }
+        total_num_rows += slice_num;
+    }
+    trie_.build(keyset);
+
+    // fill str_ids_
+    str_ids_.resize(total_num_rows);
+    int64_t offset = 0;
+    for (auto data : field_datas) {
+        auto slice_num = data->get_num_rows();
+        for (size_t i = 0; i < slice_num; ++i) {
+            std::string value(reinterpret_cast<const char*>(data->RawValue(i)));
+            auto str_id = lookup(value);
+            assert(valid_str_id(str_id));
+            str_ids_[offset++] = str_id;
+        }
+    }
+
+    // fill str_ids_to_offsets_
+    fill_offsets();
+
+    built_ = true;
 }
 
 void
@@ -91,6 +143,21 @@ StringIndexMarisa::Serialize(const Config& config) {
     return res_set;
 }
 
+BinarySet
+StringIndexMarisa::Upload(const Config& config) {
+    auto binary_set = Serialize(config);
+    file_manager_->AddFile(binary_set);
+
+    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    BinarySet ret;
+    for (auto& file : remote_paths_to_size) {
+        auto abs_file_path = file.first;
+        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/") + 1), nullptr, file.second);
+    }
+
+    return ret;
+}
+
 void
 StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(set));
@@ -121,9 +188,13 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
     fill_offsets();
 }
 
-bool
-valid_str_id(size_t str_id) {
-    return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
+void
+StringIndexMarisa::Load(const Config& config) {
+    auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+    AssertInfo(index_files.has_value(), "index file paths is empty when load index");
+    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+
+    Load(binary_set, config);
 }
 
 const TargetBitmapPtr

@@ -14,18 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#include <vector>
-#include <memory>
-#include "index/ScalarIndexSort.h"
+#include <stdlib.h>
 
-namespace milvus::index {
+#include "common/type_c.h"
 
-using BoolIndexPtr = std::shared_ptr<ScalarIndexSort<bool>>;
+typedef void* CLoadFieldDataInfo;
 
-inline BoolIndexPtr
-CreateBoolIndex(storage::FileManagerImplPtr file_manager = nullptr) {
-    return std::make_unique<ScalarIndexSort<bool>>(file_manager);
+CStatus
+NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info);
+
+void
+DeleteLoadFieldDataInfo(CLoadFieldDataInfo c_load_field_data_info);
+
+CStatus
+AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info, int64_t field_id, int64_t row_count);
+
+CStatus
+AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info, int64_t field_id, const char* file_path);
+
+#ifdef __cplusplus
 }
-}  // namespace milvus::index
+#endif

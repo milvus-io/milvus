@@ -29,6 +29,9 @@ void
 ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
 
 void
+ParsePksFromFieldData(DataType data_type, std::vector<PkType>& pks, const std::vector<storage::FieldDataPtr>& datas);
+
+void
 ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data);
 
 int64_t

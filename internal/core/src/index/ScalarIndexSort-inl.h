@@ -24,16 +24,52 @@
 #include "Meta.h"
 #include "common/Utils.h"
 #include "common/Slice.h"
+#include "index/Utils.h"
 
 namespace milvus::index {
 
 template <typename T>
-inline ScalarIndexSort<T>::ScalarIndexSort() : is_built_(false), data_() {
+inline ScalarIndexSort<T>::ScalarIndexSort(storage::FileManagerImplPtr file_manager) : is_built_(false), data_() {
+    if (file_manager != nullptr) {
+        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(file_manager);
+    }
 }
 
 template <typename T>
-inline ScalarIndexSort<T>::ScalarIndexSort(const size_t n, const T* values) : is_built_(false) {
-    ScalarIndexSort<T>::BuildWithDataset(n, values);
+inline void
+ScalarIndexSort<T>::Build(const Config& config) {
+    if (is_built_)
+        return;
+    auto insert_files = GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
+    AssertInfo(insert_files.has_value(), "insert file paths is empty when build index");
+    auto field_datas = file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    int64_t total_num_rows = 0;
+    for (auto data : field_datas) {
+        total_num_rows += data->get_num_rows();
+    }
+    if (total_num_rows == 0) {
+        // todo: throw an exception
+        throw std::invalid_argument("ScalarIndexSort cannot build null values!");
+    }
+
+    data_.reserve(total_num_rows);
+    int64_t offset = 0;
+    for (auto data : field_datas) {
+        auto slice_num = data->get_num_rows();
+        for (size_t i = 0; i < slice_num; ++i) {
+            auto value = reinterpret_cast<const T*>(data->RawValue(i));
+            data_.emplace_back(IndexStructure(*value, offset));
+            offset++;
+        }
+    }
+
+    std::sort(data_.begin(), data_.end());
+    idx_to_offsets_.resize(total_num_rows);
+    for (size_t i = 0; i < total_num_rows; ++i) {
+        idx_to_offsets_[data_[i].idx_] = i;
+    }
+    is_built_ = true;
 }
 
 template <typename T>
@@ -81,6 +117,22 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 }
 
 template <typename T>
+inline BinarySet
+ScalarIndexSort<T>::Upload(const Config& config) {
+    auto binary_set = Serialize(config);
+    file_manager_->AddFile(binary_set);
+
+    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    BinarySet ret;
+    for (auto& file : remote_paths_to_size) {
+        auto abs_file_path = file.first;
+        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/") + 1), nullptr, file.second);
+    }
+
+    return ret;
+}
+
+template <typename T>
 inline void
 ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
     size_t index_size;
@@ -96,6 +148,16 @@ ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;
+}
+
+template <typename T>
+inline void
+ScalarIndexSort<T>::Load(const Config& config) {
+    auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+    AssertInfo(index_files.has_value(), "index file paths is empty when load disk ann index");
+    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+
+    Load(binary_set, config);
 }
 
 template <typename T>

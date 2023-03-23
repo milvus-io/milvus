@@ -50,12 +50,16 @@ IndexBuilder_build(benchmark::State& state) {
 
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
 
-    std::string type_params_str, index_params_str;
-    bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params, &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
-    assert(ok);
+    milvus::Config config;
+    for (auto i = 0; i < type_params.params_size(); ++i) {
+        const auto& param = type_params.params(i);
+        config[param.key()] = param.value();
+    }
+
+    for (auto i = 0; i < index_params.params_size(); ++i) {
+        const auto& param = index_params.params(i);
+        config[param.key()] = param.value();
+    }
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
@@ -63,9 +67,8 @@ IndexBuilder_build(benchmark::State& state) {
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
-        auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str(),
-            get_default_storage_config());
+        auto index =
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(milvus::DataType::VECTOR_FLOAT, config, nullptr);
         index->Build(xb_dataset);
     }
 }
@@ -79,13 +82,16 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
     indexcgo::IndexParams index_params;
 
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
+    milvus::Config config;
+    for (auto i = 0; i < type_params.params_size(); ++i) {
+        const auto& param = type_params.params(i);
+        config[param.key()] = param.value();
+    }
 
-    std::string type_params_str, index_params_str;
-    bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params, &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
-    assert(ok);
+    for (auto i = 0; i < index_params.params_size(); ++i) {
+        const auto& param = index_params.params(i);
+        config[param.key()] = param.value();
+    }
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
@@ -93,9 +99,8 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
-        auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str(),
-            get_default_storage_config());
+        auto index =
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(milvus::DataType::VECTOR_FLOAT, config, nullptr);
 
         index->Build(xb_dataset);
         index->Serialize();

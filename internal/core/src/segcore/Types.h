@@ -40,7 +40,22 @@ struct LoadIndexInfo {
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
     index::IndexBasePtr index;
-    storage::StorageConfig storage_config;
+};
+
+struct FieldBinlogInfo {
+    int64_t field_id;
+    int64_t row_count = -1;
+    std::vector<std::string> insert_files;
+};
+
+struct LoadFieldDataInfo {
+    std::map<int64_t, FieldBinlogInfo> field_infos;
+};
+
+struct LoadDeletedRecordInfo {
+    const void* timestamps = nullptr;
+    const milvus::IdArray* primary_keys = nullptr;
+    int64_t row_count = -1;
 };
 
 }  // namespace milvus::segcore

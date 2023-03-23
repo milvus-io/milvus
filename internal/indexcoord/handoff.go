@@ -244,13 +244,15 @@ func (hd *handoff) process(segID UniqueID) {
 				EnableIndex:         true,
 			}
 			for _, indexInfo := range indexInfos {
+				indexParams := hd.meta.GetIndexParams(info.CollectionID, indexInfo.IndexID)
+				indexParams = append(indexParams, hd.meta.GetTypeParams(info.CollectionID, indexInfo.IndexID)...)
 				handoffTask.IndexInfos = append(handoffTask.IndexInfos, &querypb.FieldIndexInfo{
 					FieldID:     hd.meta.GetFieldIDByIndexID(info.CollectionID, indexInfo.IndexID),
 					EnableIndex: true,
 					IndexName:   hd.meta.GetIndexNameByID(info.CollectionID, indexInfo.IndexID),
 					IndexID:     indexInfo.IndexID,
 					BuildID:     indexInfo.BuildID,
-					IndexParams: hd.meta.GetIndexParams(info.CollectionID, indexInfo.IndexID),
+					IndexParams: indexParams,
 					//IndexFileKeys: nil,
 					//IndexSize:      0,
 				})

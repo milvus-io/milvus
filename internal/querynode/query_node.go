@@ -205,7 +205,7 @@ func (node *QueryNode) initRateCollector() error {
 }
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
-func (node *QueryNode) InitSegcore() {
+func (node *QueryNode) InitSegcore() error {
 	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
 	C.SegcoreInit(cEasyloggingYaml)
 	C.free(unsafe.Pointer(cEasyloggingYaml))
@@ -240,7 +240,8 @@ func (node *QueryNode) InitSegcore() {
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 
-	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitLocalRootPath()
+	return initcore.InitRemoteChunkManager(&Params)
 }
 
 // Init function init historical and streaming module to manage segments
@@ -295,7 +296,12 @@ func (node *QueryNode) Init() error {
 
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
 
-		node.InitSegcore()
+		err = node.InitSegcore()
+		if err != nil {
+			log.Error("QueryNode init segcore failed", zap.Error(err))
+			initError = err
+			return
+		}
 
 		if Params.QueryNodeCfg.GCHelperEnabled {
 			action := func(GOGC uint32) {
@@ -391,6 +397,9 @@ func (node *QueryNode) Stop() error {
 		if node.session != nil {
 			node.session.Stop()
 		}
+
+		// safe stop
+		initcore.CleanRemoteChunkManager()
 	})
 	return nil
 }

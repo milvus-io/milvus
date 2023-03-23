@@ -16,6 +16,11 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <aws/core/Aws.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/HttpRequest.h>
@@ -24,21 +29,20 @@
 #include <aws/core/http/curl/CurlHttpClient.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/s3/S3Client.h>
+
+#include "config/ConfigChunkManager.h"
+#include "storage/ChunkManager.h"
+#include "storage/Exception.h"
+#include "storage/Types.h"
+
+#ifdef BUILD_GCP
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
 #include <google/cloud/internal/oauth2_google_credentials.h>
 #include <google/cloud/storage/oauth2/compute_engine_credentials.h>
 #include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
-#include <map>
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "config/ConfigChunkManager.h"
-#include "storage/ChunkManager.h"
-#include "storage/Exception.h"
-#include "storage/Types.h"
+#endif
 
 namespace milvus::storage {
 
@@ -148,6 +152,7 @@ using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;
 
 static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG = "GoogleHttpClientFactory";
 
+#ifdef BUILD_GCP
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
     explicit GoogleHttpClientFactory(std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials) {
@@ -191,5 +196,6 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  private:
     std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials_;
 };
+#endif
 
 }  // namespace milvus::storage

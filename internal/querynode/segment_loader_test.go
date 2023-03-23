@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -71,6 +70,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Statslogs:    statsLog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -103,12 +103,14 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 					PartitionID:  existPatitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					NumOfRows:    defaultMsgLength,
 				},
 				{
 					SegmentID:    segmentID2,
 					PartitionID:  notExistPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -149,6 +151,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -241,7 +244,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSealedSegmentFields(ctx, segment, binlog, &querypb.SegmentLoadInfo{})
+		err = loader.loadSealedSegmentFields(ctx, segment, binlog, defaultMsgLength)
 		assert.NoError(t, err)
 	}
 
@@ -397,7 +400,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSealedSegmentFields(ctx, segment, binlog, &querypb.SegmentLoadInfo{})
+		err = loader.loadSealedSegmentFields(ctx, segment, binlog, 0)
 		assert.Error(t, err)
 	})
 
@@ -475,20 +478,10 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
-		insertData, err := genInsertData(defaultMsgLength, collection.schema)
+		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, collection.schema)
 		assert.NoError(t, err)
 
-		tsData, ok := insertData.Data[common.TimeStampField]
-		assert.Equal(t, true, ok)
-		utss := make([]uint64, tsData.RowNum())
-		for i := 0; i < tsData.RowNum(); i++ {
-			utss[i] = uint64(tsData.GetRow(i).(int64))
-		}
-
-		rowIDData, ok := insertData.Data[common.RowIDField]
-		assert.Equal(t, true, ok)
-
-		err = loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
+		err = segment.LoadMultiFieldData(defaultMsgLength, binlog)
 		assert.NoError(t, err)
 	})
 
@@ -504,20 +497,13 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
-		insertData, err := genInsertData(defaultMsgLength, collection.schema)
+		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, collection.schema)
 		assert.NoError(t, err)
 
-		tsData, ok := insertData.Data[common.TimeStampField]
-		assert.Equal(t, true, ok)
-		utss := make([]uint64, tsData.RowNum())
-		for i := 0; i < tsData.RowNum(); i++ {
-			utss[i] = uint64(tsData.GetRow(i).(int64))
-		}
+		err = segment.LoadMultiFieldData(defaultMsgLength, binlog)
+		assert.NoError(t, err)
 
-		rowIDData, ok := insertData.Data[common.RowIDField]
-		assert.Equal(t, true, ok)
-
-		err = loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, nil)
+		err = segment.LoadMultiFieldData(0, binlog)
 		assert.Error(t, err)
 	})
 }
@@ -555,6 +541,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Statslogs:    statsLog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -581,6 +568,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Deltalogs:    deltaLogs,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -615,6 +603,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -641,6 +630,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Deltalogs:    deltaLogs,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -701,6 +691,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 				BinlogPaths:  fieldBinlog,
 				IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
 				Statslogs:    statsLog,
+				NumOfRows:    defaultMsgLength,
 			},
 		},
 	}
