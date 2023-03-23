@@ -4,33 +4,31 @@ import (
 	"context"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
 )
 
-// validAuth validates the authentication
-func validAuth(ctx context.Context, authorization []string) bool {
+func parseMD(authorization []string) (username, password string) {
 	if len(authorization) < 1 {
-		//log.Warn("key not found in header", zap.String("key", headerAuthorize))
-		return false
+		log.Warn("key not found in header")
+		return
 	}
 	// token format: base64<username:password>
 	//token := strings.TrimPrefix(authorization[0], "Bearer ")
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return false
+		log.Warn("fail to decode the token", zap.Error(err))
+		return
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
-	username := secrets[0]
-	password := secrets[1]
-	isSuccess := passwordVerify(ctx, username, password, globalMetaCache)
-	if isSuccess {
-		metrics.UserRPCCounter.WithLabelValues(username).Inc()
-	}
-	return isSuccess
+	username = secrets[0]
+	password = secrets[1]
+	return
 }
 
 func validSourceID(ctx context.Context, authorization []string) bool {
@@ -62,9 +60,12 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	//	1. if rpc call from a member (like index/query/data component)
 	// 	2. if rpc call from sdk
 	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) &&
-			!validAuth(ctx, md[strings.ToLower(util.HeaderAuthorize)]) {
-			return nil, ErrUnauthenticated()
+		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) {
+			username, password := parseMD(md[strings.ToLower(util.HeaderAuthorize)])
+			if !passwordVerify(ctx, username, password, globalMetaCache) {
+				return nil, ErrUnauthenticated()
+			}
+			metrics.UserRPCCounter.WithLabelValues(username).Inc()
 		}
 	}
 	return ctx, nil

@@ -19,10 +19,9 @@ package merr
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -56,8 +55,9 @@ var (
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 
 	// Collection related
-	ErrCollectionNotFound  = newMilvusError("collection not found", 100, false)
-	ErrCollectionNotLoaded = newMilvusError("collection not loaded", 101, false)
+	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
+	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
+	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
 
 	// Partition related
 	ErrPartitionNotFound  = newMilvusError("partition not found", 202, false)

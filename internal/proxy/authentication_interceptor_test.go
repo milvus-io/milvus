@@ -4,18 +4,24 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/grpc/metadata"
-
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
-
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/metadata"
 )
 
 // validAuth validates the authentication
 func TestValidAuth(t *testing.T) {
+	validAuth := func(ctx context.Context, authorization []string) bool {
+		username, password := parseMD(authorization)
+		if username == "" || password == "" {
+			return false
+		}
+		return passwordVerify(ctx, username, password, globalMetaCache)
+	}
+
 	ctx := context.Background()
 	// no metadata
 	res := validAuth(ctx, nil)

@@ -497,7 +497,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	p.MaxCollectionNum = ParamItem{
 		Key:          "quotaAndLimits.limits.collection.maxNum",
 		Version:      "2.2.0",
-		DefaultValue: "64",
+		DefaultValue: "65535",
 	}
 	p.MaxCollectionNum.Init(base.mgr)
 
