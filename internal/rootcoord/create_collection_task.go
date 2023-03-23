@@ -22,8 +22,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
@@ -34,7 +32,9 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type collectionChannels struct {
@@ -285,6 +285,17 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		// make creating collection idempotent.
 		log.Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", t.GetTs()))
 		return nil
+	}
+
+	existedCollInfos, err := t.core.meta.ListCollections(ctx, typeutil.MaxTimestamp)
+	if err != nil {
+		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
+		return fmt.Errorf("fail to list collections for checking the collection count")
+	}
+	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
+	if len(existedCollInfos) >= maxCollectionNum {
+		log.Error("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		return merr.WrapErrCollectionResourceLimitExceeded(fmt.Sprintf("Failed to create collection, limit={%d}", maxCollectionNum))
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)

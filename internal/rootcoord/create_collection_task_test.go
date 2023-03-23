@@ -22,11 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-
-	"github.com/stretchr/testify/mock"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -34,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
@@ -311,6 +308,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 			return coll, nil
 		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
+		}
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -355,6 +355,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		meta := newMockMetaTable()
 		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 			return coll, nil
+		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
 		}
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
@@ -456,6 +459,28 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			schema:   schema,
 		}
 
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return nil, errors.New("mock error")
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
+
+		originFormatter := Params.QuotaConfig.MaxCollectionNum.Formatter
+		Params.QuotaConfig.MaxCollectionNum.Formatter = func(originValue string) string {
+			return "10"
+		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			maxNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
+			return make([]*model.Collection, maxNum), nil
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
+		Params.QuotaConfig.MaxCollectionNum.Formatter = originFormatter
+
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
+		}
+
 		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
@@ -476,6 +501,9 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		}
 		meta.AddCollectionFunc = func(ctx context.Context, coll *model.Collection) error {
 			return nil
+		}
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{}, nil
 		}
 		// inject error here.
 		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {
