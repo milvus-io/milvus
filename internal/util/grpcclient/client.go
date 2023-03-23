@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
@@ -83,7 +84,7 @@ type ClientBase[T interface {
 	InitialBackoff    float32
 	MaxBackoff        float32
 	BackoffMultiplier float32
-	NodeID            int64
+	NodeID            atomic.Int64
 
 	sf singleflight.Group
 }
@@ -357,10 +358,10 @@ func (c *ClientBase[T]) Close() error {
 
 // SetNodeID set ID role of client
 func (c *ClientBase[T]) SetNodeID(nodeID int64) {
-	c.NodeID = nodeID
+	c.NodeID.Store(nodeID)
 }
 
 // GetNodeID returns ID of client
 func (c *ClientBase[T]) GetNodeID() int64 {
-	return c.NodeID
+	return c.NodeID.Load()
 }
