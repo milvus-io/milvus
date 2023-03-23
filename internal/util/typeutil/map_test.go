@@ -3,7 +3,6 @@ package typeutil
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -58,67 +57,80 @@ func (suite *MapUtilSuite) TestGetMapKeys() {
 func (suite *MapUtilSuite) TestConcurrentMap() {
 	currMap := NewConcurrentMap[int64, string]()
 
-	assert.EqualValues(suite.T(), 0, currMap.Len())
+	suite.EqualValues(0, currMap.Len())
 	v, loaded := currMap.GetOrInsert(100, "v-100")
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), false, loaded)
+	suite.Equal("v-100", v)
+	suite.Equal(false, loaded)
 	v, loaded = currMap.GetOrInsert(100, "v-100")
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), true, loaded)
+	suite.Equal("v-100", v)
+	suite.Equal(true, loaded)
 	v, loaded = currMap.GetOrInsert(100, "v-100")
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), true, loaded)
-	assert.Equal(suite.T(), uint64(1), currMap.Len())
-	assert.EqualValues(suite.T(), 1, currMap.Len())
+	suite.Equal("v-100", v)
+	suite.Equal(true, loaded)
+	suite.Equal(uint64(1), currMap.Len())
+	suite.EqualValues(1, currMap.Len())
 
 	currMap.InsertIfNotPresent(100, "v-100-new")
 	currMap.InsertIfNotPresent(200, "v-200")
 	currMap.InsertIfNotPresent(300, "v-300")
-	assert.Equal(suite.T(), uint64(3), currMap.Len())
-	assert.EqualValues(suite.T(), 3, currMap.Len())
+	suite.Equal(uint64(3), currMap.Len())
+	suite.EqualValues(3, currMap.Len())
 
 	var exist bool
 	v, exist = currMap.Get(100)
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), true, exist)
+	suite.Equal("v-100", v)
+	suite.Equal(true, exist)
 	v, exist = currMap.Get(200)
-	assert.Equal(suite.T(), "v-200", v)
-	assert.Equal(suite.T(), true, exist)
+	suite.Equal("v-200", v)
+	suite.Equal(true, exist)
 	v, exist = currMap.Get(300)
-	assert.Equal(suite.T(), "v-300", v)
-	assert.Equal(suite.T(), true, exist)
-	assert.EqualValues(suite.T(), 3, currMap.Len())
+	suite.Equal("v-300", v)
+	suite.Equal(true, exist)
+	suite.EqualValues(3, currMap.Len())
 
 	v, exist = currMap.GetOrInsert(100, "new-v")
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), true, exist)
+	suite.Equal("v-100", v)
+	suite.Equal(true, exist)
 	v, exist = currMap.GetOrInsert(200, "new-v")
-	assert.Equal(suite.T(), "v-200", v)
-	assert.Equal(suite.T(), true, exist)
+	suite.Equal("v-200", v)
+	suite.Equal(true, exist)
 	v, exist = currMap.GetOrInsert(300, "new-v")
-	assert.Equal(suite.T(), "v-300", v)
-	assert.Equal(suite.T(), true, exist)
+	suite.Equal("v-300", v)
+	suite.Equal(true, exist)
 	v, exist = currMap.GetOrInsert(400, "new-v")
-	assert.Equal(suite.T(), "new-v", v)
-	assert.Equal(suite.T(), false, exist)
-	assert.EqualValues(suite.T(), 4, currMap.Len())
+	suite.Equal("new-v", v)
+	suite.Equal(false, exist)
+	suite.EqualValues(4, currMap.Len())
+
+	currMap.Range(func(k int64, value string) bool {
+		suite.Contains([]int64{100, 200, 300, 400}, k)
+		expect, _ := currMap.Get(k)
+		suite.Equal(expect, value)
+
+		return true
+	})
 
 	v, loaded = currMap.GetAndRemove(100)
-	assert.Equal(suite.T(), "v-100", v)
-	assert.Equal(suite.T(), true, loaded)
+	suite.Equal("v-100", v)
+	suite.Equal(true, loaded)
 	v, loaded = currMap.GetAndRemove(200)
-	assert.Equal(suite.T(), "v-200", v)
-	assert.Equal(suite.T(), true, loaded)
+	suite.Equal("v-200", v)
+	suite.Equal(true, loaded)
 	v, loaded = currMap.GetAndRemove(300)
-	assert.Equal(suite.T(), "v-300", v)
-	assert.Equal(suite.T(), true, loaded)
+	suite.Equal("v-300", v)
+	suite.Equal(true, loaded)
 	v, loaded = currMap.GetAndRemove(400)
-	assert.Equal(suite.T(), "new-v", v)
-	assert.Equal(suite.T(), true, loaded)
+	suite.Equal("new-v", v)
+	suite.Equal(true, loaded)
 	v, loaded = currMap.GetAndRemove(500)
-	assert.Equal(suite.T(), "", v)
-	assert.Equal(suite.T(), false, loaded)
-	assert.EqualValues(suite.T(), 0, currMap.Len())
+	suite.Equal("", v)
+	suite.Equal(false, loaded)
+	suite.EqualValues(0, currMap.Len())
+
+	currMap.Range(func(k int64, value string) bool {
+		suite.FailNow("empty map range")
+		return false
+	})
 }
 
 func TestMapUtil(t *testing.T) {
