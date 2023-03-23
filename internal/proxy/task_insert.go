@@ -81,40 +81,6 @@ func (it *insertTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *insertTask) checkVectorFieldData() error {
-	// error won't happen here.
-	helper, _ := typeutil.CreateSchemaHelper(it.schema)
-
-	fields := it.insertMsg.GetFieldsData()
-	for _, field := range fields {
-		if field.GetType() != schemapb.DataType_FloatVector {
-			continue
-		}
-
-		vectorField := field.GetVectors()
-		if vectorField == nil || vectorField.GetFloatVector() == nil {
-			return fmt.Errorf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
-		}
-
-		// error won't happen here.
-		f, _ := helper.GetFieldFromName(field.GetFieldName())
-		dim, _ := typeutil.GetDim(f)
-
-		floatArray := vectorField.GetFloatVector()
-
-		// TODO: `NumRows` passed by client may be not trustable.
-		if uint64(len(floatArray.GetData())) != uint64(dim)*it.insertMsg.GetNumRows() {
-			return fmt.Errorf("length of inserted vector (%d) not match dim (%d)", len(floatArray.GetData()), dim)
-		}
-
-		if err := typeutil.VerifyFloats32(floatArray.GetData()); err != nil {
-			return fmt.Errorf("float vector field data is illegal, error: %w", err)
-		}
-	}
-
-	return nil
-}
-
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Insert-PreExecute")
 	defer sp.End()
@@ -201,10 +167,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// check vector field data
-	err = it.checkVectorFieldData()
-	if err != nil {
-		log.Error("vector field data is illegal", zap.Error(err))
+	if err := newValidateUtil(withNANCheck()).Validate(it.insertMsg.GetFieldsData(), schema, it.insertMsg.NRows()); err != nil {
 		return err
 	}
 

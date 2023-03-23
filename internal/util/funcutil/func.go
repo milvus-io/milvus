@@ -192,7 +192,7 @@ func getNumRowsOfScalarField(datas interface{}) uint64 {
 	return uint64(realTypeDatas.Len())
 }
 
-func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
+func GetNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	if dim <= 0 {
 		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
 	}
@@ -203,7 +203,7 @@ func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	return uint64(int64(l) / dim), nil
 }
 
-func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
+func GetNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
 		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
 	}
@@ -245,13 +245,13 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		switch vectorFieldType := vectorField.Data.(type) {
 		case *schemapb.VectorField_FloatVector:
 			dim := vectorField.GetDim()
-			fieldNumRows, err = getNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
+			fieldNumRows, err = GetNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
 			if err != nil {
 				return 0, err
 			}
 		case *schemapb.VectorField_BinaryVector:
 			dim := vectorField.GetDim()
-			fieldNumRows, err = getNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
+			fieldNumRows, err = GetNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
 			if err != nil {
 				return 0, err
 			}
