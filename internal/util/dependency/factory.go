@@ -90,10 +90,6 @@ func (f *DefaultFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgSt
 	return f.msgStreamFactory.NewQueryMsgStream(ctx)
 }
 
-func (f *DefaultFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
-	return f.msgStreamFactory.NewMsgStreamDisposer(ctx)
-}
-
 func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return f.chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }

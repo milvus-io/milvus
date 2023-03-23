@@ -131,6 +131,12 @@ func (pc *Consumer) Close() {
 						zap.Error(err))
 					return nil
 				}
+				if strings.Contains(err.Error(), "Unconnected or shared consumer attempting to unsubscribe") {
+					log.Warn("connection closed, skip unsubscribe",
+						zap.String("subscription", pc.Subscription()),
+						zap.Error(err))
+					return nil
+				}
 				return err
 			}
 			// only close if unsubscribe successfully

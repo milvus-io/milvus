@@ -250,11 +250,6 @@ func (f *mockFactory) NewQueryMsgStream(context.Context) (msgstream.MsgStream, e
 	return nil, errNotImplErr
 }
 
-func (f *mockFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
-	// TODO
-	return nil
-}
-
 func randomFloats(rows, dim int) []float32 {
 	vecs := make([]float32, 0, rows)
 

@@ -72,5 +72,4 @@ type Factory interface {
 	NewMsgStream(ctx context.Context) (MsgStream, error)
 	NewTtMsgStream(ctx context.Context) (MsgStream, error)
 	NewQueryMsgStream(ctx context.Context) (MsgStream, error)
-	NewMsgStreamDisposer(ctx context.Context) func([]string, string) error
 }

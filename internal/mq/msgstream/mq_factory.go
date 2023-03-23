@@ -18,22 +18,16 @@ package msgstream
 
 import (
 	"context"
-	"strings"
-
-	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/log"
 	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
 	pulsarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/streamnative/pulsarctl/pkg/cli"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
-	"go.uber.org/zap"
 )
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
@@ -116,40 +110,6 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
 }
 
-func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
-	return func(channels []string, subname string) error {
-		// try to delete the old subscription
-		admin, err := pulsarmqwrapper.NewAdminClient(f.PulsarWebAddress, f.PulsarAuthPlugin, f.PulsarAuthParams)
-		if err != nil {
-			return err
-		}
-		for _, channel := range channels {
-			fullTopicName, err := pulsarmqwrapper.GetFullTopicName(f.PulsarTenant, f.PulsarNameSpace, channel)
-			if err != nil {
-				return err
-			}
-			topic, err := utils.GetTopicName(fullTopicName)
-			if err != nil {
-				log.Warn("failed to get topic name", zap.Error(err))
-				return retry.Unrecoverable(err)
-			}
-			err = admin.Subscriptions().Delete(*topic, subname, true)
-			if err != nil {
-				pulsarErr, ok := err.(cli.Error)
-				if ok {
-					// subscription not found, ignore error
-					if strings.Contains(pulsarErr.Reason, "Subscription not found") {
-						return nil
-					}
-				}
-				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
-					zap.String("topic", channel), zap.Any("subname", subname), zap.Error(err))
-			}
-		}
-		return nil
-	}
-}
-
 // RmsFactory is a rocksmq msgstream factory that implemented Factory interface(msgstream.go)
 type RmsFactory struct {
 	dispatcherFactory ProtoUDFactory
@@ -185,18 +145,6 @@ func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
-func (f *RmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
-	return func(channels []string, subname string) error {
-		msgstream, err := f.NewMsgStream(ctx)
-		if err != nil {
-			return err
-		}
-		msgstream.AsConsumer(channels, subname, mqwrapper.SubscriptionPositionUnknown)
-		msgstream.Close()
-		return nil
-	}
-}
-
 // NewRmsFactory is used to generate a new RmsFactory object
 func NewRmsFactory(path string) *RmsFactory {
 	f := &RmsFactory{
@@ -230,18 +178,6 @@ func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 
 func (f *KmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
-}
-
-func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
-	return func(channels []string, subname string) error {
-		msgstream, err := f.NewMsgStream(ctx)
-		if err != nil {
-			return err
-		}
-		msgstream.AsConsumer(channels, subname, mqwrapper.SubscriptionPositionUnknown)
-		msgstream.Close()
-		return nil
-	}
 }
 
 func NewKmsFactory(config *paramtable.KafkaConfig) Factory {

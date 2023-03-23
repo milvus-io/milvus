@@ -18,7 +18,6 @@ package pulsar
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
 	"go.uber.org/zap"
@@ -98,14 +96,11 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       fullTopicName,
 		SubscriptionName:            options.SubscriptionName,
-		Type:                        pulsar.Exclusive,
+		Type:                        pulsar.Failover,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 		MessageChannel:              receiveChannel,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "ConsumerBusy") {
-			return nil, retry.Unrecoverable(err)
-		}
 		return nil, err
 	}
 

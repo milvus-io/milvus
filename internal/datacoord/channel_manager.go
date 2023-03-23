@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -361,13 +360,6 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	nodeChannelInfo := c.store.GetNode(nodeID)
-	if nodeChannelInfo == nil {
-		return nil
-	}
-
-	c.unsubAttempt(nodeChannelInfo)
-
 	updates := c.deregisterPolicy(c.store, nodeID)
 	log.Warn("deregister node",
 		zap.Int64("unregistered node", nodeID),
@@ -398,26 +390,6 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	// No channels will be return
 	_, err := c.store.Delete(nodeID)
 	return err
-}
-
-// unsubAttempt attempts to unsubscribe node-channel info from the channel.
-func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
-	if ncInfo == nil {
-		return
-	}
-
-	if c.msgstreamFactory == nil {
-		log.Warn("msgstream factory is not set")
-		return
-	}
-
-	nodeID := ncInfo.NodeID
-	for _, ch := range ncInfo.Channels {
-		// align to datanode subname, using vchannel name
-		subName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, ch.Name)
-		pchannelName := funcutil.ToPhysicalChannel(ch.Name)
-		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
-	}
 }
 
 // Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
@@ -789,14 +761,6 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 	chToCleanUp := c.getChannelByNodeAndName(nodeID, channelName)
 	if chToCleanUp == nil {
 		return fmt.Errorf("failed to find matching channel: %s and node: %d", channelName, nodeID)
-	}
-
-	if c.msgstreamFactory == nil {
-		log.Warn("msgstream factory is not set, unable to clean up topics")
-	} else {
-		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName.GetValue(), nodeID, chToCleanUp.CollectionID)
-		pchannelName := funcutil.ToPhysicalChannel(channelName)
-		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 
 	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}

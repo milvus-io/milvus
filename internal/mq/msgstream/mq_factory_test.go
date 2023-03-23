@@ -38,9 +38,6 @@ func TestPmsFactory(t *testing.T) {
 
 	_, err = pmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
-
-	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
 }
 
 func TestPmsFactoryWithAuth(t *testing.T) {
@@ -95,9 +92,6 @@ func TestRmsFactory(t *testing.T) {
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
-
-	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
 }
 
 func TestKafkaFactory(t *testing.T) {
@@ -112,7 +106,4 @@ func TestKafkaFactory(t *testing.T) {
 
 	_, err = kmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
-
-	// err = kmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	// assert.Nil(t, err)
 }
