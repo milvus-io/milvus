@@ -284,7 +284,7 @@ func (t *unsubDmChannelTask) releaseChannelResources(collection *Collection) err
 	collection.removeVChannel(t.channel)
 	// release flowgraph resources
 	t.node.dataSyncService.removeFlowGraphsByDMLChannels([]string{t.channel})
-	t.node.queryShardService.releaseQueryShard(t.channel)
+	t.node.queryShardService.removeQueryShard(t.channel, 1)
 	t.node.ShardClusterService.releaseShardCluster(t.channel)
 
 	t.node.tSafeReplica.removeTSafe(t.channel)

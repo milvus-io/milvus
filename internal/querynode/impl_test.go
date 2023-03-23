@@ -742,7 +742,7 @@ func TestImpl_Search(t *testing.T) {
 	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	// shard cluster not synced
 	_, err = node.Search(ctx, &queryPb.SearchRequest{
@@ -785,7 +785,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
@@ -827,7 +827,7 @@ func TestImpl_GetCollectionStatistics(t *testing.T) {
 	req, err := genGetCollectionStatisticRequest()
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 
 	_, err = node.GetStatistics(ctx, &queryPb.GetStatisticsRequest{
 		Req:             req,
@@ -848,7 +848,7 @@ func TestImpl_GetPartitionStatistics(t *testing.T) {
 	req, err := genGetPartitionStatisticRequest()
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 
 	_, err = node.GetStatistics(ctx, &queryPb.GetStatisticsRequest{
 		Req:             req,
@@ -870,7 +870,7 @@ func TestImpl_Query(t *testing.T) {
 	req, err := genRetrieveRequest(schema)
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	// shard cluster not synced
 	_, err = node.Query(ctx, &queryPb.QueryRequest{
@@ -914,7 +914,7 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 	req, err := genRetrieveRequest(schema)
 	require.NoError(t, err)
 
-	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
