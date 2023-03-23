@@ -19,47 +19,49 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type EnvSource struct {
-	configs      sync.Map
+	configs      *typeutil.ConcurrentMap[string, string]
 	KeyFormatter func(string) string
 }
 
 func NewEnvSource(KeyFormatter func(string) string) EnvSource {
 	es := EnvSource{
-		configs:      sync.Map{},
+		configs:      typeutil.NewConcurrentMap[string, string](),
 		KeyFormatter: KeyFormatter,
 	}
+
 	for _, value := range os.Environ() {
 		rs := []rune(value)
 		in := strings.Index(value, "=")
 		key := string(rs[0:in])
 		value := string(rs[in+1:])
 		envKey := KeyFormatter(key)
-		es.configs.Store(key, value)
-		es.configs.Store(envKey, value)
-
+		es.configs.Insert(key, value)
+		es.configs.Insert(envKey, value)
 	}
 	return es
 }
 
 // GetConfigurationByKey implements ConfigSource
 func (es EnvSource) GetConfigurationByKey(key string) (string, error) {
-	value, ok := es.configs.Load(key)
+	value, ok := es.configs.Get(key)
+
 	if !ok {
 		return "", fmt.Errorf("key not found: %s", key)
 	}
 
-	return value.(string), nil
+	return value, nil
 }
 
 // GetConfigurations implements ConfigSource
 func (es EnvSource) GetConfigurations() (map[string]string, error) {
 	configMap := make(map[string]string)
-	es.configs.Range(func(k, v interface{}) bool {
-		configMap[k.(string)] = v.(string)
+	es.configs.Range(func(k, v string) bool {
+		configMap[k] = v
 		return true
 	})
 

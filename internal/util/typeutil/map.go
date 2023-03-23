@@ -98,3 +98,11 @@ func (m *ConcurrentMap[K, V]) GetAndRemove(key K) (V, bool) {
 	m.len.Dec()
 	return value.(V), true
 }
+
+func (m *ConcurrentMap[K, V]) Range(fn func(k K, v V) bool) {
+	m.inner.Range(func(k, v any) bool {
+		key := k.(K)
+		value := v.(V)
+		return fn(key, value)
+	})
+}
