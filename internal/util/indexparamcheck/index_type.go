@@ -16,10 +16,6 @@ type IndexType = string
 
 // IndexType definitions
 const (
-	IndexFaissGPUIDMap   IndexType = "GPU_FLAT" // no index is built.
-	IndexFaissGPUIvfFlat IndexType = "GPU_IVF_FLAT"
-	IndexFaissGPUIvfPQ   IndexType = "GPU_IVF_PQ"
-	IndexFaissGPUIvfSQ8  IndexType = "GPU_IVF_SQ8"
 	IndexRaftIvfFlat     IndexType = "RAFT_IVF_FLAT"
 	IndexRaftIvfPQ       IndexType = "RAFT_IVF_PQ"
 	IndexFaissIDMap      IndexType = "FLAT" // no index is built.
