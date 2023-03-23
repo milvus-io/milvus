@@ -267,7 +267,7 @@ type testIndexNode struct {
 }
 
 func initSession(ctx context.Context) *sessionutil.Session {
-	baseTable := paramtable.Get().BaseTable
+	baseTable := &paramtable.Get().BaseTable
 	rootPath, err := baseTable.Load("etcd.rootPath")
 	if err != nil {
 		panic(err)
