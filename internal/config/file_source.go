@@ -34,7 +34,7 @@ type FileSource struct {
 	files   []string
 	configs map[string]string
 
-	configRefresher refresher
+	configRefresher *refresher
 }
 
 func NewFileSource(fileInfo *FileInfo) *FileSource {
