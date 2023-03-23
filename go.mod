@@ -26,7 +26,7 @@ require (
 	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230322065753-aa8a66130217
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230309062747-133bf302bb11
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/panjf2000/ants/v2 v2.4.8
 	github.com/prometheus/client_golang v1.11.1
@@ -186,10 +186,10 @@ require (
 )
 
 require (
-	cloud.google.com/go/compute v1.12.1 // indirect
-	cloud.google.com/go/compute/metadata v0.2.1 // indirect
 	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
 	github.com/alibabacloud-go/tea v1.1.8 // indirect
+	cloud.google.com/go/compute v1.12.1 // indirect
+	cloud.google.com/go/compute/metadata v0.2.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
