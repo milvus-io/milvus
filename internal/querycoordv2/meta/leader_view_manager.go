@@ -27,6 +27,7 @@ type LeaderView struct {
 	ID              int64
 	CollectionID    int64
 	Channel         string
+	Version         int64
 	Segments        map[int64]*querypb.SegmentDist
 	GrowingSegments map[int64]*Segment
 }
@@ -46,6 +47,7 @@ func (view *LeaderView) Clone() *LeaderView {
 		ID:              view.ID,
 		CollectionID:    view.CollectionID,
 		Channel:         view.Channel,
+		Version:         view.Version,
 		Segments:        segments,
 		GrowingSegments: growings,
 	}
