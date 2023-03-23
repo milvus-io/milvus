@@ -47,7 +47,6 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
 
     index::CreateIndexInfo index_info;
     index_info.field_type = data_type_;
-    index_info.index_mode = index::GetIndexModeFromConfig(config_);
     index_info.index_type = index::GetIndexTypeFromConfig(config_);
     index_info.metric_type = index::GetMetricTypeFromConfig(config_);
 

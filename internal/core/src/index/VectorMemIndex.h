@@ -29,8 +29,7 @@ namespace milvus::index {
 class VectorMemIndex : public VectorIndex {
  public:
     explicit VectorMemIndex(const IndexType& index_type,
-                            const MetricType& metric_type,
-                            const IndexMode& index_mode);
+                            const MetricType& metric_type);
 
     BinarySet
     Serialize(const Config& config) override;

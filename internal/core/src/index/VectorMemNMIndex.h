@@ -29,9 +29,8 @@ namespace milvus::index {
 class VectorMemNMIndex : public VectorMemIndex {
  public:
     explicit VectorMemNMIndex(const IndexType& index_type,
-                              const MetricType& metric_type,
-                              const IndexMode& index_mode)
-        : VectorMemIndex(index_type, metric_type, index_mode) {
+                              const MetricType& metric_type)
+        : VectorMemIndex(index_type, metric_type) {
         AssertInfo(is_in_nm_list(index_type), "not valid nm index type");
     }
 

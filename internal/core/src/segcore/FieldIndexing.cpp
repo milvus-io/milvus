@@ -37,9 +37,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
         auto indexing = std::make_unique<index::VectorMemNMIndex>(
-            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-            knowhere::metric::L2,
-            IndexMode::MODE_CPU);
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2);
         auto dataset = knowhere::GenDataSet(
             source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);

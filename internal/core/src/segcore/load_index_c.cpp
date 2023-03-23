@@ -132,13 +132,6 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                    "metric type is empty");
         index_info.metric_type = index_params.at("metric_type");
 
-        // set default index mode
-        index_info.index_mode = milvus::IndexMode::MODE_CPU;
-        if (index_params.count("index_mode")) {
-            index_info.index_mode =
-                milvus::index::GetIndexMode(index_params["index_mode"]);
-        }
-
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
             load_index_info->collection_id,
@@ -191,12 +184,6 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = milvus::DataType(field_type);
         index_info.index_type = index_params["index_type"];
-        // set default index mode
-        index_info.index_mode = milvus::IndexMode::MODE_CPU;
-        if (index_params.count("index_mode")) {
-            index_info.index_mode =
-                milvus::index::GetIndexMode(index_params["index_mode"]);
-        }
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(index_info,
