@@ -38,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 )
 
 var compactTestDir = "/tmp/milvus_test/compact"
@@ -276,8 +278,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Schema: meta.GetSchema(),
 			}, nil)
 		channel := newChannel("a", collectionID, meta.GetSchema(), rc, nil)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		t.Run("Merge without expiration", func(t *testing.T) {
-			alloc := NewAllocatorFactory(1)
+
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
@@ -309,7 +313,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.Equal(t, 1, len(statsPaths))
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
-			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize
@@ -347,7 +350,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {
-			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
 
 			iData := genInsertDataWithExpiredTS()
@@ -390,7 +392,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		})
 
 		t.Run("Merge with meta error", func(t *testing.T) {
-			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
@@ -427,7 +428,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		})
 
 		t.Run("Merge with meta type param error", func(t *testing.T) {
-			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
@@ -574,12 +574,14 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
 
 	t.Run("Test compact invalid", func(t *testing.T) {
-		invalidAlloc := NewAllocatorFactory(-1)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 		ctx, cancel := context.WithCancel(context.TODO())
 		emptyTask := &compactionTask{
-			ctx:    ctx,
-			cancel: cancel,
-			done:   make(chan struct{}, 1),
+			ctx:     ctx,
+			cancel:  cancel,
+			done:    make(chan struct{}, 1),
+			Channel: &ChannelMeta{},
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -596,7 +598,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.Error(t, err)
 
 		plan.Type = datapb.CompactionType_MergeCompaction
-		emptyTask.allocatorInterface = invalidAlloc
+		emptyTask.Allocator = alloc
 		plan.SegmentBinlogs = notEmptySegmentBinlogs
 		_, err = emptyTask.compact()
 		assert.Error(t, err)
@@ -606,7 +608,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 	})
 
 	t.Run("Test typeII compact valid", func(t *testing.T) {
-		alloc := NewAllocatorFactory(1)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+		alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
 		type testCase struct {
 			pkType schemapb.DataType
 			iData1 storage.FieldData
@@ -702,7 +706,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				Channel:          "channelname",
 			}
 
-			alloc.random = false // generated ID = 19530
 			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, nil)
 			result, err := task.compact()
 			assert.NoError(t, err)
@@ -775,7 +778,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		// Both pk = 1 rows of the two segments are compacted.
 		var collID, partID, segID1, segID2 UniqueID = 1, 10, 200, 201
 
-		alloc := NewAllocatorFactory(1)
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
 		}
@@ -838,7 +843,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			Channel:          "channelname",
 		}
 
-		alloc.random = false // generated ID = 19530
 		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, nil)
 		result, err := task.compact()
 		assert.NoError(t, err)

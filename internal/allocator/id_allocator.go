@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -151,6 +152,9 @@ func (ia *IDAllocator) AllocOne() (UniqueID, error) {
 
 // Alloc allocates the id of the count number.
 func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
+	if ia.closed() {
+		return 0, 0, errors.New("fail to allocate ID, closed allocator")
+	}
 	req := &IDRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
 
 	req.count = count
@@ -161,4 +165,14 @@ func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 
 	start, count := req.id, req.count
 	return start, start + int64(count), nil
+}
+
+// preventing alloc from a closed allocator stucking forever
+func (ia *IDAllocator) closed() bool {
+	select {
+	case <-ia.Ctx.Done():
+		return true
+	default:
+		return false
+	}
 }

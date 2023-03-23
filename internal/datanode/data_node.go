@@ -35,12 +35,13 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	allocator2 "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -119,12 +120,12 @@ type DataNode struct {
 	dataCoord types.DataCoord
 
 	//call once
-	initOnce       sync.Once
-	sessionMu      sync.Mutex // to fix data race
-	session        *sessionutil.Session
-	watchKv        kv.MetaKv
-	chunkManager   storage.ChunkManager
-	rowIDAllocator *allocator2.IDAllocator
+	initOnce     sync.Once
+	sessionMu    sync.Mutex // to fix data race
+	session      *sessionutil.Session
+	watchKv      kv.MetaKv
+	chunkManager storage.ChunkManager
+	allocator    allocator.Allocator
 
 	closer io.Closer
 
@@ -254,7 +255,7 @@ func (node *DataNode) Init() error {
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", paramtable.GetNodeID()))
 
-		idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
+		alloc, err := allocator.New(context.Background(), node.rootCoord, paramtable.GetNodeID())
 		if err != nil {
 			log.Error("failed to create id allocator",
 				zap.Error(err),
@@ -262,7 +263,7 @@ func (node *DataNode) Init() error {
 			initError = err
 			return
 		}
-		node.rowIDAllocator = idAllocator
+		node.allocator = alloc
 
 		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded",
@@ -489,7 +490,7 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
-	if err := node.rowIDAllocator.Start(); err != nil {
+	if err := node.allocator.Start(); err != nil {
 		log.Error("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.DataNodeRole))
 		return err
 	}
@@ -565,14 +566,13 @@ func (node *DataNode) ReadyToFlush() error {
 func (node *DataNode) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-
-	node.cancel()
 	node.flowgraphManager.dropAll()
 	node.flowgraphManager.stop()
 
-	if node.rowIDAllocator != nil {
+	node.cancel()
+	if node.allocator != nil {
 		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
-		node.rowIDAllocator.Close()
+		node.allocator.Close()
 	}
 
 	if node.closer != nil {

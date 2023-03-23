@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -181,10 +182,11 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
 		channel := genMockChannel(segIDs, varCharPks, chanName)
-		fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+		alloc := allocator.NewMockAllocator(t)
+		fm := NewRendezvousFlushManager(alloc, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    &allocator{},
+			allocator:    alloc,
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -214,11 +216,12 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 	})
 
 	channel := genMockChannel(segIDs, int64Pks, chanName)
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	alloc := allocator.NewMockAllocator(t)
+	fm := NewRendezvousFlushManager(alloc, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 	t.Run("Test get segment by int64 primary keys", func(te *testing.T) {
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    &allocator{},
+			allocator:    alloc,
 			vChannelName: chanName,
 		}
 
@@ -260,7 +263,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    NewAllocatorFactory(),
+			allocator:    allocator.NewMockAllocator(t),
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -288,7 +291,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    NewAllocatorFactory(),
+			allocator:    allocator.NewMockAllocator(t),
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -322,7 +325,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    NewAllocatorFactory(),
+			allocator:    allocator.NewMockAllocator(t),
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -364,7 +367,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    NewAllocatorFactory(),
+			allocator:    allocator.NewMockAllocator(t),
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -392,7 +395,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			&DelDataBuf{delData: &DeleteData{}, item: bufItem})
 		heap.Push(delNode.delBufferManager.delBufHeap, bufItem)
 
-		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, channel,
+		delNode.flushManager = NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, channel,
 			func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		var fgMsg flowgraph.Msg = &msg
@@ -419,7 +422,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		c := &nodeConfig{
 			channel:      channel,
-			allocator:    NewAllocatorFactory(),
+			allocator:    allocator.NewMockAllocator(t),
 			vChannelName: chanName,
 		}
 		delBufManager := &DelBufferManager{
@@ -513,7 +516,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
@@ -525,7 +528,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	}
 	c := &nodeConfig{
 		channel:      channel,
-		allocator:    NewAllocatorFactory(),
+		allocator:    allocator.NewMockAllocator(t),
 		vChannelName: chanName,
 	}
 	delBufManager := &DelBufferManager{
@@ -562,7 +565,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
@@ -575,7 +578,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 
 	c := &nodeConfig{
 		channel:      &channel,
-		allocator:    NewAllocatorFactory(),
+		allocator:    allocator.NewMockAllocator(t),
 		vChannelName: chanName,
 	}
 	delBufManager := &DelBufferManager{

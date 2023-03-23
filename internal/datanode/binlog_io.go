@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -60,7 +61,7 @@ type uploader interface {
 
 type binlogIO struct {
 	storage.ChunkManager
-	allocatorInterface
+	allocator.Allocator
 }
 
 var _ downloader = (*binlogIO)(nil)
@@ -241,10 +242,11 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 		return "", nil, err
 	}
 
-	k, err := b.genKey(collID, partID, segID)
+	idx, err := b.AllocOne()
 	if err != nil {
 		return "", nil, err
 	}
+	k := metautil.JoinIDPath(collID, partID, segID, idx)
 
 	key := path.Join(b.ChunkManager.RootPath(), common.SegmentDeltaLogPath, k)
 
@@ -268,7 +270,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 	notifyGenIdx := make(chan struct{})
 	defer close(notifyGenIdx)
 
-	generator, err := b.idxGenerator(len(inlogs)+len(statslogs), notifyGenIdx)
+	generator, err := b.GetGenerator(len(inlogs)+len(statslogs), notifyGenIdx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -307,29 +309,6 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 	}
 
 	return kvs, inpaths, statspaths, nil
-}
-
-func (b *binlogIO) idxGenerator(n int, done <-chan struct{}) (<-chan UniqueID, error) {
-
-	idStart, _, err := b.allocIDBatch(uint32(n))
-	if err != nil {
-		return nil, err
-	}
-
-	rt := make(chan UniqueID)
-	go func(rt chan<- UniqueID) {
-		for i := 0; i < n; i++ {
-			select {
-			case <-done:
-				close(rt)
-				return
-			case rt <- idStart + UniqueID(i):
-			}
-		}
-		close(rt)
-	}(rt)
-
-	return rt, nil
 }
 
 func (b *binlogIO) uploadInsertLog(

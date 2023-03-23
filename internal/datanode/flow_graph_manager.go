@@ -102,19 +102,18 @@ func (fm *flowgraphManager) execute(totalMemory uint64) {
 }
 
 func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *tickler) error {
+	log := log.With(zap.String("channel", vchan.GetChannelName()))
 	if _, ok := fm.flowgraphs.Load(vchan.GetChannelName()); ok {
-		log.Warn("try to add an existed DataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
+		log.Warn("try to add an existed DataSyncService")
 		return nil
 	}
 
 	channel := newChannel(vchan.GetChannelName(), vchan.GetCollectionID(), schema, dn.rootCoord, dn.chunkManager)
 
-	var alloc allocatorInterface = newAllocator(dn.rootCoord)
-
 	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), make(chan resendTTMsg, 100), channel,
-		alloc, dn.dispClient, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor, tickler, dn.GetSession().ServerID)
+		dn.allocator, dn.dispClient, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor, tickler, dn.GetSession().ServerID)
 	if err != nil {
-		log.Warn("new data sync service fail", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
+		log.Warn("fail to create new datasyncservice", zap.Error(err))
 		return err
 	}
 	dataSyncService.start()

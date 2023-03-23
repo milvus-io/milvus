@@ -18,32 +18,43 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
+
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
 var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
 
+var validGeneratorFn = func(count int, done <-chan struct{}) <-chan UniqueID {
+	ret := make(chan UniqueID, count)
+	for i := 0; i < count; i++ {
+		ret <- int64(100 + i)
+	}
+	return ret
+}
+
 func TestBinlogIOInterfaceMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	b := &binlogIO{cm, alloc}
 	t.Run("Test upload", func(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
@@ -56,50 +67,82 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			Pks:      []primaryKey{pk},
 			Tss:      []uint64{666666},
 		}
+		t.Run("Test upload one iData", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 
-		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
-		assert.NoError(t, err)
-		assert.Equal(t, 12, len(p.inPaths))
-		assert.Equal(t, 1, len(p.statsPaths))
-		assert.Equal(t, 1, len(p.inPaths[0].GetBinlogs()))
-		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
-		assert.NotNil(t, p.deltaInfo)
+			b := &binlogIO{cm, alloc}
+			p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(p.inPaths))
+			assert.Equal(t, 1, len(p.statsPaths))
+			assert.Equal(t, 1, len(p.inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
+			assert.NotNil(t, p.deltaInfo)
+		})
 
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, dData, meta)
-		assert.NoError(t, err)
-		assert.Equal(t, 12, len(p.inPaths))
-		assert.Equal(t, 1, len(p.statsPaths))
-		assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
-		assert.Equal(t, 2, len(p.statsPaths[0].GetBinlogs()))
-		assert.NotNil(t, p.deltaInfo)
+		t.Run("Test upload two iData", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 
-		ctx, cancel := context.WithCancel(context.Background())
+			b := &binlogIO{cm, alloc}
+			p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, dData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(p.inPaths))
+			assert.Equal(t, 1, len(p.statsPaths))
+			assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
+			assert.Equal(t, 2, len(p.statsPaths[0].GetBinlogs()))
+			assert.NotNil(t, p.deltaInfo)
 
-		in, stats, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
-		assert.NoError(t, err)
-		assert.Equal(t, 12, len(in))
-		assert.Equal(t, 1, len(in[0].GetBinlogs()))
-		assert.Equal(t, 1, len(stats))
+		})
 
-		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
-		assert.NoError(t, err)
-		assert.NotNil(t, deltas)
-		assert.Equal(t, 1, len(deltas[0].GetBinlogs()))
+		t.Run("Test uploadInsertLog", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 
-		cancel()
+			b := &binlogIO{cm, alloc}
 
-		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
-		assert.EqualError(t, err, errUploadToBlobStorage.Error())
-		assert.Nil(t, p)
+			in, stats, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(in))
+			assert.Equal(t, 1, len(in[0].GetBinlogs()))
+			assert.Equal(t, 1, len(stats))
+		})
+		t.Run("Test uploadDeltaLog", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 
-		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
-		assert.EqualError(t, err, errUploadToBlobStorage.Error())
-		assert.Nil(t, in)
+			b := &binlogIO{cm, alloc}
+			deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+			assert.NoError(t, err)
+			assert.NotNil(t, deltas)
+			assert.Equal(t, 1, len(deltas[0].GetBinlogs()))
+		})
 
-		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
-		assert.EqualError(t, err, errUploadToBlobStorage.Error())
-		assert.Nil(t, deltas)
+		t.Run("Test context Done", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
 
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+
+			b := &binlogIO{cm, alloc}
+
+			p, err := b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
+			assert.EqualError(t, err, errUploadToBlobStorage.Error())
+			assert.Nil(t, p)
+
+			in, _, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+			assert.EqualError(t, err, errUploadToBlobStorage.Error())
+			assert.Nil(t, in)
+
+			deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+			assert.EqualError(t, err, errUploadToBlobStorage.Error())
+			assert.Nil(t, deltas)
+		})
 	})
 
 	t.Run("Test upload error", func(t *testing.T) {
@@ -110,85 +153,74 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			Tss: []uint64{},
 		}
 
-		iData := genEmptyInsertData()
-		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
-		assert.NoError(t, err)
-		assert.Empty(t, p.inPaths)
-		assert.Empty(t, p.statsPaths)
-		assert.Empty(t, p.deltaInfo)
+		t.Run("Test upload empty insertData", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			b := &binlogIO{cm, alloc}
 
-		iData = &InsertData{Data: make(map[int64]storage.FieldData)}
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
-		assert.NoError(t, err)
-		assert.Empty(t, p.inPaths)
-		assert.Empty(t, p.statsPaths)
-		assert.Empty(t, p.deltaInfo)
+			iData := genEmptyInsertData()
+			p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+			assert.NoError(t, err)
+			assert.Empty(t, p.inPaths)
+			assert.Empty(t, p.statsPaths)
+			assert.Empty(t, p.deltaInfo)
 
-		iData = genInsertData()
-		dData = &DeleteData{
-			Pks:      []primaryKey{},
-			Tss:      []uint64{1},
-			RowCount: 1,
-		}
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, p)
+			iData = &InsertData{Data: make(map[int64]storage.FieldData)}
+			p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+			assert.NoError(t, err)
+			assert.Empty(t, p.inPaths)
+			assert.Empty(t, p.statsPaths)
+			assert.Empty(t, p.deltaInfo)
+		})
 
-		mkc := &mockCm{errMultiSave: true}
-		bin := &binlogIO{mkc, alloc}
-		iData = genInsertData()
-		pk := newInt64PrimaryKey(1)
-		dData = &DeleteData{
-			Pks:      []primaryKey{pk},
-			Tss:      []uint64{1},
-			RowCount: 1,
-		}
-		ctx, cancel := context.WithTimeout(context.TODO(), 20*time.Millisecond)
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, p)
+		t.Run("Test deleta data not match", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			b := &binlogIO{cm, alloc}
+			iData := genInsertData()
+			dData := &DeleteData{
+				Pks:      []primaryKey{},
+				Tss:      []uint64{1},
+				RowCount: 1,
+			}
+			p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
+			assert.Error(t, err)
+			assert.Empty(t, p)
+		})
 
-		in, _, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, in)
+		t.Run("Test multisave error", func(t *testing.T) {
+			mkc := &mockCm{errMultiSave: true}
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+			var (
+				b     = &binlogIO{mkc, alloc}
+				iData = genInsertData()
+				pk    = newInt64PrimaryKey(1)
+				dData = &DeleteData{
+					Pks:      []primaryKey{pk},
+					Tss:      []uint64{1},
+					RowCount: 1,
+				}
+			)
+			ctx, cancel := context.WithTimeout(context.TODO(), 20*time.Millisecond)
+			p, err := b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
+			assert.Error(t, err)
+			assert.Empty(t, p)
 
-		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, deltas)
+			in, _, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+			assert.Error(t, err)
+			assert.Empty(t, in)
 
-		alloc.isvalid = false
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, p)
-
-		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, in)
-
-		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, deltas)
-
-		alloc.isvalid = true
-		for _, field := range meta.GetSchema().GetFields() {
-			field.IsPrimaryKey = false
-		}
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, p)
-
-		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, in)
-
-		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
-		assert.Error(t, err)
-		assert.Empty(t, deltas)
-
-		cancel()
+			deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+			assert.Error(t, err)
+			assert.Empty(t, deltas)
+			cancel()
+		})
 	})
 
 	t.Run("Test download", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		b := &binlogIO{cm, alloc}
 		tests := []struct {
 			isvalid bool
 			ks      []string // for preparation
@@ -232,6 +264,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 	t.Run("Test download twice", func(t *testing.T) {
 		mkc := &mockCm{errMultiLoad: true}
+		alloc := allocator.NewMockAllocator(t)
 		b := &binlogIO{mkc, alloc}
 
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*20)
@@ -259,15 +292,14 @@ func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
 func TestBinlogIOInnerMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	b := &binlogIO{
-		cm,
-		alloc,
-	}
 
 	t.Run("Test genDeltaBlobs", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+
+		b := &binlogIO{cm, alloc}
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10002), "test_gen_blobs", schemapb.DataType_Int64)
 
@@ -302,23 +334,34 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 	t.Run("Test genDeltaBlobs error", func(t *testing.T) {
 		pk := newInt64PrimaryKey(1)
-		k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
-		assert.Error(t, err)
-		assert.Empty(t, k)
-		assert.Empty(t, v)
 
-		errAlloc := NewAllocatorFactory()
-		errAlloc.isvalid = false
+		t.Run("Test serialize error", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			b := &binlogIO{cm, alloc}
+			k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
+			assert.Error(t, err)
+			assert.Empty(t, k)
+			assert.Empty(t, v)
+		})
 
-		bin := binlogIO{cm, errAlloc}
-		k, v, err = bin.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
-		assert.Error(t, err)
-		assert.Empty(t, k)
-		assert.Empty(t, v)
+		t.Run("Test AllocOne error", func(t *testing.T) {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().AllocOne().Call.Return(int64(0), fmt.Errorf("mock AllocOne error"))
+			bin := binlogIO{cm, alloc}
+			k, v, err := bin.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
+			assert.Error(t, err)
+			assert.Empty(t, k)
+			assert.Empty(t, v)
+
+		})
 	})
 
 	t.Run("Test genInsertBlobs", func(t *testing.T) {
 		f := &MetaFactory{}
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+		b := binlogIO{cm, alloc}
+
 		tests := []struct {
 			pkType      schemapb.DataType
 			description string
@@ -353,81 +396,36 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {
-		kvs, pin, pstats, err := b.genInsertBlobs(&InsertData{}, 1, 1, nil)
-		assert.Error(t, err)
-		assert.Empty(t, kvs)
-		assert.Empty(t, pin)
-		assert.Empty(t, pstats)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
+		t.Run("serialize error", func(t *testing.T) {
+			bin := &binlogIO{cm, allocator.NewMockAllocator(t)}
+			kvs, pin, pstats, err := bin.genInsertBlobs(genEmptyInsertData(), 10, 1, nil)
 
-		kvs, pin, pstats, err = b.genInsertBlobs(genEmptyInsertData(), 10, 1, meta)
-		assert.Error(t, err)
-		assert.Empty(t, kvs)
-		assert.Empty(t, pin)
-		assert.Empty(t, pstats)
+			assert.Error(t, err)
+			assert.Empty(t, kvs)
+			assert.Empty(t, pin)
+			assert.Empty(t, pstats)
+		})
 
-		errAlloc := NewAllocatorFactory()
-		errAlloc.errAllocBatch = true
-		bin := &binlogIO{cm, errAlloc}
-		kvs, pin, pstats, err = bin.genInsertBlobs(genInsertData(), 10, 1, meta)
+		t.Run("GetGenerator error", func(t *testing.T) {
+			f := &MetaFactory{}
+			meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
 
-		assert.Error(t, err)
-		assert.Empty(t, kvs)
-		assert.Empty(t, pin)
-		assert.Empty(t, pstats)
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock GetGenerator error"))
+			bin := &binlogIO{cm, alloc}
+			kvs, pin, pstats, err := bin.genInsertBlobs(genInsertData(), 10, 1, meta)
+
+			assert.Error(t, err)
+			assert.Empty(t, kvs)
+			assert.Empty(t, pin)
+			assert.Empty(t, pstats)
+		})
 	})
-
-	t.Run("Test idxGenerator", func(t *testing.T) {
-		tests := []struct {
-			isvalid  bool
-			innumber int
-
-			expectedNo  int
-			description string
-		}{
-			{false, 0, 0, "Invalid input count n"},
-			{true, 1, 1, "valid input n 1"},
-			{true, 3, 3, "valid input n 3 with cancel"},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				done := make(chan struct{})
-				if test.isvalid {
-					gen, err := b.idxGenerator(test.innumber, done)
-					assert.NoError(t, err)
-
-					r := make([]UniqueID, 0)
-					for i := range gen {
-						r = append(r, i)
-					}
-
-					assert.Equal(t, test.expectedNo, len(r))
-
-					if test.innumber > 1 {
-						donedone := make(chan struct{})
-						gen, err := b.idxGenerator(test.innumber, donedone)
-						assert.NoError(t, err)
-
-						_, ok := <-gen
-						assert.True(t, ok)
-
-						donedone <- struct{}{}
-
-						_, ok = <-gen
-						assert.False(t, ok)
-					}
-				} else {
-					gen, err := b.idxGenerator(test.innumber, done)
-					assert.Error(t, err)
-					assert.Nil(t, gen)
-				}
-			})
-		}
-	})
-
 }
 
 type mockCm struct {

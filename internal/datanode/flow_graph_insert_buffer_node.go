@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -50,7 +51,7 @@ type insertBufferNode struct {
 	channelName      string
 	delBufferManager *DelBufferManager // manager of delete msg
 	channel          Channel
-	idAllocator      allocatorInterface
+	idAllocator      allocator.Allocator
 
 	flushMap         sync.Map
 	flushChan        <-chan flushMsg

@@ -22,8 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -46,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -965,57 +962,6 @@ func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
 	fgMsg.deleteMessages = append(fgMsg.deleteMessages, dataFactory.GenMsgStreamDeleteMsg(pks, chanName))
 
 	return *fgMsg
-}
-
-type AllocatorFactory struct {
-	sync.Mutex
-	r             *rand.Rand
-	isvalid       bool
-	random        bool
-	errAllocBatch bool
-}
-
-var _ allocatorInterface = &AllocatorFactory{}
-
-func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
-	f := &AllocatorFactory{
-		r:       rand.New(rand.NewSource(time.Now().UnixNano())),
-		isvalid: len(id) == 0 || (len(id) > 0 && id[0] > 0),
-	}
-	return f
-}
-
-func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
-	alloc.Lock()
-	defer alloc.Unlock()
-
-	if !alloc.isvalid {
-		return -1, errors.New("allocID error")
-	}
-
-	if alloc.random {
-		return alloc.r.Int63n(10000), nil
-	}
-
-	return 19530, nil
-}
-
-func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
-	if count == 0 || alloc.errAllocBatch {
-		return 0, 0, errors.New("count should be greater than zero")
-	}
-
-	start, err := alloc.allocID()
-	return start, count, err
-}
-
-func (alloc *AllocatorFactory) genKey(ids ...UniqueID) (string, error) {
-	idx, err := alloc.allocID()
-	if err != nil {
-		return "", err
-	}
-	ids = append(ids, idx)
-	return metautil.JoinIDPath(ids...), nil
 }
 
 // If id == 0, AllocID will return not successful status

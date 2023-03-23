@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -113,7 +115,7 @@ type testInfo struct {
 	description string
 }
 
-func TestDataSyncService_newDataSyncService(te *testing.T) {
+func TestDataSyncService_newDataSyncService(t *testing.T) {
 
 	ctx := context.Background()
 
@@ -158,7 +160,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
+		t.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 			rc := &RootCoordFactory{pkType: schemapb.DataType_Int64}
 
@@ -172,7 +174,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				make(chan flushMsg),
 				make(chan resendTTMsg),
 				channel,
-				NewAllocatorFactory(),
+				allocator.NewMockAllocator(t),
 				dispClient,
 				test.inMsgFactory,
 				getVchanInfo(test),
@@ -224,7 +226,11 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
 
-	allocFactory := NewAllocatorFactory(1)
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil)
 	factory := dependency.NewDefaultFactory(true)
 	dispClient := msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 	defer os.RemoveAll("/tmp/milvus")
@@ -280,7 +286,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -401,13 +407,18 @@ func TestDataSyncService_Close(t *testing.T) {
 		UnflushedSegmentIds: ufsIds,
 		FlushedSegmentIds:   fsIds,
 	}
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil)
 
 	var (
 		flushChan    = make(chan flushMsg, 100)
 		resendTTChan = make(chan resendTTMsg, 100)
 		signalCh     = make(chan string, 100)
 
-		allocFactory  = NewAllocatorFactory(1)
 		factory       = dependency.NewDefaultFactory(true)
 		dispClient    = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 		mockDataCoord = &DataCoordFactory{}
@@ -432,7 +443,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)

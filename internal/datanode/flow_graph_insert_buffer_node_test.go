@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -97,7 +99,8 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	factory := dependency.NewDefaultFactory(true)
 
-	fm := NewRendezvousFlushManager(&allocator{}, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	alloc := allocator.NewMockAllocator(t)
+	fm := NewRendezvousFlushManager(alloc, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	resendTTChan := make(chan resendTTMsg, 100)
@@ -105,7 +108,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	c := &nodeConfig{
 		channel:      channel,
 		msFactory:    factory,
-		allocator:    NewAllocatorFactory(),
+		allocator:    alloc,
 		vChannelName: "string",
 	}
 	delBufManager := &DelBufferManager{
@@ -201,14 +204,19 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	factory := dependency.NewDefaultFactory(true)
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil)
+	fm := NewRendezvousFlushManager(alloc, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	resendTTChan := make(chan resendTTMsg, 100)
 	c := &nodeConfig{
 		channel:      channel,
 		msFactory:    factory,
-		allocator:    NewAllocatorFactory(),
+		allocator:    alloc,
 		vChannelName: "string",
 	}
 	delBufManager := &DelBufferManager{
@@ -363,7 +371,12 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(pack *segmentFlushPack) {
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil)
+	fm := NewRendezvousFlushManager(alloc, cm, channel, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
 		fpMut.Unlock()
@@ -382,7 +395,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	c := &nodeConfig{
 		channel:      channel,
 		msFactory:    factory,
-		allocator:    NewAllocatorFactory(),
+		allocator:    alloc,
 		vChannelName: "string",
 	}
 	delBufManager := &DelBufferManager{
@@ -571,7 +584,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 }
 
-func TestRollBF(t *testing.T) {
+func TestInsertBufferNodeRollBF(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -604,7 +617,12 @@ func TestRollBF(t *testing.T) {
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(pack *segmentFlushPack) {
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().Alloc(mock.Anything).Call.Return(int64(22222),
+		func(count uint32) int64 {
+			return int64(22222 + count)
+		}, nil)
+	fm := NewRendezvousFlushManager(alloc, cm, channel, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
 		fpMut.Unlock()
@@ -623,7 +641,7 @@ func TestRollBF(t *testing.T) {
 	c := &nodeConfig{
 		channel:      channel,
 		msFactory:    factory,
-		allocator:    NewAllocatorFactory(),
+		allocator:    alloc,
 		vChannelName: "string",
 	}
 	delBufManager := &DelBufferManager{
@@ -992,14 +1010,15 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 		factory := dependency.NewDefaultFactory(true)
 
-		fm := NewRendezvousFlushManager(&allocator{}, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+		alloc := allocator.NewMockAllocator(t)
+		fm := NewRendezvousFlushManager(alloc, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		flushChan := make(chan flushMsg, 100)
 		resendTTChan := make(chan resendTTMsg, 100)
 		c := &nodeConfig{
 			channel:      channel,
 			msFactory:    factory,
-			allocator:    NewAllocatorFactory(),
+			allocator:    alloc,
 			vChannelName: "string",
 		}
 		delBufManager := &DelBufferManager{

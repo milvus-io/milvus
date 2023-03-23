@@ -567,7 +567,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	// parse files and generate segments
 	segmentSize := Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator,
+	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.allocator.GetIDAlloactor(),
 		node.chunkManager, importResult, reportFunc)
 	importWrapper.SetCallbackFunctions(assignSegmentFunc(node, req),
 		createBinLogsFunc(node, req, colInfo.GetSchema(), ts),
@@ -922,8 +922,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		return nil, nil, err
 	}
 
-	var alloc allocatorInterface = newAllocator(node.rootCoord)
-	start, _, err := alloc.allocIDBatch(uint32(len(binLogs)))
+	start, _, err := node.allocator.Alloc(uint32(len(binLogs)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -940,7 +939,6 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 
 		logidx := start + int64(idx)
 
-		// no error raise if alloc=false
 		k := metautil.JoinIDPath(colID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(node.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
