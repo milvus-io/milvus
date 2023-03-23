@@ -86,7 +86,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 
 		// TODO delta channel need to released 1. if other watchDeltaChannel fail 2. when segment release
-		err := l.watchDeltaChannel(vchanName)
+		err := l.watchDeltaChannel(vchanName, int64(len(loadDoneSegmentIDs)))
 		if err != nil {
 			// roll back
 			for _, segment := range l.req.Infos {
@@ -133,7 +133,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 }
 
 // internal helper function to subscribe delta channel
-func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
+func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string, delta int64) error {
 	collectionID := l.req.CollectionID
 	log := log.With(
 		zap.Int64("collectionID", collectionID),
@@ -229,7 +229,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 			log.Error("failed to convert delta channel to dml", zap.String("channel", channel), zap.Error(err))
 			panic(err)
 		}
-		err = l.node.queryShardService.addQueryShard(collectionID, dmlChannel, l.req.GetReplicaID())
+		err = l.node.queryShardService.addQueryShard(collectionID, dmlChannel, l.req.GetReplicaID(), delta)
 		if err != nil {
 			log.Error("failed to add shard Service to query shard", zap.String("channel", channel), zap.Error(err))
 			panic(err)

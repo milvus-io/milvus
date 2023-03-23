@@ -73,10 +73,18 @@ func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSa
 	return qss, nil
 }
 
-func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64) error {
+func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64, delta int64) error {
+	log := log.With(
+		zap.Int64("collection", collectionID),
+		zap.Int64("replica", replicaID),
+		zap.String("channel", channel),
+		zap.Int64("delta", delta),
+	)
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
-	if _, ok := q.queryShards[channel]; ok {
+	if qs, ok := q.queryShards[channel]; ok {
+		qs.inUse.Add(delta)
+		log.Info("Successfully add query shard delta")
 		return nil
 	}
 	qs, err := newQueryShard(
@@ -94,19 +102,31 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 	if err != nil {
 		return err
 	}
+	qs.inUse.Add(delta)
 	q.queryShards[channel] = qs
-	log.Info("Successfully add query shard", zap.Int64("collection", collectionID), zap.Int64("replica", replicaID), zap.String("channel", channel))
+	log.Info("Successfully add new query shard")
 	return nil
 }
 
-func (q *queryShardService) removeQueryShard(channel Channel) error {
+func (q *queryShardService) removeQueryShard(channel Channel, delta int64) error {
+	log := log.With(
+		zap.String("channel", channel),
+		zap.Int64("delta", delta),
+	)
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
-	if _, ok := q.queryShards[channel]; !ok {
+	qs, ok := q.queryShards[channel]
+	if !ok {
 		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " does not exist"))
 	}
-	delete(q.queryShards, channel)
-	log.Info("Successfully remove query shard", zap.String("channel", channel))
+	inUse := qs.inUse.Add(-delta)
+	if inUse == 0 {
+		delete(q.queryShards, channel)
+		qs.Close()
+		log.Info("Successfully remove query shard")
+		return nil
+	}
+	log.Info("Successfully remove query shard inUse")
 	return nil
 }
 

@@ -106,7 +106,7 @@ type ReplicaInterface interface {
 	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
-	removeSegment(segmentID UniqueID, segType segmentType)
+	removeSegment(segmentID UniqueID, segType segmentType) int64
 	// getSegmentByID returns the segment which id is segmentID
 	getSegmentByID(segmentID UniqueID, segType segmentType) (*Segment, error)
 	// hasSegment returns true if collectionReplica has the segment, false otherwise
@@ -658,7 +658,7 @@ func (replica *metaReplica) setSegment(segment *Segment) error {
 }
 
 // removeSegment removes a segment from collectionReplica
-func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentType) {
+func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentType) int64 {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -680,13 +680,14 @@ func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentTyp
 	default:
 		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
 	}
-	replica.removeSegmentPrivate(segmentID, segType)
+	return replica.removeSegmentPrivate(segmentID, segType)
 }
 
 // removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
-func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType segmentType) {
+func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType segmentType) int64 {
 	var rowCount int64
 	var segment *Segment
+	var delta int64
 
 	switch segType {
 	case segmentTypeGrowing:
@@ -708,6 +709,7 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			rowCount = segment.getRowCount()
 			delete(replica.sealedSegments, segmentID)
 			deleteSegment(segment)
+			delta++
 		}
 	default:
 		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
@@ -747,7 +749,9 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			).Sub(float64(rowCount))
 		}
 	}
+
 	replica.sendNoSegmentSignal()
+	return delta
 }
 
 func (replica *metaReplica) sendNoSegmentSignal() {
