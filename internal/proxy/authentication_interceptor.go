@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
 )
@@ -51,10 +53,10 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	// See: https://godoc.org/google.golang.org/grpc/metadata#New
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, ErrMissingMetadata()
+		return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 	}
 	if globalMetaCache == nil {
-		return nil, ErrProxyNotReady()
+		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
 	// check:
 	//	1. if rpc call from a member (like index/query/data component)
@@ -63,7 +65,8 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) {
 			username, password := parseMD(md[strings.ToLower(util.HeaderAuthorize)])
 			if !passwordVerify(ctx, username, password, globalMetaCache) {
-				return nil, ErrUnauthenticated()
+				msg := fmt.Sprintf("username: %s, password: %s", username, password)
+				return nil, merr.WrapErrParameterInvalid("vaild username and password", msg, "auth check failure, please check username and password are correct")
 			}
 			metrics.UserRPCCounter.WithLabelValues(username).Inc()
 		}
