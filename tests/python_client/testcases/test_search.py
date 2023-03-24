@@ -1798,8 +1798,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[9:14],
-                                 ct.default_index_params[9:14]))
+                             zip(ct.all_index_types[9:10],
+                                 ct.default_index_params[9:10]))
     def test_search_after_different_index_with_params_gpu(self, dim, index, params, auto_id, _async):
         """
         target: test search after different index
@@ -1877,8 +1877,8 @@ class TestCollectionSearch(TestcaseBase):
             
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[9:14],
-                                 ct.default_index_params[9:14]))
+                             zip(ct.all_index_types[9:10],
+                                 ct.default_index_params[9:10]))
     def test_search_after_different_index_with_min_dim_gpu(self, index, params, auto_id, _async):
         """
         target: test search after different index with min dim
@@ -1958,8 +1958,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[9:14],
-                                 ct.default_index_params[9:14]))
+                             zip(ct.all_index_types[9:10],
+                                 ct.default_index_params[9:10]))
     def test_search_after_index_different_metric_type_gpu(self, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type

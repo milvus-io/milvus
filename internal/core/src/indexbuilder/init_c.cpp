@@ -27,8 +27,3 @@ IndexBuilderSetSimdType(const char* value) {
     ret[real_type.length()] = 0;
     return ret;
 }
-
-void
-IndexBuilderInitGPU(const int32_t gpu_id, const int32_t res_num) {
-    milvus::config::KnowhereInitGPU(gpu_id, res_num);
-}
