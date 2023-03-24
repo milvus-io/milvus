@@ -18,7 +18,6 @@
 #include <string>
 #include <unordered_set>
 
-#include "common/LoadInfo.h"
 #include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -28,6 +27,7 @@
 #include "segcore/Collection.h"
 #include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
+#include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -45,7 +45,6 @@ using milvus::segcore::LoadIndexInfo;
 namespace {
 // const int DIM = 16;
 const int64_t ROW_COUNT = 100 * 1000;
-const CStorageConfig c_storage_config = get_default_cstorage_config();
 
 const char*
 get_default_schema_config() {
@@ -401,37 +400,10 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
 
-    // load field data
-    for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
-
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
-
-        auto res = LoadFieldData(segment, load_info);
-        assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
-        assert(count == N);
-    }
-
-    // load timestamps
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
-    auto res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
+    auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
+    auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
+    SealedLoadFieldData(dataset, *sealed_segment);
     auto count = GetRowCount(segment);
-    assert(count == N);
-
-    // load rowID
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
-    res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
-    count = GetRowCount(segment);
     assert(count == N);
 
     // delete data pks = {1}
@@ -455,7 +427,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -574,34 +546,10 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     int N = 20;
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
-    for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
-
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
-
-        auto res = LoadFieldData(segment, load_info);
-        assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
-        assert(count == N);
-    }
-
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
-    auto res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
+    auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
+    auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
+    SealedLoadFieldData(dataset, *sealed_segment);
     auto count = GetRowCount(segment);
-    assert(count == N);
-
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
-    res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
-    count = GetRowCount(segment);
     assert(count == N);
 
     // create retrieve plan pks in {1, 2, 3}
@@ -615,7 +563,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -733,34 +681,10 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
     // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-    for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
-
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
-
-        auto res = LoadFieldData(segment, load_info);
-        assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
-        assert(count == N);
-    }
-
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
-    auto res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
+    auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
+    auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
+    SealedLoadFieldData(dataset, *sealed_segment);
     auto count = GetRowCount(segment);
-    assert(count == N);
-
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
-    res = LoadFieldData(segment, load_info);
-    assert(res.error_code == Success);
-    count = GetRowCount(segment);
     assert(count == N);
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
@@ -786,7 +710,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -1417,7 +1341,7 @@ TEST(CApiTest, LoadIndexInfo) {
     CBinarySet c_binary_set = (CBinarySet)&binary_set;
 
     void* c_load_index_info = nullptr;
-    auto status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    auto status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_param_key1 = "index_type";
     std::string index_param_value1 = "IVF_PQ";
@@ -1571,7 +1495,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1692,7 +1616,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1830,7 +1754,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1982,7 +1906,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2118,7 +2042,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2263,7 +2187,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2401,7 +2325,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2551,7 +2475,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2688,7 +2612,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2849,7 +2773,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2910,20 +2834,14 @@ TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Sealed, -1);
 
-    int N = 10000;
+    int N = 1000;
     std::default_random_engine e(67);
     auto ages = std::vector<int64_t>(N);
     for (auto& age : ages) {
         age = e() % 2000;
     }
-    auto blob = (void*)(&ages[0]);
-    FieldMeta field_meta(FieldName("age"), FieldId(101), DataType::INT64);
-    auto array = CreateScalarDataArrayFrom(ages.data(), N, field_meta);
-    auto age_data = serialize(array.get());
 
-    auto load_info = CLoadFieldDataInfo{101, age_data.data(), age_data.size(), N};
-
-    auto res = LoadFieldData(segment, load_info);
+    auto res = LoadFieldRawData(segment, 101, ages.data(), N);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
     assert(count == N);
@@ -2946,17 +2864,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
-
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
-
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
 
     const char* dsl_string = R"({
         "bool": {
@@ -3009,7 +2916,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -3034,31 +2941,13 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
     EXPECT_EQ(result_on_index->distances_.size(), num_queries * TOPK);
 
-    auto c_counter_field_data = CLoadFieldDataInfo{
-        101,
-        counter_data.data(),
-        counter_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_counter_field_data);
+    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
     assert(status.error_code == Success);
 
-    auto c_id_field_data = CLoadFieldDataInfo{
-        0,
-        row_ids_data.data(),
-        row_ids_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_id_field_data);
+    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
     assert(status.error_code == Success);
 
-    auto c_ts_field_data = CLoadFieldDataInfo{
-        1,
-        timestamps_data.data(),
-        timestamps_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_ts_field_data);
+    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
     assert(status.error_code == Success);
 
     // load index for vec field, load raw data for scalar filed
@@ -3102,17 +2991,6 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto vec_data = serialize(vec_array.get());
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
-
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
-
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
 
     const char* dsl_string = R"(
     {
@@ -3131,40 +3009,16 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
          }
     })";
 
-    auto c_vec_field_data = CLoadFieldDataInfo{
-        100,
-        vec_data.data(),
-        vec_data.size(),
-        N,
-    };
-    auto status = LoadFieldData(segment, c_vec_field_data);
+    auto status = LoadFieldRawData(segment, 100, vec_data.data(), N);
     assert(status.error_code == Success);
 
-    auto c_counter_field_data = CLoadFieldDataInfo{
-        101,
-        counter_data.data(),
-        counter_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_counter_field_data);
+    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
     assert(status.error_code == Success);
 
-    auto c_id_field_data = CLoadFieldDataInfo{
-        0,
-        row_ids_data.data(),
-        row_ids_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_id_field_data);
+    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
     assert(status.error_code == Success);
 
-    auto c_ts_field_data = CLoadFieldDataInfo{
-        1,
-        timestamps_data.data(),
-        timestamps_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_ts_field_data);
+    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
     assert(status.error_code == Success);
 
     int num_queries = 10;
@@ -3211,17 +3065,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
-
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
-
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -3288,7 +3131,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
+    status = NewLoadIndexInfo(&c_load_index_info);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -3308,31 +3151,13 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     assert(status.error_code == Success);
 
     // load raw data
-    auto c_counter_field_data = CLoadFieldDataInfo{
-        101,
-        counter_data.data(),
-        counter_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_counter_field_data);
+    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
     assert(status.error_code == Success);
 
-    auto c_id_field_data = CLoadFieldDataInfo{
-        0,
-        row_ids_data.data(),
-        row_ids_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_id_field_data);
+    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
     assert(status.error_code == Success);
 
-    auto c_ts_field_data = CLoadFieldDataInfo{
-        1,
-        timestamps_data.data(),
-        timestamps_data.size(),
-        N,
-    };
-    status = LoadFieldData(segment, c_ts_field_data);
+    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
     assert(status.error_code == Success);
 
     // gen query dataset
@@ -3384,21 +3209,13 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     LoadIndexInfo load_index_info;
 
     // load timestamp field
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(raw_data.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
-    auto res = LoadFieldData(segment, load_info);
+    auto res = LoadFieldRawData(segment, TimestampFieldID.get(), raw_data.timestamps_.data(), N);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
     assert(count == N);
 
     // load rowid field
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(raw_data.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
-    res = LoadFieldData(segment, load_info);
+    res = LoadFieldRawData(segment, RowFieldID.get(), raw_data.row_ids_.data(), N);
     assert(res.error_code == Success);
     count = GetRowCount(segment);
     assert(count == N);

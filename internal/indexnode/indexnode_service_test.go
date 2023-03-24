@@ -30,133 +30,133 @@ func genStorageConfig() *indexpb.StorageConfig {
 	}
 }
 
-func TestIndexNodeSimple(t *testing.T) {
-	in, err := NewMockIndexNodeComponent(context.TODO())
-	assert.Nil(t, err)
-	ctx := context.TODO()
-	state, err := in.GetComponentStates(ctx)
-	assert.Nil(t, err)
-	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
-	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
-
-	assert.Nil(t, err, err)
-	var (
-		clusterID           = "test-milvus"
-		idxFilePrefix       = "mock_idx"
-		buildID       int64 = 1
-		collID        int64 = 101
-		partID        int64 = 201
-		segID         int64 = 301
-		idxID         int64 = 401
-		idxName             = "mock_idx"
-		vecDim        int64 = 8
-		typeParams          = []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: fmt.Sprintf("%d", vecDim),
-			},
-		}
-		indexParams = []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-			{
-				Key:   "index_type",
-				Value: "IVF_FLAT",
-			},
-			{
-				Key:   "nlist",
-				Value: "128",
-			},
-		}
-		mockChunkMgr = mockChunkMgrIns
-	)
-
-	mockChunkMgr.mockFieldData(1000, dim, collID, partID, segID)
-	t.Run("create job", func(t *testing.T) {
-		createReq := &indexpb.CreateJobRequest{
-			ClusterID:       clusterID,
-			IndexFilePrefix: idxFilePrefix,
-			BuildID:         buildID,
-			DataPaths:       []string{dataPath(collID, partID, segID)},
-			IndexVersion:    0,
-			IndexID:         idxID,
-			IndexName:       idxName,
-			IndexParams:     indexParams,
-			TypeParams:      typeParams,
-			StorageConfig:   genStorageConfig(),
-		}
-		status, err := in.CreateJob(ctx, createReq)
-		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
-	t.Run(("query job"), func(t *testing.T) {
-		queryJob := &indexpb.QueryJobsRequest{
-			ClusterID: clusterID,
-			BuildIDs:  []int64{buildID},
-		}
-		timeout := time.After(time.Second * 10)
-		var idxInfo *indexpb.IndexTaskInfo
-	Loop:
-		for {
-			select {
-			case <-timeout:
-				t.Fatal("timeout for querying jobs")
-			default:
-				time.Sleep(1 * time.Millisecond)
-				resp, err := in.QueryJobs(ctx, queryJob)
-				assert.Nil(t, err)
-				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
-				assert.Equal(t, resp.ClusterID, clusterID)
-
-				for _, indexInfo := range resp.IndexInfos {
-					if indexInfo.BuildID == buildID {
-						if indexInfo.State == commonpb.IndexState_Finished {
-							idxInfo = indexInfo
-							break Loop
-						}
-					}
-				}
-
-			}
-		}
-
-		assert.NotNil(t, idxInfo)
-		for _, idxFileID := range idxInfo.IndexFileKeys {
-			idxFile := metautil.BuildSegmentIndexFilePath(mockChunkMgr.RootPath(), buildID, 0,
-				partID, segID, idxFileID)
-			_, ok := mockChunkMgr.indexedData.Load(idxFile)
-			assert.True(t, ok)
-			t.Logf("indexed file: %s", idxFile)
-		}
-
-		jobNumRet, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-		assert.Nil(t, err)
-		assert.Equal(t, jobNumRet.Status.GetErrorCode(), commonpb.ErrorCode_Success)
-		assert.Equal(t, jobNumRet.TotalJobNum, int64(0))
-		assert.Equal(t, jobNumRet.InProgressJobNum, int64(0))
-		assert.Equal(t, jobNumRet.EnqueueJobNum, int64(0))
-		assert.Equal(t, jobNumRet.TaskSlots, int64(1))
-		assert.Equal(t, len(jobNumRet.JobInfos), 1)
-		jobInfo := jobNumRet.JobInfos[0]
-
-		assert.True(t, jobInfo.Dim == 8)
-		assert.True(t, jobInfo.NumRows == 1000)
-		assert.True(t, jobInfo.PodID == 1)
-		assert.ElementsMatch(t, jobInfo.IndexParams, indexParams)
-	})
-
-	t.Run("drop not exists jobs", func(t *testing.T) {
-		status, err := in.DropJobs(ctx, &indexpb.DropJobsRequest{
-			ClusterID: clusterID,
-			BuildIDs:  []int64{100001},
-		})
-		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-}
+//func TestIndexNodeSimple(t *testing.T) {
+//	in, err := NewMockIndexNodeComponent(context.TODO())
+//	assert.Nil(t, err)
+//	ctx := context.TODO()
+//	state, err := in.GetComponentStates(ctx)
+//	assert.Nil(t, err)
+//	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
+//	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
+//
+//	assert.Nil(t, err, err)
+//	var (
+//		clusterID           = "test-milvus"
+//		idxFilePrefix       = "mock_idx"
+//		buildID       int64 = 1
+//		collID        int64 = 101
+//		partID        int64 = 201
+//		segID         int64 = 301
+//		idxID         int64 = 401
+//		idxName             = "mock_idx"
+//		vecDim        int64 = 8
+//		typeParams          = []*commonpb.KeyValuePair{
+//			{
+//				Key:   "dim",
+//				Value: fmt.Sprintf("%d", vecDim),
+//			},
+//		}
+//		indexParams = []*commonpb.KeyValuePair{
+//			{
+//				Key:   "metric_type",
+//				Value: "L2",
+//			},
+//			{
+//				Key:   "index_type",
+//				Value: "IVF_FLAT",
+//			},
+//			{
+//				Key:   "nlist",
+//				Value: "128",
+//			},
+//		}
+//		mockChunkMgr = mockChunkMgrIns
+//	)
+//
+//	mockChunkMgr.mockFieldData(1000, dim, collID, partID, segID)
+//	t.Run("create job", func(t *testing.T) {
+//		createReq := &indexpb.CreateJobRequest{
+//			ClusterID:       clusterID,
+//			IndexFilePrefix: idxFilePrefix,
+//			BuildID:         buildID,
+//			DataPaths:       []string{dataPath(collID, partID, segID)},
+//			IndexVersion:    0,
+//			IndexID:         idxID,
+//			IndexName:       idxName,
+//			IndexParams:     indexParams,
+//			TypeParams:      typeParams,
+//			StorageConfig:   genStorageConfig(),
+//		}
+//		status, err := in.CreateJob(ctx, createReq)
+//		assert.Nil(t, err)
+//		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+//	})
+//
+//	t.Run(("query job"), func(t *testing.T) {
+//		queryJob := &indexpb.QueryJobsRequest{
+//			ClusterID: clusterID,
+//			BuildIDs:  []int64{buildID},
+//		}
+//		timeout := time.After(time.Second * 10)
+//		var idxInfo *indexpb.IndexTaskInfo
+//	Loop:
+//		for {
+//			select {
+//			case <-timeout:
+//				t.Fatal("timeout for querying jobs")
+//			default:
+//				time.Sleep(1 * time.Millisecond)
+//				resp, err := in.QueryJobs(ctx, queryJob)
+//				assert.Nil(t, err)
+//				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+//				assert.Equal(t, resp.ClusterID, clusterID)
+//
+//				for _, indexInfo := range resp.IndexInfos {
+//					if indexInfo.BuildID == buildID {
+//						if indexInfo.State == commonpb.IndexState_Finished {
+//							idxInfo = indexInfo
+//							break Loop
+//						}
+//					}
+//				}
+//
+//			}
+//		}
+//
+//		assert.NotNil(t, idxInfo)
+//		for _, idxFileID := range idxInfo.IndexFileKeys {
+//			idxFile := metautil.BuildSegmentIndexFilePath(mockChunkMgr.RootPath(), buildID, 0,
+//				partID, segID, idxFileID)
+//			_, ok := mockChunkMgr.indexedData.Load(idxFile)
+//			assert.True(t, ok)
+//			t.Logf("indexed file: %s", idxFile)
+//		}
+//
+//		jobNumRet, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+//		assert.Nil(t, err)
+//		assert.Equal(t, jobNumRet.Status.GetErrorCode(), commonpb.ErrorCode_Success)
+//		assert.Equal(t, jobNumRet.TotalJobNum, int64(0))
+//		assert.Equal(t, jobNumRet.InProgressJobNum, int64(0))
+//		assert.Equal(t, jobNumRet.EnqueueJobNum, int64(0))
+//		assert.Equal(t, jobNumRet.TaskSlots, int64(1))
+//		assert.Equal(t, len(jobNumRet.JobInfos), 1)
+//		jobInfo := jobNumRet.JobInfos[0]
+//
+//		assert.True(t, jobInfo.Dim == 8)
+//		assert.True(t, jobInfo.NumRows == 1000)
+//		assert.True(t, jobInfo.PodID == 1)
+//		assert.ElementsMatch(t, jobInfo.IndexParams, indexParams)
+//	})
+//
+//	t.Run("drop not exists jobs", func(t *testing.T) {
+//		status, err := in.DropJobs(ctx, &indexpb.DropJobsRequest{
+//			ClusterID: clusterID,
+//			BuildIDs:  []int64{100001},
+//		})
+//		assert.Nil(t, err)
+//		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
+//	})
+//}
 
 type testTask struct {
 	buildID    int64

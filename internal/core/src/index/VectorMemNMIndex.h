@@ -28,8 +28,11 @@ namespace milvus::index {
 
 class VectorMemNMIndex : public VectorMemIndex {
  public:
-    explicit VectorMemNMIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode)
-        : VectorMemIndex(index_type, metric_type, index_mode) {
+    explicit VectorMemNMIndex(const IndexType& index_type,
+                              const MetricType& metric_type,
+                              const IndexMode& index_mode,
+                              storage::FileManagerImplPtr file_manager = nullptr)
+        : VectorMemIndex(index_type, metric_type, index_mode, file_manager) {
         AssertInfo(is_in_nm_list(index_type), "not valid nm index type");
     }
 

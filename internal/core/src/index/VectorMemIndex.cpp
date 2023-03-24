@@ -29,10 +29,15 @@
 
 namespace milvus::index {
 
-VectorMemIndex::VectorMemIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode)
+VectorMemIndex::VectorMemIndex(const IndexType& index_type,
+                               const MetricType& metric_type,
+                               const IndexMode& index_mode,
+                               storage::FileManagerImplPtr file_manager)
     : VectorIndex(index_type, index_mode, metric_type) {
     AssertInfo(!is_unsupported(index_type, metric_type), index_type + " doesn't support metric: " + metric_type);
-
+    if (file_manager != nullptr) {
+        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(file_manager);
+    }
     index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(GetIndexType(), index_mode);
     AssertInfo(index_ != nullptr, "[VecIndexCreator]Index is null after create index");
 }
@@ -48,11 +53,35 @@ VectorMemIndex::Serialize(const Config& config) {
     return ret;
 }
 
+BinarySet
+VectorMemIndex::Upload(const Config& config) {
+    auto binary_set = Serialize(config);
+    file_manager_->AddFile(binary_set);
+
+    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    BinarySet ret;
+    for (auto& file : remote_paths_to_size) {
+        auto abs_file_path = file.first;
+        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/") + 1), nullptr, file.second);
+    }
+
+    return ret;
+}
+
 void
 VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
     index_->Load(binary_set);
     SetDim(index_->Dim());
+}
+
+void
+VectorMemIndex::Load(const Config& config) {
+    auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+    AssertInfo(index_files.has_value(), "index file paths is empty when load index");
+    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+
+    Load(binary_set, config);
 }
 
 void
@@ -75,6 +104,35 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config
     index_->BuildAll(dataset, index_config);
     rc.ElapseFromBegin("Done");
     SetDim(index_->Dim());
+}
+
+void
+VectorMemIndex::Build(const Config& config) {
+    auto insert_files = GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
+    AssertInfo(insert_files.has_value(), "insert file paths is empty when build disk ann index");
+    auto field_datas = file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    int64_t total_size = 0;
+    int64_t total_num_rows = 0;
+    int64_t dim = 0;
+    for (auto data : field_datas) {
+        total_size += data->Size();
+        total_num_rows += data->get_num_rows();
+        AssertInfo(dim == 0 || dim == data->get_dim(), "inconsistent dim value in on field data!");
+        dim = data->get_dim();
+    }
+
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+    int64_t offset = 0;
+    for (auto data : field_datas) {
+        std::memcpy(buf.get() + offset, data->Data(), data->Size());
+        offset += data->Size();
+        data.reset();
+    }
+    field_datas.clear();
+
+    auto dataset = knowhere::GenDataset(total_num_rows, dim, buf.get());
+    BuildWithDataset(dataset, config);
 }
 
 std::unique_ptr<SearchResult>

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/panjf2000/ants/v2"
 )
@@ -278,7 +279,7 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 func genIndexBinarySet() ([][]byte, error) {
 	typeParams, indexParams := genIndexParams(IndexFaissIVFPQ, L2)
 
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams, genStorageConfig())
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +376,7 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		})
 	}
 
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams, genStorageConfig())
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +386,12 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		return nil, err
 	}
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	//cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	factory := storage.NewChunkManagerFactoryWithParam(&Params)
+	cm, err := factory.NewPersistentStorageChunkManager(context.Background())
+	if err != nil {
+		return nil, err
+	}
 
 	// save index to minio
 	binarySet, err := index.Serialize()
@@ -434,6 +440,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
 		UseSSL:          Params.MinioCfg.UseSSL,
 		UseIAM:          Params.MinioCfg.UseIAM,
+		StorageType:     Params.CommonCfg.StorageType,
 	}
 }
 
@@ -544,7 +551,9 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 }
 
 func genFactory() dependency.Factory {
-	factory := dependency.NewDefaultFactory(true)
+	//factory := dependency.NewDefaultFactory(true)
+	// TODO:: add mock s3 in cpp
+	factory := dependency.MockDefaultFactory(true, &Params)
 	return factory
 }
 
@@ -1061,7 +1070,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join(defaultLocalStorage, "delta-log", k)
+		key := path.Join(defaultLocalStorage, "stats-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -1070,7 +1079,13 @@ func saveBinLog(ctx context.Context,
 	}
 	log.Debug("[query node unittest] save statsLog file to MinIO/S3")
 
-	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	//cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	factory := storage.NewChunkManagerFactoryWithParam(&Params)
+	cm, err := factory.NewPersistentStorageChunkManager(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	err = cm.MultiWrite(ctx, kvs)
 	return fieldBinlog, statsBinlog, err
 }
@@ -1111,8 +1126,8 @@ func saveDeltaLog(collectionID UniqueID,
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
-	key += "delta" // append suffix 'delta' to avoid conflicts against binlog
-	keyPath := path.Join(defaultLocalStorage, key)
+	//key += "/delta" // append suffix 'delta' to avoid conflicts against binlog
+	keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
@@ -1120,7 +1135,13 @@ func saveDeltaLog(collectionID UniqueID,
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 
-	return fieldBinlog, storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage)).MultiWrite(context.Background(), kvs)
+	factory := storage.NewChunkManagerFactoryWithParam(&Params)
+	cm, err := factory.NewPersistentStorageChunkManager(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
 }
 
 func genSimpleTimestampFieldData(numRows int) []Timestamp {
@@ -1241,23 +1262,14 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 	if err != nil {
 		return nil, err
 	}
-	insertData, err := genInsertData(msgLength, schema)
+	binlog, _, err := saveBinLog(context.TODO(), collectionID, partitionID, segmentID, msgLength, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
+	err = seg.LoadMultiFieldData(int64(msgLength), binlog)
 	if err != nil {
 		return nil, err
-	}
-	numRows := insertRecord.NumRows
-	for _, fieldData := range insertRecord.FieldsData {
-		fieldID := fieldData.FieldId
-		err := seg.segmentLoadFieldData(fieldID, numRows, fieldData)
-		if err != nil {
-			// TODO: return or continue?
-			return nil, err
-		}
 	}
 
 	return seg, nil
@@ -1281,12 +1293,17 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleSegmentLoaderWithMqFactory(metaReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
+func genSimpleSegmentLoaderWithMqFactory(metaReplica ReplicaInterface, factory dependency.Factory) (*segmentLoader, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
-	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	//cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	//TODO:: add mock s3 in cpp
+	cm, err := factory.NewPersistentStorageChunkManager(context.TODO())
+	if err != nil {
+		return nil, err
+	}
 	return newSegmentLoader(metaReplica, kv, cm, factory), nil
 }
 
@@ -1692,7 +1709,10 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	}
 	node.etcdCli = etcdCli
 	node.initSession()
-
+	err = initcore.InitRemoteChunkManager(&Params)
+	if err != nil {
+		return nil, err
+	}
 	node.taskPool, err = concurrency.NewPool(2, ants.WithPreAlloc(true))
 	if err != nil {
 		log.Error("QueryNode init channel pool failed", zap.Error(err))

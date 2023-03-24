@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
-#include <mutex>
 
 #include "common/Common.h"
 #include "common/Slice.h"
@@ -26,47 +25,24 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/Exception.h"
-#include "storage/FieldData.h"
 #include "storage/IndexData.h"
-#include "storage/ThreadPool.h"
 #include "storage/Util.h"
-#include "storage/FieldDataFactory.h"
-
-#define FILEMANAGER_TRY try {
-#define FILEMANAGER_CATCH                                                                   \
-    }                                                                                       \
-    catch (LocalChunkManagerException & e) {                                                \
-        LOG_SEGCORE_ERROR_C << "LocalChunkManagerException:" << e.what();                   \
-        return false;                                                                       \
-    }                                                                                       \
-    catch (MinioException & e) {                                                            \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::MinioException:" << e.what();              \
-        return false;                                                                       \
-    }                                                                                       \
-    catch (DiskANNFileManagerException & e) {                                               \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::DiskANNFileManagerException:" << e.what(); \
-        return false;                                                                       \
-    }                                                                                       \
-    catch (ArrowException & e) {                                                            \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::ArrowException:" << e.what();              \
-        return false;                                                                       \
-    }                                                                                       \
-    catch (std::exception & e) {                                                            \
-        LOG_SEGCORE_ERROR_C << "Exception:" << e.what();                                    \
-        return false;
-#define FILEMANAGER_END }
-
-using ReadLock = std::shared_lock<std::shared_mutex>;
-using WriteLock = std::lock_guard<std::shared_mutex>;
+#include "storage/ThreadPool.h"
 
 namespace milvus::storage {
 
 DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
                                          const IndexMeta& index_meta,
                                          const StorageConfig& storage_config)
-    : field_meta_(field_mata), index_meta_(index_meta) {
-    remote_root_path_ = storage_config.remote_root_path;
+    : FileManagerImpl(field_mata, index_meta) {
     rcm_ = std::make_unique<MinioChunkManager>(storage_config);
+}
+
+DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
+                                         const IndexMeta& index_meta,
+                                         RemoteChunkManagerPtr remote_chunk_manager)
+    : FileManagerImpl(field_mata, index_meta) {
+    rcm_ = remote_chunk_manager;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -79,33 +55,15 @@ DiskFileManagerImpl::LoadFile(const std::string& file) noexcept {
     return true;
 }
 
-std::pair<std::string, size_t>
-EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
-                          const std::string& file,
-                          int64_t offset,
-                          int64_t batch_size,
-                          IndexMeta index_meta,
-                          FieldDataMeta field_meta,
-                          std::string object_key) {
-    auto& local_chunk_manager = LocalChunkManager::GetInstance();
-    auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[batch_size]);
-    local_chunk_manager.Read(file, offset, buf.get(), batch_size);
-
-    auto field_data = milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(DataType::INT8);
-    field_data->FillFieldData(buf.get(), batch_size);
-    auto indexData = std::make_shared<IndexData>(field_data);
-    indexData->set_index_meta(index_meta);
-    indexData->SetFieldDataMeta(field_meta);
-    auto serialized_index_data = indexData->serialize_to_remote_file();
-    auto serialized_index_size = serialized_index_data.size();
-    remote_chunk_manager->Write(object_key, serialized_index_data.data(), serialized_index_size);
-    return std::pair<std::string, size_t>(object_key, serialized_index_size);
+std::string
+DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const {
+    auto remote_prefix = GetRemoteIndexObjectPrefix();
+    return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
 }
 
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
-    auto& pool = ThreadPool::GetInstance();
     FILEMANAGER_TRY
     if (!local_chunk_manager.Exist(file)) {
         LOG_SEGCORE_ERROR_C << "local file: " << file << " does not exist ";
@@ -118,30 +76,73 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager.Size(file);
 
-    // Split local data to multi part with specified size
-    int slice_num = 0;
-    auto remotePrefix = GetRemoteIndexObjectPrefix();
-    std::vector<std::future<std::pair<std::string, size_t>>> futures;
-    for (int64_t offset = 0; offset < fileSize; slice_num++) {
-        auto batch_size = std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
-        // Put file to remote
-        char objectKey[200];
-        snprintf(objectKey, sizeof(objectKey), "%s/%s_%d", remotePrefix.c_str(), fileName.c_str(), slice_num);
+    std::vector<std::string> batch_remote_files;
+    std::vector<int64_t> remote_file_sizes;
+    std::vector<int64_t> local_file_offsets;
 
-        // use multi-thread to put part file
-        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice, rcm_.get(), file, offset, batch_size, index_meta_,
-                                      field_meta_, std::string(objectKey)));
+    int slice_num = 0;
+    auto parallel_degree = uint64_t(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT / (index_file_slice_size << 20));
+    for (int64_t offset = 0; offset < fileSize; slice_num++) {
+        if (batch_remote_files.size() >= parallel_degree) {
+            AddBatchIndexFiles(file, local_file_offsets, batch_remote_files, remote_file_sizes);
+            batch_remote_files.clear();
+            remote_file_sizes.clear();
+            local_file_offsets.clear();
+        }
+
+        auto batch_size = std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
+        batch_remote_files.emplace_back(GetRemoteIndexPath(fileName, slice_num));
+        remote_file_sizes.emplace_back(batch_size);
+        local_file_offsets.emplace_back(offset);
+
         offset += batch_size;
     }
-    for (auto& future : futures) {
-        auto res = future.get();
-        remote_paths_to_size_[res.first] = res.second;
+
+    if (batch_remote_files.size() > 0) {
+        AddBatchIndexFiles(file, local_file_offsets, batch_remote_files, remote_file_sizes);
     }
     FILEMANAGER_CATCH
     FILEMANAGER_END
 
     return true;
 }  // namespace knowhere
+
+void
+DiskFileManagerImpl::AddBatchIndexFiles(const std::string& local_file_name,
+                                        const std::vector<int64_t>& local_file_offsets,
+                                        const std::vector<std::string>& remote_files,
+                                        const std::vector<int64_t>& remote_file_sizes) {
+    auto& local_chunk_manager = LocalChunkManager::GetInstance();
+    auto& pool = ThreadPool::GetInstance();
+
+    auto LoadIndexFromDisk = [&](const std::string& file, const int64_t offset,
+                                 const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
+        local_chunk_manager.Read(file, offset, buf.get(), data_size);
+        return buf;
+    };
+
+    std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
+    AssertInfo(local_file_offsets.size() == remote_files.size(), "inconsistent size of offset slices with file slices");
+    AssertInfo(remote_files.size() == remote_file_sizes.size(), "inconsistent size of file slices with size slices");
+
+    for (int64_t i = 0; i < remote_files.size(); ++i) {
+        futures.push_back(pool.Submit(LoadIndexFromDisk, local_file_name, local_file_offsets[i], remote_file_sizes[i]));
+    }
+
+    std::vector<std::shared_ptr<uint8_t[]>> index_datas;  // hold index data util upload index file done
+    std::vector<const uint8_t*> data_slices;
+    for (auto& future : futures) {
+        auto res = future.get();
+        index_datas.emplace_back(res);
+        data_slices.emplace_back(res.get());
+    }
+
+    auto res = PutIndexData(rcm_.get(), data_slices, remote_file_sizes, remote_files, field_meta_, index_meta_);
+    for (auto iter = res.begin(); iter != res.end(); ++iter) {
+        remote_paths_to_size_[iter->first] = iter->second;
+    }
+}
 
 void
 DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
@@ -170,7 +171,7 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
         std::vector<std::string> batch_remote_files;
         uint64_t max_parallel_degree = INT_MAX;
         for (auto iter = slices.second.begin(); iter != slices.second.end(); iter++) {
-            if (batch_remote_files.size() == max_parallel_degree) {
+            if (batch_remote_files.size() >= max_parallel_degree) {
                 auto next_offset = CacheBatchIndexFilesToDisk(batch_remote_files, local_index_file_name, offset);
                 offset = next_offset;
                 batch_remote_files.clear();
@@ -191,38 +192,18 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
     }
 }
 
-std::unique_ptr<DataCodec>
-DownloadAndDecodeRemoteIndexfile(RemoteChunkManager* remote_chunk_manager,
-                                 std::string file,
-                                 milvus::storage::Payload** index_payload_ptr) {
-    auto fileSize = remote_chunk_manager->Size(file);
-    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-    remote_chunk_manager->Read(file, buf.get(), fileSize);
-
-    return DeserializeFileData(buf, fileSize);
-}
-
 uint64_t
 DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
                                                 const std::string& local_file_name,
                                                 uint64_t local_file_init_offfset) {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
-    auto& pool = ThreadPool::GetInstance();
+    auto index_datas = GetObjectData(rcm_.get(), remote_files);
     int batch_size = remote_files.size();
-    std::vector<milvus::storage::Payload*> cache_payloads(batch_size);
-    for (size_t i = 0; i < cache_payloads.size(); ++i) {
-        cache_payloads[i] = nullptr;
-    }
-    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
-    for (int i = 0; i < batch_size; ++i) {
-        futures.push_back(
-            pool.Submit(DownloadAndDecodeRemoteIndexfile, rcm_.get(), remote_files[i], &cache_payloads[i]));
-    }
+    AssertInfo(index_datas.size() == batch_size, "inconsistent file num and index data num!");
 
     uint64_t offset = local_file_init_offfset;
     for (int i = 0; i < batch_size; ++i) {
-        auto res = futures[i].get();
-        auto index_data = res->GetFieldData();
+        auto index_data = index_datas[i];
         auto index_size = index_data->Size();
         local_chunk_manager.Write(local_file_name, offset,
                                   reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data())), index_size);
@@ -233,16 +214,51 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
 }
 
 std::string
-DiskFileManagerImpl::GetFileName(const std::string& localfile) {
-    boost::filesystem::path localPath(localfile);
-    return localPath.filename().string();
+DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
+    std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
+        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+    });
+
+    auto field_datas = GetObjectData(rcm_.get(), remote_files);
+    int batch_size = remote_files.size();
+    AssertInfo(field_datas.size() == batch_size, "inconsistent file num and raw data num!");
+
+    uint32_t num_rows = 0;
+    uint32_t dim = 0;
+    for (int i = 0; i < batch_size; ++i) {
+        auto field_data = field_datas[i];
+        auto num = field_data->get_num_rows();
+        num_rows += uint32_t(num);
+        AssertInfo(dim == 0 || dim == field_data->get_dim(), "inconsistent dim value in multi binlogs!");
+        dim = field_data->get_dim();
+    }
+
+    auto segment_id = GetFieldDataMeta().segment_id;
+    auto field_id = GetFieldDataMeta().field_id;
+    auto local_data_path = storage::GenFieldRawDataPathPrefix(segment_id, field_id) + "raw_data";
+    auto& local_chunk_manager = LocalChunkManager::GetInstance();
+    local_chunk_manager.CreateFile(local_data_path);
+
+    int64_t write_offset = 0;
+    local_chunk_manager.Write(local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    write_offset += sizeof(num_rows);
+    local_chunk_manager.Write(local_data_path, write_offset, &dim, sizeof(dim));
+    write_offset += sizeof(dim);
+
+    for (int i = 0; i < batch_size; ++i) {
+        auto field_data = field_datas[i];
+        auto data_size = field_data->get_num_rows() * dim * sizeof(float);
+        local_chunk_manager.Write(local_data_path, write_offset, const_cast<void*>(field_data->Data()), data_size);
+        write_offset += data_size;
+    }
+
+    return local_data_path;
 }
 
 std::string
-DiskFileManagerImpl::GetRemoteIndexObjectPrefix() {
-    return remote_root_path_ + "/" + std::string(INDEX_ROOT_PATH) + "/" + std::to_string(index_meta_.build_id) + "/" +
-           std::to_string(index_meta_.index_version) + "/" + std::to_string(field_meta_.partition_id) + "/" +
-           std::to_string(field_meta_.segment_id);
+DiskFileManagerImpl::GetFileName(const std::string& localfile) {
+    boost::filesystem::path localPath(localfile);
+    return localPath.filename().string();
 }
 
 std::string

@@ -20,6 +20,8 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/RemoteChunkManagerFactory.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -92,6 +94,68 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
+    if (enable_small_index_) {
+        int64_t chunk_rows = segcore_config_.get_chunk_rows();
+        indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
+    }
+}
+
+void
+SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
+    // schema don't include system field
+    AssertInfo(infos.field_infos.size() == schema_->size() + 2, "loss some field data when load for growing segment");
+    AssertInfo(infos.field_infos.find(TimestampFieldID.get()) != infos.field_infos.end(),
+               "timestamps field data should be included");
+    AssertInfo(infos.field_infos.find(RowFieldID.get()) != infos.field_infos.end(),
+               "rowID field data should be included");
+    auto primary_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
+    AssertInfo(infos.field_infos.find(primary_field_id.get()) != infos.field_infos.end(),
+               "primary field data should be included");
+
+    int64_t num_rows = 0;
+    for (auto& field : infos.field_infos) {
+        num_rows = field.second.row_count;
+        break;
+    }
+    auto reserved_offset = PreInsert(num_rows);
+    for (auto& [id, info] : infos.field_infos) {
+        auto remote_chunk_manager = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
+        auto insert_files = info.insert_files;
+        std::sort(insert_files.begin(), insert_files.end(), [](const std::string& a, const std::string& b) {
+            return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        });
+        auto field_datas = storage::GetObjectData(remote_chunk_manager.get(), insert_files);
+        AssertInfo(num_rows == storage::GetTotalNumRowsForFieldDatas(field_datas),
+                   "inconsistent num row between multi fields");
+
+        if (id == TimestampFieldID.get()) {
+            // step 2: sort timestamp
+            // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
+
+            // step 3: fill into Segment.ConcurrentVector
+            insert_record_.timestamps_.set_data_raw(reserved_offset, field_datas);
+            continue;
+        }
+
+        if (id == RowFieldID.get()) {
+            insert_record_.row_ids_.set_data_raw(reserved_offset, field_datas);
+            continue;
+        }
+
+        insert_record_.get_field_data_base(FieldId(id))->set_data_raw(reserved_offset, field_datas);
+        if (id == primary_field_id.get()) {
+            auto& field_meta = schema_->operator[](primary_field_id);
+            std::vector<PkType> pks(num_rows);
+            ParsePksFromFieldData(field_meta.get_data_type(), pks, field_datas);
+            for (int i = 0; i < num_rows; ++i) {
+                insert_record_.insert_pk(pks[i], reserved_offset + i);
+            }
+        }
+    }
+
+    // step 5: update small indexes
+    insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + num_rows);
     if (enable_small_index_) {
         int64_t chunk_rows = segcore_config_.get_chunk_rows();
         indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);

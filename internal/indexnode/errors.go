@@ -26,7 +26,8 @@ import (
 )
 
 var (
-	ErrNoSuchKey = errors.New("NoSuchKey")
+	ErrNoSuchKey        = errors.New("NoSuchKey")
+	ErrEmptyInsertPaths = errors.New("empty insert paths")
 )
 
 // msgIndexNodeIsUnhealthy return a message tha IndexNode is not healthy.

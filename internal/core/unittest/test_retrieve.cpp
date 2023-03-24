@@ -333,7 +333,6 @@ TEST(Retrieve, Delete) {
         Assert(field2.has_vectors());
         auto field2_data = field2.vectors().float_vector();
         ASSERT_EQ(field2_data.data_size(), DIM * req_size);
-
     }
 
     int64_t row_count = 0;

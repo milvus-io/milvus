@@ -18,6 +18,9 @@
 #include "exceptions/EasyAssert.h"
 #include "common/Consts.h"
 #include "config/ConfigChunkManager.h"
+#include "storage/FieldDataFactory.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPool.h"
 
 #ifdef BUILD_DISK_ANN
 #include "storage/DiskFileManagerImpl.h"
@@ -25,6 +28,8 @@
 
 namespace milvus::storage {
 
+std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {{"local", ChunkManagerType::Local},
+                                                                {"minio", ChunkManagerType::Minio}};
 StorageType
 ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0, "medium type must be parsed from stream header");
@@ -285,14 +290,108 @@ CreateFileManager(IndexType index_type,
                   const FieldDataMeta& field_meta,
                   const IndexMeta& index_meta,
                   const StorageConfig& storage_config) {
-    // TODO :: switch case index type to create file manager
 #ifdef BUILD_DISK_ANN
     if (is_in_disk_list(index_type)) {
         return std::make_shared<DiskFileManagerImpl>(field_meta, index_meta, storage_config);
     }
 #endif
 
-    return nullptr;
+    return std::make_shared<MemFileManagerImpl>(field_meta, index_meta, storage_config);
+}
+
+FileManagerImplPtr
+CreateFileManager(IndexType index_type,
+                  const FieldDataMeta& field_meta,
+                  const IndexMeta& index_meta,
+                  RemoteChunkManagerPtr rcm) {
+#ifdef BUILD_DISK_ANN
+    if (is_in_disk_list(index_type)) {
+        return std::make_shared<DiskFileManagerImpl>(field_meta, index_meta, rcm);
+    }
+#endif
+
+    return std::make_shared<MemFileManagerImpl>(field_meta, index_meta, rcm);
+}
+
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFile(RemoteChunkManager* remote_chunk_manager, std::string file) {
+    auto fileSize = remote_chunk_manager->Size(file);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+    remote_chunk_manager->Read(file, buf.get(), fileSize);
+
+    return DeserializeFileData(buf, fileSize);
+}
+
+std::pair<std::string, size_t>
+EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
+                          uint8_t* buf,
+                          int64_t batch_size,
+                          IndexMeta index_meta,
+                          FieldDataMeta field_meta,
+                          std::string object_key) {
+    auto field_data = milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(DataType::INT8);
+    field_data->FillFieldData(buf, batch_size);
+    auto indexData = std::make_shared<IndexData>(field_data);
+    indexData->set_index_meta(index_meta);
+    indexData->SetFieldDataMeta(field_meta);
+    auto serialized_index_data = indexData->serialize_to_remote_file();
+    auto serialized_index_size = serialized_index_data.size();
+    remote_chunk_manager->Write(object_key, serialized_index_data.data(), serialized_index_size);
+    return std::pair<std::string, size_t>(object_key, serialized_index_size);
+}
+
+std::vector<FieldDataPtr>
+GetObjectData(RemoteChunkManager* remote_chunk_manager, std::vector<std::string> remote_files) {
+    auto& pool = ThreadPool::GetInstance();
+    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    for (auto& file : remote_files) {
+        futures.emplace_back(pool.Submit(DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
+    }
+
+    std::vector<FieldDataPtr> datas;
+    for (int i = 0; i < futures.size(); ++i) {
+        auto res = futures[i].get();
+        datas.emplace_back(res->GetFieldData());
+    }
+
+    return datas;
+}
+
+std::map<std::string, int64_t>
+PutIndexData(RemoteChunkManager* remote_chunk_manager,
+             std::vector<const uint8_t*>& data_slices,
+             const std::vector<int64_t>& slice_sizes,
+             const std::vector<std::string>& slice_names,
+             FieldDataMeta& field_meta,
+             IndexMeta& index_meta) {
+    auto& pool = ThreadPool::GetInstance();
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(data_slices.size() == slice_sizes.size(), "inconsistent size of data slices with slice sizes!");
+    AssertInfo(data_slices.size() == slice_names.size(), "inconsistent size of data slices with slice names!");
+
+    for (int64_t i = 0; i < data_slices.size(); ++i) {
+        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice, remote_chunk_manager,
+                                      const_cast<uint8_t*>(data_slices[i]), slice_sizes[i], index_meta, field_meta,
+                                      slice_names[i]));
+    }
+
+    std::map<std::string, int64_t> remote_paths_to_size;
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size[res.first] = res.second;
+    }
+
+    return remote_paths_to_size;
+}
+
+int64_t
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr> field_datas) {
+    int64_t count = 0;
+    for (auto& field_data : field_datas) {
+        count += field_data->get_num_rows();
+    }
+
+    return count;
 }
 
 }  // namespace milvus::storage

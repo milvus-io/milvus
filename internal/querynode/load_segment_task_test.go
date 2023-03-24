@@ -97,6 +97,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Statslogs:    statsLog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}
@@ -125,6 +126,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
 					Statslogs:    statsLog,
+					NumOfRows:    defaultMsgLength,
 				},
 			},
 		}

@@ -24,6 +24,12 @@ extern "C" {
 CStatus
 GetLocalUsedSize(int64_t* size);
 
+CStatus
+InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
+
+void
+CleanRemoteChunkManagerSingleton();
+
 #ifdef __cplusplus
 };
 #endif

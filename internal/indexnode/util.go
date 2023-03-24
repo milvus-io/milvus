@@ -14,31 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package indexnode
 
-#include <map>
-#include <string>
-#include "Types.h"
+import (
+	"unsafe"
 
-#include "common/CDataType.h"
-#include "knowhere/index/Index.h"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+)
 
-// NOTE: field_id can be system field
-// NOTE: Refer to common/SystemProperty.cpp for details
-// TODO: use arrow to pass field data instead of proto
-struct LoadFieldDataInfo {
-    int64_t field_id;
-    //    const void* blob = nullptr;
-    const milvus::DataArray* field_data;
-    int64_t row_count = -1;
+func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
+	if dataType == schemapb.DataType_FloatVector {
+		var value float32
+		/* #nosec G103 */
+		return uint64(dim) * uint64(numRows) * uint64(unsafe.Sizeof(value)), nil
+	}
 
-    // ~LoadFieldDataInfo() {
-    //     delete field_data;
-    // }
-};
+	if dataType == schemapb.DataType_BinaryVector {
+		return uint64(dim) / 8 * uint64(numRows), nil
+	}
 
-struct LoadDeletedRecordInfo {
-    const void* timestamps = nullptr;
-    const milvus::IdArray* primary_keys = nullptr;
-    int64_t row_count = -1;
-};
+	return 0, nil
+}

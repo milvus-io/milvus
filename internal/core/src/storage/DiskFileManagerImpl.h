@@ -37,6 +37,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
                                  const IndexMeta& index_meta,
                                  const StorageConfig& storage_config);
 
+    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata,
+                                 const IndexMeta& index_meta,
+                                 RemoteChunkManagerPtr remote_chunk_manager);
+
     virtual ~DiskFileManagerImpl();
 
     virtual bool
@@ -58,9 +62,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     std::string
-    GetRemoteIndexObjectPrefix();
-
-    std::string
     GetLocalIndexObjectPrefix();
 
     std::string
@@ -77,22 +78,21 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
+    AddBatchIndexFiles(const std::string& local_file_name,
+                       const std::vector<int64_t>& local_file_offsets,
+                       const std::vector<std::string>& remote_files,
+                       const std::vector<int64_t>& remote_file_sizes);
+
+    void
     CacheIndexToDisk(std::vector<std::string> remote_files);
+
+    std::string
+    CacheRawDataToDisk(std::vector<std::string> remote_files);
 
     uint64_t
     CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
                                const std::string& local_file_name,
                                uint64_t local_file_init_offfset);
-
-    FieldDataMeta
-    GetFileDataMeta() const {
-        return field_meta_;
-    }
-
-    IndexMeta
-    GetIndexMeta() const {
-        return index_meta_;
-    }
 
  private:
     int64_t
@@ -103,21 +103,15 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetFileName(const std::string& localfile);
 
+    std::string
+    GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
+
  private:
-    // collection meta
-    FieldDataMeta field_meta_;
-
-    // index meta
-    IndexMeta index_meta_;
-
     // local file path (abs path)
     std::vector<std::string> local_paths_;
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
-
-    RemoteChunkManagerPtr rcm_;
-    std::string remote_root_path_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;

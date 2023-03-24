@@ -19,11 +19,15 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
+#include <map>
 
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
 #include "knowhere/index/IndexType.h"
+#include "storage/ChunkManager.h"
+#include "storage/DataCodec.h"
 
 namespace milvus::storage {
 
@@ -85,4 +89,34 @@ CreateFileManager(IndexType index_type,
                   const IndexMeta& index_meta,
                   const StorageConfig& storage_config);
 
+FileManagerImplPtr
+CreateFileManager(IndexType index_type,
+                  const FieldDataMeta& field_meta,
+                  const IndexMeta& index_meta,
+                  RemoteChunkManagerPtr rcm);
+
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFile(RemoteChunkManager* remote_chunk_manager, std::string file);
+
+std::pair<std::string, size_t>
+EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
+                          uint8_t* buf,
+                          int64_t batch_size,
+                          IndexMeta index_meta,
+                          FieldDataMeta field_meta,
+                          std::string object_key);
+
+std::vector<FieldDataPtr>
+GetObjectData(RemoteChunkManager* remote_chunk_manager, std::vector<std::string> remote_files);
+
+std::map<std::string, int64_t>
+PutIndexData(RemoteChunkManager* remote_chunk_manager,
+             std::vector<const uint8_t*>& data_slices,
+             const std::vector<int64_t>& slice_sizes,
+             const std::vector<std::string>& slice_names,
+             FieldDataMeta& field_meta,
+             IndexMeta& index_meta);
+
+int64_t
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr> field_datas);
 }  // namespace milvus::storage

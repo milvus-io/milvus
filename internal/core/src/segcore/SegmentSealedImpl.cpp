@@ -17,6 +17,8 @@
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
+#include "storage/Util.h"
+#include "storage/RemoteChunkManagerFactory.h"
 
 namespace milvus::segcore {
 
@@ -142,13 +144,28 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
+SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     // print(info);
     // NOTE: lock only when data is ready to avoid starvation
-    AssertInfo(info.row_count > 0, "The row count of field data is 0");
-    auto field_id = FieldId(info.field_id);
-    AssertInfo(info.field_data != nullptr, "Field info blob is null");
-    auto size = info.row_count;
+    for (auto& [id, info] : load_info.field_infos) {  // only one field for now, parallel load field data in golang
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+        auto field_id = FieldId(id);
+        auto remote_chunk_manager = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
+        auto insert_files = info.insert_files;
+        std::sort(insert_files.begin(), insert_files.end(), [](const std::string& a, const std::string& b) {
+            return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        });
+
+        auto field_datas = storage::GetObjectData(remote_chunk_manager.get(), insert_files);
+        int64_t size = storage::GetTotalNumRowsForFieldDatas(field_datas);
+        AssertInfo(size == info.row_count, "inconsistent field data row count with meta");
+        LoadFieldData(field_id, field_datas);
+    }
+}
+
+void
+SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_datas) {
+    int64_t size = storage::GetTotalNumRowsForFieldDatas(field_datas);
     if (row_count_opt_.has_value()) {
         AssertInfo(row_count_opt_.value() == size, "field (" + std::to_string(field_id.get()) +
                                                        ") data has different row count (" + std::to_string(size) +
@@ -159,27 +176,32 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
-            auto timestamps = reinterpret_cast<const Timestamp*>(info.field_data->scalars().long_data().data().data());
+            std::vector<Timestamp> timestamps(size);
+            int64_t offset = 0;
+            for (auto& data : field_datas) {
+                int64_t row_count = data->get_num_rows();
+                std::copy_n(static_cast<const Timestamp*>(data->Data()), row_count, timestamps.data() + offset);
+                offset += row_count;
+            }
 
             TimestampIndex index;
             auto min_slice_length = size < 4096 ? 1 : 4096;
-            auto meta = GenerateFakeSlices(timestamps, size, min_slice_length);
+            auto meta = GenerateFakeSlices(timestamps.data(), size, min_slice_length);
             index.set_length_meta(std::move(meta));
-            index.build_with(timestamps, size);
+            index.build_with(timestamps.data(), size);  // todo ::opt to avoid copy timestamps from field data
 
             // use special index
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-            insert_record_.timestamps_.fill_chunk_data(timestamps, size);
+            insert_record_.timestamps_.fill_chunk_data(field_datas);
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId, "System field type of id column is not RowId");
-            auto row_ids = reinterpret_cast<const idx_t*>(info.field_data->scalars().long_data().data().data());
             // write data under lock
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
-            insert_record_.row_ids_.fill_chunk_data(row_ids, size);
+            insert_record_.row_ids_.fill_chunk_data(field_datas);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
         }
         ++system_ready_count_;
@@ -187,8 +209,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         auto& field_meta = schema_->operator[](field_id);
         auto data_type = field_meta.get_data_type();
-        AssertInfo(data_type == DataType(info.field_data->type()),
-                   "field type of load data is inconsistent with the schema");
 
         // write data under lock
         std::unique_lock lck(mutex_);
@@ -199,7 +219,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         AssertInfo(field_data->empty(), "already exists");
 
         // insert data to insertRecord
-        field_data->fill_chunk_data(size, info.field_data, field_meta);
+        field_data->fill_chunk_data(field_datas);
         AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
 
         // set pks to offset
@@ -207,7 +227,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
             std::vector<PkType> pks(size);
-            ParsePksFromFieldData(pks, *info.field_data);
+            ParsePksFromFieldData(data_type, pks, field_datas);
             for (int i = 0; i < size; ++i) {
                 insert_record_.insert_pk(pks[i], i);
             }
@@ -216,7 +236,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
 
         set_bit(field_data_ready_bitset_, field_id, true);
     }
-    update_row_count(info.row_count);
+    update_row_count(size);
 }
 
 void

@@ -36,25 +36,21 @@ set(STORAGE_FILES
     InsertData.cpp
     Event.cpp
     ThreadPool.cpp
-    storage_c.cpp)
-
-if(BUILD_DISK_ANN STREQUAL "ON")
-    set(STORAGE_FILES
-        ${STORAGE_FILES}
-        LocalChunkManager.cpp
-        MinioChunkManager.cpp
-        DiskFileManagerImpl.cpp)
-endif()
+    storage_c.cpp
+    LocalChunkManager.cpp
+    MinioChunkManager.cpp
+    DiskFileManagerImpl.cpp
+    MemFileManagerImpl.cpp)
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
-if(BUILD_DISK_ANN STREQUAL "ON")
-    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-s3 google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
-else()
-    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem pthread)
-endif()
+if ( LINUX OR APPLE )
+    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-core aws-cpp-sdk-s3 google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
+elseif ( MSYS )
+    message(FATAL_ERROR "Unsupported platform!" )
+endif ()
 
 if(NOT CMAKE_INSTALL_PREFIX)
     set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR})

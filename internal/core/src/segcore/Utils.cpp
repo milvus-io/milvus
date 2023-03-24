@@ -35,6 +35,30 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
 }
 
 void
+ParsePksFromFieldData(DataType data_type, std::vector<PkType>& pks, const std::vector<storage::FieldDataPtr>& datas) {
+    int64_t offset = 0;
+
+    for (auto& field_data : datas) {
+        AssertInfo(data_type == field_data->get_data_type(), "inconsistent data type when parse pk from field data");
+        int64_t row_count = field_data->get_num_rows();
+        switch (data_type) {
+            case DataType::INT64: {
+                std::copy_n(static_cast<const int64_t*>(field_data->Data()), row_count, pks.data() + offset);
+                break;
+            }
+            case DataType::VARCHAR: {
+                std::copy_n(static_cast<const std::string*>(field_data->Data()), row_count, pks.data() + offset);
+                break;
+            }
+            default: {
+                PanicInfo("unsupported");
+            }
+        }
+        offset += row_count;
+    }
+}
+
+void
 ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data) {
     switch (data_type) {
         case DataType::INT64: {

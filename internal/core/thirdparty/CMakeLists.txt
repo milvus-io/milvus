@@ -64,15 +64,13 @@ add_subdirectory( boost_ext )
 add_subdirectory( arrow )
 add_subdirectory( rocksdb )
 
-# ******************************* Thirdparty aws sdk ********************************
-if ( LINUX AND BUILD_DISK_ANN STREQUAL "ON" )
+# ************************ Thirdparty aws sdk and google cloud sdk **************************
+if ( LINUX OR APPLE )
     add_subdirectory( aws_sdk )
+    add_subdirectory( google_cloud_sdk )
 endif()
 
 # ******************************* Thirdparty google cloud sdk ********************************
-if ( LINUX OR APPLE )
-    add_subdirectory( google_cloud_sdk )
-endif()
 
 # ******************************* Thirdparty marisa ********************************
 # TODO: support win.

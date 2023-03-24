@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/CGoHelper.h"
-#include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "log/Log.h"
@@ -19,8 +18,10 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/segment_c.h"
+#include "segcore/Types.h"
 #include "index/IndexInfo.h"
 #include "google/protobuf/text_format.h"
+#include "storage/FieldDataFactory.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -198,17 +199,54 @@ PreDelete(CSegmentInterface c_segment, int64_t size) {
 
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
-LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info) {
+LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo c_load_field_data_info) {
+    try {
+        auto segment = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_info = (milvus::segcore::LoadFieldDataInfo*)c_load_field_data_info;
+        segment->LoadFieldData(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+// just for test
+CStatus
+LoadFieldRawData(CSegmentInterface c_segment, int64_t field_id, const void* data, int64_t row_count) {
     try {
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto field_data = std::make_unique<milvus::DataArray>();
-        auto suc = field_data->ParseFromArray(load_field_data_info.blob, load_field_data_info.blob_size);
-        AssertInfo(suc, "unmarshal field data string failed");
-        auto load_info =
-            LoadFieldDataInfo{load_field_data_info.field_id, field_data.get(), load_field_data_info.row_count};
-        segment->LoadFieldData(load_info);
+        milvus::DataType data_type;
+        int64_t dim = 1;
+        int64_t element_count = row_count;
+        if (milvus::SystemProperty::Instance().IsSystem(milvus::FieldId(field_id))) {
+            data_type = milvus::DataType::INT64;
+        } else {
+            auto field_meta = segment->get_schema()[milvus::FieldId(field_id)];
+            data_type = field_meta.get_data_type();
+
+            if (milvus::datatype_is_vector(data_type)) {
+                dim = field_meta.get_dim();
+                switch (data_type) {
+                    case milvus::DataType::VECTOR_FLOAT: {
+                        element_count = row_count * dim;
+                        break;
+                    }
+                    case milvus::DataType::VECTOR_BINARY: {
+                        AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
+                        element_count = row_count * (dim / 8);
+                        break;
+                    }
+                    default:
+                        throw std::runtime_error("invalid vector type");
+                }
+            }
+        }
+        auto field_data = milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+        field_data->FillFieldData(data, element_count);
+        segment->LoadFieldData(milvus::FieldId(field_id), std::vector<milvus::storage::FieldDataPtr>{field_data});
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -223,8 +261,8 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
         auto pks = std::make_unique<milvus::proto::schema::IDs>();
         auto suc = pks->ParseFromArray(deleted_record_info.primary_keys, deleted_record_info.primary_keys_size);
         AssertInfo(suc, "unmarshal field data string failed");
-        auto load_info =
-            LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(), deleted_record_info.row_count};
+        auto load_info = milvus::segcore::LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(),
+                                                                deleted_record_info.row_count};
         segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

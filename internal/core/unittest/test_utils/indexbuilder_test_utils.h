@@ -163,7 +163,7 @@ class TestConfigWrapper {
         auto bucketName = minioConfig["bucketName"].as<std::string>();
         std::string storage_type = "minio";
 
-        config_.address = new char[address.length() + 1];
+        config_.address = new char[endpoint.length() + 1];
         config_.bucket_name = new char[bucketName.length() + 1];
         config_.access_key_id = new char[accessKey.length() + 1];
         config_.access_key_value = new char[accessValue.length() + 1];
@@ -173,7 +173,7 @@ class TestConfigWrapper {
         config_.useSSL = useSSL;
         config_.useIAM = useIam;
 
-        strcpy(const_cast<char*>(config_.address), address.c_str());
+        strcpy(const_cast<char*>(config_.address), endpoint.c_str());
         strcpy(const_cast<char*>(config_.bucket_name), bucketName.c_str());
         strcpy(const_cast<char*>(config_.access_key_id), accessKey.c_str());
         strcpy(const_cast<char*>(config_.access_key_value), accessValue.c_str());

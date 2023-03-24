@@ -29,6 +29,7 @@ set(SEGCORE_FILES
         plan_c.cpp
         reduce_c.cpp
         load_index_c.cpp
+        load_field_data_c.cpp
         SegmentInterface.cpp
         SegcoreConfig.cpp
         segcore_init_c.cpp

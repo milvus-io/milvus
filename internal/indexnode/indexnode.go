@@ -169,7 +169,7 @@ func (i *IndexNode) initKnowhere() {
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 
-	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitLocalRootPath()
 }
 
 func (i *IndexNode) initSession() error {

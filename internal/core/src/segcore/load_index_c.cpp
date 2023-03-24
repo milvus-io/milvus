@@ -18,22 +18,12 @@
 #include "storage/Util.h"
 #include "segcore/load_index_c.h"
 #include "segcore/Types.h"
+#include "storage/RemoteChunkManagerFactory.h"
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info, CStorageConfig c_storage_config) {
+NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
     try {
         auto load_index_info = std::make_unique<milvus::segcore::LoadIndexInfo>();
-        auto& storage_config = load_index_info->storage_config;
-        storage_config.address = std::string(c_storage_config.address);
-        storage_config.bucket_name = std::string(c_storage_config.bucket_name);
-        storage_config.access_key_id = std::string(c_storage_config.access_key_id);
-        storage_config.access_key_value = std::string(c_storage_config.access_key_value);
-        storage_config.remote_root_path = std::string(c_storage_config.remote_root_path);
-        storage_config.storage_type = std::string(c_storage_config.storage_type);
-        storage_config.iam_endpoint = std::string(c_storage_config.iam_endpoint);
-        storage_config.useSSL = c_storage_config.useSSL;
-        storage_config.useIAM = c_storage_config.useIAM;
-
         *c_load_index_info = load_index_info.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -129,8 +119,10 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                                                   load_index_info->segment_id, load_index_info->field_id};
         milvus::storage::IndexMeta index_meta{load_index_info->segment_id, load_index_info->field_id,
                                               load_index_info->index_build_id, load_index_info->index_version};
-        auto file_manager = milvus::storage::CreateFileManager(index_info.index_type, field_meta, index_meta,
-                                                               load_index_info->storage_config);
+        auto remote_chunk_manager = milvus::storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
+        auto file_manager =
+            milvus::storage::CreateFileManager(index_info.index_type, field_meta, index_meta, remote_chunk_manager);
+        AssertInfo(file_manager != nullptr, "create file manager failed!");
 
         auto config = milvus::index::ParseConfigFromIndexParams(load_index_info->index_params);
         config["index_files"] = load_index_info->index_files;
@@ -190,6 +182,59 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         return appendVecIndex(c_load_index_info, c_binary_set);
     }
     return appendScalarIndex(c_load_index_info, c_binary_set);
+}
+
+CStatus
+AppendIndexV2(CLoadIndexInfo c_load_index_info) {
+    try {
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        auto& index_params = load_index_info->index_params;
+        auto field_type = load_index_info->field_type;
+
+        milvus::index::CreateIndexInfo index_info;
+        index_info.field_type = load_index_info->field_type;
+
+        // get index type
+        AssertInfo(index_params.find("index_type") != index_params.end(), "index type is empty");
+        index_info.index_type = index_params.at("index_type");
+
+        // get metric type
+        if (milvus::datatype_is_vector(field_type)) {
+            AssertInfo(index_params.find("metric_type") != index_params.end(), "metric type is empty for vector index");
+            index_info.metric_type = index_params.at("metric_type");
+        }
+
+        // set default index mode
+        index_info.index_mode = milvus::IndexMode::MODE_CPU;
+        if (index_params.count("index_mode")) {
+            index_info.index_mode = milvus::index::GetIndexMode(index_params["index_mode"]);
+        }
+
+        // init file manager
+        milvus::storage::FieldDataMeta field_meta{load_index_info->collection_id, load_index_info->partition_id,
+                                                  load_index_info->segment_id, load_index_info->field_id};
+        milvus::storage::IndexMeta index_meta{load_index_info->segment_id, load_index_info->field_id,
+                                              load_index_info->index_build_id, load_index_info->index_version};
+        auto remote_chunk_manager = milvus::storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
+        auto file_manager =
+            milvus::storage::CreateFileManager(index_info.index_type, field_meta, index_meta, remote_chunk_manager);
+        AssertInfo(file_manager != nullptr, "create file manager failed!");
+
+        auto config = milvus::index::ParseConfigFromIndexParams(load_index_info->index_params);
+        config["index_files"] = load_index_info->index_files;
+
+        load_index_info->index = milvus::index::IndexFactory::GetInstance().CreateIndex(index_info, file_manager);
+        load_index_info->index->Load(config);
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
 }
 
 CStatus

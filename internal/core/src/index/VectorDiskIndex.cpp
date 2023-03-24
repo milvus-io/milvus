@@ -54,6 +54,12 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(const IndexType& index_type,
 template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */, const Config& config) {
+    Load(config);
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::Load(const Config& config) {
     auto prepare_config = parse_prepare_config(config);
     knowhere::Config cfg;
     knowhere::DiskANNPrepareConfig::Set(cfg, prepare_config);
@@ -67,12 +73,43 @@ VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */, const Co
 }
 
 template <typename T>
+BinarySet
+VectorDiskAnnIndex<T>::Upload(const Config& config) {
+    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    BinarySet ret;
+    for (auto& file : remote_paths_to_size) {
+        auto abs_file_path = file.first;
+        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/") + 1), nullptr, file.second);
+    }
+
+    return ret;
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::Build(const Config& config) {
+    auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();
+    auto build_config = parse_build_config(config);
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+    auto insert_files = GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
+    AssertInfo(insert_files.has_value(), "insert file paths is empty when build disk ann index");
+    auto local_data_path = file_manager_->CacheRawDataToDisk(insert_files.value());
+    build_config.data_path = local_data_path;
+
+    knowhere::Config cfg;
+    knowhere::DiskANNBuildConfig::Set(cfg, build_config);
+    index_->BuildAll(nullptr, cfg);
+
+    local_chunk_manager.RemoveDir(storage::GetSegmentRawDataPathPrefix(segment_id));
+}
+
+template <typename T>
 void
 VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset, const Config& config) {
     auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();
     auto build_config = parse_build_config(config);
-    auto segment_id = file_manager_->GetFileDataMeta().segment_id;
-    auto field_id = file_manager_->GetFileDataMeta().field_id;
+    auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
+    auto field_id = file_manager_->GetFieldDataMeta().field_id;
     auto local_data_path = storage::GenFieldRawDataPathPrefix(segment_id, field_id) + "raw_data";
     build_config.data_path = local_data_path;
     if (!local_chunk_manager.Exist(local_data_path)) {

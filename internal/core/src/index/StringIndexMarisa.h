@@ -25,11 +25,14 @@
 #include <map>
 #include <memory>
 
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
+
 namespace milvus::index {
 
 class StringIndexMarisa : public StringIndex {
  public:
-    StringIndexMarisa() = default;
+    explicit StringIndexMarisa(storage::FileManagerImplPtr file_manager = nullptr);
 
     int64_t
     Size() override;
@@ -40,10 +43,16 @@ class StringIndexMarisa : public StringIndex {
     void
     Load(const BinarySet& set, const Config& config = {}) override;
 
+    void
+    Load(const Config& config = {}) override;
+
     int64_t
     Count() override {
         return str_ids_.size();
     }
+
+    void
+    Build(const Config& config = {}) override;
 
     void
     Build(size_t n, const std::string* values) override;
@@ -66,6 +75,9 @@ class StringIndexMarisa : public StringIndex {
     std::string
     Reverse_Lookup(size_t offset) const override;
 
+    BinarySet
+    Upload(const Config& config = {}) override;
+
  private:
     void
     fill_str_ids(size_t n, const std::string* values);
@@ -86,13 +98,14 @@ class StringIndexMarisa : public StringIndex {
     std::vector<size_t> str_ids_;  // used to retrieve.
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 };
 
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;
 
 inline StringIndexPtr
-CreateStringIndexMarisa() {
-    return std::make_unique<StringIndexMarisa>();
+CreateStringIndexMarisa(storage::FileManagerImplPtr file_manager = nullptr) {
+    return std::make_unique<StringIndexMarisa>(file_manager);
 }
 
 }  // namespace milvus::index

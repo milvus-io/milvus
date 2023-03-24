@@ -17,6 +17,7 @@
 #include "storage/storage_c.h"
 #include "config/ConfigChunkManager.h"
 #include "common/CGoHelper.h"
+#include "storage/RemoteChunkManagerFactory.h"
 
 #ifdef BUILD_DISK_ANN
 #include "storage/LocalChunkManager.h"
@@ -38,4 +39,30 @@ GetLocalUsedSize(int64_t* size) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
+}
+
+CStatus
+InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
+    try {
+        milvus::storage::StorageConfig storage_config;
+        storage_config.address = std::string(c_storage_config.address);
+        storage_config.bucket_name = std::string(c_storage_config.bucket_name);
+        storage_config.access_key_id = std::string(c_storage_config.access_key_id);
+        storage_config.access_key_value = std::string(c_storage_config.access_key_value);
+        storage_config.remote_root_path = std::string(c_storage_config.remote_root_path);
+        storage_config.storage_type = std::string(c_storage_config.storage_type);
+        storage_config.iam_endpoint = std::string(c_storage_config.iam_endpoint);
+        storage_config.useSSL = c_storage_config.useSSL;
+        storage_config.useIAM = c_storage_config.useIAM;
+        milvus::storage::RemoteChunkManagerFactory::GetInstance().Init(storage_config);
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+void
+CleanRemoteChunkManagerSingleton() {
+    milvus::storage::RemoteChunkManagerFactory::GetInstance().Release();
 }

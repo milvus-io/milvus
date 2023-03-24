@@ -24,7 +24,6 @@
 #include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
-#include "common/LoadInfo.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
@@ -33,6 +32,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "index/IndexInfo.h"
+#include "segcore/Types.h"
 
 namespace milvus::segcore {
 
@@ -77,6 +77,9 @@ class SegmentInterface {
 
     virtual void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
+
+    virtual void
+    LoadFieldData(const LoadFieldDataInfo& info) = 0;
 
     virtual int64_t
     get_segment_id() const = 0;

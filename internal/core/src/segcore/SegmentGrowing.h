@@ -14,7 +14,6 @@
 #include <memory>
 #include <vector>
 
-#include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "query/Plan.h"

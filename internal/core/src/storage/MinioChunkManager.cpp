@@ -73,6 +73,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
+#ifdef BUILD_GCP
         if (type == STORAGE_GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
                 // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
@@ -81,6 +82,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
                 return Aws::MakeShared<GoogleHttpClientFactory>(GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };
         }
+#endif
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -130,6 +132,7 @@ MinioChunkManager::BuildGoogleCloudClient(const StorageConfig& storage_config,
 
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name) {
+    remote_root_path_ = storage_config.remote_root_path;
     RemoteStorageType storageType;
     if (storage_config.address.find("google") != std::string::npos) {
         storageType = STORAGE_GOOGLE_CLOUD;
