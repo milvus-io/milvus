@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/merr"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -222,6 +223,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 
 	err := scheduler.preAdd(task)
 	if err != nil {
+		task.Cancel(err)
 		return err
 	}
 
@@ -265,6 +267,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 
+		if GetTaskType(task) == TaskTypeGrow {
+			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
+			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+				return merr.WrapErrServiceInternal("segment loaded, it can be only balanced")
+			}
+		}
+
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		if old, ok := scheduler.channelTasks[index]; ok {
@@ -281,6 +291,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			}
 
 			return merr.WrapErrServiceInternal("task with the same channel exists")
+		}
+
+		if GetTaskType(task) == TaskTypeGrow {
+			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
+			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
+			}
 		}
 
 	default:

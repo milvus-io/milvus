@@ -185,14 +185,6 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		Return(&schemapb.CollectionSchema{
 			Name: "TestSubscribeChannelTask",
 		}, nil)
-	channels := make([]*datapb.VchannelInfo, 0, len(suite.subChannels))
-	for _, channel := range suite.subChannels {
-		channels = append(channels, &datapb.VchannelInfo{
-			CollectionID:        suite.collection,
-			ChannelName:         channel,
-			UnflushedSegmentIds: []int64{suite.growingSegments[channel]},
-		})
-	}
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -259,6 +251,42 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	for _, task := range tasks {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
+	}
+}
+
+func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+
+	tasks := []Task{}
+	for _, channel := range suite.subChannels {
+		task, err := NewChannelTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewChannelAction(targetNode, ActionTypeGrow, channel),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+	}
+
+	views := make([]*meta.LeaderView, 0)
+	for _, channel := range suite.subChannels {
+		views = append(views, &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel,
+		})
+	}
+	suite.dist.LeaderViewManager.Update(targetNode, views...)
+
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.Error(err)
 	}
 }
 
@@ -1045,7 +1073,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
-	tasks := []Task{}
 	segments := make([]*datapb.SegmentBinlogs, 0)
 	for _, segment := range suite.loadSegments {
 		segments = append(segments, &datapb.SegmentBinlogs{
@@ -1061,7 +1088,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
-		tasks = append(tasks, task)
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
