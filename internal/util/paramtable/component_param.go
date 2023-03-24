@@ -2015,6 +2015,9 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryWatermark           ParamItem `refreshable:"true"`
+
+	// DataNode send timetick interval per collection
+	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2122,6 +2125,13 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.IOConcurrency.Init(base.mgr)
 
+	p.DataNodeTimeTickInterval = ParamItem{
+		Key:          "datanode.timetick.interval",
+		Version:      "2.2.5",
+		PanicIfEmpty: false,
+		DefaultValue: "500",
+	}
+	p.DataNodeTimeTickInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
