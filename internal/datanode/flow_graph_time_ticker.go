@@ -99,10 +99,12 @@ func (mt *mergedTimeTickerSender) isClosed() bool {
 
 func (mt *mergedTimeTickerSender) work() {
 	defer mt.wg.Done()
-	var sids []int64
-	var isDiffTs bool
 	lastTs := uint64(0)
 	for {
+		var (
+			isDiffTs bool
+			sids     []int64
+		)
 		mt.cond.L.Lock()
 		if mt.isClosed() {
 			mt.cond.L.Unlock()
