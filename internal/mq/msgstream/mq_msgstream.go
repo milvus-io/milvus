@@ -444,7 +444,7 @@ var _ MsgStream = (*MqTtMsgStream)(nil)
 
 // MqTtMsgStream is a msgstream that contains timeticks
 type MqTtMsgStream struct {
-	mqMsgStream
+	*mqMsgStream
 	chanMsgBuf         map[mqwrapper.Consumer][]TsMsg
 	chanMsgPos         map[mqwrapper.Consumer]*msgpb.MsgPosition
 	chanStopChan       map[mqwrapper.Consumer]chan bool
@@ -473,7 +473,7 @@ func NewMqTtMsgStream(ctx context.Context,
 	syncConsumer := make(chan int, 1)
 
 	return &MqTtMsgStream{
-		mqMsgStream:        *msgStream,
+		mqMsgStream:        msgStream,
 		chanMsgBuf:         chanMsgBuf,
 		chanMsgPos:         chanMsgPos,
 		chanStopChan:       chanStopChan,

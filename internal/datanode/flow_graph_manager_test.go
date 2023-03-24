@@ -211,7 +211,7 @@ func TestFlowGraphManager(t *testing.T) {
 		const channelPrefix = "by-dev-rootcoord-dml-test-fg-mgr-execute-"
 		for _, test := range tests {
 			t.Run(test.testName, func(t *testing.T) {
-				var baseParams = Params.BaseTable
+				var baseParams = &Params.BaseTable
 				baseParams.Save(Params.DataNodeCfg.MemoryWatermark.Key, fmt.Sprintf("%f", test.watermark))
 				for i, memorySize := range test.memorySizes {
 					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
