@@ -1502,13 +1502,19 @@ class TestUpsertValid(TestcaseBase):
         data2, float_values2 = cf.gen_default_data_for_upsert(upsert_nb)
 
         # upsert at the same time
-        def do_upsert():
+        def do_upsert1():
             collection_w.upsert(data=data1)
 
-        t = threading.Thread(target=do_upsert, args=())
-        t.start()
-        collection_w.upsert(data=data2)
-        t.join()
+        def do_upsert2():
+            collection_w.upsert(data=data2)
+
+        t1 = threading.Thread(target=do_upsert1, args=())
+        t2 = threading.Thread(target=do_upsert2, args=())
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
         # check the result
         exp = f"int64 >= 0 && int64 <= {upsert_nb}"

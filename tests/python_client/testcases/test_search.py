@@ -870,6 +870,34 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[:8])
+    def test_search_invalid_ignore_growing_param(self, ignore_growing):
+        """
+        target: test search ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. search with param ignore_growing invalid
+        expected: raise exception
+        """
+        if ignore_growing == 1:
+            pytest.skip("number is valid")
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(start=10000)
+        collection_w.insert(data)
+
+        # 3. search with param ignore_growing=True
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": ignore_growing}
+        vector = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
+        collection_w.search(vector[:default_nq], default_search_field, search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "parse search growing failed"})
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_travel_timestamp(self, get_invalid_travel_timestamp):
         """
         target: test search with invalid travel timestamp
