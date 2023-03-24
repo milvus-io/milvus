@@ -191,6 +191,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return err
 	}
+
+	if err := newValidateUtil(withNANCheck()).
+		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
+		return err
+	}
+
 	log.Debug("Proxy Upsert insertPreExecute done")
 
 	return nil
