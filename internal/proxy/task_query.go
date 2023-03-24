@@ -454,7 +454,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
 	retrieveReq := typeutil.Clone(t.RetrieveRequest)
 	retrieveReq.GetBase().TargetID = nodeID
 	req := &querypb.QueryRequest{

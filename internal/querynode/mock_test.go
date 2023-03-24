@@ -1482,6 +1482,75 @@ func genSearchPlanAndRequests(collection *Collection, indexType string, nq int64
 	return newSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 }
 
+type mockHook1 struct {
+	mockString string
+}
+
+func (m *mockHook1) Init(s string) error {
+	if s == "test" {
+		return fmt.Errorf("unexpected param")
+	}
+	m.mockString = s
+	return nil
+}
+
+func (m *mockHook1) Run(param map[string]interface{}) error {
+	return nil
+}
+
+type mockHook2 struct {
+}
+
+func (m *mockHook2) Init(s string) error {
+	return nil
+}
+
+func (m *mockHook2) Run(param map[string]interface{}) error {
+	param["search_param"] = "test"
+	return nil
+}
+
+type mockHook3 struct {
+}
+
+func (m *mockHook3) Init(s string) error {
+	return nil
+}
+
+func (m *mockHook3) Run(param map[string]interface{}) error {
+	return fmt.Errorf("unexpected param")
+}
+
+type mockWrongHook struct{}
+
+func getSearchParamFromPlanExpr(serializedPlan []byte) (string, error) {
+	plan := &planpb.PlanNode{}
+	err := proto.Unmarshal(serializedPlan, plan)
+	if err != nil {
+		return "", err
+	}
+	switch plan.GetNode().(type) {
+	case *planpb.PlanNode_VectorAnns:
+		qinfo := plan.GetVectorAnns().GetQueryInfo()
+		return qinfo.GetSearchParams(), nil
+	}
+	return "", nil
+}
+
+func genSimpleSearchPlanExpr(schema *schemapb.CollectionSchema) ([]byte, error) {
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_VectorAnns{
+			VectorAnns: &planpb.VectorANNS{
+				QueryInfo: &planpb.QueryInfo{
+					SearchParams: `{"nprobe":10}`,
+				},
+			},
+		},
+	}
+	planExpr, err := proto.Marshal(planNode)
+	return planExpr, err
+}
+
 func genSimpleRetrievePlanExpr(schema *schemapb.CollectionSchema) ([]byte, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -1552,22 +1621,28 @@ func genGetPartitionStatisticRequest() (*internalpb.GetStatisticsRequest, error)
 }
 
 func genSearchRequest(nq int64, indexType string, schema *schemapb.CollectionSchema) (*internalpb.SearchRequest, error) {
+	expr, err := genSimpleSearchPlanExpr(schema)
+	if err != nil {
+		return nil, err
+	}
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {
 		return nil, err
 	}
 	simpleDSL, err2 := genDSLByIndexType(schema, indexType)
+
 	if err2 != nil {
 		return nil, err2
 	}
 	return &internalpb.SearchRequest{
-		Base:             genCommonMsgBase(commonpb.MsgType_Search, 0),
-		CollectionID:     defaultCollectionID,
-		PartitionIDs:     []UniqueID{defaultPartitionID},
-		Dsl:              simpleDSL,
-		PlaceholderGroup: placeHolder,
-		DslType:          commonpb.DslType_Dsl,
-		Nq:               nq,
+		Base:               genCommonMsgBase(commonpb.MsgType_Search, 0),
+		CollectionID:       defaultCollectionID,
+		PartitionIDs:       []UniqueID{defaultPartitionID},
+		Dsl:                simpleDSL,
+		PlaceholderGroup:   placeHolder,
+		DslType:            commonpb.DslType_Dsl,
+		SerializedExprPlan: expr,
+		Nq:                 nq,
 	}, nil
 }
 

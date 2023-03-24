@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -1700,7 +1698,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
-		errPolicy      = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+		errPolicy      = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string, int) error, map[string][]nodeInfo) error {
 			return fmt.Errorf("fake error")
 		}
 	)
@@ -1956,207 +1954,6 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			})
 		}
 	})
-}
-
-func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
-	oldEnable := Params.AutoIndexConfig.Enable
-	oldIndexType := Params.AutoIndexConfig.IndexType
-	oldIndexParams := Params.AutoIndexConfig.IndexParams
-	oldSearchParamYamStr := Params.AutoIndexConfig.SearchParamsYamlStr
-	//parseSearchParams
-	paramtable.Get().Save(Params.AutoIndexConfig.Enable.Key, "true")
-	paramtable.Get().Save(Params.AutoIndexConfig.IndexType.Key, indexparamcheck.IndexHNSW)
-	paramtable.Get().Save(Params.AutoIndexConfig.IndexParams.Key, "{}")
-	defer func() {
-		paramtable.Get().Reset(Params.AutoIndexConfig.Enable.Key)
-		paramtable.Get().Reset(Params.AutoIndexConfig.IndexType.Key)
-		paramtable.Get().Reset(Params.AutoIndexConfig.IndexParams.Key)
-	}()
-
-	buildParams := map[string]any{
-		common.MetricTypeKey: indexparamcheck.L2,
-		common.IndexTypeKey:  indexparamcheck.IndexHNSW,
-		"M":                  8,
-		"efConstruction":     50,
-	}
-	buildParamsJSONValue, err := json.Marshal(buildParams)
-	assert.NoError(t, err)
-	paramtable.Get().Save(Params.AutoIndexConfig.IndexParams.Key, string(buildParamsJSONValue))
-	defer paramtable.Get().Reset(Params.AutoIndexConfig.IndexParams.Key)
-	assert.NoError(t, err)
-
-	jsonStr := `
-      {
-        "1": {
-          "bp": [10, 90],
-          "functions": [
-            "__ef = __topk * 2.2 + 31",
-            "__ef = __topk * 1.58 + 39",
-            "__ef = __topk"
-          ]
-        },
-        "2": {
-          "bp": [10, 200],
-          "functions": [
-            "__ef = __topk *3 + 64",
-            "__ef = 8 * pow(__topk, 0.7) + 50",
-            "__ef = __topk"
-          ]
-        },
-        "3": {
-          "bp": [10, 300],
-          "functions": [
-            "__ef = 10 * pow(__topk, 0.7) + 80",
-            "__ef = 10 * pow(__topk, 0.66) + 74",
-            "__ef = __topk"
-          ]
-        }
-      }`
-	paramtable.Get().Save(Params.AutoIndexConfig.SearchParamsYamlStr.Key, jsonStr)
-	defer paramtable.Get().Reset(Params.AutoIndexConfig.SearchParamsYamlStr.Key)
-
-	normalKVPairs := []*commonpb.KeyValuePair{
-		{
-			Key:   AnnsFieldKey,
-			Value: testFloatVecField,
-		},
-		{
-			Key:   TopKKey,
-			Value: "10",
-		},
-		{
-			Key:   RoundDecimalKey,
-			Value: "-1",
-		},
-		{
-			Key:   common.MetricTypeKey,
-			Value: indexparamcheck.L2,
-		},
-	}
-
-	normalWithNilParams := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: "null",
-		},
-	)
-
-	//var normalWithLevel []*commonpb.KeyValuePair
-	normalWithEmptyParams := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: "{}",
-		},
-	)
-
-	normalWithNormalLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level": 1 }`,
-		},
-	)
-
-	normalWithNormalStrLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level": "1" }`,
-		},
-	)
-
-	normalTests := []struct {
-		description string
-		params      []*commonpb.KeyValuePair
-	}{
-		{"normal", normalKVPairs},
-		{"normal_with_nil_params", normalWithNilParams},
-		{"normal_with_empty_params", normalWithEmptyParams},
-		{"normal_with_normal_level", normalWithNormalLevel},
-		{"normal_with_normal_str_level", normalWithNormalStrLevel},
-	}
-
-	for _, test := range normalTests {
-		t.Run(test.description, func(t *testing.T) {
-			_, _, err := parseSearchInfo(test.params)
-			assert.NoError(t, err)
-		})
-	}
-
-	invalidWithWrongParams := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: "",
-		},
-	)
-
-	invalidWithWrongLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":x}`,
-		},
-	)
-
-	invalidWithWrongStrLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":"x"}`,
-		},
-	)
-
-	invalidWithSmallLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":-1}`,
-		},
-	)
-
-	invalidWithSmallStrLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":"-1"}`,
-		},
-	)
-
-	invalidWithLargeLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":100}`,
-		},
-	)
-
-	invalidWithLargeStrLevel := append(normalKVPairs,
-		&commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"level":"100"}`,
-		},
-	)
-
-	invalidTests := []struct {
-		description string
-		params      []*commonpb.KeyValuePair
-	}{
-		{"invalid_wrong_params", invalidWithWrongParams},
-		{"invalid_wrong_level", invalidWithWrongLevel},
-		{"invalid_wrong_str_level", invalidWithWrongStrLevel},
-		{"invalid_with_small_level", invalidWithSmallLevel},
-		{"invalid_with_small_str_level", invalidWithSmallStrLevel},
-		{"invalid_with_large_level", invalidWithLargeLevel},
-		{"invalid_with_large_str_level", invalidWithLargeStrLevel},
-	}
-
-	for _, test := range invalidTests {
-		t.Run(test.description, func(t *testing.T) {
-			info, offset, err := parseSearchInfo(test.params)
-			assert.Error(t, err)
-			assert.Nil(t, info)
-			assert.Zero(t, offset)
-		})
-	}
-
-	Params.AutoIndexConfig.Enable = oldEnable
-	Params.AutoIndexConfig.IndexType = oldIndexType
-	Params.AutoIndexConfig.IndexParams = oldIndexParams
-	Params.AutoIndexConfig.SearchParamsYamlStr = oldSearchParamYamStr
-
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {

@@ -45,6 +45,29 @@ func setup() {
 	paramtable.Get().BaseTable.Save("etcd.metaSubPath", "querynode")
 }
 
+func TestInitHook(t *testing.T) {
+	paramtable.Get().Save(Params.QueryNodeCfg.SoPath.Key, "")
+	a, err := initHook()
+	assert.Nil(t, a)
+	assert.NotNil(t, err)
+
+	paramtable.Get().Save(Params.QueryNodeCfg.SoPath.Key, "/a/b/hook.so")
+	a, err = initHook()
+	assert.Nil(t, a)
+	assert.NotNil(t, err)
+	paramtable.Get().Save(Params.QueryNodeCfg.SoPath.Key, "")
+
+	a = &mockHook1{}
+	assert.Equal(t, a.(*mockHook1).mockString, "")
+	assert.Error(t, a.Init("test"))
+	assert.NoError(t, a.Init("t"))
+	assert.Equal(t, a.(*mockHook1).mockString, "t")
+
+	var hoo interface{} = &mockWrongHook{}
+	a, ok := hoo.(Hook)
+	assert.False(t, ok)
+}
+
 func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
 	schema := genTestCollectionSchema()
 
@@ -138,6 +161,7 @@ func TestMain(m *testing.M) {
 // NOTE: start pulsar and etcd before test
 func TestQueryNode_Start(t *testing.T) {
 	localNode := newQueryNodeMock()
+	assert.Nil(t, localNode.queryHook)
 	localNode.Start()
 	<-localNode.queryNodeLoopCtx.Done()
 	localNode.Stop()

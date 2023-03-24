@@ -117,7 +117,7 @@ func (p *ComponentParam) init() {
 	p.IndexNodeCfg.init(&p.BaseTable)
 	p.HTTPCfg.init(&p.BaseTable)
 	p.LogCfg.init(&p.BaseTable)
-	p.HookCfg.init()
+	p.HookCfg.init(&p.BaseTable)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", &p.BaseTable)
 	p.ProxyGrpcServerCfg.Init("proxy", &p.BaseTable)
@@ -1302,6 +1302,8 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
+	SoPath ParamItem `refreshable:"false"`
+
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
@@ -1344,6 +1346,13 @@ type queryNodeConfig struct {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.SoPath = ParamItem{
+		Key:          "queryNode.soPath",
+		Version:      "2.3.0",
+		DefaultValue: "",
+	}
+	p.SoPath.Init(base.mgr)
+
 	p.FlowGraphMaxQueueLength = ParamItem{
 		Key:          "queryNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
