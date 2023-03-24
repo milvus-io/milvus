@@ -148,40 +148,6 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	return nil
 }
 
-func (it *insertTask) checkVectorFieldData() error {
-	// error won't happen here.
-	helper, _ := typeutil.CreateSchemaHelper(it.schema)
-
-	fields := it.GetFieldsData()
-	for _, field := range fields {
-		if field.GetType() != schemapb.DataType_FloatVector {
-			continue
-		}
-
-		vectorField := field.GetVectors()
-		if vectorField == nil || vectorField.GetFloatVector() == nil {
-			return fmt.Errorf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
-		}
-
-		// error won't happen here.
-		f, _ := helper.GetFieldFromName(field.GetFieldName())
-		dim, _ := typeutil.GetDim(f)
-
-		floatArray := vectorField.GetFloatVector()
-
-		// TODO: `NumRows` passed by client may be not trustable.
-		if uint64(len(floatArray.GetData())) != uint64(dim)*it.BaseInsertTask.GetNumRows() {
-			return fmt.Errorf("length of inserted vector (%d) not match dim (%d)", len(floatArray.GetData()), dim)
-		}
-
-		if err := typeutil.VerifyFloats32(floatArray.GetData()); err != nil {
-			return fmt.Errorf("float vector field data is illegal, error: %w", err)
-		}
-	}
-
-	return nil
-}
-
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
 	defer sp.Finish()
@@ -263,10 +229,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// check vector field data
-	err = it.checkVectorFieldData()
-	if err != nil {
-		log.Error("vector field data is illegal", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+	if err := newValidateUtil(withNANCheck()).Validate(it.GetFieldsData(), it.schema, it.NRows()); err != nil {
 		return err
 	}
 

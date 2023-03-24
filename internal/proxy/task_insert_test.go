@@ -1,8 +1,6 @@
 package proxy
 
 import (
-	"math"
-	"strconv"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -346,93 +344,4 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
 	err = case2.CheckAligned()
 	assert.NoError(t, err)
-}
-
-func TestInsertTask_CheckVectorFieldData(t *testing.T) {
-	fieldName := "embeddings"
-	numRows := 10
-	dim := 32
-	task := insertTask{
-		BaseInsertTask: BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				Version: internalpb.InsertDataVersion_ColumnBased,
-				NumRows: uint64(numRows),
-			},
-		},
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_CheckVectorFieldData",
-			Description: "TestInsertTask_CheckVectorFieldData",
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      100,
-					Name:         fieldName,
-					IsPrimaryKey: false,
-					AutoID:       false,
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.Itoa(dim)}},
-				},
-			},
-		},
-	}
-
-	// success case
-	task.FieldsData = []*schemapb.FieldData{
-		newFloatVectorFieldData(fieldName, numRows, dim),
-	}
-	err := task.checkVectorFieldData()
-	assert.NoError(t, err)
-
-	// field is nil
-	task.FieldsData = []*schemapb.FieldData{
-		{
-			Type:      schemapb.DataType_FloatVector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: nil,
-			},
-		},
-	}
-	err = task.checkVectorFieldData()
-	assert.Error(t, err)
-
-	// vector data is not a number
-	values := generateFloatVectors(numRows, dim)
-	values[5] = float32(math.NaN())
-	task.FieldsData[0].Field = &schemapb.FieldData_Vectors{
-		Vectors: &schemapb.VectorField{
-			Dim: int64(dim),
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: values,
-				},
-			},
-		},
-	}
-	err = task.checkVectorFieldData()
-	assert.Error(t, err)
-
-	// vector data is infinity
-	values[5] = float32(math.Inf(1))
-	task.FieldsData[0].Field = &schemapb.FieldData_Vectors{
-		Vectors: &schemapb.VectorField{
-			Dim: int64(dim),
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: values,
-				},
-			},
-		},
-	}
-	err = task.checkVectorFieldData()
-	assert.Error(t, err)
-
-	// vector dim not match
-	task.FieldsData = []*schemapb.FieldData{
-		newFloatVectorFieldData(fieldName, numRows, dim+1),
-	}
-	err = task.checkVectorFieldData()
-	assert.Error(t, err)
 }
