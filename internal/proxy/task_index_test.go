@@ -274,3 +274,90 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func Test_parseIndexParams(t *testing.T) {
+	cit := &createIndexTask{
+		Condition: nil,
+		req: &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         "",
+			CollectionName: "",
+			FieldName:      "",
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "index_type",
+					Value: "HNSW",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "IP",
+				},
+				{
+					Key:   "params",
+					Value: "{\"M\": 48, \"efConstruction\": 64}",
+				},
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			},
+			IndexName: "",
+		},
+		ctx:            nil,
+		rootCoord:      nil,
+		queryCoord:     nil,
+		result:         nil,
+		isAutoIndex:    false,
+		newIndexParams: nil,
+		newTypeParams:  nil,
+		collectionID:   0,
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         "FieldID",
+			IsPrimaryKey: false,
+			Description:  "field no.1",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "L2",
+				},
+			}},
+	}
+
+	t.Run("parse index params", func(t *testing.T) {
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   "index_type",
+					Value: "HNSW",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "IP",
+				},
+				{
+					Key:   "M",
+					Value: "48",
+				},
+				{
+					Key:   "efConstruction",
+					Value: "64",
+				},
+			}, cit.newIndexParams)
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			}, cit.newTypeParams)
+	})
+}

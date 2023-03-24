@@ -63,6 +63,7 @@ type createIndexTask struct {
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
+	newTypeParams  []*commonpb.KeyValuePair
 
 	collectionID UniqueID
 	fieldSchema  *schemapb.FieldSchema
@@ -167,18 +168,25 @@ func (cit *createIndexTask) parseIndexParams() error {
 		}
 	}
 	typeParams := cit.fieldSchema.GetTypeParams()
-	typeParamsMap := make(map[string]interface{})
+	typeParamsMap := make(map[string]string)
 	for _, pair := range typeParams {
-		typeParamsMap[pair.Key] = struct{}{}
+		typeParamsMap[pair.Key] = pair.Value
 	}
 
 	for k, v := range indexParamsMap {
 		//Currently, it is required that type_params and index_params do not have same keys.
-		_, ok := typeParamsMap[k]
-		if ok {
+		if k == DimKey || k == maxVarCharLengthKey {
+			delete(indexParamsMap, k)
 			continue
 		}
 		cit.newIndexParams = append(cit.newIndexParams, &commonpb.KeyValuePair{Key: k, Value: v})
+	}
+
+	for k, v := range typeParamsMap {
+		if _, ok := indexParamsMap[k]; ok {
+			continue
+		}
+		cit.newTypeParams = append(cit.newTypeParams, &commonpb.KeyValuePair{Key: k, Value: v})
 	}
 
 	return nil
