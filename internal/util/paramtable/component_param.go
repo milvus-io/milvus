@@ -1564,6 +1564,9 @@ type dataNodeConfig struct {
 	// io concurrency to fetch stats logs
 	IOConcurrency int
 
+	// datanote send timetick interval per channel
+	DataNodeTimeTickInterval int
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
@@ -1584,6 +1587,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initBinlogMaxSize()
 	p.initSyncPeriod()
 	p.initIOConcurrency()
+	p.initDataNodeTimeTickInterval()
 
 	p.initChannelWatchPath()
 	p.initMemoryForceSyncEnable()
@@ -1643,6 +1647,10 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 
 func (p *dataNodeConfig) initIOConcurrency() {
 	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
+}
+
+func (p *dataNodeConfig) initDataNodeTimeTickInterval() {
+	p.DataNodeTimeTickInterval = p.Base.ParseIntWithDefault("datanode.timetick.interval", 500)
 }
 
 func (p *dataNodeConfig) SetNodeID(id UniqueID) {
