@@ -73,7 +73,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer)
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -84,7 +84,7 @@ func (suite *SegmentCheckerTestSuite) TearDownTest() {
 
 func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything).Maybe().Return(func(segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
+	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{

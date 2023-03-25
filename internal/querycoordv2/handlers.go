@@ -98,7 +98,11 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	if dstNodeSet.Len() == 0 {
 		outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
 		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
-			return !outboundNodes.Contain(node)
+			stop, err := s.nodeMgr.IsStoppingNode(node)
+			if err != nil {
+				return false
+			}
+			return !outboundNodes.Contain(node) && !stop
 		})
 		dstNodeSet.Insert(availableNodes...)
 	}
@@ -132,7 +136,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		zap.Int64("srcNodeID", srcNode),
 		zap.Int64s("destNodeIDs", dstNodeSet.Collect()),
 	)
-	plans := s.balancer.AssignSegment(toBalance.Collect(), dstNodeSet.Collect())
+	plans := s.balancer.AssignSegment(req.GetCollectionID(), toBalance.Collect(), dstNodeSet.Collect())
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
 		log.Info("manually balance segment...",

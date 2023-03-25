@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -60,6 +61,11 @@ type SegmentAssignPlan struct {
 	Weight    Weight
 }
 
+func (segPlan SegmentAssignPlan) ToString() string {
+	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, weight: %d]\n",
+		segPlan.Segment.CollectionID, segPlan.ReplicaID, segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.Weight)
+}
+
 type ChannelAssignPlan struct {
 	Channel   *meta.DmChannel
 	ReplicaID int64
@@ -68,8 +74,19 @@ type ChannelAssignPlan struct {
 	Weight    Weight
 }
 
+func (chanPlan ChannelAssignPlan) ToString() string {
+	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d, weight: %d]\n",
+		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.ReplicaID, chanPlan.From, chanPlan.To, chanPlan.Weight)
+}
+
+var (
+	RoundRobinBalancerName    = "RoundRobinBalancer"
+	RowCountBasedBalancerName = "RowCountBasedBalancer"
+	ScoreBasedBalancerName    = "ScoreBasedBalancer"
+)
+
 type Balance interface {
-	AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
+	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
 	Balance() ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
@@ -79,7 +96,7 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil

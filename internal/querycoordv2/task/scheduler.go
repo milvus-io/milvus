@@ -120,6 +120,8 @@ type Scheduler interface {
 	RemoveByNode(node int64)
 	GetNodeSegmentDelta(nodeID int64) int
 	GetNodeChannelDelta(nodeID int64) int
+	GetChannelTaskNum() int
+	GetSegmentTaskNum() int
 }
 
 type taskScheduler struct {
@@ -292,7 +294,6 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return merr.WrapErrServiceInternal("task with the same channel exists")
 		}
-
 		if GetTaskType(task) == TaskTypeGrow {
 			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
@@ -300,11 +301,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
 		}
-
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
-
 	return nil
 }
 
@@ -384,6 +383,20 @@ func (scheduler *taskScheduler) GetNodeChannelDelta(nodeID int64) int {
 	defer scheduler.rwmutex.RUnlock()
 
 	return calculateNodeDelta(nodeID, scheduler.channelTasks)
+}
+
+func (scheduler *taskScheduler) GetChannelTaskNum() int {
+	scheduler.rwmutex.RLock()
+	defer scheduler.rwmutex.RUnlock()
+
+	return len(scheduler.channelTasks)
+}
+
+func (scheduler *taskScheduler) GetSegmentTaskNum() int {
+	scheduler.rwmutex.RLock()
+	defer scheduler.rwmutex.RUnlock()
+
+	return len(scheduler.segmentTasks)
 }
 
 func calculateNodeDelta[K comparable, T ~map[K]Task](nodeID int64, tasks T) int {
