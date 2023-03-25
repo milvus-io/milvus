@@ -281,6 +281,13 @@ func (coord *DataCoordMock) UpdateChannelCheckpoint(ctx context.Context, req *da
 	}, nil
 }
 
+func (coord *DataCoordMock) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func (coord *DataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

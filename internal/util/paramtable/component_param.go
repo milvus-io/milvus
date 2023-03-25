@@ -136,7 +136,8 @@ type commonConfig struct {
 	QueryCoordTimeTick     string
 	QueryNodeSubName       string
 
-	DataCoordStatistic   string
+	DataCoordStatistic string
+	// Deprecated
 	DataCoordTimeTick    string
 	DataCoordSegmentInfo string
 	DataCoordSubName     string

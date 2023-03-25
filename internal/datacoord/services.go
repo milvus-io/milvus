@@ -1263,6 +1263,26 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	}, nil
 }
 
+// ReportDataNodeTtMsgs updates channel checkpoint in dataCoord.
+func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if s.isClosed() {
+		log.Warn("failed to report dataNode ttMsgs on closed server")
+		setNotServingStatus(resp, s.GetStateCode())
+		return resp, nil
+	}
+
+	for _, ttMsg := range req.GetMsgs() {
+		go s.handleTimetickMessage(ctx, ttMsg)
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 // getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.
 func getDiff(base, remove []int64) []int64 {
 	mb := make(map[int64]struct{}, len(remove))

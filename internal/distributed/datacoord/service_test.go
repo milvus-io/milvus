@@ -31,7 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	types.DataCoord
 
@@ -208,6 +208,10 @@ func (m *MockDataCoord) UpdateChannelCheckpoint(ctx context.Context, req *datapb
 	return m.updateChanPos, m.err
 }
 
+func (m *MockDataCoord) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return m.updateChanPos, m.err
+}
+
 func (m *MockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
 	return m.acquireSegLockResp, m.err
 }
@@ -242,7 +246,7 @@ func (m *MockDataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSe
 	return m.listSegmentsInfoResp, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server := NewServer(ctx, nil)

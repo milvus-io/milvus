@@ -40,21 +40,16 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -501,97 +496,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopWg.Add(3)
-	s.startDataNodeTtLoop(s.serverLoopCtx)
+	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.garbageCollector.start()
 }
 
-// startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
-// tt msg stands for the currently consumed timestamp for each channel
-func (s *Server) startDataNodeTtLoop(ctx context.Context) {
-	ttMsgStream, err := s.factory.NewMsgStream(ctx)
-	if err != nil {
-		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
-		panic(err)
-	}
-	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName, Params.DataCoordCfg.GetNodeID())
-	ttMsgStream.AsConsumer([]string{Params.CommonCfg.DataCoordTimeTick},
-		subName, mqwrapper.SubscriptionPositionLatest)
-	log.Info("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick),
-		zap.String("subscription", subName))
-	ttMsgStream.Start()
-
-	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
-}
-
-func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStream msgstream.MsgStream) {
-	var checker *timerecord.LongTermChecker
-	if enableTtChecker {
-		checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
-		checker.Start()
-		defer checker.Stop()
-	}
-
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	defer func() {
-		// https://github.com/milvus-io/milvus/issues/15659
-		// msgstream service closed before datacoord quits
-		defer func() {
-			if x := recover(); x != nil {
-				log.Error("Failed to close ttMessage", zap.Any("recovered", x))
-			}
-		}()
-		ttMsgStream.Close()
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("DataNode timetick loop shutdown")
-			return
-		case msgPack, ok := <-ttMsgStream.Chan():
-			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
-				log.Info("receive nil timetick msg and shutdown timetick channel")
-				return
-			}
-
-			for _, msg := range msgPack.Msgs {
-				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
-				if !ok {
-					log.Warn("receive unexpected msg type from tt channel")
-					continue
-				}
-				if enableTtChecker {
-					checker.Check()
-				}
-
-				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
-					log.Error("failed to handle timetick message", zap.Error(err))
-					continue
-				}
-			}
-			s.helper.eventAfterHandleDataNodeTt()
-		}
-	}
-}
-
-func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.DataNodeTtMsg) error {
+func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *datapb.DataNodeTtMsg) error {
 	ch := ttMsg.GetChannelName()
 	ts := ttMsg.GetTimestamp()
-	physical, _ := tsoutil.ParseTS(ts)
-	if time.Since(physical).Minutes() > 1 {
-		// if lag behind, log every 1 mins about
-		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
-	}
-
-	sub := tsoutil.SubByNow(ts)
-	pChannelName := funcutil.ToPhysicalChannel(ch)
-	metrics.DataCoordConsumeDataNodeTimeTickLag.
-		WithLabelValues(fmt.Sprint(Params.DataCoordCfg.GetNodeID()), pChannelName).
-		Set(float64(sub))
 
 	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
 

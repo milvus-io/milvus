@@ -23,7 +23,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -63,8 +62,6 @@ func TestMain(t *testing.M) {
 
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.InitOnce()
-	// change to specific channel for test
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 
 	var err error
 	rateCol, err = newRateCollector()

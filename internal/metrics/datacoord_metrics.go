@@ -79,6 +79,7 @@ var (
 			Help:      "count of all stored rows ever",
 		}, []string{})
 
+	// Deprecated
 	DataCoordConsumeDataNodeTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,

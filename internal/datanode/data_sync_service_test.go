@@ -173,6 +173,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				cm,
 				newCompactionExecutor(),
 				genTestTickler(),
+				nil,
 			)
 
 			if !test.isValidCase {
@@ -269,7 +270,8 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh,
+		dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), nil)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -419,7 +421,8 @@ func TestDataSyncService_Close(t *testing.T) {
 	}
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh,
+		mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), nil)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)

@@ -25,22 +25,17 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 type insertBufferNode struct {
@@ -58,36 +53,9 @@ type insertBufferNode struct {
 	flushingSegCache *Cache
 	flushManager     flushManager
 
-	timeTickStream msgstream.MsgStream
-	ttLogger       *timeTickLogger
-	ttMerger       *mergedTimeTickerSender
+	timeTickManager *timeTickManager
 
 	lastTimestamp Timestamp
-}
-
-type timeTickLogger struct {
-	start        atomic.Uint64
-	counter      atomic.Int32
-	vChannelName string
-}
-
-func (l *timeTickLogger) LogTs(ts Timestamp) {
-	if l.counter.Load() == 0 {
-		l.start.Store(ts)
-	}
-	l.counter.Inc()
-	if l.counter.Load() == 1000 {
-		min := l.start.Load()
-		l.start.Store(ts)
-		l.counter.Store(0)
-		go l.printLogs(min, ts)
-	}
-}
-
-func (l *timeTickLogger) printLogs(start, end Timestamp) {
-	t1, _ := tsoutil.ParseTS(start)
-	t2, _ := tsoutil.ParseTS(end)
-	log.Debug("IBN timetick log", zap.Time("from", t1), zap.Time("to", t2), zap.Duration("elapsed", t2.Sub(t1)), zap.Uint64("start", start), zap.Uint64("end", end), zap.String("vChannelName", l.vChannelName))
 }
 
 func (ibNode *insertBufferNode) Name() string {
@@ -95,11 +63,6 @@ func (ibNode *insertBufferNode) Name() string {
 }
 
 func (ibNode *insertBufferNode) Close() {
-	ibNode.ttMerger.close()
-
-	if ibNode.timeTickStream != nil {
-		ibNode.timeTickStream.Close()
-	}
 }
 
 func (ibNode *insertBufferNode) IsValidInMsg(in []Msg) bool {
@@ -657,8 +620,16 @@ func (ibNode *insertBufferNode) WriteTimeTick(ts Timestamp, segmentIDs []int64) 
 	default:
 	}
 
-	ibNode.ttLogger.LogTs(ts)
-	ibNode.ttMerger.bufferTs(ts, segmentIDs)
+	stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
+	for _, sid := range segmentIDs {
+		stat, err := ibNode.channel.getSegmentStatisticsUpdates(sid)
+		if err != nil {
+			log.Warn("failed to get segment statistics info", zap.Int64("segmentID", sid), zap.Error(err))
+			continue
+		}
+		stats = append(stats, stat)
+	}
+	ibNode.timeTickManager.update(ibNode.channelName, ts, stats)
 	rateCol.updateFlowGraphTt(ibNode.channelName, ts)
 }
 
@@ -667,66 +638,16 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 }
 
 func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DelBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
-	fm flushManager, flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
+	fm flushManager, flushingSegCache *Cache, config *nodeConfig, timeTickManager *timeTickManager) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
 
-	//input stream, data node time tick
-	wTt, err := config.msFactory.NewMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
-	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
-	var wTtMsgStream msgstream.MsgStream = wTt
-	wTtMsgStream.Start()
-
-	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
-		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
-		for _, sid := range segmentIDs {
-			stat, err := config.channel.getSegmentStatisticsUpdates(sid)
-			if err != nil {
-				log.Warn("failed to get segment statistics info", zap.Int64("segmentID", sid), zap.Error(err))
-				continue
-			}
-			stats = append(stats, stat)
-		}
-		msgPack := msgstream.MsgPack{}
-		timeTickMsg := msgstream.DataNodeTtMsg{
-			BaseMsg: msgstream.BaseMsg{
-				BeginTimestamp: ts,
-				EndTimestamp:   ts,
-				HashValues:     []uint32{0},
-			},
-			DataNodeTtMsg: datapb.DataNodeTtMsg{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
-					commonpbutil.WithMsgID(0),
-					commonpbutil.WithTimeStamp(ts),
-					commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
-				),
-				ChannelName:   config.vChannelName,
-				Timestamp:     ts,
-				SegmentsStats: stats,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-		sub := tsoutil.SubByNow(ts)
-		pChan := funcutil.ToPhysicalChannel(config.vChannelName)
-		metrics.DataNodeProduceTimeTickLag.
-			WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), fmt.Sprint(collID), pChan).
-			Set(float64(sub))
-		return wTtMsgStream.Produce(&msgPack)
-	})
-
 	return &insertBufferNode{
 		ctx:      ctx,
 		BaseNode: baseNode,
 
-		timeTickStream:   wTtMsgStream,
 		flushMap:         sync.Map{},
 		flushChan:        flushCh,
 		resendTTChan:     resendTTCh,
@@ -737,7 +658,6 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 		channel:          config.channel,
 		idAllocator:      config.allocator,
 		channelName:      config.vChannelName,
-		ttMerger:         mt,
-		ttLogger:         &timeTickLogger{vChannelName: config.vChannelName},
+		timeTickManager:  timeTickManager,
 	}, nil
 }

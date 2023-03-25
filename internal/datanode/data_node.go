@@ -115,6 +115,8 @@ type DataNode struct {
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
 	compactionExecutor *compactionExecutor
+	// update and merge meta data and report DatanodeTimetickMsg
+	timeTickManager *timeTickManager
 
 	etcdCli   *clientv3.Client
 	rootCoord types.RootCoord
@@ -144,10 +146,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		factory:            factory,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
-
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		flowgraphManager:   newFlowgraphManager(),
+		clearSignal:        make(chan string, 100),
 	}
+	node.timeTickManager = newTimeTickManager(node)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
 }
@@ -515,6 +517,7 @@ func (node *DataNode) Start() error {
 	go node.BackGroundGC(node.clearSignal)
 
 	go node.compactionExecutor.start(node.ctx)
+	go node.timeTickManager.start(node.ctx)
 
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)

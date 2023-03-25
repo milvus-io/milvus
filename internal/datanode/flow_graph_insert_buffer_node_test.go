@@ -111,7 +111,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		delBufHeap:    &PriorityQueue{},
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		cd:      0,
 	}
 
-	_, err = newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	_, err = newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 	assert.Error(t, err)
 }
 
@@ -157,9 +157,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
-				ibn := &insertBufferNode{
-					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
-				}
+				ibn := &insertBufferNode{}
 				assert.False(t0, ibn.IsValidInMsg(test.in))
 			})
 		}
@@ -214,11 +212,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		delBufHeap:    &PriorityQueue{},
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 	require.NoError(t, err)
-
-	// trigger log ts
-	iBNode.ttLogger.counter.Store(999)
 
 	flushChan <- flushMsg{
 		msgID:        1,
@@ -387,7 +382,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		delMemorySize: 0,
 		delBufHeap:    &PriorityQueue{},
 	}
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -631,7 +626,7 @@ func TestRollBF(t *testing.T) {
 		delMemorySize: 0,
 		delBufHeap:    &PriorityQueue{},
 	}
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -1023,7 +1018,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			delMemorySize: 0,
 			delBufHeap:    &PriorityQueue{},
 		}
-		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, nil)
 		require.NoError(t, err)
 
 		inMsg := genFlowGraphInsertMsg(insertChannelName)

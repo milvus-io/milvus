@@ -24,7 +24,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -48,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -334,15 +332,6 @@ func TestFlush(t *testing.T) {
 //assert.EqualValues(t, 1, len(resp.SubcomponentStates))
 //assert.EqualValues(t, commonpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
 //}
-
-func TestGetTimeTickChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	resp, err := svr.GetTimeTickChannel(context.TODO())
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick, resp.Value)
-}
 
 func TestGetSegmentStates(t *testing.T) {
 	t.Run("normal cases", func(t *testing.T) {
@@ -1870,229 +1859,6 @@ func TestDropVirtualChannel(t *testing.T) {
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
-	})
-}
-
-func TestDataNodeTtChannel(t *testing.T) {
-	genMsg := func(msgType commonpb.MsgType, ch string, t Timestamp) *msgstream.DataNodeTtMsg {
-		return &msgstream.DataNodeTtMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{0},
-			},
-			DataNodeTtMsg: datapb.DataNodeTtMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   msgType,
-					MsgID:     0,
-					Timestamp: t,
-					SourceID:  0,
-				},
-				ChannelName: ch,
-				Timestamp:   t,
-			},
-		}
-	}
-	t.Run("Test segment flush after tt", func(t *testing.T) {
-		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
-		defer closeTestServer(t, svr)
-
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
-		defer ttMsgStream.Close()
-		info := &NodeInfo{
-			Address: "localhost:7777",
-			NodeID:  0,
-		}
-		err = svr.cluster.Register(info)
-		assert.Nil(t, err)
-
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-			},
-		})
-
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
-		assign := resp.SegIDAssignments[0]
-
-		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbID:         0,
-			CollectionID: 0,
-		})
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
-			SegmentID: assign.GetSegID(),
-			NumRows:   1,
-		})
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.Nil(t, err)
-
-		flushMsg := <-ch
-		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
-		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
-		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
-	})
-
-	t.Run("flush segment with different channels", func(t *testing.T) {
-		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
-		defer closeTestServer(t, svr)
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
-		defer ttMsgStream.Close()
-		info := &NodeInfo{
-			Address: "localhost:7777",
-			NodeID:  0,
-		}
-		err = svr.cluster.Register(info)
-		assert.Nil(t, err)
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-2",
-					Count:        100,
-				},
-			},
-		})
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, 2, len(resp.SegIDAssignments))
-		var assign *datapb.SegmentIDAssignment
-		for _, segment := range resp.SegIDAssignments {
-			if segment.GetChannelName() == "ch-1" {
-				assign = segment
-				break
-			}
-		}
-		assert.NotNil(t, assign)
-		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbID:         0,
-			CollectionID: 0,
-		})
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
-			SegmentID: assign.GetSegID(),
-			NumRows:   1,
-		})
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.Nil(t, err)
-		flushMsg := <-ch
-		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
-		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
-		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
-	})
-
-	t.Run("test expire allocation after receiving tt msg", func(t *testing.T) {
-		ch := make(chan any, 1)
-		helper := ServerHelper{
-			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
-		}
-		svr := newTestServer(t, nil, SetServerHelper(helper))
-		defer closeTestServer(t, svr)
-
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
-		defer ttMsgStream.Close()
-		node := &NodeInfo{
-			NodeID:  0,
-			Address: "localhost:7777",
-		}
-		err = svr.cluster.Register(node)
-		assert.Nil(t, err)
-
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-			},
-		})
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
-
-		assignedSegmentID := resp.SegIDAssignments[0].SegID
-		segment := svr.meta.GetHealthySegment(assignedSegmentID)
-		assert.EqualValues(t, 1, len(segment.allocations))
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", resp.SegIDAssignments[0].ExpireTime)
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.Nil(t, err)
-
-		<-ch
-		segment = svr.meta.GetHealthySegment(assignedSegmentID)
-		assert.EqualValues(t, 0, len(segment.allocations))
 	})
 }
 
@@ -3840,52 +3606,9 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	})
 }
 
-// https://github.com/milvus-io/milvus/issues/15659
-func TestIssue15659(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{
-		helper: ServerHelper{
-			eventAfterHandleDataNodeTt: func() {},
-		},
-	}
-	ms := &MockClosePanicMsgstream{}
-
-	msgChan := make(chan *msgstream.MsgPack)
-	go func() {
-		msgChan <- &msgstream.MsgPack{}
-	}()
-	ms.On("Chan").Return(msgChan)
-
-	ch := make(chan struct{})
-	go func() {
-		assert.NotPanics(t, func() {
-			s.serverLoopWg.Add(1)
-			s.handleDataNodeTimetickMsgstream(ctx, ms)
-			close(ch)
-		})
-	}()
-	cancel()
-	<-ch
-}
-
-type MockClosePanicMsgstream struct {
-	mock.Mock
-	msgstream.MsgStream
-}
-
-func (ms *MockClosePanicMsgstream) Close() {
-	panic("mocked close panic")
-}
-
-func (ms *MockClosePanicMsgstream) Chan() <-chan *msgstream.MsgPack {
-	args := ms.Called()
-	return args.Get(0).(chan *msgstream.MsgPack)
-}
-
 func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd,
@@ -3936,7 +3659,6 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ...Option) *Server {
 	var err error
 	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -3992,7 +3714,6 @@ func closeTestServer(t *testing.T, svr *Server) {
 func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -4185,7 +3906,6 @@ func Test_initGarbageCollection(t *testing.T) {
 
 func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	var err error
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
