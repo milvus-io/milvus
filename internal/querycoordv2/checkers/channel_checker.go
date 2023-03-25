@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,6 +39,7 @@ type ChannelChecker struct {
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
 	balancer  balance.Balance
+	nodeMgr   *session.NodeManager
 }
 
 func NewChannelChecker(
@@ -45,12 +47,14 @@ func NewChannelChecker(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
 ) *ChannelChecker {
 	return &ChannelChecker{
 		meta:      meta,
 		dist:      dist,
 		targetMgr: targetMgr,
 		balancer:  balancer,
+		nodeMgr:   nodeMgr,
 	}
 }
 

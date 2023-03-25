@@ -1084,6 +1084,8 @@ type queryCoordConfig struct {
 
 	//---- Balance ---
 	AutoBalance                         ParamItem `refreshable:"true"`
+	GlobalRowCountFactor                ParamItem `refreshable:"true"`
+	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
@@ -1102,6 +1104,8 @@ type queryCoordConfig struct {
 	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
 	CheckResourceGroupInterval ParamItem `refreshable:"false"`
 	EnableRGAutoRecover        ParamItem `refreshable:"true"`
+
+	NonUrgentTasksLimit ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1149,12 +1153,32 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.AutoBalance = ParamItem{
 		Key:          "queryCoord.autoBalance",
 		Version:      "2.0.0",
-		DefaultValue: "tru",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "Enable auto balance",
 		Export:       true,
 	}
 	p.AutoBalance.Init(base.mgr)
+
+	p.GlobalRowCountFactor = ParamItem{
+		Key:          "queryCoord.globalRowCountFactor",
+		Version:      "2.0.0",
+		DefaultValue: "0.1",
+		PanicIfEmpty: true,
+		Doc:          "the weight used when balancing segments among queryNodes",
+		Export:       true,
+	}
+	p.GlobalRowCountFactor.Init(base.mgr)
+
+	p.ScoreUnbalanceTolerationFactor = ParamItem{
+		Key:          "queryCoord.scoreUnbalanceTolerationFactor",
+		Version:      "2.0.0",
+		DefaultValue: "1.1",
+		PanicIfEmpty: true,
+		Doc:          "the largest value for unbalanced extent between from and to nodes when doing balance",
+		Export:       true,
+	}
+	p.ScoreUnbalanceTolerationFactor.Init(base.mgr)
 
 	p.OverloadedMemoryThresholdPercentage = ParamItem{
 		Key:          "queryCoord.overloadedMemoryThresholdPercentage",
@@ -1297,6 +1321,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.EnableRGAutoRecover.Init(base.mgr)
+
+	p.NonUrgentTasksLimit = ParamItem{
+		Key:          "queryCoord.nonUrgentTasksLimit",
+		Version:      "2.2.3",
+		DefaultValue: "5",
+		PanicIfEmpty: true,
+	}
+	p.NonUrgentTasksLimit.Init(base.mgr)
+
 }
 
 // /////////////////////////////////////////////////////////////////////////////

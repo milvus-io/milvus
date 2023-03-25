@@ -17,11 +17,12 @@
 package balance
 
 import (
-	"sort"
-
+	"fmt"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"sort"
 )
 
 type Weight = int
@@ -60,6 +61,18 @@ type SegmentAssignPlan struct {
 	Weight    Weight
 }
 
+func (segPlan SegmentAssignPlan) ToString() string {
+	str := "SegmentPlan:["
+	str += fmt.Sprintf("collectionID: %d, ", segPlan.Segment.CollectionID)
+	str += fmt.Sprintf("segmentID: %d, ", segPlan.Segment.ID)
+	str += fmt.Sprintf("replicaID: %d, ", segPlan.ReplicaID)
+	str += fmt.Sprintf("from: %d, ", segPlan.From)
+	str += fmt.Sprintf("to: %d, ", segPlan.To)
+	str += fmt.Sprintf("weight: %d, ", segPlan.Weight)
+	str += "]\n"
+	return str
+}
+
 type ChannelAssignPlan struct {
 	Channel   *meta.DmChannel
 	ReplicaID int64
@@ -68,10 +81,30 @@ type ChannelAssignPlan struct {
 	Weight    Weight
 }
 
+func (chanPlan ChannelAssignPlan) ToString() string {
+	str := "ChannelPlan:["
+	str += fmt.Sprintf("collectionID: %d, ", chanPlan.Channel.CollectionID)
+	str += fmt.Sprintf("channel: %s, ", chanPlan.Channel.ChannelName)
+	str += fmt.Sprintf("replicaID: %d, ", chanPlan.ReplicaID)
+	str += fmt.Sprintf("from: %d, ", chanPlan.From)
+	str += fmt.Sprintf("to: %d, ", chanPlan.To)
+	str += fmt.Sprintf("weight: %d, ", chanPlan.Weight)
+	str += "]\n"
+	return str
+}
+
+const (
+	BalanceInfoPrefix = "Balance-Info:"
+)
+
 type Balance interface {
-	AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
+	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
 	Balance() ([]SegmentAssignPlan, []ChannelAssignPlan)
+	PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan)
+	PrintCurrentReplicaDist(replica *meta.Replica,
+		stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
+		channelManager *meta.ChannelDistManager)
 }
 
 type RoundRobinBalancer struct {
@@ -79,7 +112,7 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil
@@ -146,4 +179,80 @@ func NewRoundRobinBalancer(scheduler task.Scheduler, nodeManager *session.NodeMa
 		scheduler:   scheduler,
 		nodeManager: nodeManager,
 	}
+}
+
+func (b *RoundRobinBalancer) PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
+	channelPlans []ChannelAssignPlan) {
+	balanceInfo := BalanceInfoPrefix + "{"
+	balanceInfo += fmt.Sprintf("collectionID:%d, replicaID:%d, ", collectionID, replicaID)
+	for _, segmentPlan := range segmentPlans {
+		balanceInfo += segmentPlan.ToString()
+	}
+	for _, channelPlan := range channelPlans {
+		balanceInfo += channelPlan.ToString()
+	}
+	balanceInfo += "}"
+	log.Debug(balanceInfo)
+}
+
+func (b *RoundRobinBalancer) PrintCurrentReplicaDist(replica *meta.Replica,
+	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
+	channelManager *meta.ChannelDistManager) {
+	distInfo := BalanceInfoPrefix + "{"
+	distInfo += fmt.Sprintf("collectionID:%d, replicaID:%d, ", replica.CollectionID, replica.GetID())
+	//1. print stopping nodes segment distribution
+	distInfo += fmt.Sprintf("[stoppingNodesSegmentDist:")
+	for stoppingNodeID, stoppedSegments := range stoppingNodesSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", stoppingNodeID)
+		distInfo += "stopped-segments:["
+		for _, stoppedSegment := range stoppedSegments {
+			distInfo += fmt.Sprintf("%d,", stoppedSegment.GetID())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+	//2. print normal nodes segment distribution
+	distInfo += "[normalNodesSegmentDist:"
+	for normalNodeID, normalNodeSegments := range nodeSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
+		distInfo += "loaded-segments:["
+		nodeRowSum := int64(0)
+		for _, normalSegment := range normalNodeSegments {
+			distInfo += fmt.Sprintf("[segmentID: %d,", normalSegment.GetID())
+			distInfo += fmt.Sprintf("rowCount: %d]", normalSegment.GetNumOfRows())
+			nodeRowSum += normalSegment.GetNumOfRows()
+		}
+		distInfo += fmt.Sprintf("] nodeRowSum:%d]", nodeRowSum)
+	}
+	distInfo += "]\n"
+
+	//3. print stopping nodes channel distribution
+	distInfo += "[stoppingNodesChannelDist:"
+	for stoppingNodeID, _ := range stoppingNodesSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", stoppingNodeID)
+		stoppingNodeChannels := channelManager.GetByNode(stoppingNodeID)
+		distInfo += fmt.Sprintf("count:%d, ", len(stoppingNodeChannels))
+		distInfo += "channels:["
+		for _, stoppingChan := range stoppingNodeChannels {
+			distInfo += fmt.Sprintf("%s,", stoppingChan.GetChannelName())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+
+	//4. print normal nodes channel distribution
+	distInfo += "[normalNodesChannelDist:"
+	for normalNodeID, _ := range nodeSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
+		normalNodeChannels := channelManager.GetByNode(normalNodeID)
+		distInfo += fmt.Sprintf("count:%d, ", len(normalNodeChannels))
+		distInfo += "channels:["
+		for _, normalNodeChan := range normalNodeChannels {
+			distInfo += fmt.Sprintf("%s,", normalNodeChan.GetChannelName())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+
+	log.Debug(distInfo)
 }

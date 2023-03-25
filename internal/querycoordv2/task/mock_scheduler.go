@@ -13,6 +13,16 @@ type MockScheduler struct {
 	mock.Mock
 }
 
+func (_m *MockScheduler) GetChannelTaskNum() int {
+	//hc---to implement
+	return 0;
+}
+
+func (_m *MockScheduler) GetSegmentTaskNum() int {
+	//hc---to implement
+	return 0;
+}
+
 type MockScheduler_Expecter struct {
 	mock *mock.Mock
 }
