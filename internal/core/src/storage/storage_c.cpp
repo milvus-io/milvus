@@ -18,14 +18,14 @@
 #include "config/ConfigChunkManager.h"
 #include "common/CGoHelper.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "storage/LocalChunkManager.h"
 #endif
 
 CStatus
 GetLocalUsedSize(int64_t* size) {
     try {
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
         auto& local_chunk_manager =
             milvus::storage::LocalChunkManager::GetInstance();
         auto dir = milvus::ChunkMangerConfig::GetLocalRootPath();

@@ -20,7 +20,7 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "index/VectorDiskIndex.h"
 #endif
 
@@ -76,7 +76,7 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
     auto index_type = create_index_info.index_type;
     auto metric_type = create_index_info.metric_type;
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
     // create disk index
     if (is_in_disk_list(index_type)) {
         switch (data_type) {

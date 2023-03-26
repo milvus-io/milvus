@@ -1,43 +1,43 @@
 #include <iostream>
-#include "dynamic_bitset_ext.hpp"
+#include "dynamic_bitset_ext.h"
 
 namespace {
 struct PtrWrapper {
-    explicit PtrWrapper(char*& ptr) : ptr_(ptr) {}
+    explicit PtrWrapper(char*& ptr) : ptr_(ptr) {
+    }
     char*& ptr_;
 };
 
 struct ConstPtrWrapper {
-    explicit ConstPtrWrapper(const char*& ptr) : ptr_(ptr) {}
+    explicit ConstPtrWrapper(const char*& ptr) : ptr_(ptr) {
+    }
     const char*& ptr_;
 };
 
 using Block = unsigned long;
 using Allocator = std::allocator<Block>;
 
-}    // namespace
-
+}  // namespace
 
 namespace boost {
 // a language lawyer's way to steal original pointer from boost::dynamic_bitset
 // salute to http://www.gotw.ca/gotw/076.htm
-template<>
+template <>
 void
 from_block_range<PtrWrapper, Block, Allocator>(PtrWrapper result,
-                                              PtrWrapper resultB,
-                                              dynamic_bitset<>& bitset) {
+                                               PtrWrapper resultB,
+                                               dynamic_bitset<>& bitset) {
     (void)resultB;
     result.ptr_ = reinterpret_cast<char*>(bitset.m_bits.data());
 }
 
-template<>
+template <>
 void
-to_block_range<Block, Allocator, ConstPtrWrapper>(const dynamic_bitset<>& bitset,
-                                                  ConstPtrWrapper result) {
+to_block_range<Block, Allocator, ConstPtrWrapper>(
+    const dynamic_bitset<>& bitset, ConstPtrWrapper result) {
     result.ptr_ = reinterpret_cast<const char*>(bitset.m_bits.data());
 }
-}    // namespace boost
-
+}  // namespace boost
 
 namespace boost_ext {
 
@@ -59,5 +59,4 @@ get_data(const boost::dynamic_bitset<>& bitset) {
     return ptr;
 }
 
-
-}    // namespace boost_ext
+}  // namespace boost_ext

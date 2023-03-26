@@ -27,7 +27,7 @@
 
 namespace milvus::index {
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 
 #define kSearchListMaxValue1 200    // used if tok <= 20
 #define kSearchListMaxValue2 65535  // used for topk > 20

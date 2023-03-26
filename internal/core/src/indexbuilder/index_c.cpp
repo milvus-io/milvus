@@ -15,6 +15,7 @@
 #include <malloc.h>
 #endif
 
+#include "log/Log.h"
 #include "exceptions/EasyAssert.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
@@ -50,6 +51,7 @@ CreateIndex(enum CDataType dtype,
                                            c_storage_config.useSSL,
                                            c_storage_config.useIAM};
 
+        LOG_SEGCORE_INFO_ << "Create Index address: " << address;
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
                 dtype,

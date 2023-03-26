@@ -18,7 +18,6 @@
 
 #include "ConfigKnowhere.h"
 #include "exceptions/EasyAssert.h"
-#include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/thread_pool.h"
 #include "knowhere/comp/knowhere_config.h"
@@ -28,14 +27,13 @@ namespace milvus::config {
 std::once_flag init_knowhere_once_;
 
 void
-KnowhereInitImpl(const char* conf_file) {
+KnowhereInitImpl() {
     auto init = [&]() {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::SetLogHandler();
         knowhere::KnowhereConfig::SetStatisticsLevel(0);
         knowhere::KnowhereConfig::ShowVersion();
-        google::InitGoogleLogging("milvus");
     };
 
     std::call_once(init_knowhere_once_, init);

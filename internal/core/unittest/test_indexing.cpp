@@ -24,7 +24,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/Timer.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "storage/MinioChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 
@@ -387,7 +387,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     create_index_info.field_type = vec_field_data_type;
     index::IndexBasePtr index;
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
         milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
         milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
         auto file_manager =
@@ -405,7 +405,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::VectorIndex* vec_index = nullptr;
 
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
         // TODO ::diskann.query need load first, ugly
         auto binary_set = index->Serialize(milvus::Config{});
         index.reset();

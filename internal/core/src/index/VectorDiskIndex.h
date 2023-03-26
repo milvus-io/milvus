@@ -24,7 +24,7 @@
 
 namespace milvus::index {
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 
 template <typename T>
 class VectorDiskAnnIndex : public VectorIndex {

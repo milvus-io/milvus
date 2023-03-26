@@ -17,7 +17,7 @@
 package storage
 
 /*
-#cgo pkg-config: milvus_storage
+#cgo pkg-config: milvus_segcore
 
 #include <stdlib.h>
 #include "storage/parquet_c.h"

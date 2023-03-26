@@ -12,33 +12,27 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/unittest)
 
-set(bench_srcs 
+find_package(benchmark REQUIRED)
+
+set(bench_srcs
     bench_naive.cpp
     bench_search.cpp
 )
 
 set(indexbuilder_bench_srcs
-        bench_indexbuilder.cpp
+  bench_indexbuilder.cpp
 )
 
 add_executable(all_bench ${bench_srcs})
 target_link_libraries(all_bench
-        milvus_segcore
-        milvus_log
-        pthread
-        )
-
-target_link_libraries(all_bench benchmark_main)
+    milvus_segcore
+    pthread
+    benchmark::benchmark_main
+)
 
 add_executable(indexbuilder_bench ${indexbuilder_bench_srcs})
 target_link_libraries(indexbuilder_bench
-        milvus_segcore
-        milvus_indexbuilder
-        milvus_index
-        milvus_log
-        pthread
-        knowhere
-        milvus_utils
-        )
-
-target_link_libraries(indexbuilder_bench benchmark_main)
+    milvus_segcore
+    pthread
+    benchmark::benchmark_main
+)

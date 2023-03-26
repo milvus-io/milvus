@@ -10,14 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "config/ConfigKnowhere.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
 
 namespace milvus::segcore {
 extern "C" void
-SegcoreInit(const char* conf_file) {
-    milvus::config::KnowhereInitImpl(conf_file);
+SegcoreInit() {
+    if (!google::IsGoogleLoggingInitialized()) {
+        google::InitGoogleLogging("milvus");
+    }
+    milvus::config::KnowhereInitImpl();
 }
 
 // TODO merge small index config into one config map, including enable/disable small_index

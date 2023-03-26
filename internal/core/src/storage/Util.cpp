@@ -22,7 +22,7 @@
 #include "config/ConfigChunkManager.h"
 #include "storage/parquet_c.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "storage/DiskFileManagerImpl.h"
 #endif
 
@@ -343,7 +343,7 @@ CreateFileManager(IndexType index_type,
                   const IndexMeta& index_meta,
                   const StorageConfig& storage_config) {
     // TODO :: switch case index type to create file manager
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
     if (is_in_disk_list(index_type)) {
         return std::make_shared<DiskFileManagerImpl>(
             field_meta, index_meta, storage_config);

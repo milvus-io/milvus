@@ -14,7 +14,8 @@ include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
-# TODO: better to use ls/find pattern
+find_package(GTest REQUIRED)
+
 set(MILVUS_TEST_FILES
         init_gtest.cpp
         test_bf.cpp
@@ -49,9 +50,11 @@ set(MILVUS_TEST_FILES
         test_data_codec.cpp
         test_range_search_sort.cpp
         test_tracer.cpp
-        )
+        test_scalar_index_creator.cpp
+        test_string_index.cpp
+)
 
-if ( BUILD_DISK_ANN STREQUAL "ON" )
+if (MILVUS_DISKANN STREQUAL "ON")
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
             #test_minio_chunk_manager.cpp
@@ -60,58 +63,38 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
             )
 endif()
 
-if (LINUX OR APPLE)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_scalar_index_creator.cpp
-            test_string_index.cpp
-            )
+if (MILVUS_WITH_ASAN STREQUAL "ON")
+    message( STATUS "Building Milvus using AddressSanitizer")
+    add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
+    add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
 endif()
 
 if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
-
     # check if memory leak exists in index builder
     set(INDEX_BUILDER_TEST_FILES
-            test_index_wrapper.cpp
-            test_scalar_index_creator.cpp
-            test_index_c_api.cpp
-            )
+      test_index_wrapper.cpp
+      test_scalar_index_creator.cpp
+      test_index_c_api.cpp
+    )
 
-    add_executable(index_builder_test
-            ${INDEX_BUILDER_TEST_FILES}
-            )
+    add_executable(index_builder_test ${INDEX_BUILDER_TEST_FILES})
 
     target_link_libraries(index_builder_test
-            gtest
-            gtest_main
-            milvus_segcore
-            milvus_storage
-            milvus_indexbuilder
-            )
+      GTest::gtest_main
+      milvus_segcore
+      pthread
+    )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
 
-add_executable(all_tests
-        ${MILVUS_TEST_FILES}
-        )
+add_executable(all_tests ${MILVUS_TEST_FILES})
 
 target_link_libraries(all_tests
-        gtest
-        milvus_segcore
-        milvus_storage
-        milvus_indexbuilder
-        pthread
-        )
+  GTest::gtest_main
+  milvus_segcore
+  pthread
+)
 
 install(TARGETS all_tests DESTINATION unittest)
 
-if (LINUX)
-    add_subdirectory(bench)
-endif ()
+add_subdirectory(bench)

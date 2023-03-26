@@ -11,6 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+set(MILVUS_JEMALLOC_BUILD_VERSION "5.2.1")
 if (DEFINED ENV{MILVUS_JEMALLOC_URL})
     set(JEMALLOC_SOURCE_URL "$ENV{MILVUS_JEMALLOC_URL}")
 else ()
@@ -51,7 +52,7 @@ if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
     # Enable jemalloc debug checks when Milvus itself has debugging enabled
     list(APPEND JEMALLOC_CONFIGURE_COMMAND "--enable-debug")
 endif ()
-set(JEMALLOC_BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS})
+set(JEMALLOC_BUILD_COMMAND ${CMAKE_MAKE_PROGRAM} ${MAKE_BUILD_ARGS})
 if (CMAKE_OSX_SYSROOT)
     list(APPEND JEMALLOC_BUILD_COMMAND "SDKROOT=${CMAKE_OSX_SYSROOT}")
 endif ()
@@ -65,7 +66,7 @@ ExternalProject_Add(
         BUILD_IN_SOURCE 1
         BUILD_COMMAND ${JEMALLOC_BUILD_COMMAND}
         BUILD_BYPRODUCTS "${JEMALLOC_STATIC_LIB}"
-        INSTALL_COMMAND ${MAKE} install)
+        INSTALL_COMMAND ${CMAKE_MAKE_PROGRAM} install)
 
 add_library(jemalloc SHARED IMPORTED)
 set_target_properties(jemalloc

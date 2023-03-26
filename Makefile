@@ -148,7 +148,7 @@ download-milvus-proto:
 
 build-3rdparty:
 	@echo "Build 3rdparty ..."
-	@(env bash $(PWD)/scripts/3rdparty_build.sh)
+	@(env bash $(PWD)/scripts/3rdparty_build.sh -a ${useasan})
 
 generated-proto: download-milvus-proto build-3rdparty
 	@echo "Generate proto ..."

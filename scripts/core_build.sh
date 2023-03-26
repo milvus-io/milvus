@@ -92,13 +92,9 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${CPP_SRC_DIR}/output"
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
-DB_PATH="/tmp/milvus"
-PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
-WITH_PROMETHEUS="ON"
-CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
@@ -112,9 +108,6 @@ while getopts "p:d:t:s:f:n:i:a:ulrcghzmeb" arg; do
     ;;
   p)
     INSTALL_PREFIX=$OPTARG
-    ;;
-  d)
-    DB_PATH=$OPTARG
     ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
@@ -134,17 +127,8 @@ while getopts "p:d:t:s:f:n:i:a:ulrcghzmeb" arg; do
   c)
     BUILD_COVERAGE="ON"
     ;;
-  z)
-    PROFILING="ON"
-    ;;
   g)
     GPU_VERSION="ON"
-    ;;
-  e)
-    WITH_PROMETHEUS="OFF"
-    ;;
-  s)
-    CUDA_ARCH=$OPTARG
     ;;
   b)
     EMBEDDED_MILVUS="ON"
@@ -169,22 +153,19 @@ while getopts "p:d:t:s:f:n:i:a:ulrcghzmeb" arg; do
 parameter:
 -f: custom paths of thirdparty downloaded files(default: NULL)
 -p: install prefix(default: $(pwd)/milvus)
--d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
--z: profiling(default: OFF)
 -g: build GPU version(default: OFF)
--e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-g] [-m] [-h] [-b]
                 "
     exit 0
     ;;
@@ -205,10 +186,7 @@ CMAKE_GENERATOR="Unix Makefiles"
 # MSYS system
 if [ "$MSYSTEM" == "MINGW64" ] ; then
   BUILD_COVERAGE=OFF
-  PROFILING=OFF
   GPU_VERSION=OFF
-  WITH_PROMETHEUS=OFF
-  CUDA_ARCH=OFF
 
   # extra default cmake args for msys
   CMAKE_GENERATOR="MSYS Makefiles"
@@ -240,27 +218,18 @@ fi
 
 CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
 
-arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
--DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
--DOpenBLAS_SOURCE=AUTO \
--DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
--DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
--DBUILD_COVERAGE=${BUILD_COVERAGE} \
--DMILVUS_DB_PATH=${DB_PATH} \
--DENABLE_CPU_PROFILING=${PROFILING} \
--DMILVUS_GPU_VERSION=${GPU_VERSION} \
--DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
--DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
--DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
--DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
--DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
--DUSE_ASAN=${USE_ASAN} \
--DOPEN_SIMD=${OPEN_SIMD} \
+-DCMAKE_TOOLCHAIN_FILE="${BUILD_OUTPUT_DIR}/conan/conan_toolchain.cmake" \
 -DCPU_ARCH=${CPU_ARCH} \
+-DMILVUS_BUILD_TESTS=${BUILD_UNITTEST} \
+-DMILVUS_BUILD_COVERAGE=${BUILD_COVERAGE} \
+-DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DMILVUS_OPEN_SIMD=${OPEN_SIMD} \
+-DMILVUS_DISKANN=${BUILD_DISK_ANN} \
+-DMILVUS_WITH_ASAN=${USE_ASAN} \
 ${CPP_SRC_DIR}"
 
 echo "CC $CC"

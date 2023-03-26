@@ -17,7 +17,7 @@
 package initcore
 
 /*
-#cgo pkg-config: milvus_common
+#cgo pkg-config: milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>

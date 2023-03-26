@@ -18,9 +18,9 @@
 
 #include <fmt/core.h>
 
-#include <boost_ext/dynamic_bitset_ext.hpp>
 #include <deque>
 
+#include "common/dynamic_bitset_ext.h"
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/bitsetview.h"

@@ -47,6 +47,15 @@ jobs:
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
       - name: Checkout
         uses: actions/checkout@v2
         with:
@@ -68,6 +77,7 @@ jobs:
         if: steps.changed-files-cpp.outputs.any_changed == 'true'
         run: |
           echo "useasan=true" >> $GITHUB_ENV
+          echo "suffix=-debug" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: 'Generate CCache Hash'
         env:
@@ -80,14 +90,14 @@ jobs:
         uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+          key: ubuntu${{ matrix.ubuntu }}-ccache${{ env.suffix }}-${{ env.corehash }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache${{ env.suffix }}-
       - name: Cache Conan Packages
         uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+          key: ubuntu${{ matrix.ubuntu }}-conan${{ env.suffix }}-${{ hashFiles('internal/core/conanfile.*') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-conan${{ env.suffix }}-
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
@@ -121,7 +131,7 @@ jobs:
         uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
+          key: ubuntu${{ matrix.ubuntu }}-conan${{ env.suffix }}-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: UT
         run: |

@@ -263,7 +263,7 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto index_file_path_prefix = milvus::storage::GenLocalIndexPathPrefix(
             load_index_info->index_build_id, load_index_info->index_version);
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
         milvus::storage::LocalChunkManager::GetInstance().RemoveDir(
             index_file_path_prefix);
 #endif

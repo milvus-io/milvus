@@ -29,7 +29,7 @@
 #include "storage/Types.h"
 #include "storage/FileManager.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "storage/LocalChunkManager.h"
 #include "storage/MinioChunkManager.h"
 #endif

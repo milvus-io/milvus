@@ -17,7 +17,7 @@
 package querynodev2
 
 /*
-#cgo pkg-config: milvus_segcore milvus_common
+#cgo pkg-config: milvus_segcore
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -31,7 +31,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"plugin"
 	"runtime/debug"
 	"sync"
@@ -176,9 +175,7 @@ func (node *QueryNode) Register() error {
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() {
-	cEasyloggingYaml := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
-	C.SegcoreInit(cEasyloggingYaml)
-	C.free(unsafe.Pointer(cEasyloggingYaml))
+	C.SegcoreInit()
 
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())

@@ -17,7 +17,7 @@
 package indexnode
 
 /*
-#cgo pkg-config: milvus_common milvus_indexbuilder
+#cgo pkg-config: milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -30,7 +30,6 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"path"
 	"sync"
 	"syscall"
 	"time"
@@ -138,9 +137,7 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) initKnowhere() {
-	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
-	C.IndexBuilderInit(cEasyloggingYaml)
-	C.free(unsafe.Pointer(cEasyloggingYaml))
+	C.IndexBuilderInit()
 
 	// override index builder SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType.GetValue())

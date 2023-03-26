@@ -1,4 +1,5 @@
-from conans import ConanFile, CMake
+from conan import ConanFile
+from conan.tools.cmake import CMakeToolchain, CMakeDeps
 
 
 class MilvusConan(ConanFile):
@@ -45,7 +46,7 @@ class MilvusConan(ConanFile):
         "folly/2023.02.24@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
     )
-    generators = ("cmake", "cmake_find_package")
+    # generators = ("cmake", "cmake_find_package")
     default_options = {
         "rocksdb:shared": True,
         "arrow:parquet": True,
@@ -75,6 +76,13 @@ class MilvusConan(ConanFile):
             self.options["boost"].without_graph = True
             self.options["boost"].without_graph_parallel = True
             self.options["boost"].without_nowide = True
+
+    def generate(self):
+        tc = CMakeToolchain(self)
+        tc.generate()
+
+        deps = CMakeDeps(self)
+        deps.generate()
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")

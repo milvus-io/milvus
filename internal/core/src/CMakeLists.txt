@@ -14,24 +14,43 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(MILVUS_GPU_VERSION STREQUAL "ON")
-    project(core CXX C CUDA)
-else()
-    project(core CXX C)
-endif()
-
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
-set(FOUND_OPENBLAS "unknown")
-add_subdirectory( pb )
-add_subdirectory( exceptions )
-add_subdirectory( utils )
-add_subdirectory( log )
-add_subdirectory( config )
-add_subdirectory( common )
-add_subdirectory( storage )
-add_subdirectory( index )
-add_subdirectory( query )
-add_subdirectory( segcore )
-add_subdirectory( indexbuilder )
+find_package(Protobuf REQUIRED)
+find_package(gRPC REQUIRED)
+find_package(Boost REQUIRED)
+find_package(arrow REQUIRED)
+find_package(TBB REQUIRED)
+find_package(fmt REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(opentelemetry-cpp REQUIRED)
+find_package(nlohmann_json REQUIRED)
+find_package(marisa REQUIRED)
+find_package(AWSSDK REQUIRED)
+find_package(folly REQUIRED)
+
+milvus_add_pkg_config("milvus_segcore")
+
+file(GLOB_RECURSE SRC_FILES
+        ${MILVUS_ENGINE_SRC}/*.cpp
+        ${MILVUS_ENGINE_SRC}/*.cc
+        )
+add_library(milvus_segcore SHARED ${SRC_FILES})
+target_link_libraries(milvus_segcore
+  Boost::boost
+  TBB::tbb
+  fmt::fmt
+  protobuf::libprotobuf
+  nlohmann_json::nlohmann_json
+  opentelemetry-cpp::opentelemetry-cpp
+  marisa::marisa
+  arrow::libarrow
+  arrow::libparquet
+  aws-sdk-cpp::aws-sdk-cpp
+  yaml-cpp
+  Folly::folly
+  knowhere
+  simdjson
+)
+install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")

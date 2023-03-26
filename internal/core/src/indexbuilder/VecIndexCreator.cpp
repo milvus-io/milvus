@@ -17,7 +17,7 @@
 #include "index/IndexFactory.h"
 #include "pb/index_cgo_msg.pb.h"
 
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
 #include "storage/DiskFileManagerImpl.h"
 #endif
 
@@ -51,7 +51,7 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
     index_info.metric_type = index::GetMetricTypeFromConfig(config_);
 
     std::shared_ptr<storage::FileManagerImpl> file_manager = nullptr;
-#ifdef BUILD_DISK_ANN
+#ifdef MILVUS_DISKANN
     if (index::is_in_disk_list(index_info.index_type)) {
         // For now, only support diskann index
         file_manager = std::make_shared<storage::DiskFileManagerImpl>(

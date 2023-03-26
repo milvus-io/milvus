@@ -5,4 +5,6 @@ else()
   milvus_add_pkg_config("rocksdb")
 endif()
 
-install(DIRECTORY "${CONAN_INCLUDE_DIRS_ROCKSDB}/rocksdb/" DESTINATION "${CMAKE_INSTALL_PREFIX}/include/rocksdb/")
+find_package(RocksDB REQUIRED)
+
+install(DIRECTORY "${RocksDB_INCLUDE_DIR}/rocksdb/" DESTINATION "${CMAKE_INSTALL_PREFIX}/include/rocksdb/")

@@ -44,33 +44,10 @@ endmacro()
 set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
-
-#----------------------------------------------------------------------
-set_option_category("Thirdparty")
-
-set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
-
-define_option_string(MILVUS_DEPENDENCY_SOURCE
-        "Method to use for acquiring MILVUS's build dependencies"
-        "${MILVUS_DEPENDENCY_SOURCE_DEFAULT}"
-        "AUTO"
-        "BUNDLED"
-        "SYSTEM")
-
-define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
-
-define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
-        "Show output from ExternalProjects rather than just logging to files" ON)
-
-#----------------------------------------------------------------------
-set_option_category("Test and benchmark")
-
-unset(MILVUS_BUILD_TESTS CACHE)
-if (BUILD_UNIT_TEST)
-    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" ON)
-else ()
-    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" OFF)
-endif (BUILD_UNIT_TEST)
+define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" OFF)
+define_option(MILVUS_BUILD_COVERAGE "Build the MILVUS with coverage" OFF)
+define_option(MILVUS_WITH_ASAN "Build the MILVUS with address sanitizer" OFF)
+define_option(MILVUS_DISKANN "Build the MILVUS with diskann" OFF)
 
 #----------------------------------------------------------------------
 macro(config_summary)

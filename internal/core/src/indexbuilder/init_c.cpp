@@ -9,13 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string.h>
+#include <cstring>
+#include <glog/logging.h>
+
 #include "config/ConfigKnowhere.h"
 #include "indexbuilder/init_c.h"
 
 void
-IndexBuilderInit(const char* conf_file) {
-    milvus::config::KnowhereInitImpl(conf_file);
+IndexBuilderInit() {
+    if (!google::IsGoogleLoggingInitialized()) {
+        google::InitGoogleLogging("milvus");
+    }
+    milvus::config::KnowhereInitImpl();
 }
 
 // return value must be freed by the caller

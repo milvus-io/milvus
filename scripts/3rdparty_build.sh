@@ -18,20 +18,38 @@
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
-  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+    DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 CPP_SRC_DIR="${ROOT_DIR}/internal/core"
 BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
-  mkdir ${BUILD_OUTPUT_DIR}
+    mkdir ${BUILD_OUTPUT_DIR}
 fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
 pushd ${BUILD_OUTPUT_DIR}
+
+BUILD_TYPE="Release"
+USE_ASAN="OFF"
+
+while getopts "p:d:t:s:f:n:a:ulrcghzmeb" arg; do
+    case $arg in
+        t)
+            BUILD_TYPE=$OPTARG # BUILD_TYPE
+            ;;
+        a)
+            ENV_VAL=$OPTARG
+            if [[ ${ENV_VAL} == 'true' ]]; then
+                USE_ASAN="ON"
+                BUILD_TYPE=Debug
+            fi
+            ;;
+    esac
+done
 
 export CONAN_REVISIONS_ENABLED=1
 if [[ ! `conan remote list` == *default-conan-local* ]]; then
@@ -39,22 +57,22 @@ if [[ ! `conan remote list` == *default-conan-local* ]]; then
 fi
 unameOut="$(uname -s)"
 case "${unameOut}" in
-  Darwin*)
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
-    ;;
-  Linux*)
-    echo "Running on ${OS_NAME}"
-    export CPU_TARGET=avx
-    GCC_VERSION=`gcc -dumpversion`
-    if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} || { echo 'conan install failed'; exit 1; }
-    else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
-    fi
-    ;;
-  *)
-    echo "Cannot build on windows"
-    ;;
+    Darwin*)
+        conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -s build_type=${BUILD_TYPE} || { echo 'conan install failed'; exit 1; }
+        ;;
+    Linux*)
+        echo "Running on ${OS_NAME}"
+        export CPU_TARGET=avx
+        GCC_VERSION=`gcc -dumpversion`
+        if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
+            conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s build_type=${BUILD_TYPE} || { echo 'conan install failed'; exit 1; }
+        else
+            conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s build_type=${BUILD_TYPE} || { echo 'conan install failed'; exit 1; }
+        fi
+        ;;
+    *)
+        echo "Cannot build on windows"
+        ;;
 esac
 
 popd
