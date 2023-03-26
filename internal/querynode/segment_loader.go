@@ -642,6 +642,11 @@ func (loader *segmentLoader) loadSegmentBloomFilter(ctx context.Context, segment
 		return nil
 	}
 
+	if Params.DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		log.Info("skip load BF with config set ", zap.Int64("segmentID", segment.segmentID))
+		return nil
+	}
+
 	startTs := time.Now()
 	values, err := loader.cm.MultiRead(ctx, binlogPaths)
 	if err != nil {
