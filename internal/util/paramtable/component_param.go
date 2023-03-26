@@ -1574,6 +1574,8 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     bool
 	MemoryForceSyncSegmentNum int
 	MemoryWatermark           float64
+
+	SkipBFStatsLoad bool
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1588,6 +1590,8 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initSyncPeriod()
 	p.initIOConcurrency()
 	p.initDataNodeTimeTickInterval()
+
+	p.initSkipBFStatsLoad()
 
 	p.initChannelWatchPath()
 	p.initMemoryForceSyncEnable()
@@ -1651,6 +1655,10 @@ func (p *dataNodeConfig) initIOConcurrency() {
 
 func (p *dataNodeConfig) initDataNodeTimeTickInterval() {
 	p.DataNodeTimeTickInterval = p.Base.ParseIntWithDefault("datanode.timetick.interval", 500)
+}
+
+func (p *dataNodeConfig) initSkipBFStatsLoad() {
+	p.SkipBFStatsLoad = p.Base.ParseBool("dataNode.skip.BFStats.Load", false)
 }
 
 func (p *dataNodeConfig) SetNodeID(id UniqueID) {
