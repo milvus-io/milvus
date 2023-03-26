@@ -1533,6 +1533,9 @@ type dataNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	// skip BF load on datanode recovery
+	SkipBFStatsLoad bool
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1545,6 +1548,8 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initBinlogMaxSize()
 	p.initSyncPeriod()
 	p.initIOConcurrency()
+
+	p.initSkipBFStatsLoad()
 
 	p.initChannelWatchPath()
 }
@@ -1597,6 +1602,10 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 
 func (p *dataNodeConfig) initIOConcurrency() {
 	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
+}
+
+func (p *dataNodeConfig) initSkipBFStatsLoad() {
+	p.SkipBFStatsLoad = p.Base.ParseBool("dataNode.skip.BFStats.Load", false)
 }
 
 func (p *dataNodeConfig) SetNodeID(id UniqueID) {
