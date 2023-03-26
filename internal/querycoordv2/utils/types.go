@@ -90,6 +90,8 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, indexes []*querypb.FieldIn
 		Deltalogs:     segment.Deltalogs,
 		InsertChannel: segment.InsertChannel,
 		IndexInfos:    indexes,
+		StartPosition: segment.GetStartPosition(),
+		EndPosition:   segment.GetDmlPosition(),
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo

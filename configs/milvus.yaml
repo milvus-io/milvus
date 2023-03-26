@@ -182,13 +182,15 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
-  enableActiveStandby: false
   port: 19531
   grpc:
     serverMaxSendSize: 536870912
     serverMaxRecvSize: 536870912
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 268435456
+  taskMergeCap: 1
+  taskExecutionCap: 256
+  enableActiveStandby: false  # Enable active-standby
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:

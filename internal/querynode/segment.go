@@ -122,7 +122,7 @@ func (s *Segment) getType() segmentType {
 }
 
 func (s *Segment) setIndexedFieldInfo(fieldID UniqueID, info *IndexedFieldInfo) {
-	s.indexedFieldInfos.InsertIfNotPresent(fieldID, info)
+	s.indexedFieldInfos.GetOrInsert(fieldID, info)
 }
 
 func (s *Segment) getIndexedFieldInfo(fieldID UniqueID) (*IndexedFieldInfo, error) {

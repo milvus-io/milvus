@@ -85,7 +85,7 @@ func initMeta() *etcdpb.CollectionMeta {
 }
 
 func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
-	insertCodec := NewInsertCodec(schema)
+	insertCodec := NewInsertCodecWithSchema(schema)
 	insertData := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
@@ -126,8 +126,7 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 	}
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
-	meta := initMeta()
-	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, meta, 16, localCacheEnable)
+	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, 16, localCacheEnable)
 	if err != nil {
 		return nil, cancel, err
 	}
@@ -157,13 +156,12 @@ func TestNewVectorChunkManager(t *testing.T) {
 	assert.NotNil(t, rcm)
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
-	meta := initMeta()
-	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, meta, 16, true)
+	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, 16, true)
 	assert.Equal(t, "", vcm.RootPath())
 	assert.Nil(t, err)
 	assert.NotNil(t, vcm)
 
-	vcm, err = NewVectorChunkManager(ctx, lcm, rcm, meta, -1, true)
+	vcm, err = NewVectorChunkManager(ctx, lcm, rcm, -1, true)
 	assert.NotNil(t, err)
 	assert.Nil(t, vcm)
 }

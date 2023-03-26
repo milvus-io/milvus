@@ -26,8 +26,9 @@ import (
 
 type Segment struct {
 	*datapb.SegmentInfo
-	Node    int64 // Node the segment is in
-	Version int64 // Version is the timestamp of loading segment
+	Node               int64  // Node the segment is in
+	Version            int64  // Version is the timestamp of loading segment
+	LastDeltaTimestamp uint64 // The timestamp of the last delta record
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {

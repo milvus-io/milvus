@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -36,7 +37,6 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	t0 := tsoutil.ComposeTSByTime(time.Now().Add(-20*time.Minute), 0)
 	t1 := tsoutil.ComposeTSByTime(time.Now().Add(-8*time.Minute), 0)
 	t2 := tsoutil.ComposeTSByTime(time.Now().Add(-5*time.Minute), 0)
-	t3 := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:            0,
@@ -51,28 +51,6 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		},
 	}
 
-	t.Run("test set deltaPosition from channel checkpoint", func(t *testing.T) {
-		segmentAction := NewSegmentAction(0, 0, "", 0)
-		segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, segmentAction)
-		assert.NoError(t, err)
-
-		resp := &datapb.GetSegmentInfoResponse{
-			Infos: []*datapb.SegmentInfo{
-				proto.Clone(segmentInfo).(*datapb.SegmentInfo),
-			},
-			ChannelCheckpoint: map[string]*msgpb.MsgPosition{
-				mockVChannel: {
-					ChannelName: mockPChannel,
-					Timestamp:   t3,
-				},
-			},
-		}
-		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, nil, resp)
-		assert.Equal(t, 1, len(req.GetDeltaPositions()))
-		assert.Equal(t, mockPChannel, req.DeltaPositions[0].ChannelName)
-		assert.Equal(t, t3, req.DeltaPositions[0].Timestamp)
-	})
-
 	t.Run("test set deltaPosition from segment dmlPosition", func(t *testing.T) {
 		segmentAction := NewSegmentAction(0, 0, "", 0)
 		segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, segmentAction)
@@ -83,7 +61,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 				proto.Clone(segmentInfo).(*datapb.SegmentInfo),
 			},
 		}
-		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, nil, resp)
+		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, &querypb.SegmentLoadInfo{}, resp)
 		assert.Equal(t, 1, len(req.GetDeltaPositions()))
 		assert.Equal(t, mockPChannel, req.DeltaPositions[0].ChannelName)
 		assert.Equal(t, t2, req.DeltaPositions[0].Timestamp)
@@ -99,7 +77,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		resp := &datapb.GetSegmentInfoResponse{
 			Infos: []*datapb.SegmentInfo{segInfo},
 		}
-		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, nil, resp)
+		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, &querypb.SegmentLoadInfo{}, resp)
 		assert.Equal(t, 1, len(req.GetDeltaPositions()))
 		assert.Equal(t, mockPChannel, req.DeltaPositions[0].ChannelName)
 		assert.Equal(t, t1, req.DeltaPositions[0].Timestamp)
@@ -115,7 +93,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		resp := &datapb.GetSegmentInfoResponse{
 			Infos: []*datapb.SegmentInfo{segInfo},
 		}
-		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, nil, resp)
+		req := packLoadSegmentRequest(segmentTask, segmentAction, nil, nil, &querypb.SegmentLoadInfo{}, resp)
 		assert.Equal(t, 1, len(req.GetDeltaPositions()))
 		assert.Equal(t, mockPChannel, req.DeltaPositions[0].ChannelName)
 		assert.Equal(t, t0, req.DeltaPositions[0].Timestamp)

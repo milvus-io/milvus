@@ -124,7 +124,7 @@ func TestDataSorter(t *testing.T) {
 		},
 	}
 
-	insertCodec := NewInsertCodec(schema)
+	insertCodec := NewInsertCodecWithSchema(schema)
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{

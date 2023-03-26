@@ -1338,11 +1338,15 @@ type queryNodeConfig struct {
 	TopKMergeRatio       ParamItem `refreshable:"true"`
 	CPURatio             ParamItem `refreshable:"true"`
 	MaxTimestampLag      ParamItem `refreshable:"true"`
+	GCEnabled            ParamItem `refreshable:"true"`
 
 	GCHelperEnabled     ParamItem `refreshable:"false"`
 	MinimumGOGCConfig   ParamItem `refreshable:"false"`
 	MaximumGOGCConfig   ParamItem `refreshable:"false"`
 	GracefulStopTimeout ParamItem `refreshable:"false"`
+
+	// delete buffer
+	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1607,6 +1611,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxTimestampLag.Init(base.mgr)
 
+	p.GCEnabled = ParamItem{
+		Key:          "queryNode.gcenabled",
+		Version:      "2.3.0",
+		DefaultValue: "true",
+	}
+	p.GCEnabled.Init(base.mgr)
+
 	p.GCHelperEnabled = ParamItem{
 		Key:          "queryNode.gchelper.enabled",
 		Version:      "2.0.0",
@@ -1635,6 +1646,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.MaxSegmentDeleteBuffer = ParamItem{
+		Key:          "queryNode.maxSegmentDeleteBuffer",
+		Version:      "2.3.0",
+		DefaultValue: "10000000",
+	}
+	p.MaxSegmentDeleteBuffer.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
