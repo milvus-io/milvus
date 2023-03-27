@@ -213,6 +213,7 @@ func TestFlowGraphManager(t *testing.T) {
 			t.Run(test.testName, func(t *testing.T) {
 				var baseParams = &Params.BaseTable
 				baseParams.Save(Params.DataNodeCfg.MemoryWatermark.Key, fmt.Sprintf("%f", test.watermark))
+				baseParams.Save(Params.DataNodeCfg.MemoryForceSyncEnable.Key, fmt.Sprintf("%t", true))
 				for i, memorySize := range test.memorySizes {
 					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
 					vchan := &datapb.VchannelInfo{
