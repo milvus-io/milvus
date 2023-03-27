@@ -700,7 +700,7 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 
 		// Log if # of rows is updated.
 		if segment.currRows < stat.GetNumRows() {
-			log.Info("Updating segment number of rows",
+			log.Debug("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
 				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
