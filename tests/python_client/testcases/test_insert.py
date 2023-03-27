@@ -956,9 +956,9 @@ class TestInsertAsync(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data()
-        err_msg = "partition is not exist: p"
         future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
         future.done()
+        err_msg = "partition=p: partition not found"
         with pytest.raises(MilvusException, match=err_msg):
             future.result()
 
