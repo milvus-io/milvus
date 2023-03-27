@@ -28,19 +28,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -69,7 +64,6 @@ type ddNode struct {
 	collectionID UniqueID
 	vChannelName string
 
-	deltaMsgStream     msgstream.MsgStream
 	dropMode           atomic.Value
 	compactionExecutor *compactionExecutor
 
@@ -150,7 +144,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		dropCollection: false,
 	}
 
-	var forwardMsgs []msgstream.TsMsg
 	for _, msg := range msMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
@@ -219,13 +212,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
-			deltaVChannel, err := funcutil.ConvertChannelName(dmsg.ShardName, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
-			if err != nil {
-				log.Error("convert dmlVChannel to deltaVChannel failed", zap.String("vchannel", ddn.vChannelName), zap.Error(err))
-				panic(err)
-			}
-			dmsg.ShardName = deltaVChannel
-			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
@@ -242,16 +228,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
 				Inc()
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
-		}
-	}
-	err := retry.Do(ddn.ctx, func() error {
-		return ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
-	}, getFlowGraphRetryOpt())
-	if err != nil {
-		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vChannelName, err)
-		log.Error(err.Error())
-		if !common.IsIgnorableError(err) {
-			panic(err)
 		}
 	}
 
@@ -302,96 +278,14 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 	return false
 }
 
-func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
-	tr := timerecord.NewTimeRecorder("forwardDeleteMsg")
-
-	if len(msgs) != 0 {
-		var msgPack = msgstream.MsgPack{
-			Msgs:    msgs,
-			BeginTs: minTs,
-			EndTs:   maxTs,
-		}
-		if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
-			return err
-		}
-	}
-	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
-		return err
-	}
-
-	metrics.DataNodeForwardDeleteMsgTimeTaken.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return nil
-}
-
-func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
-	timeTickResult := msgpb.TimeTickMsg{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
-			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-	}
-	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
-		TimeTickMsg: timeTickResult,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-
-	if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
-		return err
-	}
-	p, _ := tsoutil.ParseTS(ts)
-	log.RatedDebug(10.0, "DDNode sent delta timeTick",
-		zap.Any("collectionID", ddn.collectionID),
-		zap.Any("ts", ts),
-		zap.Any("ts_p", p),
-		zap.Any("channel", ddn.vChannelName),
-	)
-	return nil
-}
-
-func (ddn *ddNode) Close() {
-	if ddn.deltaMsgStream != nil {
-		ddn.deltaMsgStream.Close()
-	}
-}
+func (ddn *ddNode) Close() {}
 
 func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppedSegmentIDs []UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo,
-	msFactory msgstream.Factory, compactor *compactionExecutor) (*ddNode, error) {
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, compactor *compactionExecutor) (*ddNode, error) {
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
-
-	deltaStream, err := msFactory.NewMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pChannelName := funcutil.ToPhysicalChannel(vChannelName)
-	log.Info("ddNode convert vChannel to pChannel",
-		zap.String("vChannelName", vChannelName),
-		zap.String("pChannelName", pChannelName),
-	)
-
-	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
-	if err != nil {
-		return nil, err
-	}
-	deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-	deltaStream.AsProducer([]string{deltaChannelName})
-	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	log.Info("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
-	var deltaMsgStream msgstream.MsgStream = deltaStream
 
 	dd := &ddNode{
 		ctx:                ctx,
@@ -401,7 +295,6 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 		growingSegInfo:     make(map[UniqueID]*datapb.SegmentInfo, len(growingSegments)),
 		droppedSegmentIDs:  droppedSegmentIDs,
 		vChannelName:       vChannelName,
-		deltaMsgStream:     deltaMsgStream,
 		compactionExecutor: compactor,
 	}
 
