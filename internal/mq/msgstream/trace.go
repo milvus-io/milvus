@@ -31,13 +31,13 @@ import (
 func ExtractCtx(msg TsMsg, properties map[string]string) (context.Context, trace.Span) {
 	ctx := msg.TraceCtx()
 	if ctx == nil {
-		return ctx, trace.SpanFromContext(ctx)
+		ctx = context.Background()
 	}
 	if !allowTrace(msg) {
 		return ctx, trace.SpanFromContext(ctx)
 	}
-	ctx = otel.GetTextMapPropagator().Extract(msg.TraceCtx(), propagation.MapCarrier(properties))
-	name := "receive msg"
+	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(properties))
+	name := "ReceieveMsg"
 	return otel.Tracer(name).Start(ctx, name, trace.WithAttributes(
 		attribute.Int64("ID", msg.ID()),
 		attribute.String("Type", msg.Type().String()),
@@ -63,7 +63,7 @@ func MsgSpanFromCtx(ctx context.Context, msg TsMsg) (context.Context, trace.Span
 	if !allowTrace(msg) {
 		return ctx, trace.SpanFromContext(ctx)
 	}
-	operationName := "send msg"
+	operationName := "SendMsg"
 	opts := trace.WithAttributes(
 		attribute.Int64("ID", msg.ID()),
 		attribute.String("Type", msg.Type().String()),

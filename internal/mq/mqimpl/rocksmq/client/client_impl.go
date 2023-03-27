@@ -168,9 +168,10 @@ func (c *client) deliver(consumer *consumer, batchMax int) {
 		for _, msg := range msgs {
 			select {
 			case consumer.messageCh <- Message{
-				MsgID:   msg.MsgID,
-				Payload: msg.Payload,
-				Topic:   consumer.Topic()}:
+				MsgID:      msg.MsgID,
+				Payload:    msg.Payload,
+				Properties: msg.Properties,
+				Topic:      consumer.Topic()}:
 			case <-c.closeCh:
 				return
 			}

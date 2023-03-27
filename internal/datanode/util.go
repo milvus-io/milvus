@@ -50,5 +50,9 @@ func startTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span)
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	sp := trace.SpanFromContext(ctx)
+	if sp.SpanContext().IsValid() {
+		return ctx, sp
+	}
 	return otel.Tracer(typeutil.DataNodeRole).Start(ctx, name)
 }

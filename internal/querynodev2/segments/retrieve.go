@@ -34,7 +34,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 		if segment == nil {
 			continue
 		}
-		result, err := segment.Retrieve(plan)
+		result, err := segment.Retrieve(ctx, plan)
 		if err != nil {
 			return nil, err
 		}

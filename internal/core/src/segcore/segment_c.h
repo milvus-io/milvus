@@ -51,6 +51,7 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 CStatus
 Retrieve(CSegmentInterface c_segment,
          CRetrievePlan c_plan,
+         CTraceContext c_trace,
          uint64_t timestamp,
          CRetrieveResult* result);
 

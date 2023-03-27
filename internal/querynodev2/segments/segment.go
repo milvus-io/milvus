@@ -363,7 +363,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	return &searchResult, nil
 }
 
-func (s *LocalSegment) Retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
@@ -377,12 +377,23 @@ func (s *LocalSegment) Retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults,
 		zap.Int64("segmentID", s.ID()),
 	)
 
+	span := trace.SpanFromContext(ctx)
+
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceCtx := C.CTraceContext{
+		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		flag:    C.uchar(span.SpanContext().TraceFlags()),
+	}
+
 	var retrieveResult RetrieveResult
 	ts := C.uint64_t(plan.Timestamp)
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 	status := C.Retrieve(s.ptr,
 		plan.cRetrievePlan,
+		traceCtx,
 		ts,
 		&retrieveResult.cRetrieveResult,
 	)

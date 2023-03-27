@@ -353,11 +353,21 @@ func (s *Segment) retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.
 		return nil, fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
+	span := trace.SpanFromContext(ctx)
+
+	traceID := span.SpanContext().TraceID()
+	spanID := span.SpanContext().SpanID()
+	traceCtx := C.CTraceContext{
+		traceID: (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
+		spanID:  (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+		flag:    C.uchar(span.SpanContext().TraceFlags()),
+	}
+
 	var retrieveResult RetrieveResult
 	ts := C.uint64_t(plan.Timestamp)
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
+	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, traceCtx, ts, &retrieveResult.cRetrieveResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.CtxElapse(ctx, "finish cgoRetrieve").Milliseconds()))
 	log.Debug("do retrieve on segment",
