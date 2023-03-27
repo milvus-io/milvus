@@ -16,7 +16,7 @@ require (
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/confluentinc/confluent-kafka-go v1.9.1
-	github.com/containerd/cgroups v1.0.4
+	github.com/containerd/cgroups v1.1.0
 	github.com/gin-gonic/gin v1.7.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang/protobuf v1.5.2
