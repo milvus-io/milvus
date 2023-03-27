@@ -232,7 +232,8 @@ func getOutputFieldIDs(schema *schemapb.CollectionSchema, outputFields []string)
 			}
 		}
 		if !hitField {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			errMsg := "Field " + name + " not exist"
+			return nil, errors.New(errMsg)
 		}
 	}
 	return outputFieldIDs, nil

@@ -35,7 +35,7 @@ struct ExtractedPlanInfo {
     void
     add_involved_field(FieldId field_id) {
         auto pos = field_id.get() - START_USER_FIELDID;
-        AssertInfo(pos >= 0, "invalid field id");
+        AssertInfo(pos >= 0, "field id is invalid");
         involved_fields_.set(pos);
     }
 
