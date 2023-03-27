@@ -346,3 +346,19 @@ func WrapErrMetricNotFound(name string, msg ...string) error {
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }
+
+func WrapErrTaskEnqueueFail(reason string, msg ...string) error {
+	err := errors.Wrap(ErrTaskEnqueueFail, reason)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrTaskWaitToFinishFail(reason string, msg ...string) error {
+	err := errors.Wrap(ErrTaskWaitToFinishFail, reason)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}

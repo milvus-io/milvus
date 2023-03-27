@@ -108,6 +108,10 @@ func (s *ErrSuite) TestWrap() {
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)
+
+	// scheduler related
+	s.ErrorIs(WrapErrTaskEnqueueFail("unknown", "failed to enqueue"), ErrTaskEnqueueFail)
+	s.ErrorIs(WrapErrTaskWaitToFinishFail("unknown", "failed to finish"), ErrTaskWaitToFinishFail)
 }
 
 func (s *ErrSuite) TestCombine() {

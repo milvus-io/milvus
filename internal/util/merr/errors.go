@@ -44,7 +44,7 @@ const (
 
 // Define leaf errors here,
 // WARN: take care to add new error,
-// check whehter you can use the erorrs below before adding a new one.
+// check whether you can use the errors below before adding a new one.
 // Name: Err + related prefix + error name
 var (
 	// Service related
@@ -97,6 +97,11 @@ var (
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
+
+	// task schedule related
+	// actually not leaf error, use wrap
+	ErrTaskEnqueueFail      = newMilvusError("task enqueue fail", 1301, false)
+	ErrTaskWaitToFinishFail = newMilvusError("task wait to finish fail", 1302, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
