@@ -210,32 +210,30 @@ func TestFlowGraphManager(t *testing.T) {
 		fm.dropAll()
 		const channelPrefix = "by-dev-rootcoord-dml-test-fg-mgr-execute-"
 		for _, test := range tests {
-			t.Run(test.testName, func(t *testing.T) {
-				var baseParams = &Params.BaseTable
-				baseParams.Save(Params.DataNodeCfg.MemoryWatermark.Key, fmt.Sprintf("%f", test.watermark))
-				baseParams.Save(Params.DataNodeCfg.MemoryForceSyncEnable.Key, fmt.Sprintf("%t", true))
-				for i, memorySize := range test.memorySizes {
-					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
-					vchan := &datapb.VchannelInfo{
-						ChannelName: vchannel,
-					}
-					err = fm.addAndStart(node, vchan, nil, genTestTickler())
-					assert.NoError(t, err)
-					fg, ok := fm.flowgraphs.Load(vchannel)
-					assert.True(t, ok)
-					err = fg.(*dataSyncService).channel.addSegment(addSegmentReq{segID: 0})
-					assert.NoError(t, err)
-					fg.(*dataSyncService).channel.updateSegmentMemorySize(0, memorySize)
-					fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Store(false)
+			var baseParams = &Params.BaseTable
+			baseParams.Save(Params.DataNodeCfg.MemoryWatermark.Key, fmt.Sprintf("%f", test.watermark))
+			baseParams.Save(Params.DataNodeCfg.MemoryForceSyncEnable.Key, fmt.Sprintf("%t", true))
+			for i, memorySize := range test.memorySizes {
+				vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
+				vchan := &datapb.VchannelInfo{
+					ChannelName: vchannel,
 				}
-				fm.execute(test.totalMemory)
-				for i, needToSync := range test.expectNeedToSync {
-					vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
-					fg, ok := fm.flowgraphs.Load(vchannel)
-					assert.True(t, ok)
-					assert.Equal(t, needToSync, fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Load())
-				}
-			})
+				err = fm.addAndStart(node, vchan, nil, genTestTickler())
+				assert.NoError(t, err)
+				fg, ok := fm.flowgraphs.Load(vchannel)
+				assert.True(t, ok)
+				err = fg.(*dataSyncService).channel.addSegment(addSegmentReq{segID: 0})
+				assert.NoError(t, err)
+				fg.(*dataSyncService).channel.updateSegmentMemorySize(0, memorySize)
+				fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Store(false)
+			}
+			fm.execute(test.totalMemory)
+			for i, needToSync := range test.expectNeedToSync {
+				vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
+				fg, ok := fm.flowgraphs.Load(vchannel)
+				assert.True(t, ok)
+				assert.Equal(t, needToSync, fg.(*dataSyncService).channel.(*ChannelMeta).needToSync.Load())
+			}
 		}
 	})
 }

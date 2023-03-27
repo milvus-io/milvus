@@ -23,7 +23,6 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
-#include "common/Utils.h"
 #include "common/RangeSearchHelper.h"
 
 namespace milvus::index {
