@@ -187,10 +187,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     //     CreateBucket(storage_config.bucket_name);
     // }
 
-    LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '"
-                       << storage_config.address << "', default_bucket_name:'"
-                       << storage_config.bucket_name << "', use_secure:'"
-                       << std::boolalpha << storage_config.useSSL << "']";
+    LOG_SEGCORE_INFO_ << "init MinioChunkManager with parameter[endpoint: '"
+                      << storage_config.address << "', default_bucket_name:'"
+                      << storage_config.bucket_name << "', use_secure:'"
+                      << std::boolalpha << storage_config.useSSL << "']";
 }
 
 MinioChunkManager::~MinioChunkManager() {

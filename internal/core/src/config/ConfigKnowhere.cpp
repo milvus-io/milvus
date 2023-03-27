@@ -18,7 +18,7 @@
 
 #include "ConfigKnowhere.h"
 #include "exceptions/EasyAssert.h"
-#include "easyloggingpp/easylogging++.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/thread_pool.h"
 #include "knowhere/comp/knowhere_config.h"
@@ -35,21 +35,7 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetLogHandler();
         knowhere::KnowhereConfig::SetStatisticsLevel(0);
         knowhere::KnowhereConfig::ShowVersion();
-
-#ifdef EMBEDDED_MILVUS
-        // always disable all logs for embedded milvus.
-        el::Configurations el_conf;
-        el_conf.setGlobally(el::ConfigurationType::Enabled, "false");
-        el::Loggers::reconfigureAllLoggers(el_conf);
-#else
-        if (conf_file != nullptr) {
-            el::Configurations el_conf(conf_file);
-            el::Loggers::reconfigureAllLoggers(el_conf);
-            LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: "
-                              << conf_file;
-        }
-        LOG_SERVER_DEBUG_ << "Knowhere init successfully";
-#endif
+        google::InitGoogleLogging("milvus");
     };
 
     std::call_once(init_knowhere_once_, init);
