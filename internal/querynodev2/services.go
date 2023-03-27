@@ -967,7 +967,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}, nil
 	}
 
-	var removeSegments []int64
+	removeActions := make([]*querypb.SyncAction, 0)
 	addSegments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for _, action := range req.GetActions() {
 		log := log.With(zap.String("Action",
@@ -977,7 +977,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		log.Info("sync action")
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
-			removeSegments = append(removeSegments, action.GetSegmentID())
+			removeActions = append(removeActions, action)
 		case querypb.SyncType_Set:
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_Amend:
@@ -1003,12 +1003,6 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			}, nil
 		}
 	}
-	if len(removeSegments) > 0 {
-		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-			SegmentIDs: removeSegments,
-			Scope:      querypb.DataScope_Historical,
-		}, true)
-	}
 
 	for nodeID, infos := range addSegments {
 		err := shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
@@ -1019,6 +1013,14 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		if err != nil {
 			return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, "failed to sync(load) segment", err), nil
 		}
+	}
+
+	for _, action := range removeActions {
+		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+			NodeID:     action.GetNodeID(),
+			SegmentIDs: []int64{action.GetSegmentID()},
+			Scope:      querypb.DataScope_Historical,
+		}, true)
 	}
 
 	return &commonpb.Status{

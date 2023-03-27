@@ -1181,6 +1181,60 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
+func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
+	ctx := context.Background()
+	// prepare
+	// watch dmchannel and load some segments
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	delegator, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok)
+	sealedSegments, _, version := delegator.GetDistribution().GetCurrent()
+	suite.Len(sealedSegments[0].Segments, 3)
+	delegator.GetDistribution().FinishUsage(version)
+
+	// data
+	req := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+	}
+
+	releaseAction := &querypb.SyncAction{
+		Type:      querypb.SyncType_Remove,
+		SegmentID: sealedSegments[0].Segments[0].SegmentID,
+		NodeID:    100,
+	}
+
+	// expect one segments in distribution
+	req.Actions = []*querypb.SyncAction{releaseAction}
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	sealedSegments, _, version = delegator.GetDistribution().GetCurrent()
+	suite.Len(sealedSegments[0].Segments, 3)
+	delegator.GetDistribution().FinishUsage(version)
+
+	releaseAction = &querypb.SyncAction{
+		Type:      querypb.SyncType_Remove,
+		SegmentID: sealedSegments[0].Segments[0].SegmentID,
+		NodeID:    sealedSegments[0].Segments[0].NodeID,
+	}
+
+	// expect one segments in distribution
+	req.Actions = []*querypb.SyncAction{releaseAction}
+	status, err = suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	sealedSegments, _, version = delegator.GetDistribution().GetCurrent()
+	suite.Len(sealedSegments[0].Segments, 2)
+	delegator.GetDistribution().FinishUsage(version)
+}
+
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	ctx := context.Background()
 	// prepare
