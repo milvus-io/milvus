@@ -314,10 +314,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
 		return fmt.Errorf("fail to list collections for checking the collection count")
 	}
-	if len(existedCollInfos) >= Params.QuotaConfig.MaxCollectionNum {
-		errMsg := "unable to create collection because the number of collection has reached the limit"
-		log.Error(errMsg, zap.Int("max_collection_num", Params.QuotaConfig.MaxCollectionNum))
-		return errors.New(errMsg)
+	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum
+	if len(existedCollInfos) >= maxCollectionNum {
+		log.Error("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		return fmt.Errorf("failed to create collection, limit={%d}, exceeded the limit number of collections", maxCollectionNum)
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
