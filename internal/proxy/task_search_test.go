@@ -1698,7 +1698,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
-		errPolicy      = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string, int) error, map[string][]nodeInfo) error {
+		errPolicy      = func(context.Context, *shardClientMgr, queryFunc, map[string][]nodeInfo) error {
 			return fmt.Errorf("fake error")
 		}
 	)
@@ -1820,7 +1820,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	task.searchShardPolicy = errPolicy
 	assert.Error(t, task.Execute(ctx))
 
-	task.searchShardPolicy = mergeRoundRobinPolicy
+	task.searchShardPolicy = RoundRobinPolicy
 	qn.searchError = fmt.Errorf("mock error")
 	assert.Error(t, task.Execute(ctx))
 

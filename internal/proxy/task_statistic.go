@@ -109,7 +109,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 
 	if g.statisticShardPolicy == nil {
-		g.statisticShardPolicy = mergeRoundRobinPolicy
+		g.statisticShardPolicy = RoundRobinPolicy
 	}
 
 	// TODO: Maybe we should create a new MsgType: GetStatistics?
@@ -299,7 +299,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{

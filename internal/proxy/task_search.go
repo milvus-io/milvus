@@ -52,6 +52,7 @@ type searchTask struct {
 	qc             types.QueryCoord
 	tr             *timerecord.TimeRecorder
 	collectionName string
+	channelNum     int32
 	schema         *schemapb.CollectionSchema
 
 	offset          int64
@@ -207,7 +208,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 
 	if t.searchShardPolicy == nil {
-		t.searchShardPolicy = mergeRoundRobinPolicy
+		t.searchShardPolicy = RoundRobinPolicy
 	}
 
 	t.Base.MsgType = commonpb.MsgType_Search
@@ -358,6 +359,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		}
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
+		t.channelNum = int32(len(shard2Leaders))
 		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
 			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
 			return err
@@ -439,14 +441,14 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
 		DmlChannels:     channelIDs,
 		Scope:           querypb.DataScope_All,
-		TotalChannelNum: int32(channelNum),
+		TotalChannelNum: t.channelNum,
 	}
 
 	queryNode := querynode.GetQueryNode()
