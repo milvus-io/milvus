@@ -314,7 +314,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		vchanInfo.GetDroppedSegmentIds(),
 		flushedSegmentInfos,
 		unflushedSegmentInfos,
-		dsService.msFactory,
 		dsService.compactor)
 	if err != nil {
 		return err
