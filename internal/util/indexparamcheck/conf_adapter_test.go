@@ -134,7 +134,6 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	invalidParamsIVF[IVFM] = "NAN"
 
 	invalidParamsM := copyParams(validParams)
-	invalidParamsM[IndexMode] = GPUMode
 	invalidParamsM[DIM] = strconv.Itoa(65536)
 
 	invalidParamsMzero := copyParams(validParams)
