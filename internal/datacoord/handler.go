@@ -75,6 +75,11 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 			continue
 		}
 
+		if Params.CommonCfg.IgnoreSegment >= 0 && s.GetID() == Params.CommonCfg.IgnoreSegment {
+			// Skip the ignored segment
+			continue
+		}
+
 		if s.GetState() == commonpb.SegmentState_Dropped {
 			droppedIDs.Insert(s.GetID())
 			continue
@@ -126,6 +131,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		}
 		if s.GetIsImporting() {
 			// Skip bulk insert segments.
+			continue
+		}
+		if Params.CommonCfg.IgnoreSegment >= 0 && s.GetID() == Params.CommonCfg.IgnoreSegment {
+			// Skip the ignored segment
 			continue
 		}
 		segmentInfos[s.GetID()] = s

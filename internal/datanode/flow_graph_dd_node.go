@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -194,6 +195,38 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Uint64("message timestamp", msg.EndTs()),
 					zap.String("segment's vChannel", imsg.GetShardName()),
 					zap.String("current vChannel", ddn.vChannelName))
+				continue
+			}
+
+			// Skip the ignored segment and log the checkpoints
+			if Params.CommonCfg.IgnoreSegment >= 0 && imsg.GetSegmentID() == Params.CommonCfg.IgnoreSegment {
+				if len(msMsg.StartPositions()) <= 0 || len(msMsg.EndPositions()) <= 0 {
+					log.Warn("Empty startpositions and endpositions",
+						zap.Int64("filter segment ID", imsg.GetSegmentID()),
+						zap.String("current vChannel", ddn.vChannelName),
+					)
+					continue
+				}
+				var (
+					startPos = msMsg.StartPositions()[0]
+					endPos   = msMsg.EndPositions()[0]
+
+					cp = &datapb.CheckPoint{
+						SegmentID: imsg.GetSegmentID(),
+						Position:  startPos,
+					}
+					base64StartPosMsgID = base64.StdEncoding.EncodeToString(startPos.GetMsgID())
+					base64EndPosMsgID   = base64.StdEncoding.EncodeToString(endPos.GetMsgID())
+				)
+				log.Info("Filter ignored segment",
+					zap.Int64("filter segment ID", imsg.GetSegmentID()),
+					zap.String("current vChannel", ddn.vChannelName),
+					zap.Any("cp", cp),
+					zap.Any("start position", startPos),
+					zap.Any("end position", endPos),
+					zap.String("start position msgID", base64StartPosMsgID),
+					zap.String("end position msgID", base64EndPosMsgID),
+				)
 				continue
 			}
 

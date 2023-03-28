@@ -170,6 +170,8 @@ type commonConfig struct {
 
 	SessionTTL        int64
 	SessionRetryTimes int64
+
+	IgnoreSegment int64
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -223,6 +225,12 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.initSessionTTL()
 	p.initSessionRetryTimes()
+
+	p.initIgnoreSegment()
+}
+
+func (p *commonConfig) initIgnoreSegment() {
+	p.IgnoreSegment = p.Base.ParseInt64WithDefault("common.ignoreSegment", -1)
 }
 
 func (p *commonConfig) initClusterPrefix() {
