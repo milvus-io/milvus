@@ -203,6 +203,11 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		}
 	}
 
+	if Params.CommonCfg.IgnoreSegment >= 0 && msg.GetSegmentID() == Params.CommonCfg.IgnoreSegment {
+		// filter out msg when IgnoreSegment equals msg's segmentID
+		return nil, nil
+	}
+
 	// Check if the segment is in excluded segments,
 	// messages after seekPosition may contain the redundant data from flushed slice of segment,
 	// so we need to compare the endTimestamp of received messages and position's timestamp.
