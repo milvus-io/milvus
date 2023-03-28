@@ -202,6 +202,11 @@ func (node *QueryNode) InitSegcore() {
 	C.InitCpuNum(cCPUNum)
 
 	initcore.InitLocalStorageConfig(paramtable.Get())
+
+	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if len(mmapDirPath) > 0 {
+		log.Info("mmap enabled", zap.String("dir", mmapDirPath))
+	}
 }
 
 // Init function init historical and streaming module to manage segments

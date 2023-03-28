@@ -643,11 +643,19 @@ func (s *LocalSegment) LoadField(rowCount int64, data *schemapb.FieldData) error
 		return err
 	}
 
+	var mmapDirPath *C.char = nil
+	path := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if len(path) > 0 {
+		mmapDirPath = C.CString(path)
+		defer C.free(unsafe.Pointer(mmapDirPath))
+	}
+
 	loadInfo := C.CLoadFieldDataInfo{
-		field_id:  C.int64_t(fieldID),
-		blob:      (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		blob_size: C.uint64_t(len(dataBlob)),
-		row_count: C.int64_t(rowCount),
+		field_id:      C.int64_t(fieldID),
+		blob:          (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
+		blob_size:     C.uint64_t(len(dataBlob)),
+		row_count:     C.int64_t(rowCount),
+		mmap_dir_path: mmapDirPath,
 	}
 
 	status := C.LoadFieldData(s.ptr, loadInfo)

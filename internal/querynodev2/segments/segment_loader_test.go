@@ -323,6 +323,33 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
+	key := paramtable.Get().QueryNodeCfg.MmapDirPath.Key
+	paramtable.Get().Save(key, "/tmp/mmap-test")
+	defer paramtable.Get().Reset(key)
+	ctx := context.Background()
+
+	// Load sealed
+	binlogs, statsLogs, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		100,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+	})
+	suite.NoError(err)
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 }
