@@ -30,6 +30,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -54,9 +55,9 @@ var CheckBucketRetryAttempts uint = 20
 type MinioChunkManager struct {
 	*minio.Client
 
-	//	ctx        context.Context
-	bucketName string
-	rootPath   string
+	cloudProvider string
+	bucketName    string
+	rootPath      string
 }
 
 var _ ChunkManager = (*MinioChunkManager)(nil)
@@ -126,8 +127,9 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	}
 
 	mcm := &MinioChunkManager{
-		Client:     minIOClient,
-		bucketName: c.bucketName,
+		cloudProvider: c.cloudProvider,
+		Client:        minIOClient,
+		bucketName:    c.bucketName,
 	}
 	mcm.rootPath = mcm.normalizeRootPath(c.rootPath)
 	log.Info("minio chunk manager init success.", zap.String("bucketname", c.bucketName), zap.String("root", mcm.RootPath()))
@@ -365,6 +367,9 @@ func (mcm *MinioChunkManager) MultiRemove(ctx context.Context, keys []string) er
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	objects := mcm.listMinioObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+	if mcm.cloudProvider == paramtable.CloudProviderGCP {
+		return mcm.removeGCSObjects(ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: true})
+	}
 	for rErr := range mcm.removeMinioObjects(ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: false}) {
 		if rErr.Err != nil {
 			log.Warn("failed to remove objects", zap.String("prefix", prefix), zap.Error(rErr.Err))
@@ -498,6 +503,38 @@ func (mcm *MinioChunkManager) listMinioObjects(ctx context.Context, bucketName s
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
 
 	return res
+}
+
+const gcsMaxDeletionQPS = 100
+const gcsDeletionGoroutines = 10
+
+func (mcm *MinioChunkManager) removeGCSObjects(ctx context.Context, bucketName string, objectsCh <-chan minio.ObjectInfo,
+	opts minio.RemoveObjectsOptions) error {
+	var err error
+	removeObjectOpt := minio.RemoveObjectOptions{
+		GovernanceBypass: opts.GovernanceBypass,
+	}
+	start := timerecord.NewTimeRecorder("removeMinioObjects")
+	eg := new(errgroup.Group)
+	ticker := time.NewTicker(time.Second / gcsMaxDeletionQPS)
+	defer ticker.Stop()
+	for i := 0; i < gcsDeletionGoroutines; i++ {
+		eg.Go(func() error {
+			for obj := range objectsCh {
+				<-ticker.C
+				err := mcm.Client.RemoveObject(ctx, bucketName, obj.Key, removeObjectOpt)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	err = eg.Wait()
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Inc()
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Inc()
+	return err
 }
 
 func (mcm *MinioChunkManager) removeMinioObjects(ctx context.Context, bucketName string, objectsCh <-chan minio.ObjectInfo,
