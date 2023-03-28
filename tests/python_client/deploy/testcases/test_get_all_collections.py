@@ -22,6 +22,6 @@ class TestGetCollections(TestcaseBase):
         }
         with open("/tmp/ci_logs/all_collections.json", "w") as f:
             f.write(json.dumps(data))
-        log.info(f"write {len(all_collections)} collections to /tmp/ci_logs/all_collections.json")
+        log.info(f"write {len(all_collections)} collections to /tmp/ci_logs/deploy_test_all_collections.json")
         collections_in_json = get_collections()
         assert len(all_collections) == len(collections_in_json)

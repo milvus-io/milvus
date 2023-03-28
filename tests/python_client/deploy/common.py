@@ -46,7 +46,7 @@ def gen_search_param(index_type, metric_type="L2"):
 
 def get_collections():
     try:
-        with open("/tmp/ci_logs/all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
