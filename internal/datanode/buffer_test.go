@@ -187,6 +187,11 @@ func Test_CompactSegBuff(t *testing.T) {
 	assert.False(t, seg2Exist)
 	assert.Equal(t, int64(2), delBufferManager.GetEntriesNum(compactedToSegID))
 
+	// test item of compactedToSegID is correct
+	compactTo, ok := delBufferManager.Load(compactedToSegID)
+	assert.True(t, ok)
+	assert.Equal(t, compactedToSegID, compactTo.item.segmentID)
+
 	//5. test roll and evict (https://github.com/milvus-io/milvus/issues/20501)
 	delBufferManager.channel.rollDeleteBuffer(compactedToSegID)
 	_, segCompactedToExist := delBufferManager.Load(compactedToSegID)
