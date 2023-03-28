@@ -1200,6 +1200,7 @@ class TestNewIndexBinary(TestcaseBase):
         assert collection_w.has_index(index_name=binary_field_name)[0] == False
         assert len(collection_w.indexes) == 0
 
+
 @pytest.mark.tags(CaseLabel.GPU)
 class TestIndexInvalid(TestcaseBase):
     """
@@ -1620,26 +1621,24 @@ class TestIndexDiskann(TestcaseBase):
                                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_index_with_over_max_dim(self):
+    def test_create_index_with_max_dim(self):
         """
         target: test create index with diskann
-        method: 1.create collection, when the dim of the vector is greater than 1024 
+        method: 1.create collection, when the max dim of the vector is 32768
                 2.create diskann index
         expected: create index raise an error
         """
-        dim = 1025
+        dim = 32768
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(), cf.gen_string_field(),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1,
-                                               ct.err_msg: "invalid index params"})
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index)
+        assert len(collection_w.indexes) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_index_with_diskann_callback(self,_async):
+    def test_create_index_with_diskann_callback(self, _async):
         """
         target: test create index with diskann
         method: 1.create collection and insert data 
@@ -1709,15 +1708,15 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
                                   index_name=field_name)
         collection_w.load()
-        assert collection_w.has_index(index_name=field_name)[0] == True
+        assert collection_w.has_index(index_name=field_name)[0] is True
         assert len(collection_w.indexes) == 1 
         collection_w.release()
         collection_w.drop_index(index_name=field_name)
-        assert collection_w.has_index(index_name=field_name)[0] == False
+        assert collection_w.has_index(index_name=field_name)[0] is False
         assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_diskann_index_with_noraml(self):
+    def test_drop_diskann_index_with_normal(self):
         """
         target: test drop diskann index normal
         method: 1.create collection and insert data
@@ -1845,7 +1844,7 @@ class TestIndexDiskann(TestcaseBase):
             t.join()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [1,2, 8, 16, 24])
+    @pytest.mark.parametrize("dim", [1, 2, 8, 16, 24, 31])
     def test_create_index_with_small_dim(self, dim):
         """
         target: test create index with diskann

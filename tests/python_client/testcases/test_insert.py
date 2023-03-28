@@ -956,7 +956,7 @@ class TestInsertAsync(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data()
-        err_msg = "partition is not exist: p"
+        err_msg = "partition=p: partition not found"
         future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
         future.done()
         with pytest.raises(MilvusException, match=err_msg):
@@ -1037,7 +1037,7 @@ class TestInsertInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_ids_invalid(self):
         """
-        target: test insert, with using auto id is invaild, which are not int64
+        target: test insert, with using auto id is invalid, which are not int64
         method: create collection and insert entities in it
         expected: raise exception
         """
