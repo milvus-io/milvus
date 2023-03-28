@@ -160,13 +160,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// check that all field's number rows are equal
-	if err = it.insertMsg.CheckAligned(); err != nil {
-		log.Error("field data is not aligned",
-			zap.Error(err))
-		return err
-	}
-
 	if err := newValidateUtil(withNANCheck()).Validate(it.insertMsg.GetFieldsData(), schema, it.insertMsg.NRows()); err != nil {
 		return err
 	}
