@@ -435,7 +435,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 			collection.LoadPercentage = 100
 		}
 		collection.CollectionLoadInfo.Status = status
-		suite.server.meta.UpdateCollection(collection)
+		suite.server.meta.PutCollection(collection)
 
 		partitions := suite.server.meta.GetPartitionsByCollection(collectionID)
 		for _, partition := range partitions {
@@ -445,7 +445,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 				partition.LoadPercentage = 100
 			}
 			partition.PartitionLoadInfo.Status = status
-			suite.server.meta.UpdatePartition(partition)
+			suite.server.meta.PutPartition(partition)
 		}
 	}
 }

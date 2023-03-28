@@ -980,7 +980,8 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 		// Load and explicitly mark load percentage to 100%.
 		collObj := utils.CreateTestCollection(collection, 1)
 		collObj.LoadPercentage = 40
-		suite.True(suite.server.meta.CollectionManager.UpdateCollectionInMemory(collObj))
+		err = suite.server.meta.CollectionManager.PutCollectionWithoutSave(collObj)
+		suite.NoError(err)
 	}
 
 	// Test refresh all collections again when collections are loaded. This time should fail with collection not 100% loaded.
@@ -996,7 +997,8 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 		// Load and explicitly mark load percentage to 100%.
 		collObj := utils.CreateTestCollection(collection, 1)
 		collObj.LoadPercentage = 100
-		suite.True(suite.server.meta.CollectionManager.UpdateCollectionInMemory(collObj))
+		err := suite.server.meta.CollectionManager.PutCollectionWithoutSave(collObj)
+		suite.NoError(err)
 	}
 
 	// Test refresh all collections again when collections are loaded. This time should fail with context canceled.
@@ -1049,7 +1051,8 @@ func (suite *ServiceSuite) TestRefreshPartitions() {
 		for _, partition := range suite.partitions[collection] {
 			partObj := utils.CreateTestPartition(collection, partition)
 			partObj.LoadPercentage = 40
-			suite.True(suite.server.meta.CollectionManager.UpdatePartitionInMemory(partObj))
+			err := suite.server.meta.CollectionManager.PutPartitionWithoutSave(partObj)
+			suite.NoError(err)
 		}
 	}
 
@@ -1070,7 +1073,8 @@ func (suite *ServiceSuite) TestRefreshPartitions() {
 		for _, partition := range suite.partitions[collection] {
 			partObj := utils.CreateTestPartition(collection, partition)
 			partObj.LoadPercentage = 100
-			suite.True(suite.server.meta.CollectionManager.UpdatePartitionInMemory(partObj))
+			err := suite.server.meta.CollectionManager.PutPartitionWithoutSave(partObj)
+			suite.NoError(err)
 		}
 	}
 
@@ -1845,7 +1849,7 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 			collection.LoadPercentage = 100
 		}
 		collection.CollectionLoadInfo.Status = status
-		suite.meta.UpdateCollection(collection)
+		suite.meta.PutCollection(collection)
 
 		partitions := suite.meta.GetPartitionsByCollection(collectionID)
 		for _, partition := range partitions {
@@ -1855,7 +1859,7 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 				partition.LoadPercentage = 100
 			}
 			partition.PartitionLoadInfo.Status = status
-			suite.meta.UpdatePartition(partition)
+			suite.meta.PutPartition(partition)
 		}
 	}
 }
