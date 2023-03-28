@@ -101,11 +101,8 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
 			if partition.GetStatus() != querypb.LoadStatus_Loaded {
-				partitionIDs := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) int64 {
-					return partition.GetPartitionID()
-				})
-				m.store.ReleasePartition(collection, partitionIDs...)
-				break
+				m.store.ReleasePartition(collection, partition.GetPartitionID())
+				continue
 			}
 			m.partitions[partition.PartitionID] = &Partition{
 				PartitionLoadInfo: partition,
