@@ -146,7 +146,7 @@ func TestCurrencyGlobalMethods(t *testing.T) {
 
 			data := prefix + fmt.Sprintf(": %d-th goroutine", idx)
 
-			err := ZstdCompress(strings.NewReader(data), compressed, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(idx)))
+			err := ZstdCompress(strings.NewReader(data), compressed)
 			assert.NoError(t, err)
 			compressedBytes = ZstdCompressBytes([]byte(data), compressedBytes)
 			assert.Equal(t, compressed.Bytes(), compressedBytes)

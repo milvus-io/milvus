@@ -63,7 +63,6 @@ const (
 	// If Dim = 2, and raw vector data = 2G, query node need 240G disk space When loading the vectors' disk index
 	// So DiskAnnMinDim should be greater than or equal to 32 to avoid running out of disk space
 	DiskAnnMinDim = 32
-	DiskAnnMaxDim = 1024
 
 	NgtMinEdgeSize = 1
 	NgtMaxEdgeSize = 200
@@ -541,7 +540,7 @@ type DISKANNConfAdapter struct {
 }
 
 func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DiskAnnMaxDim) {
+	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
 		return false
 	}
 	return adapter.BaseConfAdapter.CheckTrain(params)
