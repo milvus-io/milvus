@@ -185,8 +185,38 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 			RowData: []*commonpb.Blob{
 				{},
 			},
-			FieldsData: nil,
-			Version:    msgpb.InsertDataVersion_RowBased,
+			Version: msgpb.InsertDataVersion_RowBased,
+		},
+	}
+	msg1.FieldsData = []*schemapb.FieldData{
+		{
+			FieldName: "test1",
+			Type:      schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	msg1.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "test1",
+				FieldID:  101,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "dim",
+						Value: "8",
+					},
+				},
+			},
 		},
 	}
 	msg1.InsertRequest.NumRows = 1
@@ -203,6 +233,16 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 						},
 					},
 				},
+			},
+		},
+	}
+
+	msg1.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "test1",
+				FieldID:  101,
+				DataType: schemapb.DataType_Int64,
 			},
 		},
 	}

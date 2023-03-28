@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -60,6 +61,7 @@ type BaseMsg struct {
 	EndTimestamp   Timestamp
 	HashValues     []uint32
 	MsgPosition    *MsgPosition
+	Schema         *schemapb.CollectionSchema
 }
 
 // TraceCtx returns the context of opentracing
@@ -95,6 +97,11 @@ func (bm *BaseMsg) Position() *MsgPosition {
 // SetPosition is used to set position of this message in msgstream
 func (bm *BaseMsg) SetPosition(position *MsgPosition) {
 	bm.MsgPosition = position
+}
+
+// GetSchema returns the begin schema of this message pack
+func (bm *BaseMsg) GetSchema() *schemapb.CollectionSchema {
+	return bm.Schema
 }
 
 func convertToByteArray(input interface{}) ([]byte, error) {
@@ -188,18 +195,67 @@ func (it *InsertMsg) NRows() uint64 {
 }
 
 func (it *InsertMsg) CheckAligned() error {
-	numRowsOfFieldDataMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
-		return fmt.Errorf("the num_rows(%d) of %sth field is not equal to passed NumRows(%d)", fieldNumRows, fieldName, passedNumRows)
+	numRows := it.NRows()
+	errNumRowsMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
+		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, passedNumRows)
+		return merr.WrapErrParameterInvalid(passedNumRows, numRows, msg)
 	}
-	rowNums := it.NRows()
-	if it.IsColumnBased() {
-		for _, field := range it.FieldsData {
-			fieldNumRows, err := funcutil.GetNumRowOfFieldData(field)
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(it.Schema)
+	if err != nil {
+		return err
+	}
+	for _, field := range it.FieldsData {
+		switch field.GetType() {
+		case schemapb.DataType_FloatVector:
+			f, err := schemaHelper.GetFieldFromName(field.GetFieldName())
 			if err != nil {
 				return err
 			}
-			if fieldNumRows != rowNums {
-				return numRowsOfFieldDataMismatch(field.FieldName, fieldNumRows, rowNums)
+
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			n, err := funcutil.GetNumRowsOfFloatVectorField(field.GetVectors().GetFloatVector().GetData(), dim)
+			if err != nil {
+				return err
+			}
+
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+			}
+
+		case schemapb.DataType_BinaryVector:
+			f, err := schemaHelper.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
+
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			n, err := funcutil.GetNumRowsOfBinaryVectorField(field.GetVectors().GetBinaryVector(), dim)
+			if err != nil {
+				return err
+			}
+
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
+			}
+
+		default:
+			// error won't happen here.
+			n, err := funcutil.GetNumRowOfFieldData(field)
+			if err != nil {
+				return err
+			}
+
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
 			}
 		}
 	}

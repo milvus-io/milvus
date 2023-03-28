@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -1007,13 +1008,15 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 
 	// schema is empty, though won't happen in system
 	case1 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{},
-		},
 		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkLengthOfFieldsData",
+					Description: "TestInsertTask_checkLengthOfFieldsData",
+					AutoID:      false,
+					Fields:      []*schemapb.FieldSchema{},
+				},
+			},
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1025,27 +1028,29 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 		},
 	}
 
-	err = checkLengthOfFieldsData(case1.schema, case1.insertMsg)
+	err = checkLengthOfFieldsData(case1.insertMsg.Schema, case1.insertMsg)
 	assert.Equal(t, nil, err)
 
 	// schema has two fields, neither of them are autoID
 	case2 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkLengthOfFieldsData",
+					Description: "TestInsertTask_checkLengthOfFieldsData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							AutoID:   false,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							AutoID:   false,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1063,7 +1068,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 	// 		},
 	// 	},
 	// }
-	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	err = checkLengthOfFieldsData(case2.insertMsg.Schema, case2.insertMsg)
 	assert.NotEqual(t, nil, err)
 	// the num of passed fields is less than needed
 	case2.insertMsg.FieldsData = []*schemapb.FieldData{
@@ -1071,7 +1076,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			Type: schemapb.DataType_Int64,
 		},
 	}
-	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	err = checkLengthOfFieldsData(case2.insertMsg.Schema, case2.insertMsg)
 	assert.NotEqual(t, nil, err)
 	// satisfied
 	case2.insertMsg.FieldsData = []*schemapb.FieldData{
@@ -1082,27 +1087,29 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			Type: schemapb.DataType_Int64,
 		},
 	}
-	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	err = checkLengthOfFieldsData(case2.insertMsg.Schema, case2.insertMsg)
 	assert.Equal(t, nil, err)
 
 	// schema has two field, one of them are autoID
 	case3 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   true,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkLengthOfFieldsData",
+					Description: "TestInsertTask_checkLengthOfFieldsData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							AutoID:   true,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							AutoID:   false,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1112,7 +1119,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 	}
 	// passed fields is empty
 	// case3.req = &milvuspb.InsertRequest{}
-	err = checkLengthOfFieldsData(case3.schema, case3.insertMsg)
+	err = checkLengthOfFieldsData(case3.insertMsg.Schema, case3.insertMsg)
 	assert.NotEqual(t, nil, err)
 	// satisfied
 	case3.insertMsg.FieldsData = []*schemapb.FieldData{
@@ -1120,23 +1127,25 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			Type: schemapb.DataType_Int64,
 		},
 	}
-	err = checkLengthOfFieldsData(case3.schema, case3.insertMsg)
+	err = checkLengthOfFieldsData(case3.insertMsg.Schema, case3.insertMsg)
 	assert.Equal(t, nil, err)
 
 	// schema has one field which is autoID
 	case4 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   true,
-					DataType: schemapb.DataType_Int64,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkLengthOfFieldsData",
+					Description: "TestInsertTask_checkLengthOfFieldsData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							AutoID:   true,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1147,7 +1156,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 	// passed fields is empty
 	// satisfied
 	// case4.req = &milvuspb.InsertRequest{}
-	err = checkLengthOfFieldsData(case4.schema, case4.insertMsg)
+	err = checkLengthOfFieldsData(case4.insertMsg.Schema, case4.insertMsg)
 	assert.Equal(t, nil, err)
 }
 
@@ -1155,13 +1164,15 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 	// schema is empty, though won't happen in system
 	// num_rows(0) should be greater than 0
 	case1 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{},
-		},
 		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkPrimaryFieldData",
+					Description: "TestInsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields:      []*schemapb.FieldSchema{},
+				},
+			},
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1178,27 +1189,29 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 		},
 	}
 
-	_, err := checkPrimaryFieldData(case1.schema, case1.result, case1.insertMsg, true)
+	_, err := checkPrimaryFieldData(case1.insertMsg.Schema, case1.result, case1.insertMsg, true)
 	assert.NotEqual(t, nil, err)
 
 	// the num of passed fields is less than needed
 	case2 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkPrimaryFieldData",
+					Description: "TestInsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							AutoID:   false,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							AutoID:   false,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1221,28 +1234,30 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	_, err = checkPrimaryFieldData(case2.schema, case2.result, case2.insertMsg, true)
+	_, err = checkPrimaryFieldData(case2.insertMsg.Schema, case2.result, case2.insertMsg, true)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == false, no primary field schema
 	// primary field is not found
 	case3 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkPrimaryFieldData",
+					Description: "TestInsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1263,30 +1278,32 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	_, err = checkPrimaryFieldData(case3.schema, case3.result, case3.insertMsg, true)
+	_, err = checkPrimaryFieldData(case3.insertMsg.Schema, case3.result, case3.insertMsg, true)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == true, has primary field schema, but primary field data exist
 	// can not assign primary field data when auto id enabled int64Field
 	case4 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					FieldID:  1,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkPrimaryFieldData",
+					Description: "TestInsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							FieldID:  1,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							FieldID:  2,
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1309,18 +1326,18 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	case4.schema.Fields[0].IsPrimaryKey = true
-	case4.schema.Fields[0].AutoID = true
-	case4.insertMsg.FieldsData[0] = newScalarFieldData(case4.schema.Fields[0], case4.schema.Fields[0].Name, 10)
-	_, err = checkPrimaryFieldData(case4.schema, case4.result, case4.insertMsg, true)
+	case4.insertMsg.Schema.Fields[0].IsPrimaryKey = true
+	case4.insertMsg.Schema.Fields[0].AutoID = true
+	case4.insertMsg.FieldsData[0] = newScalarFieldData(case4.insertMsg.Schema.Fields[0], case4.insertMsg.Schema.Fields[0].Name, 10)
+	_, err = checkPrimaryFieldData(case4.insertMsg.Schema, case4.result, case4.insertMsg, true)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == true, has primary field schema, but DataType don't match
 	// the data type of the data and the schema do not match
-	case4.schema.Fields[0].IsPrimaryKey = false
-	case4.schema.Fields[1].IsPrimaryKey = true
-	case4.schema.Fields[1].AutoID = true
-	_, err = checkPrimaryFieldData(case4.schema, case4.result, case4.insertMsg, true)
+	case4.insertMsg.Schema.Fields[0].IsPrimaryKey = false
+	case4.insertMsg.Schema.Fields[1].IsPrimaryKey = true
+	case4.insertMsg.Schema.Fields[1].AutoID = true
+	_, err = checkPrimaryFieldData(case4.insertMsg.Schema, case4.result, case4.insertMsg, true)
 	assert.NotEqual(t, nil, err)
 }
 
@@ -1328,13 +1345,15 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 	// schema is empty, though won't happen in system
 	// num_rows(0) should be greater than 0
 	case1 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{},
-		},
 		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields:      []*schemapb.FieldSchema{},
+				},
+			},
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1350,29 +1369,31 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	_, err := checkPrimaryFieldData(case1.schema, case1.result, case1.insertMsg, false)
+	_, err := checkPrimaryFieldData(case1.insertMsg.Schema, case1.result, case1.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 
 	// the num of passed fields is less than needed
 	case2 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					FieldID:  1,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							FieldID:  1,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							FieldID:  2,
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1395,28 +1416,30 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	_, err = checkPrimaryFieldData(case2.schema, case2.result, case2.insertMsg, false)
+	_, err = checkPrimaryFieldData(case2.insertMsg.Schema, case2.result, case2.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == false, no primary field schema
 	// primary field is not found
 	case3 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1437,29 +1460,31 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	_, err = checkPrimaryFieldData(case3.schema, case3.result, case3.insertMsg, false)
+	_, err = checkPrimaryFieldData(case3.insertMsg.Schema, case3.result, case3.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == true, upsert don't support it
 	case4 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					FieldID:  1,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							FieldID:  1,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							FieldID:  2,
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1482,32 +1507,34 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	case4.schema.Fields[0].IsPrimaryKey = true
-	case4.schema.Fields[0].AutoID = true
-	_, err = checkPrimaryFieldData(case4.schema, case4.result, case4.insertMsg, false)
+	case4.insertMsg.Schema.Fields[0].IsPrimaryKey = true
+	case4.insertMsg.Schema.Fields[0].AutoID = true
+	_, err = checkPrimaryFieldData(case4.insertMsg.Schema, case4.result, case4.insertMsg, false)
 	assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, case4.result.Status.ErrorCode)
 	assert.NotEqual(t, nil, err)
 
 	// primary field data is nil, GetPrimaryFieldData fail
 	case5 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					FieldID:  1,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "int64Field",
+							FieldID:  1,
+							DataType: schemapb.DataType_Int64,
+						},
+						{
+							Name:     "floatField",
+							FieldID:  2,
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1528,31 +1555,33 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	case5.schema.Fields[0].IsPrimaryKey = true
-	case5.schema.Fields[0].AutoID = false
-	_, err = checkPrimaryFieldData(case5.schema, case5.result, case5.insertMsg, false)
+	case5.insertMsg.Schema.Fields[0].IsPrimaryKey = true
+	case5.insertMsg.Schema.Fields[0].AutoID = false
+	_, err = checkPrimaryFieldData(case5.insertMsg.Schema, case5.result, case5.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 
 	// only support DataType Int64 or VarChar as PrimaryField
 	case6 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestUpsertTask_checkPrimaryFieldData",
-			Description: "TestUpsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "floatVectorField",
-					FieldID:  1,
-					DataType: schemapb.DataType_FloatVector,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
+		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestUpsertTask_checkPrimaryFieldData",
+					Description: "TestUpsertTask_checkPrimaryFieldData",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:     "floatVectorField",
+							FieldID:  1,
+							DataType: schemapb.DataType_FloatVector,
+						},
+						{
+							Name:     "floatField",
+							FieldID:  2,
+							DataType: schemapb.DataType_Float,
+						},
+					},
 				},
 			},
-		},
-		insertMsg: &BaseInsertTask{
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -1579,8 +1608,8 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 	}
-	case6.schema.Fields[0].IsPrimaryKey = true
-	case6.schema.Fields[0].AutoID = false
-	_, err = checkPrimaryFieldData(case6.schema, case6.result, case6.insertMsg, false)
+	case6.insertMsg.Schema.Fields[0].IsPrimaryKey = true
+	case6.insertMsg.Schema.Fields[0].AutoID = false
+	_, err = checkPrimaryFieldData(case6.insertMsg.Schema, case6.result, case6.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 }

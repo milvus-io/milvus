@@ -32,7 +32,6 @@ type insertTask struct {
 	chTicker      channelsTimeTicker
 	vChannels     []vChan
 	pChannels     []pChan
-	schema        *schemapb.CollectionSchema
 }
 
 // TraceCtx returns insertTask context
@@ -112,7 +111,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Error("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
-	it.schema = schema
+	it.insertMsg.Schema = schema
 
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
@@ -144,7 +143,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.insertMsg, true)
+	it.result.IDs, err = checkPrimaryFieldData(it.insertMsg.Schema, it.result, it.insertMsg, true)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {
 		log.Error("check primary field data and hash primary key failed",

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 func TestInsertTask_CheckAligned(t *testing.T) {
@@ -44,6 +45,25 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	dim := 128
 	case2 := insertTask{
 		insertMsg: &BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{
+				Schema: &schemapb.CollectionSchema{
+					Name:        "TestInsertTask_checkRowNums",
+					Description: "TestInsertTask_checkRowNums",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						boolFieldSchema,
+						int8FieldSchema,
+						int16FieldSchema,
+						int32FieldSchema,
+						int64FieldSchema,
+						floatFieldSchema,
+						doubleFieldSchema,
+						floatVectorFieldSchema,
+						binaryVectorFieldSchema,
+						varCharFieldSchema,
+					},
+				},
+			},
 			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -51,23 +71,6 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 				Version:    msgpb.InsertDataVersion_ColumnBased,
 				RowIDs:     generateInt64Array(numRows),
 				Timestamps: generateUint64Array(numRows),
-			},
-		},
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkRowNums",
-			Description: "TestInsertTask_checkRowNums",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				boolFieldSchema,
-				int8FieldSchema,
-				int16FieldSchema,
-				int32FieldSchema,
-				int64FieldSchema,
-				floatFieldSchema,
-				doubleFieldSchema,
-				floatVectorFieldSchema,
-				binaryVectorFieldSchema,
-				varCharFieldSchema,
 			},
 		},
 	}

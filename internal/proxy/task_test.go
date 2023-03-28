@@ -1360,6 +1360,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
+					Schema:     nil,
 				},
 				InsertRequest: msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
@@ -1397,7 +1398,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			chTicker:      ticker,
 			vChannels:     nil,
 			pChannels:     nil,
-			schema:        nil,
 		}
 
 		for fieldName, dataType := range fieldName2Types {
@@ -1615,6 +1615,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
+					Schema:     nil,
 				},
 				InsertRequest: msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
@@ -1652,7 +1653,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			chTicker:      ticker,
 			vChannels:     nil,
 			pChannels:     nil,
-			schema:        nil,
 		}
 
 		fieldID := common.StartOfUserFieldID

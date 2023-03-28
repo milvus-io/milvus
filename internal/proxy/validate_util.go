@@ -6,7 +6,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/merr"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -41,10 +40,6 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		return err
 	}
 
-	if err := v.checkAligned(data, helper, numRows); err != nil {
-		return err
-	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -66,70 +61,6 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		default:
 
-		}
-	}
-
-	return nil
-}
-
-func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
-	errNumRowsMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
-		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, passedNumRows)
-		return merr.WrapErrParameterInvalid(passedNumRows, numRows, msg)
-	}
-
-	for _, field := range data {
-		switch field.GetType() {
-		case schemapb.DataType_FloatVector:
-			f, err := schema.GetFieldFromName(field.GetFieldName())
-			if err != nil {
-				return err
-			}
-
-			dim, err := typeutil.GetDim(f)
-			if err != nil {
-				return err
-			}
-
-			n, err := funcutil.GetNumRowsOfFloatVectorField(field.GetVectors().GetFloatVector().GetData(), dim)
-			if err != nil {
-				return err
-			}
-
-			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
-			}
-
-		case schemapb.DataType_BinaryVector:
-			f, err := schema.GetFieldFromName(field.GetFieldName())
-			if err != nil {
-				return err
-			}
-
-			dim, err := typeutil.GetDim(f)
-			if err != nil {
-				return err
-			}
-
-			n, err := funcutil.GetNumRowsOfBinaryVectorField(field.GetVectors().GetBinaryVector(), dim)
-			if err != nil {
-				return err
-			}
-
-			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
-			}
-
-		default:
-			// error won't happen here.
-			n, err := funcutil.GetNumRowOfFieldData(field)
-			if err != nil {
-				return err
-			}
-
-			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
-			}
 		}
 	}
 
