@@ -87,6 +87,7 @@ var (
 	ErrNodeNotFound = newMilvusError("node not found", 901, false)
 	ErrNodeOffline  = newMilvusError("node offline", 902, false)
 	ErrNodeLack     = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch = newMilvusError("node not match", 904, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)

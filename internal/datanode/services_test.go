@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -117,7 +118,7 @@ func (s *DataNodeServicesSuite) TestNotInUseAPIs() {
 	s.Run("WatchDmChannels", func() {
 		status, err := s.node.WatchDmChannels(s.ctx, &datapb.WatchDmChannelsRequest{})
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+		s.Assert().True(merr.Ok(status))
 	})
 	s.Run("GetTimeTickChannel", func() {
 		_, err := s.node.GetTimeTickChannel(s.ctx)
@@ -133,14 +134,14 @@ func (s *DataNodeServicesSuite) TestNotInUseAPIs() {
 func (s *DataNodeServicesSuite) TestGetComponentStates() {
 	resp, err := s.node.GetComponentStates(s.ctx)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().Equal(common.NotRegisteredID, resp.State.NodeID)
 
 	s.node.SetSession(&sessionutil.Session{})
 	s.node.session.UpdateRegistered(true)
 	resp, err = s.node.GetComponentStates(context.Background())
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 }
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
@@ -184,7 +185,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		node := &DataNode{}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, _ := node.GetCompactionState(s.ctx, nil)
-		s.Assert().Equal("DataNode is unhealthy", resp.GetStatus().GetReason())
+		s.Assert().Equal(merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
 	})
 }
 
@@ -231,7 +232,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 		status, err := s.node.FlushSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+		s.Assert().True(merr.Ok(status))
 	}()
 
 	go func() {
@@ -273,7 +274,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	// dup call
 	status, err := s.node.FlushSegments(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	s.Assert().True(merr.Ok(status))
 
 	// failure call
 	req = &datapb.FlushSegmentsRequest{
@@ -286,7 +287,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	}
 	status, err = s.node.FlushSegments(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+	s.Assert().Equal(merr.Code(merr.ErrNodeNotMatch), status.GetCode())
 
 	req = &datapb.FlushSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -299,7 +300,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 	status, err = s.node.FlushSegments(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	s.Assert().False(merr.Ok(status))
 
 	req = &datapb.FlushSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -312,7 +313,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 	status, err = s.node.FlushSegments(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	s.Assert().True(merr.Ok(status))
 }
 
 func (s *DataNodeServicesSuite) TestShowConfigurations() {
@@ -332,12 +333,12 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	s.Assert().False(merr.Ok(resp.GetStatus()))
 
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err = node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().Equal(1, len(resp.Configuations))
 	s.Assert().Equal("datanode.port", resp.Configuations[0].Key)
 }
@@ -350,7 +351,7 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	node.stateCode.Store(commonpb.StateCode_Abnormal)
 	resp, err := node.GetMetrics(s.ctx, &milvuspb.GetMetricsRequest{})
 	s.Assert().NoError(err)
-	s.Assert().NotEqual(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().False(merr.Ok(resp.GetStatus()))
 
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -360,7 +361,7 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 		Request: invalidRequest,
 	})
 	s.Assert().NoError(err)
-	s.Assert().NotEqual(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().False(merr.Ok(resp.GetStatus()))
 
 	// unsupported metric type
 	unsupportedMetricType := "unsupported"
@@ -368,14 +369,14 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	s.Assert().NoError(err)
 	resp, err = node.GetMetrics(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().NotEqual(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().False(merr.Ok(resp.GetStatus()))
 
 	// normal case
 	req, err = metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	s.Assert().NoError(err)
 	resp, err = node.GetMetrics(node.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 	log.Info("Test DataNode.GetMetrics",
 		zap.String("name", resp.ComponentName),
 		zap.String("response", resp.Response))
@@ -453,7 +454,7 @@ func (s *DataNodeServicesSuite) TestImport() {
 
 		stat, err := s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, stat.GetErrorCode())
+		s.Assert().True(merr.Ok(stat))
 		s.Assert().Equal("", stat.GetReason())
 	})
 
@@ -504,7 +505,7 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}
 		stat, err := s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, stat.GetErrorCode())
+		s.Assert().True(merr.Ok(stat))
 		s.Assert().Equal("", stat.GetReason())
 	})
 	s.Run("Test Import report import error", func() {
@@ -537,7 +538,7 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}
 		stat, err := s.node.Import(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+		s.Assert().False(merr.Ok(stat))
 	})
 
 	s.Run("Test Import error", func() {
@@ -550,16 +551,16 @@ func (s *DataNodeServicesSuite) TestImport() {
 		}
 		stat, err := s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.ErrorCode)
+		s.Assert().False(merr.Ok(stat))
 
 		stat, err = s.node.Import(context.WithValue(s.ctx, ctxKey{}, returnError), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+		s.Assert().False(merr.Ok(stat))
 
 		s.node.stateCode.Store(commonpb.StateCode_Abnormal)
 		stat, err = s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+		s.Assert().False(merr.Ok(stat))
 	})
 }
 
@@ -592,7 +593,7 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 		_, ok = s.node.flowgraphManager.getFlowgraphService(chName2)
 		s.Assert().True(ok)
 
-		stat, err := s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
+		resp, err := s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
 			SegmentId:    100,
 			CollectionId: 100,
 			PartitionId:  100,
@@ -600,12 +601,12 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 			RowNum:       500,
 		})
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, stat.GetStatus().GetErrorCode())
-		s.Assert().Equal("", stat.GetStatus().GetReason())
-		s.Assert().NotEqual(nil, stat.GetChannelPos())
+		s.Assert().True(merr.Ok(resp.GetStatus()))
+		s.Assert().Equal("", resp.GetStatus().GetReason())
+		s.Assert().NotEqual(nil, resp.GetChannelPos())
 
 		getFlowGraphServiceAttempts = 3
-		stat, err = s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
+		resp, err = s.node.AddImportSegment(context.WithValue(s.ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
 			SegmentId:    100,
 			CollectionId: 100,
 			PartitionId:  100,
@@ -613,7 +614,9 @@ func (s *DataNodeServicesSuite) TestAddImportSegment() {
 			RowNum:       500,
 		})
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.GetStatus().GetErrorCode())
+		// TODO ASSERT COMBINE ERROR
+		s.Assert().False(merr.Ok(resp.GetStatus()))
+		// s.Assert().Equal(merr.Code(merr.ErrChannelNotFound), stat.GetStatus().GetCode())
 	})
 
 }
@@ -651,12 +654,12 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		req.CompactedFrom = []UniqueID{}
 		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		s.Assert().False(merr.Ok(status))
 
 		req.CompactedFrom = []UniqueID{101, 201}
 		status, err = s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		s.Assert().True(merr.Ok(status))
 	})
 
 	s.Run("valid request numRows>0", func() {
@@ -669,11 +672,11 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		cancel()
 		status, err := s.node.SyncSegments(cancelCtx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		s.Assert().False(merr.Ok(status))
 
 		status, err = s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		s.Assert().True(merr.Ok(status))
 
 		s.Assert().True(fg.channel.hasSegment(req.CompactedTo, true))
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[0], true))
@@ -681,7 +684,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 
 		status, err = s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		s.Assert().True(merr.Ok(status))
 	})
 
 	s.Run("valid request numRows=0", func() {
@@ -702,7 +705,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		}
 		status, err := s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+		s.Assert().True(merr.Ok(status))
 
 		s.Assert().False(fg.channel.hasSegment(req.CompactedTo, true))
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[0], true))
@@ -762,12 +765,12 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 
 	resp, err := s.node.ResendSegmentStats(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().ElementsMatch([]UniqueID{0, 1, 2}, resp.GetSegResent())
 
 	// Duplicate call.
 	resp, err = s.node.ResendSegmentStats(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	s.Assert().True(merr.Ok(resp.GetStatus()))
 	s.Assert().ElementsMatch([]UniqueID{0, 1, 2}, resp.GetSegResent())
 }

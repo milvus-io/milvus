@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -147,7 +148,7 @@ func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) 
 		return flushCh, nil
 	}
 
-	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
+	return nil, merr.WrapErrSegmentNotFound(segID, "failed to get flush channel has this segment")
 }
 
 func (fm *flowgraphManager) getChannel(segID UniqueID) (Channel, error) {

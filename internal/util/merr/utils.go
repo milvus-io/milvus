@@ -83,6 +83,8 @@ func oldCode(code int32) commonpb.ErrorCode {
 		return commonpb.ErrorCode_NotReadyServe
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
+	case ErrNodeNotMatch.code():
+		return commonpb.ErrorCode_NodeIDNotMatch
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -294,6 +296,14 @@ func WrapErrNodeOffline(id int64, msg ...string) error {
 
 func WrapErrNodeLack(expectedNum, actualNum int64, msg ...string) error {
 	err := errors.Wrapf(ErrNodeLack, "expectedNum=%d, actualNum=%d", expectedNum, actualNum)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) error {
+	err := errors.Wrapf(ErrNodeNotMatch, "expectedNodeID=%d, actualNodeID=%d", expectedNodeID, actualNodeID)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
