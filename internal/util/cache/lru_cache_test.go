@@ -409,7 +409,10 @@ func TestLRU_closed(t *testing.T) {
 	c.Close()
 
 	c.Add("testKey", "testValue")
-	assert.Equal(t, int32(1), evicted)
+
+	for atomic.LoadInt32(&evicted) != 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	_, ok := c.Get("testKey")
 	assert.False(t, ok)
