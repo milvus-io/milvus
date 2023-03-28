@@ -694,11 +694,7 @@ func GetTS(i *internalpb.RetrieveResults, idx int64) uint64 {
 		fieldID := fieldData.FieldId
 		if fieldID == common.TimeStampField {
 			res := fieldData.GetScalars().GetLongData().Data
-			timeStamp := make([]uint64, len(res))
-			for i, v := range res {
-				timeStamp[i] = uint64(v)
-			}
-			return timeStamp[idx]
+			return uint64(res[idx])
 		}
 	}
 	return 0
