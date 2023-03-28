@@ -614,6 +614,12 @@ func (s *Segment) InitCurrentStat() {
 func (s *Segment) isPKExist(pk primaryKey) bool {
 	s.statLock.Lock()
 	defer s.statLock.Unlock()
+
+	if Params.DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		log.Warn("processing delete while skip load BF, may affect performance", zap.Any("pk", pk), zap.Int64("segmentID", s.segmentID))
+		return true
+	}
+
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
 		return true
 	}

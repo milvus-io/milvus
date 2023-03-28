@@ -2036,6 +2036,9 @@ type dataNodeConfig struct {
 
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
+
+	// Skip BF
+	SkipBFStatsLoad ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2150,6 +2153,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "500",
 	}
 	p.DataNodeTimeTickInterval.Init(base.mgr)
+
+	p.SkipBFStatsLoad = ParamItem{
+		Key:          "dataNode.skip.BFStats.Load",
+		Version:      "2.2.5",
+		PanicIfEmpty: false,
+		DefaultValue: "false",
+	}
+	p.SkipBFStatsLoad.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
