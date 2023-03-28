@@ -47,6 +47,7 @@ const (
 	DefaultEtcdEndpoints        = "localhost:2379"
 	DefaultInsertBufferSize     = "16777216"
 	DefaultEnvPrefix            = "milvus"
+	DefaultMinioMaxConcurrency  = "10"
 
 	DefaultLogFormat       = "text"
 	DefaultLogLevelForBase = "debug"

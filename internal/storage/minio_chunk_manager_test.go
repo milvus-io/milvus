@@ -50,6 +50,7 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 		CloudProvider("aws"),
 		IAMEndpoint(""),
 		CreateBucket(true),
+		MaxConcurrency(10),
 	)
 	return client, err
 }

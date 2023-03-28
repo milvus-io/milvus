@@ -476,15 +476,16 @@ func (p *RocksmqConfig) initPath() {
 type MinioConfig struct {
 	Base *BaseTable
 
-	Address         string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	RootPath        string
-	UseIAM          bool
-	CloudProvider   string
-	IAMEndpoint     string
+	Address              string
+	AccessKeyID          string
+	SecretAccessKey      string
+	UseSSL               bool
+	BucketName           string
+	RootPath             string
+	UseIAM               bool
+	CloudProvider        string
+	IAMEndpoint          string
+	MaxRemoveConcurrency int
 }
 
 func (p *MinioConfig) init(base *BaseTable) {
@@ -584,4 +585,13 @@ func (p *MinioConfig) initCloudProvider() {
 
 func (p *MinioConfig) initIAMEndpoint() {
 	p.IAMEndpoint = p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
+}
+
+func (p *MinioConfig) initMaxConcurrency() {
+	maxRemoveConcurrency := p.Base.LoadWithDefault("minio.maxRemoveConcurrency", DefaultMinioMaxConcurrency)
+	var err error
+	p.MaxRemoveConcurrency, err = strconv.Atoi(maxRemoveConcurrency)
+	if err != nil {
+		panic("parse int64 maxConcurrency:" + err.Error())
+	}
 }

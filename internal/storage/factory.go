@@ -26,7 +26,8 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		UseIAM(params.MinioCfg.UseIAM),
 		CloudProvider(params.MinioCfg.CloudProvider),
 		IAMEndpoint(params.MinioCfg.IAMEndpoint),
-		CreateBucket(true))
+		CreateBucket(true),
+		MaxConcurrency(params.MinioCfg.MaxRemoveConcurrency))
 }
 
 func NewChunkManagerFactory(persistentStorage string, opts ...Option) *ChunkManagerFactory {
