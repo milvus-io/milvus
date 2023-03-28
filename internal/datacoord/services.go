@@ -713,7 +713,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
-		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows {
+		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
 			log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
 				zap.Int64("segmentID", segment.GetID()),
 				zap.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
