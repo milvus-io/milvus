@@ -85,7 +85,7 @@ type ShardDelegator interface {
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
-	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
+	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, force bool) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 
 	// control

@@ -220,13 +220,13 @@ func (_c *MockShardDelegator_LoadGrowing_Call) Return(_a0 error) *MockShardDeleg
 	return _c
 }
 
-// LoadSegments provides a mock function with given fields: ctx, req
-func (_m *MockShardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	ret := _m.Called(ctx, req)
+// LoadSegments provides a mock function with given fields: ctx, req, force
+func (_m *MockShardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, force bool) error {
+	ret := _m.Called(ctx, req, force)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadSegmentsRequest) error); ok {
-		r0 = rf(ctx, req)
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.LoadSegmentsRequest, bool) error); ok {
+		r0 = rf(ctx, req, force)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -240,15 +240,16 @@ type MockShardDelegator_LoadSegments_Call struct {
 }
 
 // LoadSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.LoadSegmentsRequest
-func (_e *MockShardDelegator_Expecter) LoadSegments(ctx interface{}, req interface{}) *MockShardDelegator_LoadSegments_Call {
-	return &MockShardDelegator_LoadSegments_Call{Call: _e.mock.On("LoadSegments", ctx, req)}
+//   - ctx context.Context
+//   - req *querypb.LoadSegmentsRequest
+//   - force bool
+func (_e *MockShardDelegator_Expecter) LoadSegments(ctx interface{}, req interface{}, force interface{}) *MockShardDelegator_LoadSegments_Call {
+	return &MockShardDelegator_LoadSegments_Call{Call: _e.mock.On("LoadSegments", ctx, req, force)}
 }
 
-func (_c *MockShardDelegator_LoadSegments_Call) Run(run func(ctx context.Context, req *querypb.LoadSegmentsRequest)) *MockShardDelegator_LoadSegments_Call {
+func (_c *MockShardDelegator_LoadSegments_Call) Run(run func(ctx context.Context, req *querypb.LoadSegmentsRequest, force bool)) *MockShardDelegator_LoadSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.LoadSegmentsRequest))
+		run(args[0].(context.Context), args[1].(*querypb.LoadSegmentsRequest), args[2].(bool))
 	})
 	return _c
 }

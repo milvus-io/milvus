@@ -128,27 +128,6 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			segment := resp.GetInfos()[0]
 			loadInfo := utils.PackSegmentLoadInfo(segment, nil)
 
-			// Fix the leader view with lacks of delta logs
-			if existInCurrentTarget && s.LastDeltaTimestamp < currentTarget.GetDmlPosition().GetTimestamp() {
-				log.Info("Fix QueryNode delta logs lag",
-					zap.Int64("nodeID", s.Node),
-					zap.Int64("collectionID", s.GetCollectionID()),
-					zap.Int64("partitionID", s.GetPartitionID()),
-					zap.Int64("segmentID", s.GetID()),
-					zap.Uint64("segmentDeltaTimestamp", s.LastDeltaTimestamp),
-					zap.Uint64("channelTimestamp", currentTarget.GetDmlPosition().GetTimestamp()),
-				)
-
-				ret = append(ret, &querypb.SyncAction{
-					Type:        querypb.SyncType_Amend,
-					PartitionID: s.GetPartitionID(),
-					SegmentID:   s.GetID(),
-					NodeID:      s.Node,
-					Version:     s.Version,
-					Info:        loadInfo,
-				})
-			}
-
 			ret = append(ret, &querypb.SyncAction{
 				Type:        querypb.SyncType_Set,
 				PartitionID: s.GetPartitionID(),

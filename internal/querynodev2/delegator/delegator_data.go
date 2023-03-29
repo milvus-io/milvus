@@ -308,7 +308,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
-func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, force bool) error {
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetDstNodeID()
@@ -317,39 +317,42 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		zap.Int64("workID", req.GetDstNodeID()),
 		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
+	//if it's a real loading order from queryCoord, do loading segments really
+	if !force {
+		worker, err := sd.workerManager.GetWorker(targetNodeID)
+		if err != nil {
+			log.Warn("delegator failed to find worker", zap.Error(err))
+			return err
+		}
 
-	worker, err := sd.workerManager.GetWorker(targetNodeID)
-	if err != nil {
-		log.Warn("delegator failed to find worker", zap.Error(err))
-		return err
+		// load bloom filter only when candidate not exists
+		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
+		})
+		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+		if err != nil {
+			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			return err
+		}
+
+		req.Base.TargetID = req.GetDstNodeID()
+		log.Info("worker loads segments...")
+		err = worker.LoadSegments(ctx, req)
+		if err != nil {
+			log.Warn("worker failed to load segments", zap.Error(err))
+			return err
+		}
+		log.Info("work loads segments done")
+
+		log.Info("load delete...")
+		err = sd.loadStreamDelete(ctx, candidates, infos, targetNodeID, worker)
+		if err != nil {
+			log.Warn("load stream delete failed", zap.Error(err))
+			return err
+		}
+		log.Info("load delete done")
 	}
 
-	// load bloom filter only when candidate not exists
-	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
-	})
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
-	if err != nil {
-		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-		return err
-	}
-
-	req.Base.TargetID = req.GetDstNodeID()
-	log.Info("worker loads segments...")
-	err = worker.LoadSegments(ctx, req)
-	if err != nil {
-		log.Warn("worker failed to load segments", zap.Error(err))
-		return err
-	}
-	log.Info("work loads segments done")
-
-	log.Info("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, infos, targetNodeID, worker)
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
-		return err
-	}
-	log.Info("load delete done")
 	// alter distribution
 	entries := lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) SegmentEntry {
 		return SegmentEntry{
@@ -361,7 +364,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	})
 	removed := sd.distribution.AddDistributions(entries...)
 
-	// call worker release async
+	// release possible matched growing segments async
 	if len(removed) > 0 {
 		go func() {
 			worker, err := sd.workerManager.GetWorker(paramtable.GetNodeID())
@@ -404,7 +407,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context, candidates []*pk
 
 		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
-		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
+		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msg stream
 		if info.GetEndPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
 			log.Info("load delete from stream...")
 			var err error
@@ -536,7 +539,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	return result, nil
 }
 
-// ReleaseSegments releases segments local or remotely depends ont the target node.
+// ReleaseSegments releases segments local or remotely depending on the target node.
 func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	log := sd.getLogger(ctx)
 
