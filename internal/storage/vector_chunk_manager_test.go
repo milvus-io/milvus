@@ -396,6 +396,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
 		keys, contents, err := vcm.ReadWithPrefix(ctx, "10")
+
 		assert.Nil(t, err)
 		assert.Equal(t, "101", keys[0])
 		assert.Equal(t, []byte{3, 4}, contents[0])
