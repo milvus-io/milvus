@@ -193,13 +193,25 @@ conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/c
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
-    llvm_prefix="$(brew --prefix llvm)"
+    # detect llvm version by valid list
+    for llvm_version in 15 14 NOT_FOUND ; do
+      if brew ls --versions llvm@${llvm_version} > /dev/null; then
+        break
+      fi
+    done
+    if [ "${llvm_version}" = "NOT_FOUND" ] ; then
+      echo "valid llvm(14 or 15) not installed"
+      exit 1
+    fi
+    llvm_prefix="$(brew --prefix llvm@${llvm_version})"
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
     export CC="${llvm_prefix}/bin/clang"
     export CXX="${llvm_prefix}/bin/clang++"
-    export CFLAGS=-Wno-deprecated-declarations
-    export CXXFLAGS=-Wno-deprecated-declarations
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=15 -s compiler.libcxx=libc++ -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+    export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
+    export CXXFLAGS=${CFLAGS}
+    export LDFLAGS="-L$(brew --prefix libomp)/lib"
+
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     echo "Running on ${OS_NAME}"
