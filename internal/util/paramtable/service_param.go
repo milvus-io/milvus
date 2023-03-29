@@ -582,7 +582,7 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 
 	r.PageSize = ParamItem{
 		Key:          "rocksmq.rocksmqPageSize",
-		DefaultValue: strconv.FormatInt(256<<20, 10),
+		DefaultValue: strconv.FormatInt(64<<20, 10),
 		Version:      "2.0.0",
 		Doc:          "256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq",
 		Export:       true,
