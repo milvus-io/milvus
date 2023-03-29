@@ -757,7 +757,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
 		}
+		node.wg.Add(1)
 		runningGp.Go(func() error {
+			defer node.wg.Done()
 			ret, err := node.searchWithDmlChannel(runningCtx, req, ch)
 			mu.Lock()
 			defer mu.Unlock()
@@ -812,8 +814,6 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		node.NotReadyServeResp(failRet.GetStatus())
 		return failRet, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
@@ -938,8 +938,6 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		node.NotReadyServeResp(failRet.GetStatus())
 		return failRet, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	msgID := req.GetReq().GetBase().GetMsgID()
 	log.Ctx(ctx).Debug("queryWithDmlChannel receives query request",
@@ -1094,7 +1092,9 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
 		}
+		node.wg.Add(1)
 		runningGp.Go(func() error {
+			defer node.wg.Done()
 			ret, err := node.queryWithDmlChannel(runningCtx, req, ch)
 			mu.Lock()
 			defer mu.Unlock()
