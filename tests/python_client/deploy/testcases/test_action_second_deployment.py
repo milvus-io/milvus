@@ -8,7 +8,7 @@ from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
 from utils.util_pymilvus import *
 from deploy.base import TestDeployBase
-from deploy.common import gen_index_param, gen_search_param, get_collections
+from deploy.common import gen_index_param, gen_search_param, get_deploy_test_collections
 from utils.util_log import test_log as log
 
 default_nb = ct.default_nb
@@ -31,7 +31,7 @@ pymilvus_version = pymilvus.__version__
 class TestActionSecondDeployment(TestDeployBase):
     """ Test case of action before reinstall """
 
-    @pytest.fixture(scope="function", params=get_collections())
+    @pytest.fixture(scope="function", params=get_deploy_test_collections())
     def all_collection_name(self, request):
         if request.param == [] or request.param == "":
             pytest.skip("The collection name is invalid")
