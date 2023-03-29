@@ -17,6 +17,7 @@
 package utils
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -61,6 +62,22 @@ func CreateTestReplica(id, collectionID int64, nodes []int64) *meta.Replica {
 		},
 		typeutil.NewUniqueSet(nodes...),
 	)
+}
+
+func CreateTestSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "schema",
+		Description: "schema",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "id",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
 }
 
 func CreateTestCollection(collection int64, replica int32) *meta.Collection {

@@ -101,7 +101,7 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 			dists := o.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
 			needLoaded, needRemoved := o.findNeedLoadedSegments(leaderView, dists),
 				o.findNeedRemovedSegments(leaderView, dists)
-			o.sync(ctx, leaderView, append(needLoaded, needRemoved...))
+			o.sync(ctx, replica.GetID(), leaderView, append(needLoaded, needRemoved...))
 		}
 	}
 }
@@ -128,27 +128,6 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			}
 			segment := resp.GetInfos()[0]
 			loadInfo := utils.PackSegmentLoadInfo(segment, nil)
-
-			// Fix the leader view with lacks of delta logs
-			if existInCurrentTarget && s.LastDeltaTimestamp < currentTarget.GetDmlPosition().GetTimestamp() {
-				log.Info("Fix QueryNode delta logs lag",
-					zap.Int64("nodeID", s.Node),
-					zap.Int64("collectionID", s.GetCollectionID()),
-					zap.Int64("partitionID", s.GetPartitionID()),
-					zap.Int64("segmentID", s.GetID()),
-					zap.Uint64("segmentDeltaTimestamp", s.LastDeltaTimestamp),
-					zap.Uint64("channelTimestamp", currentTarget.GetDmlPosition().GetTimestamp()),
-				)
-
-				ret = append(ret, &querypb.SyncAction{
-					Type:        querypb.SyncType_Amend,
-					PartitionID: s.GetPartitionID(),
-					SegmentID:   s.GetID(),
-					NodeID:      s.Node,
-					Version:     s.Version,
-					Info:        loadInfo,
-				})
-			}
 
 			ret = append(ret, &querypb.SyncAction{
 				Type:        querypb.SyncType_Set,
@@ -190,7 +169,7 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	return ret
 }
 
-func (o *LeaderObserver) sync(ctx context.Context, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) {
+func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) {
 	if len(diffs) == 0 {
 		return
 	}
@@ -200,13 +179,33 @@ func (o *LeaderObserver) sync(ctx context.Context, leaderView *meta.LeaderView, 
 		zap.Int64("collectionID", leaderView.CollectionID),
 		zap.String("channel", leaderView.Channel),
 	)
+
+	schema, err := o.broker.GetCollectionSchema(ctx, leaderView.CollectionID)
+	if err != nil {
+		log.Error("sync distribution failed, cannot get schema of collection", zap.Error(err))
+		return
+	}
+	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
+	if err != nil {
+		log.Error("sync distribution failed, cannot get partitions of collection", zap.Error(err))
+		return
+	}
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
 		),
 		CollectionID: leaderView.CollectionID,
+		ReplicaID:    replicaID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
+		Schema:       schema,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     o.meta.GetLoadType(leaderView.CollectionID),
+			CollectionID: leaderView.CollectionID,
+			PartitionIDs: partitions,
+		},
+		Version: time.Now().UnixNano(),
 	}
 	resp, err := o.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {

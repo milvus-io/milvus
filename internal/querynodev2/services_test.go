@@ -1168,15 +1168,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 		PartitionID: suite.partitionIDs[0],
 	}
 
-	amendAction := &querypb.SyncAction{
-		Type: querypb.SyncType_Amend,
-		Info: &querypb.SegmentLoadInfo{
-			SegmentID:    suite.validSegmentIDs[0],
-			PartitionID:  suite.partitionIDs[0],
-			CollectionID: suite.collectionID,
-		},
-	}
-	req.Actions = []*querypb.SyncAction{releaseAction, setAction, amendAction}
+	req.Actions = []*querypb.SyncAction{releaseAction, setAction}
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)

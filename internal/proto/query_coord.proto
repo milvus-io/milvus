@@ -555,6 +555,10 @@ message SyncDistributionRequest {
   int64 collectionID = 2;
   string channel = 3;
   repeated SyncAction actions = 4;
+  schema.CollectionSchema schema = 5;
+  LoadMetaInfo load_meta = 6;
+  int64 replicaID = 7;
+  int64 version = 8;
 }
 
 message ResourceGroup {

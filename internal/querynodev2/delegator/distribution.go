@@ -200,7 +200,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 }
 
 // getSnapshot converts current distribution to snapshot format.
-// in which, user could juse found nodeID=>segmentID list.
+// in which, user could use found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
 func (d *distribution) genSnapshot() chan struct{} {
 
