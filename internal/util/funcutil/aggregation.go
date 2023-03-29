@@ -47,10 +47,3 @@ func Sum[T constraints.Ordered](s ...T) T {
 }
 
 */
-
-func Min(t1, t2 uint64) uint64 {
-	if t1 < t2 {
-		return t1
-	}
-	return t2
-}

@@ -486,10 +486,15 @@ def gen_invaild_search_params_type():
 
 def gen_search_param(index_type, metric_type="L2"):
     search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]:
-        for nprobe in [64, 128]:
-            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "GPU_FLAT", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_IVF_SQ8",
+                      "RAFT_IVF_FLAT", "RAFT_IVF_PQ"]:
+        if index_type in ["GPU_FLAT"]:
+            ivf_search_params = {"metric_type": metric_type, "params": {}}
             search_params.append(ivf_search_params)
+        else:
+            for nprobe in [64, 128]:
+                ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+                search_params.append(ivf_search_params)
     elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
         if metric_type not in ct.binary_metrics:
             log.error("Metric type error: binary index only supports distance type in (%s)" % ct.binary_metrics)

@@ -75,7 +75,6 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
     auto data_type = create_index_info.field_type;
     auto index_type = create_index_info.index_type;
     auto metric_type = create_index_info.metric_type;
-    auto index_mode = create_index_info.index_mode;
 
 #ifdef BUILD_DISK_ANN
     // create disk index
@@ -83,7 +82,7 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
         switch (data_type) {
             case DataType::VECTOR_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, index_mode, file_manager);
+                    index_type, metric_type, file_manager);
             }
             default:
                 throw std::invalid_argument(
@@ -94,12 +93,10 @@ IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info,
 #endif
 
     if (is_in_nm_list(index_type)) {
-        return std::make_unique<VectorMemNMIndex>(
-            index_type, metric_type, index_mode);
+        return std::make_unique<VectorMemNMIndex>(index_type, metric_type);
     }
     // create mem index
-    return std::make_unique<VectorMemIndex>(
-        index_type, metric_type, index_mode);
+    return std::make_unique<VectorMemIndex>(index_type, metric_type);
 }
 
 }  // namespace milvus::index

@@ -43,6 +43,7 @@ default_search_ip_params = ct.default_search_ip_params
 default_search_binary_params = ct.default_search_binary_params
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexParams(TestcaseBase):
     """ Test case of index interface """
 
@@ -195,6 +196,7 @@ class TestIndexParams(TestcaseBase):
                                                 ct.err_msg: "Invalid index name"})
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexOperation(TestcaseBase):
     """ Test case of index interface """
 
@@ -389,6 +391,7 @@ class TestIndexOperation(TestcaseBase):
         self.index_wrap.drop()
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexAdvanced(TestcaseBase):
     """ Test case of index interface """
 
@@ -457,6 +460,7 @@ class TestIndexAdvanced(TestcaseBase):
     """
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexBase(TestcaseBase):
     """
     ******************************************************************
@@ -1064,6 +1068,7 @@ class TestNewIndexBase(TestcaseBase):
         assert len(search_res[0]) == ct.default_limit
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexBinary(TestcaseBase):
 
     def get_simple_index(self, request):
@@ -1195,7 +1200,7 @@ class TestNewIndexBinary(TestcaseBase):
         assert collection_w.has_index(index_name=binary_field_name)[0] == False
         assert len(collection_w.indexes) == 0
 
-
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexInvalid(TestcaseBase):
     """
     Test create / describe / drop index interfaces with invalid collection names
@@ -1282,6 +1287,7 @@ class TestIndexInvalid(TestcaseBase):
                                                "err_msg": "invalid index params"})
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexAsync(TestcaseBase):
     @pytest.fixture(scope="function", params=[False, True])
     def _async(self, request):
@@ -1363,6 +1369,7 @@ class TestNewIndexAsync(TestcaseBase):
                                            _callback=self.call_back())
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexString(TestcaseBase):
     """
     ******************************************************************
@@ -1572,6 +1579,7 @@ class TestIndexString(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
 
+@pytest.mark.tags(CaseLabel.GPU)
 class TestIndexDiskann(TestcaseBase):
     """
     ******************************************************************

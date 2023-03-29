@@ -2,7 +2,7 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
+
 	"fmt"
 	"regexp"
 	"strconv"
@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/types"
 
-	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -100,62 +99,6 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 	return partitionIDs, nil
 }
 
-func parseSearchParams(searchParamsPair []*commonpb.KeyValuePair) (string, error) {
-	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
-	if Params.AutoIndexConfig.Enable.GetAsBool() {
-		searchParamMap := make(map[string]interface{})
-		var level int
-		if err == nil { // if specified params, we try to parse params
-			err = json.Unmarshal([]byte(searchParamStr), &searchParamMap)
-			if err == nil { // if unmarshal success, we try to parse level
-				if searchParamMap == nil { // is searchParamStr equal "null", searchParamMap will become nil!
-					searchParamMap = make(map[string]interface{})
-				}
-				levelValue, ok := searchParamMap[SearchLevelKey]
-				if !ok { // if level is not specified, set to default 1
-					level = 1
-				} else {
-					switch lValue := levelValue.(type) {
-					case float64: // for numeric values, json unmarshal will interpret it as float64
-						level = int(lValue)
-					case string:
-						level, err = strconv.Atoi(lValue)
-					default:
-						err = fmt.Errorf("wrong level in search params")
-					}
-				}
-			}
-			if err != nil {
-				return "", fmt.Errorf("search params in wrong format:%w", err)
-			}
-		} else {
-			level = 1
-		}
-		paramsStr := Params.AutoIndexConfig.SearchParamsYamlStr.GetValue()
-		calculator := autoindex.GetSearchCalculator(paramsStr, level)
-		if calculator == nil {
-			return "", fmt.Errorf("search params calculator not found for level:%d", level)
-		}
-		newSearchParamMap, err2 := calculator.Calculate(searchParamsPair)
-		if err2 != nil {
-			return "", errors.New("search params calculate failed")
-		}
-		for k, v := range newSearchParamMap {
-			searchParamMap[k] = v
-		}
-		searchParamValue, err2 := json.Marshal(searchParamMap)
-		if err2 != nil {
-			return "", err2
-		}
-		searchParamStr = string(searchParamValue)
-	} else {
-		if err != nil {
-			return "", errors.New(SearchParamsKey + " not found in search_params")
-		}
-	}
-	return searchParamStr, nil
-}
-
 // parseSearchInfo returns QueryInfo and offset
 func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInfo, int64, error) {
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
@@ -208,7 +151,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
-	searchParamStr, err := parseSearchParams(searchParamsPair)
+	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -496,13 +439,14 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
-		Req:         searchReq,
-		DmlChannels: channelIDs,
-		Scope:       querypb.DataScope_All,
+		Req:             searchReq,
+		DmlChannels:     channelIDs,
+		Scope:           querypb.DataScope_All,
+		TotalChannelNum: int32(channelNum),
 	}
 
 	queryNode := querynode.GetQueryNode()

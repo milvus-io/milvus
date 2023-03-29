@@ -61,13 +61,23 @@ func NewMetaStore(cli kv.MetaKv) metaStore {
 	}
 }
 
-func (s metaStore) SaveCollection(info *querypb.CollectionLoadInfo) error {
-	k := encodeCollectionLoadInfoKey(info.GetCollectionID())
-	v, err := proto.Marshal(info)
+func (s metaStore) SaveCollection(collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
+	k := encodeCollectionLoadInfoKey(collection.GetCollectionID())
+	v, err := proto.Marshal(collection)
 	if err != nil {
 		return err
 	}
-	return s.cli.Save(k, string(v))
+	kvs := make(map[string]string)
+	for _, partition := range partitions {
+		key := encodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
+		value, err := proto.Marshal(partition)
+		if err != nil {
+			return err
+		}
+		kvs[key] = string(value)
+	}
+	kvs[k] = string(v)
+	return s.cli.MultiSave(kvs)
 }
 
 func (s metaStore) SavePartition(info ...*querypb.PartitionLoadInfo) error {
@@ -211,9 +221,27 @@ func (s metaStore) GetResourceGroups() ([]*querypb.ResourceGroup, error) {
 	return ret, nil
 }
 
-func (s metaStore) ReleaseCollection(id int64) error {
-	k := encodeCollectionLoadInfoKey(id)
-	return s.cli.Remove(k)
+func (s metaStore) ReleaseCollection(collection int64) error {
+	// obtain partitions of this collection
+	_, values, err := s.cli.LoadWithPrefix(fmt.Sprintf("%s/%d", PartitionLoadInfoPrefix, collection))
+	if err != nil {
+		return err
+	}
+	partitions := make([]*querypb.PartitionLoadInfo, 0)
+	for _, v := range values {
+		info := querypb.PartitionLoadInfo{}
+		if err = proto.Unmarshal([]byte(v), &info); err != nil {
+			return err
+		}
+		partitions = append(partitions, &info)
+	}
+	// remove collection and obtained partitions
+	keys := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) string {
+		return encodePartitionLoadInfoKey(collection, partition.GetPartitionID())
+	})
+	k := encodeCollectionLoadInfoKey(collection)
+	keys = append(keys, k)
+	return s.cli.MultiRemove(keys)
 }
 
 func (s metaStore) ReleasePartition(collection int64, partitions ...int64) error {

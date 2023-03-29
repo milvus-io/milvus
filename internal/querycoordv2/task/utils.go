@@ -99,10 +99,7 @@ func packLoadSegmentRequest(
 	segment := resp.GetInfos()[0]
 
 	var posSrcStr string
-	if resp.GetChannelCheckpoint() != nil && resp.ChannelCheckpoint[segment.InsertChannel] != nil {
-		deltaPosition = resp.ChannelCheckpoint[segment.InsertChannel]
-		posSrcStr = "channelCheckpoint"
-	} else if segment.GetDmlPosition() != nil {
+	if segment.GetDmlPosition() != nil {
 		deltaPosition = segment.GetDmlPosition()
 		posSrcStr = "segmentDMLPos"
 	} else {

@@ -69,6 +69,8 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager()
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
+
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -257,6 +259,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
+			collection.LoadType = querypb.LoadType_LoadCollection
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			for node, s := range c.distributions {
@@ -359,6 +362,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
+			collection.LoadType = querypb.LoadType_LoadCollection
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			for node, s := range c.distributions {
@@ -415,6 +419,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			collection := utils.CreateTestCollection(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loading
+			collection.LoadType = querypb.LoadType_LoadCollection
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, c.nodes))
 			for node, s := range c.distributions {

@@ -25,15 +25,15 @@ type DocContent struct {
 }
 
 func collect() []DocContent {
-	params := paramtable.ComponentParam{}
+	params := &paramtable.ComponentParam{}
 	params.Init()
 
-	val := reflect.ValueOf(params)
+	val := reflect.ValueOf(params).Elem()
 	data := make([]DocContent, 0)
 	keySet := typeutil.NewSet[string]()
 	for i := 0; i < val.NumField(); i++ {
 		valueField := val.Field(i)
-		collectRecursive(&params, &data, &valueField)
+		collectRecursive(params, &data, &valueField)
 	}
 	result := make([]DocContent, 0)
 	for _, d := range data {

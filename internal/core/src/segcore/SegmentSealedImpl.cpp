@@ -221,9 +221,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         AssertInfo(data_type == DataType(info.field_data->type()),
                    "field type of load data is inconsistent with the schema");
 
-        // write data under lock
-        std::unique_lock lck(mutex_);
-
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id),
                    "field data can't be loaded when indexing exists");
@@ -234,11 +231,13 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             VariableField field(get_segment_id(), field_meta, info);
             size = field.size();
             field_data = reinterpret_cast<void*>(field.data());
+            std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(field));
         } else {
             field_data = CreateMap(get_segment_id(), field_meta, info);
-            fixed_fields_[field_id] = field_data;
             size = field_meta.get_sizeof() * info.row_count;
+            std::unique_lock lck(mutex_);
+            fixed_fields_[field_id] = field_data;
         }
 
         // set pks to offset
@@ -253,7 +252,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             }
             insert_record_.seal_pks();
         }
-
+        std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
     std::unique_lock lck(mutex_);
@@ -275,9 +274,27 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
+    ssize_t n = deleted_record_.ack_responder_.GetAck();
+    ssize_t divide_point = 0;
+    // Truncate the overlapping prefix
+    if (n > 0) {
+        auto last = deleted_record_.timestamps_[n - 1];
+        divide_point =
+            std::lower_bound(timestamps, timestamps + size, last + 1) -
+            timestamps;
+    }
+
+    // All these delete records have been loaded
+    if (divide_point == size) {
+        return;
+    }
+
+    size -= divide_point;
     auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    deleted_record_.pks_.set_data_raw(reserved_begin, pks.data(), size);
-    deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps, size);
+    deleted_record_.pks_.set_data_raw(
+        reserved_begin, pks.data() + divide_point, size);
+    deleted_record_.timestamps_.set_data_raw(
+        reserved_begin, timestamps + divide_point, size);
     deleted_record_.ack_responder_.AddSegment(reserved_begin,
                                               reserved_begin + size);
 }

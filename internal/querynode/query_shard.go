@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -68,11 +67,11 @@ func newQueryShard(
 	if remoteChunkManager == nil {
 		return nil, fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
 	}
-	vectorChunkManager, err := storage.NewVectorChunkManager(ctx, localChunkManager, remoteChunkManager,
-		&etcdpb.CollectionMeta{
-			ID:     collectionID,
-			Schema: collection.schema,
-		}, Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(), localCacheEnabled)
+	vectorChunkManager, err := storage.NewVectorChunkManager(ctx,
+		localChunkManager,
+		remoteChunkManager,
+		Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(),
+		localCacheEnabled)
 	if err != nil {
 		return nil, err
 	}

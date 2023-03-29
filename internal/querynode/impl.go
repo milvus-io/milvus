@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -566,10 +567,10 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.Releas
 	return status, nil
 }
 
-// ReleasePartitions clears all data related to this partition on the querynode
-func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	nodeID := node.session.ServerID
 	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
-		err := fmt.Errorf("query node %d is not ready", node.GetSession().ServerID)
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -578,35 +579,58 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 	}
 	defer node.lifetime.Done()
 
-	dct := &releasePartitionsTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			done: make(chan error),
-		},
-		req:  in,
-		node: node,
+	// check target matches
+	if req.GetBase().GetTargetID() != nodeID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID),
+		}
+		return status, nil
 	}
 
-	err := node.scheduler.queue.Enqueue(dct)
-	if err != nil {
+	log.Ctx(ctx).With(zap.Int64("colID", req.GetCollectionID()), zap.Int64s("partIDs", req.GetPartitionIDs()))
+	log.Info("loading partitions")
+	for _, part := range req.GetPartitionIDs() {
+		err := node.metaReplica.addPartition(req.GetCollectionID(), part)
+		if err != nil {
+			log.Warn(err.Error())
+		}
+	}
+	log.Info("load partitions done")
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	return status, nil
+}
+
+// ReleasePartitions clears all data related to this partition on the querynode
+func (node *QueryNode) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	nodeID := node.session.ServerID
+	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
 		return status, nil
 	}
-	log.Info("releasePartitionsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
+	defer node.lifetime.Done()
 
-	func() {
-		err = dct.WaitToFinish()
-		if err != nil {
-			log.Warn(err.Error())
-			return
+	// check target matches
+	if req.GetBase().GetTargetID() != nodeID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID),
 		}
-		log.Info("releasePartitionsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
-	}()
+		return status, nil
+	}
 
+	log.Ctx(ctx).With(zap.Int64("colID", req.GetCollectionID()), zap.Int64s("partIDs", req.GetPartitionIDs()))
+	log.Info("releasing partitions")
+	for _, part := range req.GetPartitionIDs() {
+		node.metaReplica.removePartition(part)
+	}
+	log.Info("release partitions done")
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -749,11 +773,12 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.SearchRequest{
-			Req:             req.Req,
+			Req:             typeutil.Clone(req.Req),
 			DmlChannels:     []string{ch},
 			SegmentIDs:      req.SegmentIDs,
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
+			TotalChannelNum: req.TotalChannelNum,
 		}
 		runningGp.Go(func() error {
 			ret, err := node.searchWithDmlChannel(runningCtx, req, ch)
@@ -886,6 +911,44 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		errCluster        error
 	)
 	defer cancel()
+
+	// optimize search params
+	if req.Req.GetSerializedExprPlan() != nil && node.queryHook != nil {
+		channelNum := int(req.GetTotalChannelNum())
+		if channelNum <= 0 {
+			channelNum = 1
+		}
+		segmentNum := cluster.GetSegmentNum() * channelNum
+		plan := &planpb.PlanNode{}
+		err = proto.Unmarshal(req.Req.GetSerializedExprPlan(), plan)
+		if err != nil {
+			failRet.Status.Reason = err.Error()
+			return failRet, nil
+		}
+		switch plan.GetNode().(type) {
+		case *planpb.PlanNode_VectorAnns:
+			qinfo := plan.GetVectorAnns().GetQueryInfo()
+			paramMap := map[string]interface{}{
+				"topk":         qinfo.GetTopk(),
+				"search_param": qinfo.GetSearchParams(),
+				"segment_num":  segmentNum,
+			}
+			err := node.queryHook.Run(paramMap)
+			if err != nil {
+				failRet.Status.Reason = err.Error()
+				return failRet, nil
+			}
+			qinfo.Topk = paramMap["topk"].(int64)
+			qinfo.SearchParams = paramMap["search_param"].(string)
+
+			SerializedExprPlan, err := proto.Marshal(plan)
+			if err != nil {
+				failRet.Status.Reason = err.Error()
+				return failRet, nil
+			}
+			req.Req.SerializedExprPlan = SerializedExprPlan
+		}
+	}
 
 	// shard leader dispatches request to its shard cluster
 	var withStreamingFunc searchWithStreaming
@@ -1435,4 +1498,11 @@ func (node *QueryNode) GetSession() *sessionutil.Session {
 	node.sessionMu.Lock()
 	defer node.sessionMu.Unlock()
 	return node.session
+}
+
+func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "not implemented in qnv1",
+	}, nil
 }

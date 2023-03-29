@@ -19,24 +19,30 @@ package querynode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestImpl_GetComponentStates(t *testing.T) {
@@ -360,6 +366,36 @@ func TestImpl_ReleaseCollection(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
+func TestImpl_LoadPartitions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	req := &queryPb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			TargetID: paramtable.GetNodeID(),
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	status, err := node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	status, err = node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req.Base.TargetID = -1
+	status, err = node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+}
+
 func TestImpl_ReleasePartitions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -368,8 +404,9 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 
 	req := &queryPb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-			MsgID:   rand.Int63(),
+			MsgType:  commonpb.MsgType_WatchQueryChannels,
+			MsgID:    rand.Int63(),
+			TargetID: paramtable.GetNodeID(),
 		},
 		NodeID:       0,
 		CollectionID: defaultCollectionID,
@@ -384,6 +421,12 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 	status, err = node.ReleasePartitions(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req.Base.TargetID = -1
+	status, err = node.ReleasePartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
 }
 
 func TestImpl_GetSegmentInfo(t *testing.T) {
@@ -787,6 +830,62 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel},
 	}, defaultDMLChannel)
 	assert.NoError(t, err)
+
+	// test querynode plugin
+	node.queryHook = &mockHook1{}
+	newReq := typeutil.Clone(req)
+	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, req.SerializedExprPlan, newReq.SerializedExprPlan)
+
+	node.queryHook = &mockHook2{}
+	newReq = typeutil.Clone(req)
+	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.NotEqual(t, req.SerializedExprPlan, newReq.SerializedExprPlan)
+	reqSearchParams, err := getSearchParamFromPlanExpr(req.SerializedExprPlan)
+	assert.NoError(t, err)
+	newReqSearchParams, err := getSearchParamFromPlanExpr(newReq.SerializedExprPlan)
+	assert.NoError(t, err)
+	assert.NotEqual(t, reqSearchParams, newReqSearchParams)
+	assert.Equal(t, newReqSearchParams, "test")
+
+	node.queryHook = &mockHook3{}
+	newReq = typeutil.Clone(req)
+	res, err := node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, res.Status.Reason, fmt.Errorf("unexpected param").Error())
+
+	node.queryHook = &mockHook3{}
+	newReq = typeutil.Clone(req)
+	newReq.SerializedExprPlan, _ = json.Marshal("")
+	res, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	plan := &planpb.PlanNode{}
+	err = proto.Unmarshal(newReq.SerializedExprPlan, plan)
+	assert.Equal(t, res.Status.Reason, err.Error())
+	node.queryHook = nil
+
 	// search with ignore growing segment
 	req.IgnoreGrowing = true
 	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{

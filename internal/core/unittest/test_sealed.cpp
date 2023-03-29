@@ -739,7 +739,6 @@ TEST(Sealed, Delete) {
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
 
-    std::vector<uint8_t> tmp_block{0, 0};
     BitsetType bitset(N, false);
     segment->mask_with_delete(bitset, 10, 11);
     ASSERT_EQ(bitset.count(), pks.size());
@@ -756,6 +755,90 @@ TEST(Sealed, Delete) {
                     new_count,
                     new_ids.get(),
                     reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+}
+
+TEST(Sealed, OverlapDelete) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = 10;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+
+    auto segment = CreateSealedSegment(schema);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 3
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    Timestamp time = 1000000;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+
+    SealedLoadFieldData(dataset, *segment);
+
+    int64_t row_count = 5;
+    std::vector<idx_t> pks{1, 2, 3, 4, 5};
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+
+    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    segment->LoadDeletedRecord(info);
+    ASSERT_EQ(segment->get_deleted_count(), pks.size())
+        << "deleted_count=" << segment->get_deleted_count() << " pks_count=" << pks.size() << std::endl;
+
+    // Load overlapping delete records
+    row_count += 3;
+    pks.insert(pks.end(), {6, 7, 8});
+    auto new_ids = std::make_unique<IdArray>();
+    new_ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+    timestamps.insert(timestamps.end(), {11, 11, 11});
+    LoadDeletedRecordInfo overlap_info = {timestamps.data(), new_ids.get(), row_count};
+    segment->LoadDeletedRecord(overlap_info);
+
+    BitsetType bitset(N, false);
+    // NOTE: need to change delete timestamp, so not to hit the cache
+    ASSERT_EQ(segment->get_deleted_count(), pks.size())
+        << "deleted_count=" << segment->get_deleted_count() << " pks_count=" << pks.size() << std::endl;
+    segment->mask_with_delete(bitset, 10, 12);
+    ASSERT_EQ(bitset.count(), pks.size())
+        << "bitset_count=" << bitset.count() << " pks_count=" << pks.size() << std::endl;
 }
 
 auto

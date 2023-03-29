@@ -57,7 +57,7 @@ VectorMemNMIndex::Load(const BinarySet& binary_set, const Config& config) {
     VectorMemIndex::Load(binary_set, config);
     if (binary_set.Contains(RAW_DATA)) {
         std::call_once(raw_data_loaded_, [&]() {
-            LOG_SEGCORE_INFO_C << "NM index load raw data done!";
+            LOG_SEGCORE_INFO_ << "NM index load raw data done!";
         });
     }
 }

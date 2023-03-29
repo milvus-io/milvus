@@ -34,7 +34,7 @@ func (c *stop) execute(args []string, flags *flag.FlagSet) {
 		fmt.Fprintln(os.Stderr, c.getHelp())
 	}
 	c.serverType = args[2]
-	if _, ok := typeutil.ServerTypeMap()[c.serverType]; !ok {
+	if !typeutil.ServerTypeSet().Contain(c.serverType) {
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", c.serverType)
 		os.Exit(-1)
 	}

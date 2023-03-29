@@ -184,8 +184,7 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
 // VecIndexPtr
 // generate_index(
 //    void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, knowhere::IndexType index_type) {
-//    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type,
-//    knowhere::IndexMode::MODE_CPU);
+//    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
 //
 //    auto database = knowhere::GenDataset(N, dim, raw_data);
 //    indexing->Train(database, conf);
@@ -1004,13 +1003,13 @@ TEST(CApiTest, SearchTest) {
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    auto res = Search(
+        segment, plan, placeholderGroup, {}, N + ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
     auto res2 =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -1075,6 +1074,7 @@ TEST(CApiTest, SearchTestWithExpr) {
     auto res = Search(segment,
                       plan,
                       placeholderGroup,
+                      {},
                       dataset.timestamps_[0],
                       &search_result);
     ASSERT_EQ(res.error_code, Success);
@@ -1153,11 +1153,6 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
                       insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
-
-    auto memory_usage_size = GetMemoryUsageInBytes(segment);
-    // std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
-    // TODO:: assert
-    // ASSERT_EQ(memory_usage_size, 2785280);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -1363,7 +1358,7 @@ TEST(CApiTest, ReudceNullResult) {
         std::vector<CSearchResult> results;
         CSearchResult res;
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
@@ -1453,10 +1448,10 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res1);
         ASSERT_EQ(status.error_code, Success);
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res2);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1486,13 +1481,13 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res1);
         ASSERT_EQ(status.error_code, Success);
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res2);
         ASSERT_EQ(status.error_code, Success);
         status = Search(
-            segment, plan, placeholderGroup, dataset.timestamps_[0], &res3);
+            segment, plan, placeholderGroup, {}, dataset.timestamps_[0], &res3);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1580,10 +1575,10 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     CSearchResult res1;
     CSearchResult res2;
     auto res = Search(
-        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1);
+        segment, plan, placeholderGroup, {}, dataset.timestamps_[N - 1], &res1);
     ASSERT_EQ(res.error_code, Success);
     res = Search(
-        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2);
+        segment, plan, placeholderGroup, {}, dataset.timestamps_[N - 1], &res2);
     ASSERT_EQ(res.error_code, Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -1685,15 +1680,10 @@ TEST(CApiTest, LoadIndexInfo) {
     std::string index_param_value1 = "IVF_PQ";
     status = AppendIndexParam(
         c_load_index_info, index_param_key1.data(), index_param_value1.data());
-    std::string index_param_key2 = "index_mode";
-    std::string index_param_value2 = "CPU";
+    std::string index_param_key2 = knowhere::meta::METRIC_TYPE;
+    std::string index_param_value2 = knowhere::metric::L2;
     status = AppendIndexParam(
         c_load_index_info, index_param_key2.data(), index_param_value2.data());
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_param_key3 = knowhere::meta::METRIC_TYPE;
-    std::string index_param_value3 = knowhere::metric::L2;
-    status = AppendIndexParam(
-        c_load_index_info, index_param_key3.data(), index_param_value3.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
     status =
@@ -1737,10 +1727,7 @@ TEST(CApiTest, LoadIndex_Search) {
     milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = "IVF_PQ";
-    index_params["index_mode"] = "CPU";
-    auto mode = knowhere::IndexMode::MODE_CPU;
-    load_index_info.index = std::make_unique<VectorMemIndex>(
-        index_params["index_type"], knowhere::metric::L2, mode);
+    load_index_info.index = std::make_unique<VectorMemIndex>(index_params["index_type"], knowhere::metric::L2);
     load_index_info.index->Load(binary_set);
 
     // search
@@ -1821,8 +1808,12 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -1859,15 +1850,11 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -1882,6 +1869,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -1966,8 +1954,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2004,15 +1996,11 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2027,6 +2015,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2127,8 +2116,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2165,15 +2158,11 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2188,6 +2177,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2301,8 +2291,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2339,15 +2333,11 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2362,6 +2352,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2458,8 +2449,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2496,15 +2491,11 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2519,6 +2510,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2625,8 +2617,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2663,15 +2659,11 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -2686,6 +2678,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2784,8 +2777,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -2823,15 +2820,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -2846,6 +2839,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -2958,8 +2952,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_TRUE(res_before_load_index.error_code == Success)
         << res_before_load_index.error_msg;
 
@@ -2997,15 +2995,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3020,6 +3014,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -3118,8 +3113,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3156,15 +3155,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3179,6 +3174,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -3308,8 +3304,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment,
+                                        plan,
+                                        placeholderGroup,
+                                        {},
+                                        time,
+                                        &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
@@ -3346,15 +3346,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
@@ -3369,6 +3365,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -3532,15 +3529,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -3594,6 +3587,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto res_after_load_index = Search(sealed_segment.get(),
                                        plan,
                                        placeholderGroup,
+                                       {},
                                        time,
                                        &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
@@ -3715,14 +3709,14 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     CSearchResult search_result;
-    auto res =
-        Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    auto res = Search(
+        segment, plan, placeholderGroup, {}, N + ts_offset, &search_result);
     std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
     auto res2 =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3841,15 +3835,11 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
-    std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
@@ -3903,8 +3893,12 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(
-        segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment,
+                                       plan,
+                                       placeholderGroup,
+                                       {},
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -4144,7 +4138,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
 
     CSearchResult search_result;
     auto res =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4212,7 +4206,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 
     CSearchResult search_result;
     auto res =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4279,7 +4273,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 
     CSearchResult search_result;
     auto res =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4347,7 +4341,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
 
     CSearchResult search_result;
     auto res =
-        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+        Search(segment, plan, placeholderGroup, {}, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);

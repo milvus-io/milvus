@@ -38,7 +38,7 @@ type EtcdSource struct {
 	currentConfig map[string]string
 	keyPrefix     string
 
-	configRefresher refresher
+	configRefresher *refresher
 	eh              EventHandler
 }
 

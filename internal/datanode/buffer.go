@@ -143,6 +143,7 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 	compactToDelBuff, loaded := bm.Load(compactedToSegID)
 	if !loaded {
 		compactToDelBuff = newDelDataBuf()
+		compactToDelBuff.item.segmentID = compactedToSegID
 	}
 
 	for _, segID := range compactedFromSegIDs {

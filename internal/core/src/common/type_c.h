@@ -98,6 +98,20 @@ typedef struct CStorageConfig {
     bool useIAM;
 } CStorageConfig;
 
+typedef struct CTraceConfig {
+    const char* exporter;
+    int sampleFraction;
+    const char* jaegerURL;
+    const char* otlpEndpoint;
+
+    int nodeID;
+} CTraceConfig;
+
+typedef struct CTraceContext {
+    const uint8_t* traceID;
+    const uint8_t* spanID;
+    uint8_t flag;
+} CTraceContext;
 #ifdef __cplusplus
 }
 #endif

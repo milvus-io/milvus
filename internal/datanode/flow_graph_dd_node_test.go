@@ -28,9 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 const (
@@ -69,7 +67,6 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			mockFactory := &mockMsgStreamFactory{true, true}
 			ddNode, err := newDDNode(
 				context.Background(),
 				collectionID,
@@ -77,7 +74,6 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 				droppedSegIDs,
 				test.inSealedSegs,
 				test.inGrowingSegs,
-				mockFactory,
 				newCompactionExecutor(),
 			)
 			require.NoError(t, err)
@@ -129,15 +125,9 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				factory := dependency.NewDefaultFactory(true)
-				deltaStream, err := factory.NewMsgStream(context.Background())
-				assert.Nil(t, err)
-				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 				ddn := ddNode{
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
-					deltaMsgStream:     deltaStream,
 					vChannelName:       "ddn_drop_msg",
 					compactionExecutor: newCompactionExecutor(),
 				}
@@ -182,15 +172,9 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				factory := dependency.NewDefaultFactory(true)
-				deltaStream, err := factory.NewMsgStream(context.Background())
-				assert.Nil(t, err)
-				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 				ddn := ddNode{
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
-					deltaMsgStream:     deltaStream,
 					vChannelName:       "ddn_drop_msg",
 					compactionExecutor: newCompactionExecutor(),
 				}
@@ -217,12 +201,6 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 	})
 
 	t.Run("Test DDNode Operate and filter insert msg", func(t *testing.T) {
-		factory := dependency.NewDefaultFactory(true)
-		deltaStream, err := factory.NewMsgStream(context.Background())
-		require.Nil(t, err)
-		deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-		deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
-
 		var (
 			collectionID UniqueID = 1
 		)
@@ -231,7 +209,6 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 			ctx:               context.Background(),
 			collectionID:      collectionID,
 			droppedSegmentIDs: []UniqueID{100},
-			deltaMsgStream:    deltaStream,
 		}
 
 		tsMessages := []msgstream.TsMsg{getInsertMsg(100, 10000), getInsertMsg(200, 20000)}
@@ -257,16 +234,9 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				factory := dependency.NewDefaultFactory(true)
-				deltaStream, err := factory.NewMsgStream(context.Background())
-				assert.Nil(t, err)
-				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
-				// Prepare ddNode states
 				ddn := ddNode{
-					ctx:            context.Background(),
-					collectionID:   test.ddnCollID,
-					deltaMsgStream: deltaStream,
+					ctx:          context.Background(),
+					collectionID: test.ddnCollID,
 				}
 
 				// Prepare delete messages
@@ -291,38 +261,6 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		}
 	})
 
-	t.Run("Test forwardDeleteMsg failed", func(t *testing.T) {
-		factory := dependency.NewDefaultFactory(true)
-		deltaStream, err := factory.NewMsgStream(context.Background())
-		assert.Nil(t, err)
-		deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-		// Prepare ddNode states
-		ddn := ddNode{
-			ctx:            context.Background(),
-			collectionID:   1,
-			deltaMsgStream: deltaStream,
-		}
-
-		// Prepare delete messages
-		var dMsg msgstream.TsMsg = &msgstream.DeleteMsg{
-			BaseMsg: msgstream.BaseMsg{
-				EndTimestamp: 2000,
-				HashValues:   []uint32{0},
-			},
-			DeleteRequest: msgpb.DeleteRequest{
-				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
-				CollectionID: 1,
-			},
-		}
-		tsMessages := []msgstream.TsMsg{dMsg}
-		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
-
-		// Test
-		setFlowGraphRetryOpt(retry.Attempts(1))
-		assert.Panics(t, func() {
-			ddn.Operate([]Msg{msgStreamMsg})
-		})
-	})
 }
 
 func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
@@ -577,10 +515,8 @@ func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 			for _, seg := range test.indroppedSegment {
 				dsIDs = append(dsIDs, seg.GetID())
 			}
-			factory := mockMsgStreamFactory{true, true}
-			deltaStream, err := factory.NewMsgStream(context.Background())
-			assert.Nil(t, err)
-			ddn := &ddNode{droppedSegmentIDs: dsIDs, deltaMsgStream: deltaStream, vChannelName: ddNodeChannelName}
+
+			ddn := &ddNode{droppedSegmentIDs: dsIDs, vChannelName: ddNodeChannelName}
 			assert.Equal(t, test.expectedOut, ddn.isDropped(test.inSeg))
 		})
 	}

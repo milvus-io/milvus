@@ -14,6 +14,7 @@ package paramtable
 import (
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,8 +22,11 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/zap"
 
 	config "github.com/milvus-io/milvus/internal/config"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 const (
@@ -115,7 +119,7 @@ func (p *ComponentParam) init() {
 	p.IndexNodeCfg.init(&p.BaseTable)
 	p.HTTPCfg.init(&p.BaseTable)
 	p.LogCfg.init(&p.BaseTable)
-	p.HookCfg.init()
+	p.HookCfg.init(&p.BaseTable)
 
 	p.RootCoordGrpcServerCfg.Init("rootCoord", &p.BaseTable)
 	p.ProxyGrpcServerCfg.Init("proxy", &p.BaseTable)
@@ -619,6 +623,7 @@ type traceConfig struct {
 	Exporter       ParamItem `refreshable:"false"`
 	SampleFraction ParamItem `refreshable:"false"`
 	JaegerURL      ParamItem `refreshable:"false"`
+	OtlpEndpoint   ParamItem `refreshable:"false"`
 }
 
 func (t *traceConfig) init(base *BaseTable) {
@@ -649,6 +654,12 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:  true,
 	}
 	t.JaegerURL.Init(base.mgr)
+
+	t.OtlpEndpoint = ParamItem{
+		Key:     "trace.otlp.endpoint",
+		Version: "2.3.0",
+	}
+	t.OtlpEndpoint.Init(base.mgr)
 }
 
 type logConfig struct {
@@ -1295,6 +1306,8 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
+	SoPath ParamItem `refreshable:"false"`
+
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
@@ -1329,14 +1342,25 @@ type queryNodeConfig struct {
 	TopKMergeRatio       ParamItem `refreshable:"true"`
 	CPURatio             ParamItem `refreshable:"true"`
 	MaxTimestampLag      ParamItem `refreshable:"true"`
+	GCEnabled            ParamItem `refreshable:"true"`
 
 	GCHelperEnabled     ParamItem `refreshable:"false"`
 	MinimumGOGCConfig   ParamItem `refreshable:"false"`
 	MaximumGOGCConfig   ParamItem `refreshable:"false"`
 	GracefulStopTimeout ParamItem `refreshable:"false"`
+
+	// delete buffer
+	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.SoPath = ParamItem{
+		Key:          "queryNode.soPath",
+		Version:      "2.3.0",
+		DefaultValue: "",
+	}
+	p.SoPath.Init(base.mgr)
+
 	p.FlowGraphMaxQueueLength = ParamItem{
 		Key:          "queryNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
@@ -1591,6 +1615,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxTimestampLag.Init(base.mgr)
 
+	p.GCEnabled = ParamItem{
+		Key:          "queryNode.gcenabled",
+		Version:      "2.3.0",
+		DefaultValue: "true",
+	}
+	p.GCEnabled.Init(base.mgr)
+
 	p.GCHelperEnabled = ParamItem{
 		Key:          "queryNode.gchelper.enabled",
 		Version:      "2.0.0",
@@ -1619,6 +1650,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.MaxSegmentDeleteBuffer = ParamItem{
+		Key:          "queryNode.maxSegmentDeleteBuffer",
+		Version:      "2.3.0",
+		DefaultValue: "10000000",
+	}
+	p.MaxSegmentDeleteBuffer.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1996,9 +2034,15 @@ type dataNodeConfig struct {
 	IOConcurrency ParamItem `refreshable:"false"`
 
 	// memory management
-	MemoryForceSyncEnable       ParamItem `refreshable:"true"`
-	MemoryForceSyncThreshold    ParamItem `refreshable:"true"`
-	MemoryForceSyncSegmentRatio ParamItem `refreshable:"true"`
+	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
+	MemoryWatermark           ParamItem `refreshable:"true"`
+
+	// DataNode send timetick interval per collection
+	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
+
+	// Skip BF
+	SkipBFStatsLoad ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -2038,19 +2082,34 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.MemoryForceSyncEnable.Init(base.mgr)
 
-	p.MemoryForceSyncThreshold = ParamItem{
-		Key:          "datanode.memory.forceSyncThreshold",
+	p.MemoryForceSyncSegmentNum = ParamItem{
+		Key:          "datanode.memory.forceSyncSegmentNum",
 		Version:      "2.2.4",
-		DefaultValue: "0.6",
+		DefaultValue: "1",
 	}
-	p.MemoryForceSyncThreshold.Init(base.mgr)
+	p.MemoryForceSyncSegmentNum.Init(base.mgr)
 
-	p.MemoryForceSyncSegmentRatio = ParamItem{
-		Key:          "datanode.memory.forceSyncSegmentRatio",
-		Version:      "2.2.4",
-		DefaultValue: "0.3",
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkStandalone",
+			Version:      "2.2.4",
+			DefaultValue: "0.2",
+		}
+	} else if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.ClusterDeployMode {
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkCluster",
+			Version:      "2.2.4",
+			DefaultValue: "0.5",
+		}
+	} else {
+		log.Warn("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+		p.MemoryWatermark = ParamItem{
+			Key:          "datanode.memory.watermarkCluster",
+			Version:      "2.2.4",
+			DefaultValue: "0.5",
+		}
 	}
-	p.MemoryForceSyncSegmentRatio.Init(base.mgr)
+	p.MemoryWatermark.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",
@@ -2091,6 +2150,21 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.IOConcurrency.Init(base.mgr)
 
+	p.DataNodeTimeTickInterval = ParamItem{
+		Key:          "datanode.timetick.interval",
+		Version:      "2.2.5",
+		PanicIfEmpty: false,
+		DefaultValue: "500",
+	}
+	p.DataNodeTimeTickInterval.Init(base.mgr)
+
+	p.SkipBFStatsLoad = ParamItem{
+		Key:          "dataNode.skip.BFStats.Load",
+		Version:      "2.2.5",
+		PanicIfEmpty: false,
+		DefaultValue: "false",
+	}
+	p.SkipBFStatsLoad.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

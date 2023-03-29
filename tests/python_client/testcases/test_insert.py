@@ -1486,8 +1486,7 @@ class TestUpsertValid(TestcaseBase):
         res1 = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
         assert [res1[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #22563")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_pk_concurrently(self):
         """
         target: test upsert the same pk concurrently
@@ -1503,13 +1502,19 @@ class TestUpsertValid(TestcaseBase):
         data2, float_values2 = cf.gen_default_data_for_upsert(upsert_nb)
 
         # upsert at the same time
-        def do_upsert():
+        def do_upsert1():
             collection_w.upsert(data=data1)
 
-        t = threading.Thread(target=do_upsert, args=())
-        t.start()
-        collection_w.upsert(data=data2)
-        t.join()
+        def do_upsert2():
+            collection_w.upsert(data=data2)
+
+        t1 = threading.Thread(target=do_upsert1, args=())
+        t2 = threading.Thread(target=do_upsert2, args=())
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
         # check the result
         exp = f"int64 >= 0 && int64 <= {upsert_nb}"
@@ -1624,8 +1629,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [127, 129, 200])
-    @pytest.mark.xfail(reason="issue #22777")
+    @pytest.mark.parametrize("dim", [120, 129, 200])
     def test_upsert_binary_dim_unmatch(self, dim):
         """
         target: test upsert with unmatched vector dim

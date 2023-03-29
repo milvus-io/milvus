@@ -252,8 +252,13 @@ type InsertCodec struct {
 	Schema *etcdpb.CollectionMeta
 }
 
-// NewInsertCodec creates an InsertCodec with provided collection meta
-func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
+// NewInsertCodec creates an InsertCodec
+func NewInsertCodec() *InsertCodec {
+	return &InsertCodec{}
+}
+
+// NewInsertCodecWithSchema creates an InsertCodec with provided collection meta
+func NewInsertCodecWithSchema(schema *etcdpb.CollectionMeta) *InsertCodec {
 	return &InsertCodec{Schema: schema}
 }
 

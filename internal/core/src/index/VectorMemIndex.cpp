@@ -33,9 +33,8 @@
 namespace milvus::index {
 
 VectorMemIndex::VectorMemIndex(const IndexType& index_type,
-                               const MetricType& metric_type,
-                               const IndexMode& index_mode)
-    : VectorIndex(index_type, index_mode, metric_type) {
+                               const MetricType& metric_type)
+    : VectorIndex(index_type, metric_type) {
     AssertInfo(!is_unsupported(index_type, metric_type),
                index_type + " doesn't support metric: " + metric_type);
 

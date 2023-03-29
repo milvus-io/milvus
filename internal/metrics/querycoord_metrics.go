@@ -31,12 +31,12 @@ var (
 			Help:      "number of collections",
 		}, []string{})
 
-	QueryCoordNumEntities = prometheus.NewGaugeVec(
+	QueryCoordNumPartitions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "entity_num",
-			Help:      "number of entities",
+			Name:      "partition_num",
+			Help:      "number of partitions",
 		}, []string{})
 
 	QueryCoordLoadCount = prometheus.NewCounterVec(
@@ -97,7 +97,7 @@ var (
 // RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordNumCollections)
-	registry.MustRegister(QueryCoordNumEntities)
+	registry.MustRegister(QueryCoordNumPartitions)
 	registry.MustRegister(QueryCoordLoadCount)
 	registry.MustRegister(QueryCoordReleaseCount)
 	registry.MustRegister(QueryCoordLoadLatency)

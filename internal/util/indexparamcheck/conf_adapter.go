@@ -63,7 +63,6 @@ const (
 	// If Dim = 2, and raw vector data = 2G, query node need 240G disk space When loading the vectors' disk index
 	// So DiskAnnMinDim should be greater than or equal to 32 to avoid running out of disk space
 	DiskAnnMinDim = 32
-	DiskAnnMaxDim = 1024
 
 	HNSWMinEfConstruction = 8
 	HNSWMaxEfConstruction = 512
@@ -88,10 +87,6 @@ const (
 
 	PQM    = "PQM"
 	NTREES = "n_trees"
-
-	IndexMode = "index_mode"
-	CPUMode   = "CPU"
-	GPUMode   = "GPU"
 )
 
 // METRICS is a set of all metrics types supported for float vector.
@@ -178,11 +173,8 @@ func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 
 	// nbits can be set to default: 8
 	nbitsStr, nbitsExist := params[NBITS]
-	var nbits int
-	if !nbitsExist {
-		nbits = 8
-	} else {
-		nbits, err = strconv.Atoi(nbitsStr)
+	if nbitsExist {
+		_, err := strconv.Atoi(nbitsStr)
 		if err != nil { // invalid nbits
 			return false
 		}
@@ -194,15 +186,6 @@ func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 	}
 	m, err := strconv.Atoi(mStr)
 	if err != nil || m == 0 { // invalid m
-		return false
-	}
-
-	mode, ok := params[IndexMode]
-	if !ok {
-		mode = CPUMode
-	}
-
-	if mode == GPUMode && !adapter.checkGPUPQParams(dimension, m, nbits) {
 		return false
 	}
 
@@ -345,7 +328,7 @@ type DISKANNConfAdapter struct {
 }
 
 func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DiskAnnMaxDim) {
+	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
 		return false
 	}
 	return adapter.BaseConfAdapter.CheckTrain(params)

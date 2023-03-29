@@ -58,9 +58,4 @@ SegcoreSetSimdType(const char* value) {
     return ret;
 }
 
-extern "C" void
-SegcoreInitGPU(const int32_t gpu_id, const int32_t res_num) {
-    milvus::config::KnowhereInitGPU(gpu_id, res_num);
-}
-
 }  // namespace milvus::segcore

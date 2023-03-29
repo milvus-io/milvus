@@ -203,11 +203,11 @@ func TestGetNumRowsOfFloatVectorField(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		got, err := getNumRowsOfFloatVectorField(test.fDatas, test.dim)
+		got, err := GetNumRowsOfFloatVectorField(test.fDatas, test.dim)
 		if test.errIsNil {
 			assert.Equal(t, nil, err)
 			if got != test.want {
-				t.Errorf("getNumRowsOfFloatVectorField(%v, %v) = %v, %v", test.fDatas, test.dim, test.want, nil)
+				t.Errorf("GetNumRowsOfFloatVectorField(%v, %v) = %v, %v", test.fDatas, test.dim, test.want, nil)
 			}
 		} else {
 			assert.NotEqual(t, nil, err)
@@ -236,11 +236,11 @@ func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		got, err := getNumRowsOfBinaryVectorField(test.bDatas, test.dim)
+		got, err := GetNumRowsOfBinaryVectorField(test.bDatas, test.dim)
 		if test.errIsNil {
 			assert.Equal(t, nil, err)
 			if got != test.want {
-				t.Errorf("getNumRowsOfBinaryVectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
+				t.Errorf("GetNumRowsOfBinaryVectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
 			}
 		} else {
 			assert.NotEqual(t, nil, err)

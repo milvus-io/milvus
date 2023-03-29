@@ -518,8 +518,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     auto database = knowhere::GenDataSet(N, dim, vec);
     auto indexing = std::make_unique<index::VectorMemNMIndex>(
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-        knowhere::metric::L2,
-        IndexMode::MODE_CPU);
+        knowhere::metric::L2);
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }

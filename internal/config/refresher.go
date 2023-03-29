@@ -32,15 +32,15 @@ type refresher struct {
 	fetchFunc func() error
 }
 
-func newRefresher(interval time.Duration, fetchFunc func() error) refresher {
-	return refresher{
+func newRefresher(interval time.Duration, fetchFunc func() error) *refresher {
+	return &refresher{
 		refreshInterval: interval,
 		intervalDone:    make(chan bool, 1),
 		fetchFunc:       fetchFunc,
 	}
 }
 
-func (r refresher) start(name string) {
+func (r *refresher) start(name string) {
 	if r.refreshInterval > 0 {
 		r.intervalInitOnce.Do(func() {
 			go r.refreshPeriodically(name)
@@ -48,11 +48,11 @@ func (r refresher) start(name string) {
 	}
 }
 
-func (r refresher) stop() {
+func (r *refresher) stop() {
 	r.intervalDone <- true
 }
 
-func (r refresher) refreshPeriodically(name string) {
+func (r *refresher) refreshPeriodically(name string) {
 	ticker := time.NewTicker(r.refreshInterval)
 	defer ticker.Stop()
 	log.Info("start refreshing configurations", zap.String("source", name))
@@ -72,7 +72,7 @@ func (r refresher) refreshPeriodically(name string) {
 
 }
 
-func (r refresher) fireEvents(name string, source, target map[string]string) error {
+func (r *refresher) fireEvents(name string, source, target map[string]string) error {
 	events, err := PopulateEvents(name, source, target)
 	if err != nil {
 		log.Warn("generating event error", zap.Error(err))

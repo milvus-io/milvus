@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/util/autoindex"
 )
 
 const (
@@ -90,59 +89,4 @@ func TestAutoIndexParams_build(t *testing.T) {
 	// 	assert.NoError(t, err)
 	// 	CParams.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
 	// })
-}
-
-func TestAutoIndexParams_search1(t *testing.T) {
-	var CParams ComponentParam
-	CParams.Init()
-	CParams.Save(CParams.AutoIndexConfig.Enable.Key, "true")
-
-	var err error
-	indexMap := map[string]interface{}{
-		IndexTypeKey:     "HNSW",
-		"M":              48,
-		"efConstruction": 500,
-	}
-	var jsonStrBytes []byte
-	jsonStrBytes, err = json.Marshal(indexMap)
-	assert.NoError(t, err)
-	CParams.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
-
-	jsonStr := `
-	{
-        "1": {
-          "function": "__output = 3*__input  + 4"
-        },
-        "2": {
-          "bp": [10, 200],
-          "functions": [
-		"__output = __input  + 4",
-		"__output = 3*__input  + 4",
-		"__output = pow(__input, 2) + 4"
-          ]
-        },
-        "3": {
-          "bp": [10, 300],
-          "functions": [
-		"__output = __input  + 4",
-		"__output = 2*__input  + 3",
-		"__output = pow(__input, 1.2) + 4"
-          ]
-        }
-	}`
-
-	parser := autoindex.NewParser()
-	parser.InitFromJSONStr(jsonStr)
-	assert.NoError(t, err)
-
-	normalLevels := []int{1, 2, 3}
-	for _, l := range normalLevels {
-		m, _ := parser.GetMethodByLevel(l)
-		assert.NotNil(t, m)
-	}
-	invalidLevels := []int{-1, 0, 4}
-	for _, l := range invalidLevels {
-		m, _ := parser.GetMethodByLevel(l)
-		assert.Nil(t, m)
-	}
 }

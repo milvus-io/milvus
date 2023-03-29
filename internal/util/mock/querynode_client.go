@@ -77,6 +77,10 @@ func (q QueryNodeClient) ReleaseCollection(ctx context.Context, req *querypb.Rel
 	return q.grpcClient.ReleaseCollection(ctx, req)
 }
 
+func (q QueryNodeClient) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.LoadPartitions(ctx, req)
+}
+
 func (q QueryNodeClient) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return q.grpcClient.ReleasePartitions(ctx, req)
 }
@@ -119,4 +123,8 @@ func (q QueryNodeClient) GetDataDistribution(ctx context.Context, req *querypb.G
 
 func (q QueryNodeClient) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return q.grpcClient.SyncDistribution(ctx, req)
+}
+
+func (q QueryNodeClient) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return q.grpcClient.Delete(ctx, req)
 }

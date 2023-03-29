@@ -7,7 +7,7 @@ import (
 )
 
 type mockIndexNodeComponent struct {
-	IndexNode
+	*IndexNode
 }
 
 var _ types.IndexNodeComponent = &mockIndexNodeComponent{}
@@ -36,6 +36,6 @@ func NewMockIndexNodeComponent(ctx context.Context) (types.IndexNodeComponent, e
 		return nil, err
 	}
 	return &mockIndexNodeComponent{
-		IndexNode: *node,
+		IndexNode: node,
 	}, nil
 }

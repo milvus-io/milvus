@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -75,7 +76,7 @@ type compactionTask struct {
 	compactor
 	Channel
 	flushManager
-	allocatorInterface
+	allocator.Allocator
 
 	plan *datapb.CompactionPlan
 
@@ -97,7 +98,7 @@ func newCompactionTask(
 	ul uploader,
 	channel Channel,
 	fm flushManager,
-	alloc allocatorInterface,
+	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 	chunkManager storage.ChunkManager) *compactionTask {
 
@@ -106,15 +107,15 @@ func newCompactionTask(
 		ctx:    ctx1,
 		cancel: cancel,
 
-		downloader:         dl,
-		uploader:           ul,
-		Channel:            channel,
-		flushManager:       fm,
-		allocatorInterface: alloc,
-		plan:               plan,
-		tr:                 timerecord.NewTimeRecorder("compactionTask"),
-		chunkManager:       chunkManager,
-		done:               make(chan struct{}, 1),
+		downloader:   dl,
+		uploader:     ul,
+		Channel:      channel,
+		flushManager: fm,
+		Allocator:    alloc,
+		plan:         plan,
+		tr:           timerecord.NewTimeRecorder("compactionTask"),
+		chunkManager: chunkManager,
+		done:         make(chan struct{}, 1),
 	}
 }
 
@@ -445,7 +446,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, errIllegalCompactionPlan
 
 	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
-		targetSegID, err = t.allocID()
+		targetSegID, err = t.AllocOne()
 		if err != nil {
 			log.Warn("compact wrong", zap.Error(err))
 			return nil, err

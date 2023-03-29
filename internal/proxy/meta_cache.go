@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 
@@ -470,7 +471,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
-			return nil, ErrPartitionNotExist(partitionName)
+			return nil, merr.WrapErrPartitionNotFound(partitionName)
 		}
 	}
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetPartitionInfo", metrics.CacheHitLabel).Inc()

@@ -85,6 +85,10 @@ func (m *QueryNodeMock) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	return nil, nil
 }
 
+func (m *QueryNodeMock) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 // TODO
 func (m *QueryNodeMock) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return nil, nil
@@ -129,5 +133,9 @@ func (m *QueryNodeMock) GetDataDistribution(context.Context, *querypb.GetDataDis
 	return nil, nil
 }
 func (m *QueryNodeMock) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *QueryNodeMock) Delete(context.Context, *querypb.DeleteRequest) (*commonpb.Status, error) {
 	return nil, nil
 }

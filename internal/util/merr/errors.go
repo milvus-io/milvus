@@ -19,10 +19,9 @@ package merr
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -56,8 +55,9 @@ var (
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 
 	// Collection related
-	ErrCollectionNotFound  = newMilvusError("collection not found", 100, false)
-	ErrCollectionNotLoaded = newMilvusError("collection not loaded", 101, false)
+	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
+	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
+	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
 
 	// Partition related
 	ErrPartitionNotFound  = newMilvusError("partition not found", 202, false)
@@ -87,6 +87,7 @@ var (
 	ErrNodeNotFound = newMilvusError("node not found", 901, false)
 	ErrNodeOffline  = newMilvusError("node offline", 902, false)
 	ErrNodeLack     = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch = newMilvusError("node not match", 904, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
@@ -96,7 +97,7 @@ var (
 	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
 
 	// Metrics related
-	ErrMetricNotFound = newMilvusError("MetricNotFound", 1200, false)
+	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
@@ -166,6 +167,12 @@ func (e multiErrors) Unwrap() error {
 	if len(e.errs) <= 1 {
 		return nil
 	}
+	// To make merr work for multi errors,
+	// we need cause of multi errors, which defined as the last error
+	if len(e.errs) == 2 {
+		return e.errs[1]
+	}
+
 	return multiErrors{
 		errs: e.errs[1:],
 	}

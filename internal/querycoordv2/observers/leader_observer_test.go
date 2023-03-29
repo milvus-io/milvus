@@ -73,7 +73,7 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.mockCluster)
+	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster)
 }
 
 func (suite *LeaderObserverTestSuite) TearDownTest() {
@@ -97,6 +97,16 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
+	info := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+	}
+	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
+		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -117,6 +127,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 				SegmentID:   1,
 				NodeID:      1,
 				Version:     1,
+				Info:        loadInfo,
 			},
 		},
 	}
@@ -152,6 +163,16 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
+	info := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+	}
+	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
+		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -174,6 +195,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 				SegmentID:   1,
 				NodeID:      1,
 				Version:     1,
+				Info:        loadInfo,
 			},
 		},
 	}
@@ -209,6 +231,8 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -247,6 +271,16 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
+	info := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+	}
+	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
+		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -269,6 +303,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 				SegmentID:   1,
 				NodeID:      1,
 				Version:     1,
+				Info:        loadInfo,
 			},
 		},
 	}
@@ -306,6 +341,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 			{
 				Type:      querypb.SyncType_Remove,
 				SegmentID: 3,
+				NodeID:    2,
 			},
 		},
 	}
@@ -340,6 +376,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -357,6 +394,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 			{
 				Type:      querypb.SyncType_Remove,
 				SegmentID: 3,
+				NodeID:    2,
 			},
 		},
 	}

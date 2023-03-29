@@ -31,7 +31,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const interval = 1 * time.Second
+const (
+	interval   = 1 * time.Second
+	RPCTimeout = 3 * time.Second
+)
 
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
@@ -40,6 +43,7 @@ type LeaderObserver struct {
 	dist    *meta.DistributionManager
 	meta    *meta.Meta
 	target  *meta.TargetManager
+	broker  meta.Broker
 	cluster session.Cluster
 
 	stopOnce sync.Once
@@ -106,18 +110,54 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	dists = utils.FindMaxVersionSegments(dists)
 	for _, s := range dists {
 		version, ok := leaderView.Segments[s.GetID()]
-		existInCurrentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget) != nil
+		currentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget)
+		existInCurrentTarget := currentTarget != nil
 		existInNextTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
-		if ok && version.GetVersion() >= s.Version || (!existInCurrentTarget && !existInNextTarget) {
+
+		if !existInCurrentTarget && !existInNextTarget {
 			continue
 		}
-		ret = append(ret, &querypb.SyncAction{
-			Type:        querypb.SyncType_Set,
-			PartitionID: s.GetPartitionID(),
-			SegmentID:   s.GetID(),
-			NodeID:      s.Node,
-			Version:     s.Version,
-		})
+
+		if !ok || version.GetVersion() < s.Version { // Leader misses this segment
+			ctx := context.Background()
+			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
+			if err != nil || len(resp.GetInfos()) == 0 {
+				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+				continue
+			}
+			segment := resp.GetInfos()[0]
+			loadInfo := utils.PackSegmentLoadInfo(segment, nil)
+
+			// Fix the leader view with lacks of delta logs
+			if existInCurrentTarget && s.LastDeltaTimestamp < currentTarget.GetDmlPosition().GetTimestamp() {
+				log.Info("Fix QueryNode delta logs lag",
+					zap.Int64("nodeID", s.Node),
+					zap.Int64("collectionID", s.GetCollectionID()),
+					zap.Int64("partitionID", s.GetPartitionID()),
+					zap.Int64("segmentID", s.GetID()),
+					zap.Uint64("segmentDeltaTimestamp", s.LastDeltaTimestamp),
+					zap.Uint64("channelTimestamp", currentTarget.GetDmlPosition().GetTimestamp()),
+				)
+
+				ret = append(ret, &querypb.SyncAction{
+					Type:        querypb.SyncType_Amend,
+					PartitionID: s.GetPartitionID(),
+					SegmentID:   s.GetID(),
+					NodeID:      s.Node,
+					Version:     s.Version,
+					Info:        loadInfo,
+				})
+			}
+
+			ret = append(ret, &querypb.SyncAction{
+				Type:        querypb.SyncType_Set,
+				PartitionID: s.GetPartitionID(),
+				SegmentID:   s.GetID(),
+				NodeID:      s.Node,
+				Version:     s.Version,
+				Info:        loadInfo,
+			})
+		}
 	}
 	return ret
 }
@@ -128,7 +168,7 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	for _, s := range dists {
 		distMap[s.GetID()] = struct{}{}
 	}
-	for sid := range leaderView.Segments {
+	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
 		existInCurrentTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
 		existInNextTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
@@ -143,6 +183,7 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 		ret = append(ret, &querypb.SyncAction{
 			Type:      querypb.SyncType_Remove,
 			SegmentID: sid,
+			NodeID:    s.NodeID,
 		})
 	}
 	return ret
@@ -181,6 +222,7 @@ func NewLeaderObserver(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
+	broker meta.Broker,
 	cluster session.Cluster,
 ) *LeaderObserver {
 	return &LeaderObserver{
@@ -188,6 +230,7 @@ func NewLeaderObserver(
 		dist:    dist,
 		meta:    meta,
 		target:  targetMgr,
+		broker:  broker,
 		cluster: cluster,
 	}
 }

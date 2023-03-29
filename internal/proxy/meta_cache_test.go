@@ -802,7 +802,6 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 		CollectionIDs:       []UniqueID{1},
 		InMemoryPercentages: []int64{100},
 	}, nil)
-
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -814,11 +813,12 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 			},
 		},
-	}, nil).Times(1)
+	}, nil)
 	nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
 	assert.NoError(t, err)
 	assert.Len(t, nodeInfos["channel-1"], 3)
 
+	queryCoord.ExpectedCalls = nil
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -830,7 +830,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001"},
 			},
 		},
-	}, nil).Times(1)
+	}, nil)
 
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
@@ -838,6 +838,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 		return len(nodeInfos["channel-1"]) == 2
 	}, 3*time.Second, 1*time.Second)
 
+	queryCoord.ExpectedCalls = nil
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -849,7 +850,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 			},
 		},
-	}, nil).Times(1)
+	}, nil)
 
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
@@ -857,6 +858,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 		return len(nodeInfos["channel-1"]) == 3
 	}, 3*time.Second, 1*time.Second)
 
+	queryCoord.ExpectedCalls = nil
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -873,7 +875,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 			},
 		},
-	}, nil).Times(1)
+	}, nil)
 
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")

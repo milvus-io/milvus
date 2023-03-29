@@ -22,9 +22,6 @@ IndexBuilderInit(const char*);
 char*
 IndexBuilderSetSimdType(const char*);
 
-void
-IndexBuilderInitGPU(const int32_t, const int32_t);
-
 #ifdef __cplusplus
 };
 #endif

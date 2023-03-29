@@ -60,6 +60,10 @@ function milvus_ci_release_name(){
 
     fi 
 
+    if [[ "${MODE:-}" == "gpu" ]]; then
+        name+="-gpu"
+    fi
+
     export MILVUS_HELM_RELEASE_NAME=${name}
     echo ${name}
 }

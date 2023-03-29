@@ -50,7 +50,7 @@ function install_linux_deps() {
 
 function install_mac_deps() {
   sudo xcode-select --install > /dev/null 2>&1
-  brew install libomp ninja cmake llvm ccache grep
+  brew install libomp ninja cmake llvm@15 ccache grep
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 
@@ -60,14 +60,6 @@ function install_mac_deps() {
     brew install openssl
     brew install librdkafka
     brew install pkg-config
-    sudo mkdir /usr/local/include
-    sudo mkdir /usr/local/opt
-    sudo ln -s "$(brew --prefix llvm)" "/usr/local/opt/llvm"
-    sudo ln -s "$(brew --prefix libomp)/include/omp.h" "/usr/local/include/omp.h"
-    sudo ln -s "$(brew --prefix libomp)" "/usr/local/opt/libomp"
-    sudo ln -s "$(brew --prefix boost)/include/boost" "/usr/local/include/boost"
-    sudo ln -s "$(brew --prefix tbb)/include/tbb" "/usr/local/include/tbb"
-    sudo ln -s "$(brew --prefix tbb)/include/oneapi" "/usr/local/include/oneapi"
   fi
 }
 

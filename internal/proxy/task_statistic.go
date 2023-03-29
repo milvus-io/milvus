@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.opentelemetry.io/otel"
@@ -298,9 +299,11 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
+	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
+	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{
-		Req:         g.GetStatisticsRequest,
+		Req:         nodeReq,
 		DmlChannels: channelIDs,
 		Scope:       querypb.DataScope_All,
 	}

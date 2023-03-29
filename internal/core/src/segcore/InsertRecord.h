@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -20,7 +21,6 @@
 
 #include "TimestampIndex.h"
 #include "common/Schema.h"
-#include "easyloggingpp/easylogging++.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
@@ -264,6 +264,7 @@ struct InsertRecord {
 
     void
     seal_pks() {
+        std::lock_guard lck(shared_mutex_);
         pk2offset_->seal();
     }
 

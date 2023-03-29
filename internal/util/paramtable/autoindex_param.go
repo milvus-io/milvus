@@ -25,11 +25,10 @@ import (
 type autoIndexConfig struct {
 	Enable ParamItem `refreshable:"true"`
 
-	IndexParams         ParamItem `refreshable:"true"`
-	ExtraParams         ParamItem `refreshable:"true"`
-	SearchParamsYamlStr ParamItem `refreshable:"true"`
-	IndexType           ParamItem `refreshable:"true"`
-	AutoIndexTypeName   ParamItem `refreshable:"true"`
+	IndexParams       ParamItem `refreshable:"true"`
+	ExtraParams       ParamItem `refreshable:"true"`
+	IndexType         ParamItem `refreshable:"true"`
+	AutoIndexTypeName ParamItem `refreshable:"true"`
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
@@ -64,12 +63,6 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.IndexType.Init(base.mgr)
-
-	p.SearchParamsYamlStr = ParamItem{
-		Key:     "autoIndex.params.search",
-		Version: "2.2.0",
-	}
-	p.SearchParamsYamlStr.Init(base.mgr)
 
 	p.AutoIndexTypeName = ParamItem{
 		Key:     "autoIndex.type",

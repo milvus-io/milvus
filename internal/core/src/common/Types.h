@@ -130,8 +130,6 @@ using DatasetPtr = knowhere::DataSetPtr;
 using MetricType = knowhere::MetricType;
 // TODO :: type define milvus index type(vector index type and scalar index type)
 using IndexType = knowhere::IndexType;
-// TODO :: type define milvus index mode, add transfer func from milvus index mode to knowhere index mode
-using IndexMode = knowhere::IndexMode;
 
 // Plus 1 because we can't use greater(>) symbol
 constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;

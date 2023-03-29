@@ -19,6 +19,7 @@ set(COMMON_SRC
         init_c.cpp
         Common.cpp
         RangeSearchHelper.cpp
+        Tracer.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})

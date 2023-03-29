@@ -124,6 +124,14 @@ func (suite *ClusterTestSuite) createDefaultMockServer() querypb.QueryNodeServer
 		mock.Anything,
 		mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"),
 	).Maybe().Return(succStatus, nil)
+	svr.EXPECT().LoadPartitions(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.LoadPartitionsRequest"),
+	).Maybe().Return(succStatus, nil)
+	svr.EXPECT().ReleasePartitions(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.ReleasePartitionsRequest"),
+	).Maybe().Return(succStatus, nil)
 	svr.EXPECT().GetDataDistribution(
 		mock.Anything,
 		mock.AnythingOfType("*querypb.GetDataDistributionRequest"),
@@ -168,6 +176,14 @@ func (suite *ClusterTestSuite) createFailedMockServer() querypb.QueryNodeServer 
 	svr.EXPECT().ReleaseSegments(
 		mock.Anything,
 		mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"),
+	).Maybe().Return(failStatus, nil)
+	svr.EXPECT().LoadPartitions(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.LoadPartitionsRequest"),
+	).Maybe().Return(failStatus, nil)
+	svr.EXPECT().ReleasePartitions(
+		mock.Anything,
+		mock.AnythingOfType("*querypb.ReleasePartitionsRequest"),
 	).Maybe().Return(failStatus, nil)
 	svr.EXPECT().GetDataDistribution(
 		mock.Anything,
@@ -275,6 +291,45 @@ func (suite *ClusterTestSuite) TestReleaseSegments() {
 	}, status)
 
 	status, err = suite.cluster.ReleaseSegments(ctx, 1, &querypb.ReleaseSegmentsRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	suite.Equal(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "unexpected error",
+	}, status)
+}
+
+func (suite *ClusterTestSuite) TestLoadAndReleasePartitions() {
+	ctx := context.TODO()
+	status, err := suite.cluster.LoadPartitions(ctx, 0, &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	suite.Equal(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, status)
+
+	status, err = suite.cluster.LoadPartitions(ctx, 1, &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	suite.Equal(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "unexpected error",
+	}, status)
+
+	status, err = suite.cluster.ReleasePartitions(ctx, 0, &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{},
+	})
+	suite.NoError(err)
+	suite.Equal(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, status)
+
+	status, err = suite.cluster.ReleasePartitions(ctx, 1, &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{},
 	})
 	suite.NoError(err)

@@ -145,7 +145,7 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
-	insertCodec := NewInsertCodec(schema)
+	insertCodec := NewInsertCodecWithSchema(schema)
 	insertData1 := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
@@ -418,7 +418,7 @@ func TestDDCodec(t *testing.T) {
 
 func TestTsError(t *testing.T) {
 	insertData := &InsertData{}
-	insertCodec := NewInsertCodec(nil)
+	insertCodec := NewInsertCodecWithSchema(nil)
 	blobs, _, err := insertCodec.Serialize(1, 1, insertData)
 	assert.Nil(t, blobs)
 	assert.NotNil(t, err)

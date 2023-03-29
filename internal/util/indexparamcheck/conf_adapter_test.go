@@ -134,7 +134,6 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	invalidParamsIVF[IVFM] = "NAN"
 
 	invalidParamsM := copyParams(validParams)
-	invalidParamsM[IndexMode] = GPUMode
 	invalidParamsM[DIM] = strconv.Itoa(65536)
 
 	invalidParamsMzero := copyParams(validParams)
@@ -332,6 +331,39 @@ func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
 	for _, test := range cases {
 		if got := adapter.CheckTrain(test.params); got != test.want {
 			t.Errorf("ANNOYConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
+		}
+	}
+}
+
+func TestDiskAnnConfAdapter_CheckTrain(t *testing.T) {
+	validParams := map[string]string{
+		DIM:    strconv.Itoa(128),
+		Metric: L2,
+	}
+	validParamsBigDim := copyParams(validParams)
+	validParamsBigDim[DIM] = strconv.Itoa(2048)
+
+	invalidParamsWithoutDim := map[string]string{
+		Metric: L2,
+	}
+
+	invalidParamsSmallDim := copyParams(validParams)
+	invalidParamsSmallDim[DIM] = strconv.Itoa(15)
+
+	cases := []struct {
+		params map[string]string
+		want   bool
+	}{
+		{validParams, true},
+		{validParamsBigDim, true},
+		{invalidParamsWithoutDim, false},
+		{invalidParamsSmallDim, false},
+	}
+
+	adapter := newDISKANNConfAdapter()
+	for _, test := range cases {
+		if got := adapter.CheckTrain(test.params); got != test.want {
+			t.Errorf("DiskAnnConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
 }

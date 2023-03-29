@@ -185,16 +185,6 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		Return(&schemapb.CollectionSchema{
 			Name: "TestSubscribeChannelTask",
 		}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).
-		Return([]int64{100, 101}, nil)
-	channels := make([]*datapb.VchannelInfo, 0, len(suite.subChannels))
-	for _, channel := range suite.subChannels {
-		channels = append(channels, &datapb.VchannelInfo{
-			CollectionID:        suite.collection,
-			ChannelName:         channel,
-			UnflushedSegmentIds: []int64{suite.growingSegments[channel]},
-		})
-	}
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -234,6 +224,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(dmChannels, nil, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	suite.AssertTaskNum(0, len(suite.subChannels), len(suite.subChannels), 0)
@@ -260,6 +251,42 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	for _, task := range tasks {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
+	}
+}
+
+func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+
+	tasks := []Task{}
+	for _, channel := range suite.subChannels {
+		task, err := NewChannelTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewChannelAction(targetNode, ActionTypeGrow, channel),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+	}
+
+	views := make([]*meta.LeaderView, 0)
+	for _, channel := range suite.subChannels {
+		views = append(views, &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel,
+		})
+	}
+	suite.dist.LeaderViewManager.Update(targetNode, views...)
+
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.Error(err)
 	}
 }
 
@@ -293,6 +320,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(dmChannels, nil, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 
@@ -333,7 +361,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestLoadSegmentTask",
 	}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -374,6 +401,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
@@ -417,7 +445,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestLoadSegmentTask",
 	}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -455,6 +482,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
@@ -610,7 +638,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestMoveSegmentTask",
 	}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.moveSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -665,6 +692,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	suite.target.UpdateCollectionCurrentTarget(suite.collection, int64(1))
@@ -709,7 +737,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestSubscribeChannelTask",
 	}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -752,6 +779,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{partition}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, partition)
 
@@ -787,7 +815,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestSegmentTaskStale",
 	}, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -829,6 +856,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
@@ -856,6 +884,10 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			InsertChannel: channel.GetChannelName(),
 		})
 	}
+	bakExpectations := suite.broker.ExpectedCalls
+	suite.broker.AssertExpectations(suite.T())
+	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{2}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(2)).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(2))
 	suite.dispatchAndWait(targetNode)
@@ -870,6 +902,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			suite.NoError(task.Err())
 		}
 	}
+	suite.broker.ExpectedCalls = bakExpectations
 }
 
 func (suite *TaskSuite) TestChannelTaskReplace() {
@@ -1040,7 +1073,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
-	tasks := []Task{}
 	segments := make([]*datapb.SegmentBinlogs, 0)
 	for _, segment := range suite.loadSegments {
 		segments = append(segments, &datapb.SegmentBinlogs{
@@ -1056,10 +1088,10 @@ func (suite *TaskSuite) TestNoExecutor() {
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
-		tasks = append(tasks, task)
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)

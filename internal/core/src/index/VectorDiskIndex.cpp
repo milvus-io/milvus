@@ -15,14 +15,14 @@
 // limitations under the License.
 
 #include "index/VectorDiskIndex.h"
+
+#include "common/Utils.h"
+#include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-
 #include "storage/LocalChunkManager.h"
-#include "config/ConfigKnowhere.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
-#include "common/Utils.h"
 #include "common/RangeSearchHelper.h"
 
 namespace milvus::index {
@@ -38,9 +38,8 @@ template <typename T>
 VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
-    const IndexMode& index_mode,
     storage::FileManagerImplPtr file_manager)
-    : VectorIndex(index_type, index_mode, metric_type) {
+    : VectorIndex(index_type, metric_type) {
     file_manager_ =
         std::dynamic_pointer_cast<storage::DiskFileManagerImpl>(file_manager);
     auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();

@@ -53,6 +53,8 @@ type Cluster interface {
 	UnsubDmChannel(ctx context.Context, nodeID int64, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error)
 	LoadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, nodeID int64, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
+	LoadPartitions(ctx context.Context, nodeID int64, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
 	GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error)
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
@@ -167,6 +169,34 @@ func (c *QueryCluster) ReleaseSegments(ctx context.Context, nodeID int64, req *q
 		req := proto.Clone(req).(*querypb.ReleaseSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.ReleaseSegments(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return status, err
+}
+
+func (c *QueryCluster) LoadPartitions(ctx context.Context, nodeID int64, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	var status *commonpb.Status
+	var err error
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+		req := proto.Clone(req).(*querypb.LoadPartitionsRequest)
+		req.Base.TargetID = nodeID
+		status, err = cli.LoadPartitions(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return status, err
+}
+
+func (c *QueryCluster) ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	var status *commonpb.Status
+	var err error
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNode) {
+		req := proto.Clone(req).(*querypb.ReleasePartitionsRequest)
+		req.Base.TargetID = nodeID
+		status, err = cli.ReleasePartitions(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

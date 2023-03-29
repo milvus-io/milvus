@@ -63,8 +63,8 @@ class IndexFactory {
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info);
 
-    //    IndexBasePtr
-    //    CreateIndex(DataType dtype, const IndexType& index_type, const IndexMode& index_mode = IndexMode::MODE_CPU);
+    // IndexBasePtr
+    // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     template <typename T>
     ScalarIndexPtr<T>

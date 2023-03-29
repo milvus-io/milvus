@@ -150,13 +150,13 @@ type IndexCoordCatalog interface {
 }
 
 type QueryCoordCatalog interface {
-	SaveCollection(info *querypb.CollectionLoadInfo) error
+	SaveCollection(collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error
 	SavePartition(info ...*querypb.PartitionLoadInfo) error
 	SaveReplica(replica *querypb.Replica) error
 	GetCollections() ([]*querypb.CollectionLoadInfo, error)
 	GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
 	GetReplicas() ([]*querypb.Replica, error)
-	ReleaseCollection(id int64) error
+	ReleaseCollection(collection int64) error
 	ReleasePartition(collection int64, partitions ...int64) error
 	ReleaseReplicas(collectionID int64) error
 	ReleaseReplica(collection, replica int64) error

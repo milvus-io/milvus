@@ -35,7 +35,7 @@ class ThreadPool {
  public:
     explicit ThreadPool(const int thread_core_coefficient) : shutdown_(false) {
         auto thread_num = cpu_num * thread_core_coefficient;
-        LOG_SEGCORE_INFO_C << "Thread pool's worker num:" << thread_num;
+        LOG_SEGCORE_INFO_ << "Thread pool's worker num:" << thread_num;
         threads_ = std::vector<std::thread>(thread_num);
         Init();
     }

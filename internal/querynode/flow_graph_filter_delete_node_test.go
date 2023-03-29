@@ -89,7 +89,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 
 		res, err := fg.filterInvalidDeleteMessage(msg, loadTypePartition)
 		assert.NoError(t, err)
-		assert.Nil(t, res)
+		assert.NotNil(t, res)
 	})
 }
 

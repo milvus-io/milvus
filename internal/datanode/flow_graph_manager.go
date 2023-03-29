@@ -18,39 +18,103 @@ package datanode
 
 import (
 	"fmt"
+	"sort"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"go.uber.org/zap"
 )
 
 type flowgraphManager struct {
 	flowgraphs sync.Map // vChannelName -> dataSyncService
+
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func newFlowgraphManager() *flowgraphManager {
-	return &flowgraphManager{}
+	return &flowgraphManager{
+		closeCh: make(chan struct{}),
+	}
+}
+
+func (fm *flowgraphManager) start() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-fm.closeCh:
+			return
+		case <-ticker.C:
+			fm.execute(hardware.GetMemoryCount())
+		}
+	}
+}
+
+func (fm *flowgraphManager) stop() {
+	fm.closeOnce.Do(func() {
+		close(fm.closeCh)
+	})
+}
+
+func (fm *flowgraphManager) execute(totalMemory uint64) {
+	if !Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
+		return
+	}
+
+	var total int64
+	channels := make([]struct {
+		channel    string
+		bufferSize int64
+	}, 0)
+	fm.flowgraphs.Range(func(key, value interface{}) bool {
+		size := value.(*dataSyncService).channel.getTotalMemorySize()
+		channels = append(channels, struct {
+			channel    string
+			bufferSize int64
+		}{key.(string), size})
+		total += size
+		return true
+	})
+	if len(channels) == 0 {
+		return
+	}
+
+	if float64(total) < float64(totalMemory)*Params.DataNodeCfg.MemoryWatermark.GetAsFloat() {
+		return
+	}
+
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].bufferSize > channels[j].bufferSize
+	})
+	if fg, ok := fm.flowgraphs.Load(channels[0].channel); ok { // sync the first channel with the largest memory usage
+		fg.(*dataSyncService).channel.forceToSync()
+		log.Info("notify flowgraph to sync",
+			zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
+	}
 }
 
 func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *tickler) error {
+	log := log.With(zap.String("channel", vchan.GetChannelName()))
 	if _, ok := fm.flowgraphs.Load(vchan.GetChannelName()); ok {
-		log.Warn("try to add an existed DataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
+		log.Warn("try to add an existed DataSyncService")
 		return nil
 	}
 
 	channel := newChannel(vchan.GetChannelName(), vchan.GetCollectionID(), schema, dn.rootCoord, dn.chunkManager)
 
-	var alloc allocatorInterface = newAllocator(dn.rootCoord)
-
 	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), make(chan resendTTMsg, 100), channel,
-		alloc, dn.dispClient, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor, tickler, dn.GetSession().ServerID)
+		dn.allocator, dn.dispClient, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor, tickler, dn.GetSession().ServerID)
 	if err != nil {
-		log.Warn("new data sync service fail", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
+		log.Warn("fail to create new datasyncservice", zap.Error(err))
 		return err
 	}
 	dataSyncService.start()
@@ -84,7 +148,7 @@ func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) 
 		return flushCh, nil
 	}
 
-	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
+	return nil, merr.WrapErrSegmentNotFound(segID, "failed to get flush channel has this segment")
 }
 
 func (fm *flowgraphManager) getChannel(segID UniqueID) (Channel, error) {

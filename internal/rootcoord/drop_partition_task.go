@@ -85,7 +85,12 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		ts:           t.GetTs(),
 	})
 
-	// TODO: release partition when query coord is ready.
+	redoTask.AddAsyncStep(&releasePartitionsStep{
+		baseStep:     baseStep{core: t.core},
+		collectionID: t.collMeta.CollectionID,
+		partitionIDs: []int64{partID},
+	})
+
 	redoTask.AddAsyncStep(&deletePartitionDataStep{
 		baseStep: baseStep{core: t.core},
 		pchans:   t.collMeta.PhysicalChannelNames,

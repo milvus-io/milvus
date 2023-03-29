@@ -17,7 +17,6 @@
 package utils
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -51,18 +50,15 @@ func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeM
 	return nodes
 }
 
-func GetPartitions(collectionMgr *meta.CollectionManager, broker meta.Broker, collectionID int64) ([]int64, error) {
+func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
 	collection := collectionMgr.GetCollection(collectionID)
 	if collection != nil {
-		partitions, err := broker.GetPartitions(context.Background(), collectionID)
-		return partitions, err
-	}
-
-	partitions := collectionMgr.GetPartitionsByCollection(collectionID)
-	if partitions != nil {
-		return lo.Map(partitions, func(partition *meta.Partition, i int) int64 {
-			return partition.PartitionID
-		}), nil
+		partitions := collectionMgr.GetPartitionsByCollection(collectionID)
+		if partitions != nil {
+			return lo.Map(partitions, func(partition *meta.Partition, i int) int64 {
+				return partition.PartitionID
+			}), nil
+		}
 	}
 
 	// todo(yah01): replace this error with a defined error
