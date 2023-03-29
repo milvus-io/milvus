@@ -115,7 +115,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 
 	// process flush messages
 	if len(fgMsg.segmentsToSync) > 0 {
-		log.Debug("DeleteNode receives flush message",
+		log.Info("DeleteNode receives flush message",
 			zap.Int64s("segIDs", fgMsg.segmentsToSync),
 			zap.String("vChannelName", dn.channelName),
 			zap.Time("posTime", tsoutil.PhysicalTime(fgMsg.endPositions[0].Timestamp)))

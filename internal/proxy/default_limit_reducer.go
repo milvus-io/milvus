@@ -7,10 +7,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type defaultLimitReducer struct {
@@ -36,7 +34,6 @@ func (r *defaultLimitReducer) Reduce(results []*internalpb.RetrieveResults) (*mi
 
 func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 	collectionName := r.collectionName
-	ctx := r.ctx
 	schema := r.schema
 	outputFieldsID := r.req.GetOutputFieldsId()
 
@@ -47,8 +44,6 @@ func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}
 	} else {
-		log.Ctx(ctx).Warn("Query result is nil",
-			zap.Any("requestType", "query"))
 		result.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_EmptyCollection,
 			Reason:    "empty collection", // TODO
