@@ -186,15 +186,30 @@ fi
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
-    Darwin*)
-        llvm_prefix="$(brew --prefix llvm)"
-        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-        export CC="${llvm_prefix}/bin/clang"
-        export CXX="${llvm_prefix}/bin/clang++"
-        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
-        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
-        ;;
-          *)   echo "==System:${unameOut}";
+  Darwin*)
+    # detect llvm version by valid list
+    for llvm_version in 15 14 NOT_FOUND ; do
+      if brew ls --versions llvm@${llvm_version} > /dev/null; then
+        break
+      fi
+    done
+    if [ "${llvm_version}" = "NOT_FOUND" ] ; then
+      echo "valid llvm(14 or 15) not installed"
+      exit 1
+    fi
+    llvm_prefix="$(brew --prefix llvm@${llvm_version})"
+    export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+    export CC="${llvm_prefix}/bin/clang"
+    export CXX="${llvm_prefix}/bin/clang++"
+    export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
+    export CXXFLAGS=${CFLAGS}
+    export LDFLAGS="-L$(brew --prefix libomp)/lib"
+    ;;
+  Linux*)
+    ;;
+  *)   
+    echo "Cannot build on windows"
+    ;;
 esac
 
 
