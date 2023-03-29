@@ -57,7 +57,7 @@ func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if !ok {
 		return nil
 	}
-	if msg.EndTimestamp <= segInfo.GetDmlPosition().Timestamp {
+	if msg.EndTimestamp <= segInfo.GetDmlPosition().GetTimestamp() {
 		return WrapErrMsgExcluded(msg.SegmentID)
 	}
 	return nil

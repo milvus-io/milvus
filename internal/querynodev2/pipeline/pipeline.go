@@ -44,7 +44,7 @@ func (p *pipeline) ExcludedSegments(segInfos ...*datapb.SegmentInfo) {
 	for _, segInfo := range segInfos {
 		log.Debug("pipeline add exclude info",
 			zap.Int64("segmentID", segInfo.GetID()),
-			zap.Uint64("tss", segInfo.GetDmlPosition().Timestamp),
+			zap.Uint64("ts", segInfo.GetDmlPosition().GetTimestamp()),
 		)
 		p.excludedSegments.Insert(segInfo.GetID(), segInfo)
 	}
