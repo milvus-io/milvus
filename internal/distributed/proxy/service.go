@@ -692,6 +692,10 @@ func (s *Server) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanc
 	return s.proxy.CalcDistance(ctx, request)
 }
 
+func (s *Server) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	return s.proxy.FlushAll(ctx, request)
+}
+
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.proxy.GetDdChannel(ctx, request)
 }
@@ -756,6 +760,11 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
+}
+
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return s.proxy.GetFlushAllState(ctx, req)
 }
 
 func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
