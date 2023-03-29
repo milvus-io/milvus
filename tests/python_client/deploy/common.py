@@ -44,9 +44,19 @@ def gen_search_param(index_type, metric_type="L2"):
     return search_params
 
 
-def get_collections():
+def get_deploy_test_collections():
     try:
         with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
+            data = json.load(f)
+            collections = data["all"]
+    except Exception as e:
+        log.error(f"get_all_collections error: {e}")
+        return []
+    return collections
+
+def get_chaos_test_collections():
+    try:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
