@@ -632,6 +632,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 }
 
 func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.DataNodeTtMsg) error {
+	log := log.Ctx(ctx).WithRateGroup("dc.handleTimetick", 1, 60)
 	ch := ttMsg.GetChannelName()
 	ts := ttMsg.GetTimestamp()
 	physical, _ := tsoutil.ParseTS(ts)

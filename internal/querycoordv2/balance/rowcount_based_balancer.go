@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"context"
 	"sort"
 
 	"github.com/samber/lo"
@@ -105,6 +106,7 @@ func (b *RowCountBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignP
 }
 
 func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	log := log.Ctx(context.Background()).WithRateGroup("qcv2.rowCountBalancer", 1.0, 60.0)
 	nodes := replica.GetNodes()
 	if len(nodes) == 0 {
 		return nil, nil

@@ -81,6 +81,7 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {
+	log := log.Ctx(context.Background()).WithRateGroup("qcv2.replicaObserver", 1, 60)
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
 		removedNodes := make([]int64, 0)

@@ -30,6 +30,7 @@
 package tso
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -174,7 +175,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
 	if jetLag > 3*UpdateTimestampStep {
-		log.RatedWarn(60.0, "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
+		log.Ctx(context.TODO()).WithRateGroup("tso", 1, 60).RatedWarn(60.0, "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
 			zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 	}
 
