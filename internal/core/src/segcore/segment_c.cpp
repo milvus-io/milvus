@@ -104,12 +104,18 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 CStatus
 Retrieve(CSegmentInterface c_segment,
          CRetrievePlan c_plan,
+         CTraceContext c_trace,
          uint64_t timestamp,
          CRetrieveResult* result) {
     try {
         auto segment =
             static_cast<const milvus::segcore::SegmentInterface*>(c_segment);
         auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
+
+        auto ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.flag};
+        auto span = milvus::tracer::StartSpan("SegcoreRetrieve", &ctx);
+
         auto retrieve_result = segment->Retrieve(plan, timestamp);
 
         auto size = retrieve_result->ByteSizeLong();
@@ -118,6 +124,8 @@ Retrieve(CSegmentInterface c_segment,
 
         result->proto_blob = buffer;
         result->proto_size = size;
+
+        span->End();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

@@ -256,6 +256,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
 			spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
+			defer sp.End()
 
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
@@ -268,17 +269,14 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 			}
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
-
 			InjectCtx(spanCtx, msg.Properties)
 
 			ms.producerLock.Lock()
 			if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
 				ms.producerLock.Unlock()
 				sp.RecordError(err)
-				sp.End()
 				return err
 			}
-			sp.End()
 			ms.producerLock.Unlock()
 		}
 	}
@@ -306,7 +304,6 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 		}
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
-
 		InjectCtx(spanCtx, msg.Properties)
 
 		ms.producerLock.Lock()
@@ -385,10 +382,8 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				Timestamp:   tsMsg.BeginTs(),
 			})
 
-			ctx, sp := ExtractCtx(tsMsg, msg.Properties())
-			if ctx != nil {
-				tsMsg.SetTraceCtx(ctx)
-			}
+			ctx, _ := ExtractCtx(tsMsg, msg.Properties())
+			tsMsg.SetTraceCtx(ctx)
 
 			msgPack := MsgPack{
 				Msgs:           []TsMsg{tsMsg},
@@ -400,8 +395,6 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			case <-ms.ctx.Done():
 				return
 			}
-
-			sp.End()
 		}
 	}
 }
@@ -688,11 +681,6 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				continue
 			}
 
-			ctx, sp := ExtractCtx(tsMsg, msg.Properties())
-			if ctx != nil {
-				tsMsg.SetTraceCtx(ctx)
-			}
-
 			ms.chanMsgBufMutex.Lock()
 			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
 			ms.chanMsgBufMutex.Unlock()
@@ -701,10 +689,8 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				ms.chanTtMsgTimeMutex.Lock()
 				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				ms.chanTtMsgTimeMutex.Unlock()
-				sp.End()
 				return
 			}
-			sp.End()
 		}
 	}
 }
@@ -810,6 +796,9 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 					runLoop = false
 					break
 				} else if tsMsg.BeginTs() > mp.Timestamp {
+					ctx, _ := ExtractCtx(tsMsg, msg.Properties())
+					tsMsg.SetTraceCtx(ctx)
+
 					tsMsg.SetPosition(&MsgPosition{
 						ChannelName: filepath.Base(msg.Topic()),
 						MsgID:       msg.ID().Serialize(),
