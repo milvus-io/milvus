@@ -983,8 +983,12 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	return ids, nil
 }
 
-func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
-	msgBase *commonpb.MsgBase, collectionID int64) (int64, error) {
+func getCollectionProgress(
+	ctx context.Context,
+	queryCoord types.QueryCoord,
+	msgBase *commonpb.MsgBase,
+	collectionID int64,
+) (loadProgress int64, refreshProgress int64, err error) {
 	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
@@ -994,36 +998,53 @@ func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	})
 	if err != nil {
 		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID), zap.Error(err))
-		return 0, err
+		return
 	}
 
 	if resp.Status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
+		err = ErrInsufficientMemory
 		log.Warn("detected insufficientMemoryError when getCollectionProgress", zap.Int64("collection_id", collectionID), zap.String("reason", resp.GetStatus().GetReason()))
-		return 0, ErrInsufficientMemory
+		return
 	}
 
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		err = merr.Error(resp.GetStatus())
 		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
 			zap.String("reason", resp.Status.Reason))
-		return 0, errors.New(resp.Status.Reason)
+		return
 	}
 
 	if len(resp.InMemoryPercentages) == 0 {
 		errMsg := "fail to show collections from the querycoord, no data"
+		err = errors.New(errMsg)
 		log.Warn(errMsg, zap.Int64("collection_id", collectionID))
-		return 0, errors.New(errMsg)
+		return
 	}
-	return resp.InMemoryPercentages[0], nil
+
+	loadProgress = resp.GetInMemoryPercentages()[0]
+
+	if len(resp.GetRefreshProgress()) > 0 { // Compatibility for new Proxy with old QueryCoord
+		refreshProgress = resp.GetRefreshProgress()[0]
+	}
+
+	return
 }
 
-func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
-	msgBase *commonpb.MsgBase, partitionNames []string, collectionName string, collectionID int64) (int64, error) {
+func getPartitionProgress(
+	ctx context.Context,
+	queryCoord types.QueryCoord,
+	msgBase *commonpb.MsgBase,
+	partitionNames []string,
+	collectionName string,
+	collectionID int64,
+) (loadProgress int64, refreshProgress int64, err error) {
 	IDs2Names := make(map[int64]string)
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+		var partitionID int64
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
 		if err != nil {
-			return 0, err
+			return
 		}
 		IDs2Names[partitionID] = partitionName
 		partitionIDs = append(partitionIDs, partitionID)
@@ -1041,24 +1062,34 @@ func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
 			zap.String("collection_name", collectionName),
 			zap.Strings("partition_names", partitionNames),
 			zap.Error(err))
-		return 0, err
+		return
 	}
 	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
-		log.Warn("detected insufficientMemoryError when getPartitionProgress", zap.Int64("collection_id", collectionID),
-			zap.String("collection_name", collectionName), zap.Strings("partition_names", partitionNames), zap.String("reason", resp.GetStatus().GetReason()))
-		return 0, ErrInsufficientMemory
+		err = ErrInsufficientMemory
+		log.Warn("detected insufficientMemoryError when getPartitionProgress",
+			zap.Int64("collection_id", collectionID),
+			zap.String("collection_name", collectionName),
+			zap.Strings("partition_names", partitionNames),
+			zap.String("reason", resp.GetStatus().GetReason()),
+		)
+		return
 	}
 	if len(resp.InMemoryPercentages) != len(partitionIDs) {
 		errMsg := "fail to show partitions from the querycoord, invalid data num"
+		err = errors.New(errMsg)
 		log.Warn(errMsg, zap.Int64("collection_id", collectionID),
 			zap.String("collection_name", collectionName),
 			zap.Strings("partition_names", partitionNames))
-		return 0, errors.New(errMsg)
+		return
 	}
-	var progress int64
 	for _, p := range resp.InMemoryPercentages {
-		progress += p
+		loadProgress += p
 	}
-	progress /= int64(len(partitionIDs))
-	return progress, nil
+	loadProgress /= int64(len(partitionIDs))
+
+	if len(resp.GetRefreshProgress()) > 0 { // Compatibility for new Proxy with old QueryCoord
+		refreshProgress = resp.GetRefreshProgress()[0]
+	}
+
+	return
 }

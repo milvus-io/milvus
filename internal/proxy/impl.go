@@ -1485,13 +1485,16 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		request.Base.SourceID = msgBase.SourceID
 	}
 
-	var progress int64
+	var (
+		loadProgress    int64
+		refreshProgress int64
+	)
 	if len(request.GetPartitionNames()) == 0 {
-		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+		if loadProgress, refreshProgress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	} else {
-		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
@@ -1506,7 +1509,8 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Progress: progress,
+		Progress:        loadProgress,
+		RefreshProgress: refreshProgress,
 	}, nil
 }
 
@@ -1582,7 +1586,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
-		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+		if progress, _, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
 			if errors.Is(err, ErrInsufficientMemory) {
 				return &milvuspb.GetLoadStateResponse{
 					Status: InSufficientMemoryStatus(request.GetCollectionName()),
@@ -1592,7 +1596,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			return successResponse, nil
 		}
 	} else {
-		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+		if progress, _, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
 			if errors.Is(err, ErrInsufficientMemory) {
 				return &milvuspb.GetLoadStateResponse{
