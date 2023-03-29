@@ -1,9 +1,8 @@
 # MEP(Milvus Enhancement Proposals) Templates
+
 Current state: [One of "Under Discussion", "Accepted", "Rejected"]
 
 ISSUE: link to the GitHub issue
-
-PRs: link to the GitHub PRs
 
 Keywords: list keywords about this MEP
 
@@ -26,11 +25,11 @@ Briefly list any new interfaces that will be introduced as part of this proposal
 Describe the new thing you want to do in appropriate detail. This may be fairly extensive and have large subsections of its own. Or it may be a few sentences. Use judgment based on the scope of the change.
 
 ## Compatibility, Deprecation, and Migration Plan(optional)
+
 - What impact (if any) will there be on existing users?
 - If we are changing behaviors how will we phase out the older behavior?
 - If we need special migration tools, describe them here.
 - When will we remove the existing behavior?
-
 
 ## Test Plan(required)
 
@@ -43,5 +42,3 @@ If there are alternative ways of accomplishing the same thing, what were they? T
 ## References(optional)
 
 Briefly list all references
-
-
