@@ -185,13 +185,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// check that all field's number rows are equal
-	if err = it.upsertMsg.InsertMsg.CheckAligned(); err != nil {
-		log.Error("field data is not aligned when upsert",
-			zap.Error(err))
-		return err
-	}
-
 	if err := newValidateUtil(withNANCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
