@@ -550,10 +550,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 
 	log.Info("delegator start to release segments")
 	// alter distribution first
-	if force {
-		targetNodeID = wildcardNodeID
-	}
-
 	var sealed, growing []SegmentEntry
 	convertSealed := func(segmentID int64, _ int) SegmentEntry {
 		return SegmentEntry{
