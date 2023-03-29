@@ -594,7 +594,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
-		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest"), mock.Anything).
 			Return(nil)
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
@@ -641,7 +641,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator := &delegator.MockShardDelegator{}
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
-		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest"), mock.Anything).
 			Return(errors.New("mocked error"))
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
@@ -1167,18 +1167,10 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 		PartitionID: suite.partitionIDs[0],
 	}
 
-	amendAction := &querypb.SyncAction{
-		Type: querypb.SyncType_Amend,
-		Info: &querypb.SegmentLoadInfo{
-			SegmentID:    suite.validSegmentIDs[0],
-			PartitionID:  suite.partitionIDs[0],
-			CollectionID: suite.collectionID,
-		},
-	}
-	req.Actions = []*querypb.SyncAction{releaseAction, setAction, amendAction}
+	req.Actions = []*querypb.SyncAction{releaseAction, setAction}
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

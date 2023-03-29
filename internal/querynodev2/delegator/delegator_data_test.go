@@ -263,7 +263,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 			},
 		},
-	})
+	}, false)
 	s.Require().NoError(err)
 
 	s.delegator.ProcessDelete([]*DeleteData{
@@ -316,7 +316,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
-		})
+		}, false)
 
 		s.NoError(err)
 		sealed, _, _ := s.delegator.GetDistribution().GetCurrent()
@@ -392,7 +392,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
-		})
+		}, false)
 
 		s.NoError(err)
 		sealed, _, _ := s.delegator.GetDistribution().GetCurrent()
@@ -435,7 +435,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
-		})
+		}, false)
 
 		s.Error(err)
 	})
@@ -473,7 +473,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
-		})
+		}, false)
 
 		s.Error(err)
 	})
@@ -517,7 +517,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
-		})
+		}, false)
 
 		s.Error(err)
 	})
@@ -596,7 +596,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 				EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
 			},
 		},
-	})
+	}, false)
 	s.Require().NoError(err)
 
 	sealed, growing, version := s.delegator.GetDistribution().GetCurrent()
