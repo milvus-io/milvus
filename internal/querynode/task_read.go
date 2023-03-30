@@ -76,9 +76,9 @@ func (b *baseReadTask) SetStep(step typeutil.TaskStep) {
 	switch step {
 	case typeutil.TaskStepEnqueue:
 		b.queueDur = 0
-		b.tr.Record("enqueue done")
+		b.tr.RecordSpan()
 	case typeutil.TaskStepPreExecute:
-		b.queueDur = b.tr.Record("start to process")
+		b.queueDur = b.tr.RecordSpan()
 	}
 }
 
@@ -109,9 +109,9 @@ func (b *baseReadTask) PostExecute(ctx context.Context) error {
 func (b *baseReadTask) Notify(err error) {
 	switch b.step {
 	case typeutil.TaskStepEnqueue:
-		b.queueDur = b.tr.Record("enqueueEnd")
+		b.queueDur = b.tr.RecordSpan()
 	case typeutil.TaskStepPostExecute:
-		b.tr.Record("execute task done")
+		b.tr.RecordSpan()
 	}
 	b.baseTask.Notify(err)
 }

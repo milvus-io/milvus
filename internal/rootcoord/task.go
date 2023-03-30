@@ -65,9 +65,9 @@ func (b *baseTask) SetStep(step typeutil.TaskStep) {
 	switch step {
 	case typeutil.TaskStepEnqueue:
 		b.queueDur = 0
-		b.tr.Record("enqueue done")
+		b.tr.RecordSpan()
 	case typeutil.TaskStepPreExecute:
-		b.queueDur = b.tr.Record("start to process")
+		b.queueDur = b.tr.RecordSpan()
 	}
 }
 

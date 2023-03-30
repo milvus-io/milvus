@@ -139,7 +139,7 @@ func (it *indexBuildTask) GetState() commonpb.IndexState {
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.queueDur = 0
-	it.tr.Record("enqueue done")
+	it.tr.RecordSpan()
 	it.statistic.StartTime = time.Now().UnixMicro()
 	it.statistic.PodID = it.node.GetNodeID()
 	log.Ctx(ctx).Debug("IndexNode IndexBuilderTask Enqueue")
@@ -148,9 +148,12 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 
 func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	// cal time duration in task queue
-	it.queueDur = it.tr.Record("start to process")
+	it.queueDur = it.tr.RecordSpan()
 
-	logutil.Logger(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
+	logutil.Logger(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
+		zap.Int64("SegmentIf", it.segmentID),
+		zap.Duration("queue duration", it.queueDur))
+
 	typeParams := make(map[string]string)
 	indexParams := make(map[string]string)
 
@@ -337,7 +340,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		log.Ctx(ctx).Error("failed to build index", zap.Error(err))
 		return err
 	}
-	buildIndexLatency := it.tr.Record("build index done")
+	buildIndexLatency := it.tr.RecordSpan()
 	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
 
 	logutil.Logger(ctx).Info("Successfully build index", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
@@ -351,7 +354,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 		log.Ctx(ctx).Error("failed to upload index", zap.Error(err))
 		return err
 	}
-	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
+	encodeIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 
 	// early release index for gc, and we can ensure that Delete is idempotent.
@@ -370,11 +373,12 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	it.statistic.EndTime = time.Now().UnixMicro()
 	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic)
 	log.Ctx(ctx).Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
-	saveIndexFileDur := it.tr.Record("index file save done")
+	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
-	it.tr.Elapse("index building all done")
+	totalDuration := it.tr.ElapseSpan()
 	log.Ctx(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
-		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID))
+		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID),
+		zap.Duration("total duration", totalDuration))
 	return nil
 }
 
@@ -428,14 +432,15 @@ func (it *indexBuildTask) decodeBlobs(ctx context.Context, blobs []*storage.Blob
 	it.partitionID = partitionID
 	it.segmentID = segmentID
 
+	deserializeDur := it.tr.RecordSpan()
+
 	log.Ctx(ctx).Debug("indexnode deserialize data success",
 		zap.Int64("index id", it.req.IndexID),
 		zap.String("index name", it.req.IndexName),
 		zap.Int64("collectionID", it.collectionID),
 		zap.Int64("partitionID", it.partitionID),
-		zap.Int64("segmentID", it.segmentID))
-
-	it.tr.Record("deserialize vector data done")
+		zap.Int64("segmentID", it.segmentID),
+		zap.Duration("deserialize duration", deserializeDur))
 
 	// we can ensure that there blobs are in one Field
 	var data storage.FieldData
