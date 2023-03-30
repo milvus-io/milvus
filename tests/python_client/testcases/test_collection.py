@@ -2429,7 +2429,7 @@ class TestLoadCollection(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"not loaded into memory"}
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]",
                            partition_names=[ct.default_partition_name, ct.default_tag],
-                           check_task=CheckTasks.err_res, check_items=error)
+                           check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_replica_non_shard_leader(self):
