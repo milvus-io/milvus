@@ -421,7 +421,8 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, errContext
 	}
 
-	durInQueue := t.tr.Record("compact task start to process")
+	durInQueue := t.tr.RecordSpan()
+	log.Info("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Duration("wait duration", durInQueue))
 
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
