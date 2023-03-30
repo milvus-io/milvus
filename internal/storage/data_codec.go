@@ -275,8 +275,17 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	rowNum := int64(timeFieldData.RowNum())
 
 	ts := timeFieldData.(*Int64FieldData).Data
-	startTs := ts[0]
-	endTs := ts[len(ts)-1]
+	var startTs, endTs Timestamp
+	startTs, endTs = math.MaxUint64, 0
+	for _, t := range ts {
+		if uint64(t) > endTs {
+			endTs = uint64(t)
+		}
+
+		if uint64(t) < startTs {
+			startTs = uint64(t)
+		}
+	}
 
 	// sort insert data by rowID
 	dataSorter := &DataSorter{
