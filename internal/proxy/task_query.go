@@ -393,7 +393,6 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}
 	} else {
-		log.Ctx(ctx).Warn("Query result is nil", zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 		t.result.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_EmptyCollection,
 			Reason:    "empty collection", // TODO
