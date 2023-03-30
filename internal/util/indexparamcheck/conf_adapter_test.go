@@ -165,6 +165,77 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+func TestRaftIVFPQConfAdapter_CheckTrain(t *testing.T) {
+	validParams := map[string]string{
+		DIM:    strconv.Itoa(128),
+		NLIST:  strconv.Itoa(1024),
+		IVFM:   strconv.Itoa(4),
+		NBITS:  strconv.Itoa(8),
+		Metric: L2,
+	}
+
+	validParamsWithoutNbits := map[string]string{
+		DIM:    strconv.Itoa(128),
+		NLIST:  strconv.Itoa(1024),
+		IVFM:   strconv.Itoa(4),
+		Metric: L2,
+	}
+
+	validParamsWithoutDim := map[string]string{
+		NLIST:  strconv.Itoa(1024),
+		IVFM:   strconv.Itoa(4),
+		NBITS:  strconv.Itoa(8),
+		Metric: L2,
+	}
+
+	invalidParamsDim := copyParams(validParams)
+	invalidParamsDim[DIM] = "NAN"
+
+	invalidParamsNbits := copyParams(validParams)
+	invalidParamsNbits[NBITS] = "NAN"
+
+	invalidParamsWithoutIVF := map[string]string{
+		DIM:    strconv.Itoa(128),
+		NLIST:  strconv.Itoa(1024),
+		NBITS:  strconv.Itoa(8),
+		Metric: L2,
+	}
+
+	invalidParamsIVF := copyParams(validParams)
+	invalidParamsIVF[IVFM] = "NAN"
+
+	invalidParamsM := copyParams(validParams)
+	invalidParamsM[DIM] = strconv.Itoa(65536)
+
+	validParamsMzero := copyParams(validParams)
+	validParamsMzero[IVFM] = "0"
+
+	cases := []struct {
+		params map[string]string
+		want   bool
+	}{
+		{validParams, true},
+		{validParamsWithoutNbits, true},
+		{invalidIVFParamsMin(), false},
+		{invalidIVFParamsMax(), false},
+		{validParamsWithoutDim, false},
+		{invalidParamsDim, false},
+		{invalidParamsNbits, false},
+		{invalidParamsWithoutIVF, false},
+		{invalidParamsIVF, false},
+		{invalidParamsM, false},
+		{validParamsMzero, true},
+	}
+
+	adapter := newRaftIVFPQConfAdapter()
+	for i, test := range cases {
+		if got := adapter.CheckTrain(test.params); got != test.want {
+			t.Log("i:", i, "params", test.params)
+			t.Errorf("RaftIVFPQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
+		}
+	}
+}
+
 func TestIVFSQConfAdapter_CheckTrain(t *testing.T) {
 	getValidParams := func(withNBits bool) map[string]string {
 		validParams := map[string]string{

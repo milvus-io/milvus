@@ -47,7 +47,7 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexRaftIvfFlat] = newIVFConfAdapter()
-	mgr.adapters[IndexRaftIvfPQ] = newIVFPQConfAdapter()
+	mgr.adapters[IndexRaftIvfPQ] = newRaftIVFPQConfAdapter()
 	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
