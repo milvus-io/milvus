@@ -174,7 +174,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
-	defer tr.Elapse("insert execute done")
 
 	collectionName := it.insertMsg.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -195,13 +194,12 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		}
 	}
 	it.insertMsg.PartitionID = partitionID
-	tr.Record("get collection id & partition id from cache")
-
+	getCacheDur := tr.RecordSpan()
 	stream, err := it.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
 	}
-	tr.Record("get used message stream")
+	getMsgStreamDur := tr.RecordSpan()
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
@@ -219,7 +217,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.Int64("collection_id", collID),
 		zap.Int64("partition_id", partitionID),
 		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()))
+		zap.Int64("task_id", it.ID()),
+		zap.Duration("get cache duration", getCacheDur),
+		zap.Duration("get msgStream duration", getMsgStreamDur))
 
 	// assign segmentID for insert data and repack data by segmentID
 	var msgPack *msgstream.MsgPack
@@ -232,21 +232,25 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+	assignSegmentIDDur := tr.RecordSpan()
+
 	log.Debug("assign segmentID for insert data success",
 		zap.Int64("collectionID", collID),
-		zap.String("collectionName", it.insertMsg.CollectionName))
-	tr.Record("assign segment id")
+		zap.String("collectionName", it.insertMsg.CollectionName),
+		zap.Duration("assign segmentID duration", assignSegmentIDDur))
 	err = stream.Produce(msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	sendMsgDur := tr.Record("send insert request to dml channel")
+	sendMsgDur := tr.RecordSpan()
 	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
-
+	totalExecDur := tr.ElapseSpan()
 	log.Debug("Proxy Insert Execute done",
-		zap.String("collectionName", collectionName))
+		zap.String("collectionName", collectionName),
+		zap.Duration("send message duration", sendMsgDur),
+		zap.Duration("execute duration", totalExecDur))
 
 	return nil
 }

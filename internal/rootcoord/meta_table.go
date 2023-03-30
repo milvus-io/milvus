@@ -148,8 +148,7 @@ func (mt *MetaTable) reload() error {
 
 	metrics.RootCoordNumOfCollections.Set(float64(collectionNum))
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(partitionNum))
-
-	record.Record("MetaTable reload")
+	log.Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 

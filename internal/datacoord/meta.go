@@ -150,8 +150,7 @@ func (m *meta) reloadFromKV() error {
 	for _, segIdx := range segmentIndexes {
 		m.updateSegmentIndex(segIdx)
 	}
-
-	record.Record("meta reloadFromKV")
+	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
