@@ -675,7 +675,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Err() != nil {
-			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.err))
+			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.Err()))
 			scheduler.recordSegmentTaskError(task)
 			metrics.QueryCoordTaskNum.WithLabelValues(metrics.LoadSegmentLabel).Set(float64(len(scheduler.segmentTasks)))
 		}
