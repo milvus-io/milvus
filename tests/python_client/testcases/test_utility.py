@@ -5,6 +5,7 @@ import pytest
 from pymilvus import DefaultConfig
 from pymilvus.exceptions import MilvusException
 from base.client_base import TestcaseBase
+from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -534,7 +535,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "`collection_name` value {} is illegal".format(old_collection_name)})
+                                                         "err_msg": "`collection_name` value {} is illegal".format(
+                                                             old_collection_name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_value(self, get_invalid_value_collection_name):
@@ -601,7 +603,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
-                                                         "err_msg": "can't find collection: {}".format(collection_w.name)})
+                                                         "err_msg": "can't find collection: {}".format(
+                                                             collection_w.name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_name(self):
@@ -617,7 +620,8 @@ class TestUtilityParams(TestcaseBase):
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
                                                          "err_msg": "duplicated new collection name :{} with other "
-                                                                    "collection name or alias".format(collection_w.name)})
+                                                                    "collection name or alias".format(
+                                                             collection_w.name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_alias(self):
@@ -655,6 +659,7 @@ class TestUtilityParams(TestcaseBase):
                                             check_items={"err_code": 1,
                                                          "err_msg": "unsupported use an alias to "
                                                                     "rename collection, alias:{}".format(alias)})
+
 
 class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
@@ -1642,6 +1647,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_alias[0] in collections
         assert old_collection_name not in collections
 
+
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """
 
@@ -1848,7 +1854,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                 if x in segment_distribution else 0, reverse=True)
         # add node id greater than all querynodes, which is not exist for querynode, to src_node_ids
         max_query_node_id = max(all_querynodes)
-        invalid_src_node_id = max_query_node_id+1
+        invalid_src_node_id = max_query_node_id + 1
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -2364,8 +2370,8 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
 
         # 3.reset password with the wrong username
         self.utility_wrap.update_password(user="hobo", old_password=old_password, new_password="qwaszx1",
-                                         check_task=ct.CheckTasks.err_res,
-                                         check_items={ct.err_code: 30})
+                                          check_task=ct.CheckTasks.err_res,
+                                          check_items={ct.err_code: 30})
 
     @pytest.mark.tags(ct.CaseLabel.L3)
     @pytest.mark.parametrize("user", ["demo"])
@@ -2386,8 +2392,8 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
 
         # 3.reset password with the wrong new password
         self.utility_wrap.update_password(user=user, old_password=old_password, new_password=new_password,
-                                         check_task=ct.CheckTasks.err_res,
-                                         check_items={ct.err_code: 5})
+                                          check_task=ct.CheckTasks.err_res,
+                                          check_items={ct.err_code: 5})
 
     @pytest.mark.tags(ct.CaseLabel.L3)
     @pytest.mark.parametrize("user", ["genny"])
@@ -2401,8 +2407,8 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.create_user(user=user, password="qwaszx0")
         self.utility_wrap.update_password(user=user, old_password="waszx0", new_password="123456",
-                                         check_task=ct.CheckTasks.err_res,
-                                         check_items={ct.err_code: 30})
+                                          check_task=ct.CheckTasks.err_res,
+                                          check_items={ct.err_code: 30})
 
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_delete_user_root(self, host, port):
@@ -2764,7 +2770,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.init_role(r_name)
-        self.utility_wrap.role_revoke("Global",  "*", "CreateCollection")
+        self.utility_wrap.role_revoke("Global", "*", "CreateCollection")
 
         # verify revoke is success
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -4051,3 +4057,162 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.create_role()
         error = {"err_code": 41, "err_msg": "the privilege name[%s] in the privilege entity is invalid" % p_name}
         self.utility_wrap.role_revoke("Global", "*", p_name, check_task=CheckTasks.err_res, check_items=error)
+
+
+@pytest.mark.tags(CaseLabel.L3)
+class TestUtilityFlushAll(TestcaseBase):
+
+    def test_flush_all_multi_collections(self):
+        """
+        target: test flush multi collections
+        method: 1.create multi collections
+                2. insert data into each collections without flushing
+                3. delete some data
+                4. flush all collections
+                5. verify num entities
+                6. create index -> load -> query deleted ids -> query no-deleted ids
+        expected: the insert and delete data of all collections are flushed
+        """
+        collection_num = 5
+        collection_names = []
+        delete_num = 100
+        for i in range(collection_num):
+            collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
+                                                                             is_index=True)
+            collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+            collection_names.append(collection_w.name)
+
+        self.utility_wrap.flush_all(timeout=60)
+        cw = ApiCollectionWrapper()
+        for c in collection_names:
+            cw.init_collection(name=c)
+            assert cw.num_entities_without_flush == ct.default_nb
+
+            cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+            cw.load()
+            cw.query(f'{ct.default_int64_field_name} in {insert_ids[:100]}', check_task=CheckTasks.check_query_empty)
+
+            res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
+            assert len(res) == ct.default_nb - delete_num
+
+    def test_flush_all_multi_shards_timeout(self):
+        """
+        target: test flush_all collection with max shards_num
+        method: 1.create collection with max shards_num
+                2.insert data
+                3.flush all with a small timeout and gets exception
+                4.flush and verify num entities
+        expected:
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=ct.max_shards_num)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        error = {ct.err_code: 1, ct.err_msg: "wait for flush all timeout"}
+        self.utility_wrap.flush_all(timeout=5, check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.flush_all(timeout=120)
+        assert collection_w.num_entities_without_flush == ct.default_nb
+
+    def test_flush_all_no_collections(self):
+        """
+        target: test flush all without any collections
+        method: connect and flush all
+        expected: no exception
+        """
+        self._connect()
+        self.utility_wrap.flush_all(check_task=None)
+
+    def test_flush_all_async(self):
+        """
+        target: test flush all collections with _async
+        method: flush all collections and _async=True
+        expected: finish flush all collection within a period of time
+        """
+        collection_num = 5
+        collection_names = []
+        delete_num = 100
+
+        for i in range(collection_num):
+            collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
+                                                                             is_index=True)
+            collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+            collection_names.append(collection_w.name)
+
+        self.utility_wrap.flush_all(_async=True)
+        _async_timeout = 60
+        cw = ApiCollectionWrapper()
+        start = time.time()
+        while time.time() - start < _async_timeout:
+            time.sleep(2.0)
+            flush_flag = False
+            for c in collection_names:
+                cw.init_collection(name=c)
+                if cw.num_entities_without_flush == ct.default_nb:
+                    flush_flag = True
+                else:
+                    log.debug(f"collection num entities: {cw.num_entities_without_flush} of collection {c}")
+                    flush_flag = False
+            if flush_flag:
+                break
+            if time.time() - start > _async_timeout:
+                raise MilvusException(1, f"Waiting more than {_async_timeout}s for the flush all")
+
+    def test_flush_all_while_insert_delete(self):
+        """
+        target: test flush all while insert and delete
+        method: 1. prepare multi collections
+                2. flush_all while inserting and deleting
+        expected:
+        """
+        from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+        collection_num = 5
+        collection_names = []
+        delete_num = 100
+        delete_ids = [_i for _i in range(delete_num)]
+
+        for i in range(collection_num):
+            collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=4)
+            df = cf.gen_default_dataframe_data(nb=ct.default_nb, start=0)
+            collection_w.insert(df)
+            collection_names.append(collection_w.name)
+
+        def do_insert():
+            cw = ApiCollectionWrapper()
+            df = cf.gen_default_dataframe_data(nb=ct.default_nb, start=ct.default_nb)
+            for c_name in collection_names:
+                cw.init_collection(c_name)
+                insert_res, _ = cw.insert(df)
+                assert insert_res.insert_count == ct.default_nb
+
+        def do_delete():
+            cw = ApiCollectionWrapper()
+            for c_name in collection_names:
+                cw.init_collection(c_name)
+                del_res, _ = cw.delete(f"{ct.default_int64_field_name} in {delete_ids}")
+                assert del_res.delete_count == delete_num
+
+        def do_flush_all():
+            time.sleep(2)
+            self.utility_wrap.flush_all(timeout=600)
+
+        executor = ThreadPoolExecutor(max_workers=3)
+        insert_task = executor.submit(do_insert)
+        delete_task = executor.submit(do_delete)
+        flush_task = executor.submit(do_flush_all)
+
+        # wait all tasks completed
+        wait([insert_task, delete_task, flush_task], return_when=ALL_COMPLETED)
+
+        # verify
+        for c in collection_names:
+            cw = ApiCollectionWrapper()
+            cw.init_collection(name=c)
+            log.debug(f"num entities: {cw.num_entities_without_flush}")
+            assert cw.num_entities_without_flush >= ct.default_nb
+            assert cw.num_entities_without_flush <= ct.default_nb * 2
+
+            cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+            cw.load()
+            cw.query(f'{ct.default_int64_field_name} in {delete_ids}', check_task=CheckTasks.check_query_empty)
+
+            res, _ = cw.query(f'{ct.default_int64_field_name} not in {delete_ids}')
+            assert len(res) == ct.default_nb * 2 - delete_num
