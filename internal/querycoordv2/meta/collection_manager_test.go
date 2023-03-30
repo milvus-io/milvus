@@ -108,7 +108,7 @@ func (suite *CollectionManagerSuite) TestGetProperty() {
 	for i, collection := range suite.collections {
 		loadType := mgr.GetLoadType(collection)
 		replicaNumber := mgr.GetReplicaNumber(collection)
-		percentage := mgr.GetCurrentLoadPercentage(collection)
+		percentage := mgr.CalculateLoadPercentage(collection)
 		exist := mgr.Exist(collection)
 		suite.Equal(suite.loadTypes[i], loadType)
 		suite.Equal(suite.replicaNumber[i], replicaNumber)
@@ -119,7 +119,7 @@ func (suite *CollectionManagerSuite) TestGetProperty() {
 	invalidCollection := -1
 	loadType := mgr.GetLoadType(int64(invalidCollection))
 	replicaNumber := mgr.GetReplicaNumber(int64(invalidCollection))
-	percentage := mgr.GetCurrentLoadPercentage(int64(invalidCollection))
+	percentage := mgr.CalculateLoadPercentage(int64(invalidCollection))
 	exist := mgr.Exist(int64(invalidCollection))
 	suite.Equal(querypb.LoadType_UnKnownType, loadType)
 	suite.EqualValues(-1, replicaNumber)
@@ -176,29 +176,29 @@ func (suite *CollectionManagerSuite) TestUpdate() {
 	for _, collection := range collections {
 		collection := collection.Clone()
 		collection.LoadPercentage = 100
-		ok := mgr.UpdateCollectionInMemory(collection)
-		suite.True(ok)
+		err := mgr.PutCollectionWithoutSave(collection)
+		suite.NoError(err)
 
 		modified := mgr.GetCollection(collection.GetCollectionID())
 		suite.Equal(collection, modified)
 		suite.EqualValues(100, modified.LoadPercentage)
 
 		collection.Status = querypb.LoadStatus_Loaded
-		err := mgr.UpdateCollection(collection)
+		err = mgr.PutCollection(collection)
 		suite.NoError(err)
 	}
 	for _, partition := range partitions {
 		partition := partition.Clone()
 		partition.LoadPercentage = 100
-		ok := mgr.UpdatePartitionInMemory(partition)
-		suite.True(ok)
+		err := mgr.PutPartitionWithoutSave(partition)
+		suite.NoError(err)
 
 		modified := mgr.GetPartition(partition.GetPartitionID())
 		suite.Equal(partition, modified)
 		suite.EqualValues(100, modified.LoadPercentage)
 
 		partition.Status = querypb.LoadStatus_Loaded
-		err := mgr.UpdatePartition(partition)
+		err = mgr.PutPartition(partition)
 		suite.NoError(err)
 	}
 
@@ -213,6 +213,25 @@ func (suite *CollectionManagerSuite) TestUpdate() {
 	for _, partition := range partitions {
 		suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
 	}
+}
+
+func (suite *CollectionManagerSuite) TestGetFieldIndex() {
+	mgr := suite.mgr
+	mgr.PutCollection(&Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  1,
+			ReplicaNumber: 1,
+			Status:        querypb.LoadStatus_Loading,
+			LoadType:      querypb.LoadType_LoadCollection,
+			FieldIndexID:  map[int64]int64{1: 1, 2: 2},
+		},
+		LoadPercentage: 0,
+		CreatedAt:      time.Now(),
+	})
+	indexID := mgr.GetFieldIndex(1)
+	suite.Len(indexID, 2)
+	suite.Contains(indexID, int64(1))
+	suite.Contains(indexID, int64(2))
 }
 
 func (suite *CollectionManagerSuite) TestRemove() {
@@ -289,6 +308,68 @@ func (suite *CollectionManagerSuite) TestRecover() {
 		exist := suite.colLoadPercent[i] == 100
 		suite.Equal(exist, mgr.Exist(collection))
 	}
+}
+
+func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
+	mgr := suite.mgr
+	mgr.PutCollection(&Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  1,
+			ReplicaNumber: 1,
+			Status:        querypb.LoadStatus_Loading,
+			LoadType:      querypb.LoadType_LoadCollection,
+		},
+		LoadPercentage: 0,
+		CreatedAt:      time.Now(),
+	})
+
+	partitions := []int64{1, 2}
+	for _, partition := range partitions {
+		mgr.PutPartition(&Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: 1,
+				PartitionID:  partition,
+				Status:       querypb.LoadStatus_Loading,
+			},
+			LoadPercentage: 0,
+			CreatedAt:      time.Now(),
+		})
+	}
+	// test update partition load percentage
+	mgr.UpdateLoadPercent(1, 30)
+	partition := mgr.GetPartition(1)
+	suite.Equal(int32(30), partition.LoadPercentage)
+	suite.Equal(int32(30), mgr.GetPartitionLoadPercentage(partition.PartitionID))
+	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
+	collection := mgr.GetCollection(1)
+	suite.Equal(int32(15), collection.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
+	// expect nothing changed
+	mgr.UpdateLoadPercent(1, 15)
+	partition = mgr.GetPartition(1)
+	suite.Equal(int32(30), partition.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
+	collection = mgr.GetCollection(1)
+	suite.Equal(int32(15), collection.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
+	suite.Equal(querypb.LoadStatus_Loading, mgr.CalculateLoadStatus(collection.CollectionID))
+	// test update partition load percentage to 100
+	mgr.UpdateLoadPercent(1, 100)
+	partition = mgr.GetPartition(1)
+	suite.Equal(int32(100), partition.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	collection = mgr.GetCollection(1)
+	suite.Equal(int32(50), collection.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
+	// test update collection load percentage
+	mgr.UpdateLoadPercent(2, 100)
+	partition = mgr.GetPartition(1)
+	suite.Equal(int32(100), partition.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	collection = mgr.GetCollection(1)
+	suite.Equal(int32(100), collection.LoadPercentage)
+	suite.Equal(querypb.LoadStatus_Loaded, collection.Status)
+	suite.Equal(querypb.LoadStatus_Loaded, mgr.CalculateLoadStatus(collection.CollectionID))
 }
 
 func (suite *CollectionManagerSuite) TestUpgradeRecover() {

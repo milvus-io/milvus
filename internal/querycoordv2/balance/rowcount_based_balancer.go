@@ -89,7 +89,7 @@ func (b *RowCountBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignP
 
 	// loading collection should skip balance
 	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		return b.meta.GetStatus(cid) == querypb.LoadStatus_Loaded
+		return b.meta.CalculateLoadStatus(cid) == querypb.LoadStatus_Loaded
 	})
 
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)

@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -202,11 +203,15 @@ func (m *CollectionManager) GetReplicaNumber(collectionID UniqueID) int32 {
 	return -1
 }
 
-// GetCurrentLoadPercentage checks if collection is currently fully loaded.
-func (m *CollectionManager) GetCurrentLoadPercentage(collectionID UniqueID) int32 {
+// CalculateLoadPercentage checks if collection is currently fully loaded.
+func (m *CollectionManager) CalculateLoadPercentage(collectionID UniqueID) int32 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
+	return m.calculateLoadPercentage(collectionID)
+}
+
+func (m *CollectionManager) calculateLoadPercentage(collectionID UniqueID) int32 {
 	collection, ok := m.collections[collectionID]
 	if ok {
 		partitions := m.getPartitionsByCollection(collectionID)
@@ -223,20 +228,6 @@ func (m *CollectionManager) GetCurrentLoadPercentage(collectionID UniqueID) int3
 	return -1
 }
 
-// GetCollectionLoadPercentage returns collection load percentage.
-// Note: collection.LoadPercentage == 100 only means that it used to be fully loaded, and it is queryable,
-// to check if it is fully loaded now, use GetCurrentLoadPercentage instead.
-func (m *CollectionManager) GetCollectionLoadPercentage(collectionID UniqueID) int32 {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	collection, ok := m.collections[collectionID]
-	if ok {
-		return collection.LoadPercentage
-	}
-	return -1
-}
-
 func (m *CollectionManager) GetPartitionLoadPercentage(partitionID UniqueID) int32 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
@@ -248,7 +239,7 @@ func (m *CollectionManager) GetPartitionLoadPercentage(partitionID UniqueID) int
 	return -1
 }
 
-func (m *CollectionManager) GetStatus(collectionID UniqueID) querypb.LoadStatus {
+func (m *CollectionManager) CalculateLoadStatus(collectionID UniqueID) querypb.LoadStatus {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -280,28 +271,6 @@ func (m *CollectionManager) GetFieldIndex(collectionID UniqueID) map[int64]int64
 		return collection.GetFieldIndexID()
 	}
 	return nil
-}
-
-// ContainAnyIndex returns true if the loaded collection contains one of the given indexes,
-// returns false otherwise.
-func (m *CollectionManager) ContainAnyIndex(collectionID int64, indexIDs ...int64) bool {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	for _, indexID := range indexIDs {
-		if m.containIndex(collectionID, indexID) {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *CollectionManager) containIndex(collectionID, indexID int64) bool {
-	collection, ok := m.collections[collectionID]
-	if ok {
-		return lo.Contains(lo.Values(collection.GetFieldIndexID()), indexID)
-	}
-	return false
 }
 
 func (m *CollectionManager) Exist(collectionID UniqueID) bool {
@@ -362,29 +331,11 @@ func (m *CollectionManager) PutCollection(collection *Collection, partitions ...
 	return m.putCollection(true, collection, partitions...)
 }
 
-func (m *CollectionManager) UpdateCollection(collection *Collection) error {
+func (m *CollectionManager) PutCollectionWithoutSave(collection *Collection) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	_, ok := m.collections[collection.GetCollectionID()]
-	if !ok {
-		return merr.WrapErrCollectionNotFound(collection.GetCollectionID())
-	}
-
-	return m.putCollection(true, collection)
-}
-
-func (m *CollectionManager) UpdateCollectionInMemory(collection *Collection) bool {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	_, ok := m.collections[collection.GetCollectionID()]
-	if !ok {
-		return false
-	}
-
-	m.putCollection(false, collection)
-	return true
+	return m.putCollection(false, collection)
 }
 
 func (m *CollectionManager) putCollection(withSave bool, collection *Collection, partitions ...*Partition) error {
@@ -414,36 +365,11 @@ func (m *CollectionManager) PutPartition(partitions ...*Partition) error {
 	return m.putPartition(partitions, true)
 }
 
-func (m *CollectionManager) PutPartitionWithoutSave(partitions ...*Partition) {
+func (m *CollectionManager) PutPartitionWithoutSave(partitions ...*Partition) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	m.putPartition(partitions, false)
-}
-
-func (m *CollectionManager) UpdatePartition(partition *Partition) error {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	_, ok := m.partitions[partition.GetPartitionID()]
-	if !ok {
-		return merr.WrapErrPartitionNotFound(partition.GetPartitionID())
-	}
-
-	return m.putPartition([]*Partition{partition}, true)
-}
-
-func (m *CollectionManager) UpdatePartitionInMemory(partition *Partition) bool {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	_, ok := m.partitions[partition.GetPartitionID()]
-	if !ok {
-		return false
-	}
-
-	m.putPartition([]*Partition{partition}, false)
-	return true
+	return m.putPartition(partitions, false)
 }
 
 func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool) error {
@@ -461,6 +387,55 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 		m.partitions[partition.GetPartitionID()] = partition
 	}
 	return nil
+}
+
+func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int32) (int32, error) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	oldPartition, ok := m.partitions[partitionID]
+	if !ok {
+		return 0, merr.WrapErrPartitionNotFound(partitionID)
+	}
+
+	if loadPercent <= oldPartition.LoadPercentage {
+		return m.calculateLoadPercentage(oldPartition.GetCollectionID()), nil
+	}
+
+	// update partition load percentage
+	newPartition := oldPartition.Clone()
+	newPartition.LoadPercentage = loadPercent
+	savePartition := false
+	if loadPercent == 100 {
+		savePartition = true
+		newPartition.Status = querypb.LoadStatus_Loaded
+		elapsed := time.Since(newPartition.CreatedAt)
+		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
+	}
+	err := m.putPartition([]*Partition{newPartition}, savePartition)
+	if err != nil {
+		return 0, err
+	}
+
+	// update collection load percentage
+	oldCollection, ok := m.collections[newPartition.CollectionID]
+	if !ok {
+		return 0, merr.WrapErrCollectionNotFound(newPartition.CollectionID)
+	}
+	collectionPercent := m.calculateLoadPercentage(oldCollection.CollectionID)
+	if collectionPercent <= oldCollection.LoadPercentage {
+		return m.calculateLoadPercentage(oldPartition.GetCollectionID()), nil
+	}
+	newCollection := oldCollection.Clone()
+	newCollection.LoadPercentage = collectionPercent
+	saveCollection := false
+	if collectionPercent == 100 {
+		saveCollection = true
+		newCollection.Status = querypb.LoadStatus_Loaded
+		elapsed := time.Since(newCollection.CreatedAt)
+		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
+	}
+	return collectionPercent, m.putCollection(saveCollection, newCollection)
 }
 
 // RemoveCollection removes collection and its partitions.
@@ -493,18 +468,6 @@ func (m *CollectionManager) RemovePartition(ids ...UniqueID) error {
 	defer m.rwmutex.Unlock()
 
 	return m.removePartition(ids...)
-}
-
-func (m *CollectionManager) RemoveCollectionInMemory(id UniqueID) {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	delete(m.collections, id)
-
-	partitions := m.getPartitionsByCollection(id)
-	for _, partition := range partitions {
-		delete(m.partitions, partition.GetPartitionID())
-	}
 }
 
 func (m *CollectionManager) removePartition(ids ...UniqueID) error {

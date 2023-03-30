@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -142,38 +141,6 @@ func (ob *CollectionObserver) observeLoadStatus() {
 		replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
 		ob.observePartitionLoadStatus(partition, replicaNum)
 	}
-
-	collections := ob.meta.CollectionManager.GetAllCollections()
-	for _, collection := range collections {
-		if collection.LoadPercentage == 100 {
-			continue
-		}
-		ob.observeCollectionLoadStatus(collection)
-	}
-}
-
-func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Collection) {
-	log := log.With(zap.Int64("collectionID", collection.GetCollectionID()))
-
-	updated := collection.Clone()
-	percentage := ob.meta.CollectionManager.GetCurrentLoadPercentage(collection.GetCollectionID())
-	if percentage <= updated.LoadPercentage {
-		return
-	}
-
-	updated.LoadPercentage = percentage
-	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
-		updated.Status = querypb.LoadStatus_Loaded
-		ob.meta.CollectionManager.UpdateCollection(updated)
-
-		elapsed := time.Since(updated.CreatedAt)
-		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
-	} else {
-		ob.meta.CollectionManager.UpdateCollectionInMemory(updated)
-	}
-	log.Info("collection load status updated",
-		zap.Int32("loadPercentage", updated.LoadPercentage),
-		zap.Int32("collectionStatus", int32(updated.GetStatus())))
 }
 
 func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partition, replicaNum int32) {
@@ -193,10 +160,10 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	)
 
 	loadedCount := 0
-	updated := partition.Clone()
+	loadPercentage := int32(0)
 	if targetNum == 0 {
 		log.Info("No segment/channel in target need to be loaded!")
-		updated.LoadPercentage = 100
+		loadPercentage = 100
 	} else {
 		for _, channel := range channelTargets {
 			group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
@@ -216,26 +183,24 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 				zap.Int("subChannelCount", subChannelCount),
 				zap.Int("loadSegmentCount", loadedCount-subChannelCount))
 		}
-		updated.LoadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
+		loadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
 	}
 
-	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] &&
-		updated.LoadPercentage != 100 {
+	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
 		ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 		return
 	}
-	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
-		delete(ob.partitionLoadedCount, partition.GetPartitionID())
-		updated.Status = querypb.LoadStatus_Loaded
-		ob.meta.CollectionManager.PutPartition(updated)
 
-		elapsed := time.Since(updated.CreatedAt)
-		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
-	} else {
-		ob.meta.CollectionManager.UpdatePartitionInMemory(updated)
+	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
+	if loadPercentage == 100 && ob.targetObserver.Check(partition.GetCollectionID()) {
+		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
-	log.Info("partition load status updated",
-		zap.Int32("loadPercentage", updated.LoadPercentage),
-		zap.Int32("partitionStatus", int32(updated.GetStatus())))
+	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(partition.PartitionID, loadPercentage)
+	if err != nil {
+		log.Warn("failed to update load percentage")
+	}
+	log.Info("load status updated",
+		zap.Int32("partitionLoadPercentage", loadPercentage),
+		zap.Int32("collectionLoadPercentage", collectionPercentage),
+	)
 }

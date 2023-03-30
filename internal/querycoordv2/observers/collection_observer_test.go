@@ -311,8 +311,8 @@ func (suite *CollectionObserverSuite) TestObservePartition() {
 
 func (suite *CollectionObserverSuite) isCollectionLoaded(collection int64) bool {
 	exist := suite.meta.Exist(collection)
-	percentage := suite.meta.GetCurrentLoadPercentage(collection)
-	status := suite.meta.GetStatus(collection)
+	percentage := suite.meta.CalculateLoadPercentage(collection)
+	status := suite.meta.CalculateLoadStatus(collection)
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	channels := suite.targetMgr.GetDmChannelsByCollection(collection, meta.CurrentTarget)
 	segments := suite.targetMgr.GetHistoricalSegmentsByCollection(collection, meta.CurrentTarget)

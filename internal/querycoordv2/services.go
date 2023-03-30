@@ -89,8 +89,8 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	for _, collectionID := range collections {
 		log := log.With(zap.Int64("collectionID", collectionID))
 
-		percentage := s.meta.CollectionManager.GetCollectionLoadPercentage(collectionID)
-		if percentage < 0 {
+		collInfo := s.meta.CollectionManager.GetCollection(collectionID)
+		if collInfo == nil {
 			if isGetAll {
 				// The collection is released during this,
 				// ignore it
@@ -112,6 +112,13 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 				Status: merr.Status(err),
 			}, nil
 		}
+
+		percentage := s.meta.CollectionManager.CalculateLoadPercentage(collectionID)
+		if collInfo.Status == querypb.LoadStatus_Loaded {
+			// when collection is loaded, regard collection as readable, set percentage == 100
+			percentage = 100
+		}
+
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
@@ -540,7 +547,7 @@ func (s *Server) refreshCollection(ctx context.Context, collID int64) (*commonpb
 	}
 
 	// Check that collection is fully loaded.
-	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
+	if s.meta.CollectionManager.CalculateLoadPercentage(collID) != 100 {
 		errMsg := "a collection must be fully loaded before refreshing"
 		log.Warn(errMsg)
 		return &commonpb.Status{
@@ -594,7 +601,7 @@ func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []
 	}
 
 	// Check that all partitions are fully loaded.
-	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
+	if s.meta.CollectionManager.CalculateLoadPercentage(collID) != 100 {
 		errMsg := "partitions must be fully loaded before refreshing"
 		log.Warn(errMsg)
 		return &commonpb.Status{
@@ -664,7 +671,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg, zap.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 	}
-	if s.meta.CollectionManager.GetCurrentLoadPercentage(req.GetCollectionID()) < 100 {
+	if s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID()) < 100 {
 		msg := "can't balance segments of not fully loaded collection"
 		log.Warn(msg)
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
@@ -838,7 +845,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		Status: merr.Status(nil),
 	}
 
-	if s.meta.CollectionManager.GetCurrentLoadPercentage(req.GetCollectionID()) < 100 {
+	if s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID()) < 100 {
 		msg := fmt.Sprintf("collection %v is not fully loaded", req.GetCollectionID())
 		log.Warn(msg)
 		resp.Status = utils.WrapStatus(commonpb.ErrorCode_NoReplicaAvailable, msg)
