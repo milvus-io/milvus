@@ -336,14 +336,13 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		}
 	}
 	it.upsertMsg.InsertMsg.PartitionID = partitionID
-	tr.Record("get collection id & partition id from cache when insertExecute")
+	getCacheDur := tr.RecordSpan()
 
 	_, err = it.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
 	}
-	tr.Record("get used message stream when insertExecute")
-
+	getMsgStreamDur := tr.RecordSpan()
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Error("get vChannels failed when insertExecute",
@@ -359,7 +358,9 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		zap.Int64("collection_id", collID),
 		zap.Int64("partition_id", partitionID),
 		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()))
+		zap.Int64("task_id", it.ID()),
+		zap.Duration("get cache duration", getCacheDur),
+		zap.Duration("get msgStream duration", getMsgStreamDur))
 
 	// assign segmentID for insert data and repack data by segmentID
 	insertMsgPack, err := assignSegmentID(it.TraceCtx(), it.upsertMsg.InsertMsg, it.result, channelNames, it.idAllocator, it.segIDAssigner)
@@ -370,9 +371,10 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+	assignSegmentIDDur := tr.RecordSpan()
 	log.Debug("assign segmentID for insert data success when insertExecute",
-		zap.String("collectionName", it.req.CollectionName))
-	tr.Record("assign segment id")
+		zap.String("collectionName", it.req.CollectionName),
+		zap.Duration("assign segmentID duration", assignSegmentIDDur))
 	msgPack.Msgs = append(msgPack.Msgs, insertMsgPack.Msgs...)
 
 	log.Debug("Proxy Insert Execute done when upsert",
@@ -383,8 +385,6 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 
 func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgPack) (err error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", it.ID()))
-	defer tr.Elapse("delete execute done when upsert")
-
 	collID := it.upsertMsg.DeleteMsg.CollectionID
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
@@ -399,11 +399,6 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.result.IDs
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
-	log.Debug("send delete request to virtual channels when deleteExecute",
-		zap.Int64("collection_id", collID),
-		zap.Strings("virtual_channels", channelNames))
-
-	tr.Record("get vchannels")
 	// repack delete msg by dmChannel
 	result := make(map[uint32]msgstream.TsMsg)
 	collectionName := it.upsertMsg.DeleteMsg.CollectionName
@@ -463,7 +458,9 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 	}
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsgPack.Msgs...)
 
-	log.Debug("Proxy Upsert deleteExecute done")
+	log.Debug("Proxy Upsert deleteExecute done", zap.Int64("collection_id", collID),
+		zap.Strings("virtual_channels", channelNames), zap.Int64("taskID", it.ID()),
+		zap.Duration("prepare duration", tr.ElapseSpan()))
 	return nil
 }
 
@@ -493,16 +490,18 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	tr.Record("pack messages in upsert")
+	tr.RecordSpan()
 	err = stream.Produce(msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	sendMsgDur := tr.Record("send upsert request to dml channels")
+	sendMsgDur := tr.RecordSpan()
 	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.UpsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
-	log.Debug("Proxy Upsert Execute done")
+	totalDur := tr.ElapseSpan()
+	log.Debug("Proxy Upsert Execute done", zap.Int64("taskID", it.ID()),
+		zap.Duration("total duration", totalDur))
 	return nil
 }
 

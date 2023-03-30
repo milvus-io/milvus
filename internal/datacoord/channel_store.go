@@ -168,7 +168,7 @@ func (c *ChannelStore) Reload() error {
 		log.Info("channel store reload channel",
 			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
 	}
-	record.Record("ChannelStore reload")
+	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 

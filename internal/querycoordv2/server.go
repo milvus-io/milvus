@@ -320,8 +320,7 @@ func (s *Server) initMeta() error {
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
-
-	record.Record("Server initMeta")
+	log.Info("QueryCoord server initMeta done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 

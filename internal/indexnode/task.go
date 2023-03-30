@@ -262,7 +262,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	buildIndexLatency := it.tr.Record("build index done")
+	buildIndexLatency := it.tr.RecordSpan()
 	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
 
 	indexBlobs, err := it.index.Serialize()
@@ -270,7 +270,9 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		log.Ctx(ctx).Error("IndexNode index Serialize failed", zap.Error(err))
 		return err
 	}
-	it.tr.Record("index serialize done")
+
+	log.Ctx(ctx).Info("index serialize done", zap.Int64("buildID", it.BuildID),
+		zap.Duration("duration", it.tr.RecordSpan()))
 
 	// use serialized size before encoding
 	it.serializedSize = 0
@@ -301,7 +303,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		log.Warn("failed to serialize index", zap.Error(err))
 		return err
 	}
-	encodeIndexFileDur := it.tr.Record("index codec serialize done")
+	encodeIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 	it.indexBlobs = serializedIndexBlobs
 	log.Ctx(ctx).Info("Successfully build index", zap.Int64("buildID", it.BuildID),
@@ -379,7 +381,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		}
 	}
 
-	buildIndexLatency := it.tr.Record("build index done")
+	buildIndexLatency := it.tr.RecordSpan()
 	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
 
 	fileInfos, err := it.index.GetIndexFileInfo()
@@ -387,7 +389,9 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		log.Ctx(ctx).Error("IndexNode index Serialize failed", zap.Error(err))
 		return err
 	}
-	it.tr.Record("index serialize done")
+
+	log.Ctx(ctx).Info("index serialize done", zap.Int64("buildID", it.BuildID),
+		zap.Duration("duration", it.tr.RecordSpan()))
 
 	// use serialized size before encoding
 	it.serializedSize = 0
@@ -404,7 +408,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		log.Ctx(it.ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 	}
 
-	encodeIndexFileDur := it.tr.Record("index codec serialize done")
+	encodeIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 	return nil
 }
@@ -445,7 +449,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	it.statistic.EndTime = time.Now().UnixMicro()
 	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic)
 	log.Ctx(ctx).Info("save index files done", zap.Strings("IndexFiles", savePaths))
-	saveIndexFileDur := it.tr.Record("index file save done")
+	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
 	it.tr.Elapse("index building all done")
 	log.Ctx(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
@@ -505,7 +509,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 	it.statistic.EndTime = time.Now().UnixMicro()
 	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic)
 	log.Ctx(ctx).Info("save index files done", zap.Strings("IndexFiles", savePaths))
-	saveIndexFileDur := it.tr.Record("index file save done")
+	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
 	it.tr.Elapse("index building all done")
 	log.Ctx(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
@@ -529,14 +533,15 @@ func (it *indexBuildTask) decodeBlobs(ctx context.Context, blobs []*storage.Blob
 	it.partitionID = partitionID
 	it.segmentID = segmentID
 
-	log.Ctx(ctx).Info("indexnode deserialize data success",
+	deserializeDur := it.tr.RecordSpan()
+
+	log.Ctx(ctx).Info("IndexNode deserialize data success",
 		zap.Int64("index id", it.req.IndexID),
 		zap.String("index name", it.req.IndexName),
 		zap.Int64("collectionID", it.collectionID),
 		zap.Int64("partitionID", it.partitionID),
-		zap.Int64("segmentID", it.segmentID))
-
-	it.tr.Record("deserialize vector data done")
+		zap.Int64("segmentID", it.segmentID),
+		zap.Duration("deserialize duration", deserializeDur))
 
 	// we can ensure that there blobs are in one Field
 	var data storage.FieldData
