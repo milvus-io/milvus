@@ -328,6 +328,11 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	return s.dataCoord.GetFlushState(ctx, req)
 }
 
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return s.dataCoord.GetFlushAllState(ctx, req)
+}
+
 // DropVirtualChannel drop virtual channel in datacoord
 func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	return s.dataCoord.DropVirtualChannel(ctx, req)

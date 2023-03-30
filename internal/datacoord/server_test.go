@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -3449,6 +3450,87 @@ func TestGetFlushState(t *testing.T) {
 			Flushed: true,
 		}, resp)
 	})
+}
+
+func TestGetFlushAllState(t *testing.T) {
+	tests := []struct {
+		testName                 string
+		ChannelCPs               []Timestamp
+		FlushAllTs               Timestamp
+		ServerIsHealthy          bool
+		ShowCollectionFailed     bool
+		DescribeCollectionFailed bool
+		ExpectedSuccess          bool
+		ExpectedFlushed          bool
+	}{
+		{"test FlushAll flushed", []Timestamp{100, 200}, 99,
+			true, false, false, true, true},
+		{"test FlushAll not flushed", []Timestamp{100, 200}, 150,
+			true, false, false, true, false},
+		{"test Sever is not healthy", nil, 0,
+			false, false, false, false, false},
+		{"test ShowCollections failed", nil, 0,
+			true, true, false, false, false},
+		{"test DescribeCollection failed", nil, 0,
+			true, false, true, false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			collection := UniqueID(0)
+			vchannels := []string{"mock-vchannel-0", "mock-vchannel-1"}
+
+			svr := &Server{}
+			if test.ServerIsHealthy {
+				svr.stateCode.Store(commonpb.StateCode_Healthy)
+			}
+			var err error
+			svr.meta = &meta{}
+			svr.rootCoordClient = mocks.NewRootCoord(t)
+			if test.ShowCollectionFailed {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+					Return(&milvuspb.ShowCollectionsResponse{
+						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+					}, nil).Maybe()
+			} else {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
+					Return(&milvuspb.ShowCollectionsResponse{
+						Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						CollectionIds: []int64{collection},
+					}, nil).Maybe()
+			}
+
+			if test.DescribeCollectionFailed {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+					Return(&milvuspb.DescribeCollectionResponse{
+						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+					}, nil).Maybe()
+			} else {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+					Return(&milvuspb.DescribeCollectionResponse{
+						Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+						VirtualChannelNames: vchannels,
+					}, nil).Maybe()
+			}
+
+			svr.meta.channelCPs = make(map[string]*msgpb.MsgPosition)
+			for i, ts := range test.ChannelCPs {
+				channel := vchannels[i]
+				svr.meta.channelCPs[channel] = &msgpb.MsgPosition{
+					ChannelName: channel,
+					Timestamp:   ts,
+				}
+			}
+
+			resp, err := svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs})
+			assert.Nil(t, err)
+			if test.ExpectedSuccess {
+				assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			} else {
+				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+			}
+			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
+		})
+	}
 }
 
 func TestDataCoordServer_SetSegmentState(t *testing.T) {

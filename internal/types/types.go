@@ -291,6 +291,8 @@ type DataCoord interface {
 	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
 	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+	// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+	GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error)
 	// SetSegmentState updates a segment's state explicitly.
 	SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error)
 
@@ -1169,6 +1171,16 @@ type ProxyComponent interface {
 	// Return generic error when specified vectors not found or float/binary vectors mismatch, otherwise return nil
 	CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error)
 
+	// FlushAll notifies Proxy to flush all collection's DML messages, including those in message stream.
+	//
+	// ctx is the context to control request deadline and cancellation
+	//
+	// The `Status` in response struct `FlushAllResponse` indicates if this operation is processed successfully or fail cause;
+	// The `FlushAllTs` field in the `FlushAllResponse` response struct is used to check the flushAll state at the
+	// `GetFlushAllState` interface. `GetFlushAllState` would check if all DML messages before `FlushAllTs` have been flushed.
+	// error is always nil
+	FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error)
+
 	// Not yet implemented
 	GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error)
 
@@ -1250,6 +1262,8 @@ type ProxyComponent interface {
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+	// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+	GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error)
 
 	// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 	//

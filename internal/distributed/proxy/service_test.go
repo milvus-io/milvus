@@ -415,6 +415,10 @@ func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlus
 	return nil, nil
 }
 
+func (m *MockDataCoord) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return nil, nil
+}
+
 func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
@@ -626,6 +630,10 @@ func (m *MockProxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDist
 	return nil, nil
 }
 
+func (m *MockProxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, nil
 }
@@ -721,6 +729,10 @@ func (m *MockProxy) GetCompactionStateWithPlans(ctx context.Context, req *milvus
 }
 
 func (m *MockProxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	return nil, nil
 }
 
@@ -1287,6 +1299,16 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("DescribeResourceGroup", func(t *testing.T) {
 		_, err := server.DescribeResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("FlushAll", func(t *testing.T) {
+		_, err := server.FlushAll(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("GetFlushAllState", func(t *testing.T) {
+		_, err := server.GetFlushAllState(ctx, nil)
 		assert.Nil(t, err)
 	})
 

@@ -585,6 +585,20 @@ func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	return ret.(*milvuspb.GetFlushStateResponse), err
 }
 
+// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+func (c *Client) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GetFlushAllState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.GetFlushAllStateResponse), err
+}
+
 // DropVirtualChannel drops virtual channel in datacoord.
 func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	req = typeutil.Clone(req)
