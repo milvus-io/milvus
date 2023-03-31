@@ -18,10 +18,12 @@ package datanode
 
 import (
 	"container/heap"
+	"context"
 	"fmt"
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,6 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -158,62 +163,163 @@ func TestPriorityQueueString(t *testing.T) {
 
 func Test_CompactSegBuff(t *testing.T) {
 	channelSegments := make(map[UniqueID]*Segment)
-	delBufferManager := &DelBufferManager{
+	delBufferManager := &DeltaBufferManager{
 		channel: &ChannelMeta{
 			segments: channelSegments,
 		},
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+		delBufHeap: &PriorityQueue{},
 	}
 	//1. set compactTo and compactFrom
-	compactedFromSegIDs := make([]UniqueID, 2)
-	var segID1 UniqueID = 1111
-	var segID2 UniqueID = 2222
-	compactedFromSegIDs[0] = segID1
-	compactedFromSegIDs[1] = segID2
-	channelSegments[segID1] = &Segment{}
-	channelSegments[segID2] = &Segment{}
-	var compactedToSegID UniqueID = 3333
-	channelSegments[compactedToSegID] = &Segment{}
+	targetSeg := &Segment{segmentID: 3333}
+	targetSeg.setType(datapb.SegmentType_Flushed)
+
+	seg1 := &Segment{
+		segmentID:   1111,
+		compactedTo: targetSeg.segmentID,
+	}
+	seg1.setType(datapb.SegmentType_Compacted)
+
+	seg2 := &Segment{
+		segmentID:   2222,
+		compactedTo: targetSeg.segmentID,
+	}
+	seg2.setType(datapb.SegmentType_Compacted)
+
+	channelSegments[seg1.segmentID] = seg1
+	channelSegments[seg2.segmentID] = seg2
+	channelSegments[targetSeg.segmentID] = targetSeg
 
 	//2. set up deleteDataBuf for seg1 and seg2
-	delDataBuf1 := newDelDataBuf()
+	delDataBuf1 := newDelDataBuf(seg1.segmentID)
 	delDataBuf1.EntriesNum++
 	delDataBuf1.updateStartAndEndPosition(nil, &msgpb.MsgPosition{Timestamp: 50})
-	delBufferManager.Store(segID1, delDataBuf1)
+	delBufferManager.updateMeta(seg1.segmentID, delDataBuf1)
 	heap.Push(delBufferManager.delBufHeap, delDataBuf1.item)
-	delDataBuf2 := newDelDataBuf()
+
+	delDataBuf2 := newDelDataBuf(seg2.segmentID)
 	delDataBuf2.EntriesNum++
 	delDataBuf2.updateStartAndEndPosition(nil, &msgpb.MsgPosition{Timestamp: 50})
-	delBufferManager.Store(segID2, delDataBuf2)
+	delBufferManager.updateMeta(seg2.segmentID, delDataBuf2)
 	heap.Push(delBufferManager.delBufHeap, delDataBuf2.item)
 
 	//3. test compact
-	delBufferManager.CompactSegBuf(compactedToSegID, compactedFromSegIDs)
+	delBufferManager.UpdateCompactedSegments()
 
 	//4. expect results in two aspects:
 	//4.1 compactedFrom segments are removed from delBufferManager
 	//4.2 compactedTo seg is set properly with correct entriesNum
-	_, seg1Exist := delBufferManager.Load(segID1)
-	_, seg2Exist := delBufferManager.Load(segID2)
+	_, seg1Exist := delBufferManager.Load(seg1.segmentID)
+	_, seg2Exist := delBufferManager.Load(seg2.segmentID)
 	assert.False(t, seg1Exist)
 	assert.False(t, seg2Exist)
-	assert.Equal(t, int64(2), delBufferManager.GetEntriesNum(compactedToSegID))
+	assert.Equal(t, int64(2), delBufferManager.GetEntriesNum(targetSeg.segmentID))
 
 	// test item of compactedToSegID is correct
-	compactTo, ok := delBufferManager.Load(compactedToSegID)
+	targetSegBuf, ok := delBufferManager.Load(targetSeg.segmentID)
 	assert.True(t, ok)
-	assert.Equal(t, compactedToSegID, compactTo.item.segmentID)
+	assert.NotNil(t, targetSegBuf.item)
+	assert.Equal(t, targetSeg.segmentID, targetSegBuf.item.segmentID)
 
 	//5. test roll and evict (https://github.com/milvus-io/milvus/issues/20501)
-	delBufferManager.channel.rollDeleteBuffer(compactedToSegID)
-	_, segCompactedToExist := delBufferManager.Load(compactedToSegID)
+	delBufferManager.channel.rollDeleteBuffer(targetSeg.segmentID)
+	_, segCompactedToExist := delBufferManager.Load(targetSeg.segmentID)
 	assert.False(t, segCompactedToExist)
-	delBufferManager.channel.evictHistoryDeleteBuffer(compactedToSegID, &msgpb.MsgPosition{
+	delBufferManager.channel.evictHistoryDeleteBuffer(targetSeg.segmentID, &msgpb.MsgPosition{
 		Timestamp: 100,
 	})
 	cp := delBufferManager.channel.getChannelCheckpoint(&msgpb.MsgPosition{
 		Timestamp: 200,
 	})
 	assert.Equal(t, Timestamp(200), cp.Timestamp) // evict all buffer, use ttPos as cp
+}
+
+func TestUpdateCompactedSegments(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	fm := NewRendezvousFlushManager(allocator.NewMockAllocator(t), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+
+	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
+	testPath := "/test/datanode/root/meta"
+	assert.NoError(t, clearEtcd(testPath))
+	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
+
+	channel := ChannelMeta{
+		segments: make(map[UniqueID]*Segment),
+	}
+
+	c := &nodeConfig{
+		channel:      &channel,
+		vChannelName: chanName,
+	}
+	delBufManager := &DeltaBufferManager{
+		channel:    &channel,
+		delBufHeap: &PriorityQueue{},
+	}
+	delNode, err := newDeleteNode(ctx, fm, delBufManager, make(chan string, 1), c)
+	require.NoError(t, err)
+
+	tests := []struct {
+		description    string
+		compactToExist bool
+
+		compactedToIDs   []UniqueID
+		compactedFromIDs []UniqueID
+
+		expectedSegsRemain []UniqueID
+	}{
+		{"zero segments", false,
+			[]UniqueID{}, []UniqueID{}, []UniqueID{}},
+		{"segment no compaction", false,
+			[]UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
+		{"segment compacted", true,
+			[]UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
+		{"segment compacted 100>201", true,
+			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
+		{"segment compacted 100+101>201", true,
+			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
+		{"segment compacted 100>201, 101>202", true,
+			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
+		// false
+		{"segment compacted 100>201", false,
+			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
+		{"segment compacted 100+101>201", false,
+			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
+		{"segment compacted 100>201, 101>202", false,
+			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			if test.compactToExist {
+				for _, segID := range test.compactedToIDs {
+					seg := Segment{
+						segmentID: segID,
+						numRows:   10,
+					}
+					seg.setType(datapb.SegmentType_Flushed)
+					channel.segments[segID] = &seg
+				}
+			} else { // clear all segments in channel
+				channel.segments = make(map[UniqueID]*Segment)
+			}
+
+			for i, segID := range test.compactedFromIDs {
+				seg := Segment{
+					segmentID:   segID,
+					compactedTo: test.compactedToIDs[i],
+				}
+				seg.setType(datapb.SegmentType_Compacted)
+				channel.segments[segID] = &seg
+			}
+
+			delNode.delBufferManager.UpdateCompactedSegments()
+
+			for _, remain := range test.expectedSegsRemain {
+				delNode.channel.hasSegment(remain, true)
+			}
+		})
+	}
 }

@@ -111,10 +111,9 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		allocator:    alloc,
 		vChannelName: "string",
 	}
-	delBufManager := &DelBufferManager{
-		channel:       channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	delBufManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
 	}
 
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
@@ -219,10 +218,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		allocator:    alloc,
 		vChannelName: "string",
 	}
-	delBufManager := &DelBufferManager{
-		channel:       channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	delBufManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
 	}
 
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
@@ -398,10 +396,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		allocator:    alloc,
 		vChannelName: "string",
 	}
-	delBufManager := &DelBufferManager{
-		channel:       channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	delBufManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
 	}
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
 	require.NoError(t, err)
@@ -644,10 +641,9 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		allocator:    alloc,
 		vChannelName: "string",
 	}
-	delBufManager := &DelBufferManager{
-		channel:       channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	delBufManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
 	}
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
 	require.NoError(t, err)
@@ -729,7 +725,7 @@ type InsertBufferNodeSuite struct {
 	suite.Suite
 
 	channel       *ChannelMeta
-	delBufManager *DelBufferManager
+	delBufManager *DeltaBufferManager
 
 	collID UniqueID
 	partID UniqueID
@@ -748,10 +744,9 @@ func (s *InsertBufferNodeSuite) SetupSuite() {
 	s.partID = 10
 	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
 
-	s.delBufManager = &DelBufferManager{
-		channel:       s.channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	s.delBufManager = &DeltaBufferManager{
+		channel:    s.channel,
+		delBufHeap: &PriorityQueue{},
 	}
 	s.cm = storage.NewLocalChunkManager(storage.RootPath(insertBufferNodeTestDir))
 
@@ -1021,10 +1016,9 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			allocator:    alloc,
 			vChannelName: "string",
 		}
-		delBufManager := &DelBufferManager{
-			channel:       channel,
-			delMemorySize: 0,
-			delBufHeap:    &PriorityQueue{},
+		delBufManager := &DeltaBufferManager{
+			channel:    channel,
+			delBufHeap: &PriorityQueue{},
 		}
 		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
 		require.NoError(t, err)

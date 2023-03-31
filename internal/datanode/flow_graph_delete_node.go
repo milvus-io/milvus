@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -39,9 +38,8 @@ type deleteNode struct {
 	BaseNode
 	ctx              context.Context
 	channelName      string
-	delBufferManager *DelBufferManager // manager of delete msg
+	delBufferManager *DeltaBufferManager // manager of delete msg
 	channel          Channel
-	idAllocator      allocator.Allocator
 	flushManager     flushManager
 
 	clearSignal chan<- string
@@ -57,12 +55,12 @@ func (dn *deleteNode) Close() {
 
 func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
 	for _, segID := range segIDs {
-		if _, ok := dn.delBufferManager.Load(segID); ok {
+		if buffer, ok := dn.delBufferManager.Load(segID); ok {
 			log.Debug("delta buffer status",
+				zap.Int64("segmentID", segID),
 				zap.Uint64("timestamp", ts),
-				zap.Int64("segment ID", segID),
-				zap.Int64("entries", dn.delBufferManager.GetEntriesNum(segID)),
-				zap.Int64("memory size", dn.delBufferManager.GetSegDelBufMemSize(segID)),
+				zap.Int64("entriesNum", buffer.GetEntriesNum()),
+				zap.Int64("memorySize", buffer.GetMemorySize()),
 				zap.String("vChannel", dn.channelName))
 		}
 	}
@@ -92,7 +90,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	// update compacted segment before operation
-	dn.updateCompactedSegments()
+	dn.delBufferManager.UpdateCompactedSegments()
 
 	// process delete messages
 	segIDs := typeutil.NewUniqueSet()
@@ -154,29 +152,6 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	return in
 }
 
-// update delBuf for compacted segments
-func (dn *deleteNode) updateCompactedSegments() {
-	compactedTo2From := dn.channel.listCompactedSegmentIDs()
-
-	for compactedTo, compactedFrom := range compactedTo2From {
-		// if the compactedTo segment has 0 numRows, remove all segments related
-		if !dn.channel.hasSegment(compactedTo, true) {
-			for _, segID := range compactedFrom {
-				dn.delBufferManager.Delete(segID)
-			}
-			dn.channel.removeSegments(compactedFrom...)
-			continue
-		}
-
-		dn.delBufferManager.CompactSegBuf(compactedTo, compactedFrom)
-		log.Info("update delBuf for compacted segments",
-			zap.Int64("compactedTo segmentID", compactedTo),
-			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
-		)
-		dn.channel.removeSegments(compactedFrom...)
-	}
-}
-
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange, startPos, endPos *msgpb.MsgPosition) ([]UniqueID, error) {
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
@@ -218,7 +193,7 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss [
 	return segID2Pks, segID2Tss
 }
 
-func newDeleteNode(ctx context.Context, fm flushManager, delBufManager *DelBufferManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, fm flushManager, manager *DeltaBufferManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
@@ -226,9 +201,8 @@ func newDeleteNode(ctx context.Context, fm flushManager, delBufManager *DelBuffe
 	return &deleteNode{
 		ctx:              ctx,
 		BaseNode:         baseNode,
-		delBufferManager: delBufManager,
+		delBufferManager: manager,
 		channel:          config.channel,
-		idAllocator:      config.allocator,
 		channelName:      config.vChannelName,
 		flushManager:     fm,
 		clearSignal:      sig,
