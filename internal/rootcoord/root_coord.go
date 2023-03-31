@@ -27,49 +27,48 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/samber/lo"
-
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dao"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
 	"github.com/milvus-io/milvus/internal/metastore/db/rootcoord"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/metrics"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/tso"
+	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/logutil"
-	"github.com/milvus-io/milvus/internal/util/merr"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
+	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/errorutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -117,7 +116,7 @@ type Core struct {
 	chanTimeTick *timetickSync
 
 	idAllocator  allocator.Interface
-	tsoAllocator tso.Allocator
+	tsoAllocator tso2.Allocator
 
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
@@ -230,7 +229,7 @@ func (c *Core) startTimeTickLoop() {
 
 func (c *Core) tsLoop() {
 	defer c.wg.Done()
-	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
+	tsoTicker := time.NewTicker(tso2.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -363,7 +362,7 @@ func (c *Core) initMetaTable() error {
 }
 
 func (c *Core) initIDAllocator() error {
-	tsoKV := tsoutil.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalIDAllocatorSubPath)
+	tsoKV := tsoutil2.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalIDAllocatorSubPath)
 	idAllocator := allocator.NewGlobalIDAllocator(globalIDAllocatorKey, tsoKV)
 	if err := idAllocator.Initialize(); err != nil {
 		return err
@@ -373,8 +372,8 @@ func (c *Core) initIDAllocator() error {
 }
 
 func (c *Core) initTSOAllocator() error {
-	tsoKV := tsoutil.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalTSOAllocatorSubPath)
-	tsoAllocator := tso.NewGlobalTSOAllocator(globalTSOAllocatorKey, tsoKV)
+	tsoKV := tsoutil2.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), globalTSOAllocatorSubPath)
+	tsoAllocator := tso2.NewGlobalTSOAllocator(globalTSOAllocatorKey, tsoKV)
 	if err := tsoAllocator.Initialize(); err != nil {
 		return err
 	}

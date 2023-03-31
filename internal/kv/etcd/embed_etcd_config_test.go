@@ -20,12 +20,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestEtcdConfigLoad(te *testing.T) {

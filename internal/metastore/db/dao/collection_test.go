@@ -10,13 +10,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/pkg/common"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"

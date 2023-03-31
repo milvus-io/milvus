@@ -19,8 +19,9 @@ package meta
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type LeaderView struct {

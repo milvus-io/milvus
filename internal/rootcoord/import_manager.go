@@ -26,18 +26,18 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (

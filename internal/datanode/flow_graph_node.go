@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 type (

@@ -4,10 +4,9 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )

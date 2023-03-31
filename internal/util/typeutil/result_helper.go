@@ -2,6 +2,7 @@ package typeutil
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func preHandleEmptyResult(result RetrieveResults) {
@@ -19,7 +20,7 @@ func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIds []int64, s
 
 	preHandleEmptyResult(result)
 
-	helper, err := CreateSchemaHelper(schema)
+	helper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return err
 	}
@@ -29,7 +30,7 @@ func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIds []int64, s
 			return err
 		}
 
-		emptyFieldData, err := GenEmptyFieldData(field)
+		emptyFieldData, err := typeutil.GenEmptyFieldData(field)
 		if err != nil {
 			return err
 		}

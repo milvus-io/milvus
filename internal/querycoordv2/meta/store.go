@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"

@@ -23,6 +23,7 @@ package querynode
 #include "segcore/segment_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"math"
@@ -30,17 +31,14 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Collection is a wrapper of the underlying C-structure C.CCollection

@@ -19,13 +19,12 @@ package rmq
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // rmqClient contains a rocksmq client

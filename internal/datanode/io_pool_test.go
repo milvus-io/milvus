@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/util/conc"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_getOrCreateIOPool(t *testing.T) {

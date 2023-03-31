@@ -25,7 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 // WaitForComponentStates wait for component's state to be one of the specific states

@@ -19,13 +19,14 @@ package pkoracle
 import (
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
+	bloom "github.com/bits-and-blooms/bloom/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 var _ Candidate = (*BloomFilterSet)(nil)

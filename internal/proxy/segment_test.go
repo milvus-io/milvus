@@ -24,9 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockDataCoord struct {
@@ -123,6 +124,7 @@ func TestSegmentAllocator1(t *testing.T) {
 }
 
 var curLastTick2 = Timestamp(200)
+
 var curLastTIck2Lock sync.Mutex
 
 func getLastTick2() Timestamp {

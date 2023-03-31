@@ -20,8 +20,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/suite"
+
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type TSafeTestSuite struct {

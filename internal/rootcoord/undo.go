@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 )
 

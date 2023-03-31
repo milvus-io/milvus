@@ -20,10 +20,10 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/tecbot/gorocksdb"
 
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/tecbot/gorocksdb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ kv.BaseKV = (*RocksdbKV)(nil)

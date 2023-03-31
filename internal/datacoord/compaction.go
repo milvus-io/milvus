@@ -23,12 +23,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple

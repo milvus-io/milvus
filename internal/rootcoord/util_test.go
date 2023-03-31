@@ -19,15 +19,13 @@ package rootcoord
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_EqualKeyPairArray(t *testing.T) {

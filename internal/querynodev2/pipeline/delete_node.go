@@ -19,12 +19,13 @@ package pipeline
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type deleteNode struct {

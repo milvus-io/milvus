@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
 // readTaskQueueType is the queue type in taskScheduler

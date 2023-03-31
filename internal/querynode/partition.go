@@ -29,7 +29,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // Partition is a logical division of Collection and can be considered as an attribute of Segment.

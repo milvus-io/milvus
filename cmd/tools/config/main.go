@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const (

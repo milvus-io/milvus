@@ -26,16 +26,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/storage/aliyun"
-	"github.com/milvus-io/milvus/internal/storage/gcp"
-	"github.com/milvus-io/milvus/internal/util/merr"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/minio/minio-go/v7"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
+
+	"github.com/milvus-io/milvus/internal/storage/aliyun"
+	"github.com/milvus-io/milvus/internal/storage/gcp"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 var (

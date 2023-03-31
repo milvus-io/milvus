@@ -8,15 +8,15 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
-	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (

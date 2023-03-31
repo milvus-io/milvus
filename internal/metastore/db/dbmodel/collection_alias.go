@@ -3,7 +3,7 @@ package dbmodel
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CollectionAlias struct {

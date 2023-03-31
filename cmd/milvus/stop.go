@@ -8,8 +8,8 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/milvus-io/milvus/internal/util/hardware"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (

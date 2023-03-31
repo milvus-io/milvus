@@ -22,15 +22,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"stathat.com/c/consistent"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"stathat.com/c/consistent"
 )
 
 func getMetaKv(t *testing.T) kv.MetaKv {

@@ -3,9 +3,10 @@ package dependency
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	rmqstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type DefaultFactory struct {
@@ -18,7 +19,7 @@ type DefaultFactory struct {
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:       standAlone,
-		msgStreamFactory: msgstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
+		msgStreamFactory: rmqstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
 	}
@@ -60,7 +61,7 @@ func (f *DefaultFactory) initMQLocalService(params *paramtable.ComponentParam) m
 		if err != nil {
 			panic(err)
 		}
-		return msgstream.NewRmsFactory(path)
+		return rmqstream.NewRmsFactory(path)
 	}
 	return nil
 }

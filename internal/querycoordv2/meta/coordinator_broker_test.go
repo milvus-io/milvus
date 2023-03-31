@@ -21,16 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/stretchr/testify/mock"
-
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 )
 

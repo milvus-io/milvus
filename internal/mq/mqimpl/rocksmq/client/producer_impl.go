@@ -12,9 +12,10 @@
 package client
 
 import (
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // assertion make sure implementation

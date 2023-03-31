@@ -18,12 +18,13 @@ import (
 	"sync"
 	"time"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
+
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Const value that used to convert unit

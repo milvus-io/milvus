@@ -24,19 +24,19 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/util/importutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	importutil2 "github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestImportManager_NewImportManager(t *testing.T) {
@@ -672,7 +672,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 		Files:          []string{"f1.npy", "f2.npy"},
 		Options: []*commonpb.KeyValuePair{
 			{
-				Key:   importutil.Bucket,
+				Key:   importutil2.Bucket,
 				Value: "mybucket",
 			},
 		},
@@ -805,7 +805,7 @@ func TestImportManager_TaskState(t *testing.T) {
 				Value: "value1",
 			},
 			{
-				Key:   importutil.FailedReason,
+				Key:   importutil2.FailedReason,
 				Value: "some_reason",
 			},
 		},
@@ -848,7 +848,7 @@ func TestImportManager_TaskState(t *testing.T) {
 				Value: "value1",
 			},
 			{
-				Key:   importutil.FailedReason,
+				Key:   importutil2.FailedReason,
 				Value: "some_reason",
 			},
 		},
@@ -989,11 +989,11 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 			compareReq = rowReq2
 		}
 		for _, kv := range task.GetInfos() {
-			if kv.GetKey() == importutil.CollectionName {
+			if kv.GetKey() == importutil2.CollectionName {
 				assert.Equal(t, compareReq.GetCollectionName(), kv.GetValue())
-			} else if kv.GetKey() == importutil.PartitionName {
+			} else if kv.GetKey() == importutil2.PartitionName {
 				assert.Equal(t, compareReq.GetPartitionName(), kv.GetValue())
-			} else if kv.GetKey() == importutil.Files {
+			} else if kv.GetKey() == importutil2.Files {
 				assert.Equal(t, strings.Join(compareReq.GetFiles(), ","), kv.GetValue())
 			}
 		}

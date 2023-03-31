@@ -28,12 +28,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/merr"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.

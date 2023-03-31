@@ -20,15 +20,16 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // TODO(sunby): have too much similar codes with SegmentChecker

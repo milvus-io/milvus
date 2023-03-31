@@ -22,18 +22,17 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
 type proxyCreator func(ctx context.Context, addr string) (types.Proxy, error)

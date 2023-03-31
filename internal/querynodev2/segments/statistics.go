@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // SegmentStats struct for segment statistics.

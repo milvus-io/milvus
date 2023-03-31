@@ -4,12 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 

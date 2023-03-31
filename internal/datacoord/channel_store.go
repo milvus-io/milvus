@@ -23,16 +23,14 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 const (

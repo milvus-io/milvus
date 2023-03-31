@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"go.uber.org/zap"
+
+	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // Merger merges tasks with the same mergeID.

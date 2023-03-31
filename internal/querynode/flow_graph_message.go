@@ -17,8 +17,8 @@
 package querynode
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 // Msg is an interface which has a function named TimeTick

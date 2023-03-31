@@ -23,7 +23,7 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // pkStatistics contains pk field statistic information

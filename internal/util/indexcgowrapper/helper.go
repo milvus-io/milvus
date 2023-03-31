@@ -8,6 +8,7 @@ package indexcgowrapper
 #include "storage/storage_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
@@ -15,7 +16,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {

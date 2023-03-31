@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
@@ -15,6 +16,35 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
+
+func fieldDataEmpty(data *schemapb.FieldData) bool {
+	if data == nil {
+		return true
+	}
+	switch realData := data.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		switch realScalars := realData.Scalars.Data.(type) {
+		case *schemapb.ScalarField_BoolData:
+			return len(realScalars.BoolData.GetData()) <= 0
+		case *schemapb.ScalarField_LongData:
+			return len(realScalars.LongData.GetData()) <= 0
+		case *schemapb.ScalarField_FloatData:
+			return len(realScalars.FloatData.GetData()) <= 0
+		case *schemapb.ScalarField_DoubleData:
+			return len(realScalars.DoubleData.GetData()) <= 0
+		case *schemapb.ScalarField_StringData:
+			return len(realScalars.StringData.GetData()) <= 0
+		}
+	case *schemapb.FieldData_Vectors:
+		switch realVectors := realData.Vectors.Data.(type) {
+		case *schemapb.VectorField_BinaryVector:
+			return len(realVectors.BinaryVector) <= 0
+		case *schemapb.VectorField_FloatVector:
+			return len(realVectors.FloatVector.Data) <= 0
+		}
+	}
+	return true
+}
 
 func TestGenEmptyFieldData(t *testing.T) {
 	allTypes := []schemapb.DataType{
@@ -39,7 +69,7 @@ func TestGenEmptyFieldData(t *testing.T) {
 	field := &schemapb.FieldSchema{Name: "field_name", FieldID: 100}
 	for _, dataType := range allTypes {
 		field.DataType = dataType
-		fieldData, err := GenEmptyFieldData(field)
+		fieldData, err := typeutil.GenEmptyFieldData(field)
 		assert.NoError(t, err)
 		assert.Equal(t, dataType, fieldData.GetType())
 		assert.Equal(t, field.GetName(), fieldData.GetFieldName())
@@ -49,21 +79,21 @@ func TestGenEmptyFieldData(t *testing.T) {
 
 	for _, dataType := range allUnsupportedTypes {
 		field.DataType = dataType
-		_, err := GenEmptyFieldData(field)
+		_, err := typeutil.GenEmptyFieldData(field)
 		assert.Error(t, err)
 	}
 
 	// dim not found
 	for _, dataType := range vectorTypes {
 		field.DataType = dataType
-		_, err := GenEmptyFieldData(field)
+		_, err := typeutil.GenEmptyFieldData(field)
 		assert.Error(t, err)
 	}
 
 	field.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}
 	for _, dataType := range vectorTypes {
 		field.DataType = dataType
-		fieldData, err := GenEmptyFieldData(field)
+		fieldData, err := typeutil.GenEmptyFieldData(field)
 		assert.NoError(t, err)
 		assert.Equal(t, dataType, fieldData.GetType())
 		assert.Equal(t, field.GetName(), fieldData.GetFieldName())

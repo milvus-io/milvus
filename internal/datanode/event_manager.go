@@ -21,11 +21,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const retryWatchInterval = 20 * time.Second

@@ -20,12 +20,13 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/stretchr/testify/suite"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 type ReplicaManagerSuite struct {

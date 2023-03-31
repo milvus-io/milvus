@@ -21,11 +21,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const minSyncSize = 0.5 * 1024 * 1024

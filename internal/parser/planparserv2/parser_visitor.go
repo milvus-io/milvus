@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ParserVisitor struct {

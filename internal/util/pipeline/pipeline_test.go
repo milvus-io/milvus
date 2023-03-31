@@ -19,7 +19,7 @@ package pipeline
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/stretchr/testify/suite"
 )
 

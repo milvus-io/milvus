@@ -26,24 +26,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/tracer"
-
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/management"
-	"github.com/milvus-io/milvus/internal/management/healthz"
-	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/http/healthz"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/logutil"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	_ "github.com/milvus-io/milvus/internal/util/symbolizer" // support symbolizer and crash dump
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	_ "github.com/milvus-io/milvus/pkg/util/symbolizer" // support symbolizer and crash dump
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // all milvus related metrics is in a separate registry
@@ -192,6 +192,18 @@ func (mr *MilvusRoles) setupLogger() {
 	logutil.SetupLogger(&logConfig)
 }
 
+// Register serves prometheus http service
+func setupPrometheusHTTPServer(r *prometheus.Registry) {
+	http.Register(&http.Handler{
+		Path:    "/metrics",
+		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
+	})
+	http.Register(&http.Handler{
+		Path:    "/metrics_default",
+		Handler: promhttp.Handler(),
+	})
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run(local bool, alias string) {
 	log.Info("starting running Milvus components")
@@ -241,7 +253,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		paramtable.Init()
 	}
 
-	management.ServeHTTP()
+	http.ServeHTTP()
 
 	var rc *components.RootCoord
 	var wg sync.WaitGroup
@@ -312,7 +324,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	mr.setupLogger()
 	tracer.Init()
-	metrics.Register(Registry)
+	setupPrometheusHTTPServer(Registry)
 
 	paramtable.SetCreateTime(time.Now())
 	paramtable.SetUpdateTime(time.Now())

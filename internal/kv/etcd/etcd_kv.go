@@ -23,15 +23,12 @@ import (
 	"path"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"github.com/milvus-io/milvus/internal/common"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/milvus-io/milvus/internal/log"
-
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 const (

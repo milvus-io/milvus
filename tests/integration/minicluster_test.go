@@ -20,10 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/datanode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/querynode"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMiniClusterStartAndStop(t *testing.T) {

@@ -19,15 +19,14 @@ package components
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Proxy implements Proxy grpc server

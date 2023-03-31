@@ -14,9 +14,9 @@ package client
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/log"
-
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type consumer struct {

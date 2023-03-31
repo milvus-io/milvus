@@ -22,15 +22,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-
-	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 )
 
 func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {

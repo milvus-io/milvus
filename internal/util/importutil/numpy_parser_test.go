@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 func createLocalChunkManager(t *testing.T) storage.ChunkManager {

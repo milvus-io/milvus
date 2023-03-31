@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/stretchr/testify/assert"
-
 	"go.uber.org/zap"
+
+	server2 "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 func newTopicName() string {
@@ -32,8 +32,8 @@ func newConsumerName() string {
 	return fmt.Sprintf("my-consumer-%v", time.Now().Nanosecond())
 }
 
-func newMockRocksMQ() server.RocksMQ {
-	var rocksmq server.RocksMQ
+func newMockRocksMQ() server2.RocksMQ {
+	var rocksmq server2.RocksMQ
 	return rocksmq
 }
 
@@ -44,9 +44,9 @@ func newMockClient() *client {
 	return client
 }
 
-func newRocksMQ(t *testing.T, rmqPath string) server.RocksMQ {
+func newRocksMQ(t *testing.T, rmqPath string) server2.RocksMQ {
 	rocksdbPath := rmqPath
-	rmq, err := server.NewRocksMQ(rocksdbPath, nil)
+	rmq, err := server2.NewRocksMQ(rocksdbPath, nil)
 	assert.NoError(t, err)
 	return rmq
 }

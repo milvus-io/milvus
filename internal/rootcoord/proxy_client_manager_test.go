@@ -23,15 +23,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 type proxyMock struct {

@@ -24,6 +24,7 @@ package segments
 #include "segcore/plan_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
@@ -32,7 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan

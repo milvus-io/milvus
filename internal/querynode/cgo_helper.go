@@ -35,8 +35,8 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/cgoconverter"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/cgoconverter"
 )
 
 // HandleCStatus deals with the error returned from CGO

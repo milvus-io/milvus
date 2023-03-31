@@ -21,8 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // Consumer is a client that used to consume messages from rocksmq

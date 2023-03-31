@@ -21,62 +21,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-func TestPmsFactory(t *testing.T) {
-	Params.Init()
-	pmsFactory := NewPmsFactory(&Params.PulsarCfg)
-
-	ctx := context.Background()
-	_, err := pmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = pmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
-}
-
-func TestPmsFactoryWithAuth(t *testing.T) {
-	config := &Params.PulsarCfg
-	Params.Save(Params.PulsarCfg.AuthPlugin.Key, "token")
-	Params.Save(Params.PulsarCfg.AuthParams.Key, "token:fake_token")
-	defer func() {
-		Params.Save(Params.PulsarCfg.AuthPlugin.Key, "")
-		Params.Save(Params.PulsarCfg.AuthParams.Key, "")
-	}()
-	pmsFactory := NewPmsFactory(config)
-
-	ctx := context.Background()
-	_, err := pmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = pmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	Params.Save(Params.PulsarCfg.AuthParams.Key, "")
-	pmsFactory = NewPmsFactory(config)
-
-	ctx = context.Background()
-	_, err = pmsFactory.NewMsgStream(ctx)
-	assert.Error(t, err)
-
-	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.Error(t, err)
-
-	_, err = pmsFactory.NewQueryMsgStream(ctx)
-	assert.Error(t, err)
-
-}
 
 func TestRmsFactory(t *testing.T) {
 	defer os.Unsetenv("ROCKSMQ_PATH")
@@ -98,21 +46,4 @@ func TestRmsFactory(t *testing.T) {
 
 	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
 	assert.Nil(t, err)
-}
-
-func TestKafkaFactory(t *testing.T) {
-	kmsFactory := NewKmsFactory(&Params.KafkaCfg)
-
-	ctx := context.Background()
-	_, err := kmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = kmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = kmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	// err = kmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	// assert.Nil(t, err)
 }

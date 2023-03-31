@@ -23,17 +23,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (

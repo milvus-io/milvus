@@ -22,17 +22,16 @@ import (
 	"math"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	storage "github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ReduceSuite struct {

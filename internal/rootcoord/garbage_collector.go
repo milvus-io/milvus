@@ -22,8 +22,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
 //go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord

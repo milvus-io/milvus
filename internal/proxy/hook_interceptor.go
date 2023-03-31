@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"plugin"
 
-	"github.com/milvus-io/milvus-proto/go-api/hook"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus-proto/go-api/hook"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 type defaultHook struct {

@@ -21,13 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/tso"
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type IScheduler interface {

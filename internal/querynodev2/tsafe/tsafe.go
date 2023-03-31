@@ -17,8 +17,9 @@
 package tsafe
 
 import (
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/atomic"
+
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type tSafe struct {

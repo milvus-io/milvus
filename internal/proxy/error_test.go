@@ -21,8 +21,9 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
 
 func Test_ErrInsufficientMemory(t *testing.T) {

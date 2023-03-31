@@ -6,7 +6,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const OSSDefaultAddress = "oss.aliyuncs.com"

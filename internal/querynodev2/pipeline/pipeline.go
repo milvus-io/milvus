@@ -17,15 +17,16 @@
 package pipeline
 
 import (
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 //pipeline used for querynode
@@ -33,6 +34,7 @@ type Pipeline interface {
 	base.StreamPipeline
 	ExcludedSegments(segInfos ...*datapb.SegmentInfo)
 }
+
 type pipeline struct {
 	base.StreamPipeline
 

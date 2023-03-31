@@ -19,9 +19,9 @@ package rootcoord
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/tso"
-
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/internal/tso"
 )
 
 type DdlTsLockManager interface {

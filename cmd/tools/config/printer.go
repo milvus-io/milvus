@@ -5,7 +5,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )

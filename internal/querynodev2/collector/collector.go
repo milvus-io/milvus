@@ -19,13 +19,15 @@ package collector
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 )
 
 var Average *averageCollector
+
 var Rate *ratelimitutil.RateCollector
+
 var Counter *counter
 
 func RateMetrics() []string {

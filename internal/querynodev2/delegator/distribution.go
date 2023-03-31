@@ -19,8 +19,9 @@ package delegator
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (

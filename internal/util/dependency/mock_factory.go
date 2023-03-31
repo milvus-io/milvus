@@ -5,10 +5,10 @@ package dependency
 import (
 	context "context"
 
-	msgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
+	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
 	mock "github.com/stretchr/testify/mock"
 
-	paramtable "github.com/milvus-io/milvus/internal/util/paramtable"
+	paramtable "github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )

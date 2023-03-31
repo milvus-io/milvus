@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 )
 

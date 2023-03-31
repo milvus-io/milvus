@@ -27,9 +27,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/cache"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/cache"
 )
 
 var (

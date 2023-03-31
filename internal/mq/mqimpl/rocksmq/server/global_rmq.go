@@ -21,11 +21,10 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/log"
-
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // Rmq is global rocksmq instance that will be initialized only once

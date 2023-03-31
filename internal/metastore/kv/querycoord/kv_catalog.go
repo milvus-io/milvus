@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -12,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 var (

@@ -20,14 +20,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 //Manager manage pipeline in querynode
@@ -39,6 +40,7 @@ type Manager interface {
 	Start(channels ...string) error
 	Close()
 }
+
 type manager struct {
 	channel2Pipeline map[string]Pipeline
 	dataManager      *DataManager

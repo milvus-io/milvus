@@ -20,13 +20,15 @@ import (
 	"context"
 	"testing"
 
+	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -34,11 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type DelegatorDataSuite struct {

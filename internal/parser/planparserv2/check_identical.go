@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 // CheckPredicatesIdentical check if two exprs are identical.

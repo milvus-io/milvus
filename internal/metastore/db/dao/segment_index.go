@@ -1,12 +1,13 @@
 package dao
 
 import (
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type segmentIndexDb struct {

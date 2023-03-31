@@ -18,7 +18,7 @@ package flowgraph
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Timestamp shortcut for typeutil.Timestamp

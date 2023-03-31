@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // Response response interface for verification
