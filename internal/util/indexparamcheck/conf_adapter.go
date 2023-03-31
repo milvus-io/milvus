@@ -211,6 +211,60 @@ func newIVFPQConfAdapter() *IVFPQConfAdapter {
 	return &IVFPQConfAdapter{}
 }
 
+// RaftIVFPQConfAdapter checks if a RAFT_IVF_PQ index can be built.
+type RaftIVFPQConfAdapter struct {
+	IVFConfAdapter
+}
+
+// CheckTrain checks if ivf-pq index can be built with the specific index parameters.
+func (adapter *RaftIVFPQConfAdapter) CheckTrain(params map[string]string) bool {
+	if !adapter.IVFConfAdapter.CheckTrain(params) {
+		return false
+	}
+
+	return adapter.checkPQParams(params)
+}
+
+func (adapter *RaftIVFPQConfAdapter) checkPQParams(params map[string]string) bool {
+	dimStr, dimensionExist := params[DIM]
+	if !dimensionExist {
+		return false
+	}
+
+	dimension, err := strconv.Atoi(dimStr)
+	if err != nil { // invalid dimension
+		return false
+	}
+
+	// nbits can be set to default: 8
+	nbitsStr, nbitsExist := params[NBITS]
+	if nbitsExist {
+		_, err := strconv.Atoi(nbitsStr)
+		if err != nil { // invalid nbits
+			return false
+		}
+	}
+
+	mStr, ok := params[IVFM]
+	if !ok {
+		return false
+	}
+	m, err := strconv.Atoi(mStr)
+	if err != nil { // invalid m
+		return false
+	}
+
+	// here is the only difference with IVF_PQ
+	if m == 0 {
+		return true
+	}
+	return dimension%m == 0
+}
+
+func newRaftIVFPQConfAdapter() *RaftIVFPQConfAdapter {
+	return &RaftIVFPQConfAdapter{}
+}
+
 // IVFSQConfAdapter checks if a IVF_SQ index can be built.
 type IVFSQConfAdapter struct {
 	IVFConfAdapter
