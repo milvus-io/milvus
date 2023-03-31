@@ -281,6 +281,7 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
 	// close flowgraph first, so no write will be dispatched to tSafeReplica
 	fg.close()
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 	dsService.tSafeReplica.removeTSafe(dc)
 	// try best to remove, it's ok if all info is gone before this call
 	rateCol.removeTSafeChannel(dc)
