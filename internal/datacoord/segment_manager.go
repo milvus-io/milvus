@@ -292,11 +292,15 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 // allocSegmentForImport allocates one segment allocation for bulk insert.
 func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64) (*Allocation, error) {
-	// init allocation
-	allocation := getAllocation(requestRows)
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-ImportSegment")
+	defer sp.End()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// create new segments and add allocations to meta
-	// to avoid mixing up with growing segments, the segment state is "Importing"
+	// Init allocation.
+	allocation := getAllocation(requestRows)
+	// Create new segments and add allocations to meta.
+	// To avoid mixing up with growing segments, the segment state is "Importing"
 	expireTs, err := s.genExpireTs(ctx, true)
 	if err != nil {
 		return nil, err
