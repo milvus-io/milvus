@@ -46,6 +46,7 @@ func (s *Scheduler) Add(task Task) bool {
 	case *SearchTask:
 		select {
 		case s.searchWaitQueue <- t:
+			t.tr.RecordSpan()
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 		default:
 			return false
@@ -65,6 +66,12 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 				if !s.tryPromote(task) {
 					break
 				}
+
+				inQueueDuration := task.tr.RecordSpan()
+				metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
+					fmt.Sprint(paramtable.GetNodeID()),
+					metrics.SearchLabel).
+					Observe(float64(inQueueDuration.Milliseconds()))
 				s.process(task)
 				s.mergedSearchTasks.Remove(task)
 			}
