@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -120,11 +121,7 @@ func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 }
 
 func (bm *DelBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok bool) {
-	buffer, ok := bm.channel.getCurDeleteBuffer(segID)
-	if ok {
-		return buffer, ok
-	}
-	return nil, false
+	return bm.channel.getCurDeleteBuffer(segID)
 }
 
 func (bm *DelBufferManager) Delete(segID UniqueID) {
@@ -161,9 +158,9 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 		} else {
 			heap.Push(bm.delBufHeap, compactToDelBuff.item)
 		}
-		//note that when compacting segment in del buffer manager
-		//there is no need to modify the general memory size as there is no new
-		//added del into the memory
+
+		// We need to re-add the memorySize because bm.Delete(segID) sub them all.
+		bm.delMemorySize += compactToDelBuff.item.memorySize
 		bm.channel.setCurDeleteBuffer(compactedToSegID, compactToDelBuff)
 	}
 }
@@ -203,10 +200,24 @@ type Item struct {
 	// The index is needed by update and is maintained by the heap.Interface methods.
 }
 
+// String format Item as <segmentID=0, memorySize=1>
+func (i *Item) String() string {
+	return fmt.Sprintf("<segmentID=%d, memorySize=%d>", i.segmentID, i.memorySize)
+}
+
 // A PriorityQueue implements heap.Interface and holds Items.
 // We use PriorityQueue to manage memory consumed by del buf
 type PriorityQueue struct {
 	items []*Item
+}
+
+// String format PriorityQueue as [item, item]
+func (pq *PriorityQueue) String() string {
+	var items []string
+	for _, item := range pq.items {
+		items = append(items, item.String())
+	}
+	return fmt.Sprintf("[%s]", strings.Join(items, ","))
 }
 
 func (pq *PriorityQueue) Len() int { return len(pq.items) }

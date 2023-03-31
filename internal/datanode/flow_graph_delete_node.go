@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // DeleteNode is to process delete msg, flush delete info into storage.
@@ -94,7 +95,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	dn.updateCompactedSegments()
 
 	// process delete messages
-	var segIDs []UniqueID
+	segIDs := typeutil.NewUniqueSet()
 	for i, msg := range fgMsg.deleteMessages {
 		traceID := spans[i].SpanContext().TraceID().String()
 		log.Debug("Buffer delete request in DataNode", zap.String("traceID", traceID))
@@ -105,12 +106,12 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 			log.Error(err.Error())
 			panic(err)
 		}
-		segIDs = append(segIDs, tmpSegIDs...)
+		segIDs.Insert(tmpSegIDs...)
 	}
 
 	// display changed segment's status in dn.delBuf of a certain ts
 	if len(fgMsg.deleteMessages) != 0 {
-		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
+		dn.showDelBuf(segIDs.Collect(), fgMsg.timeRange.timestampMax)
 	}
 
 	// process flush messages

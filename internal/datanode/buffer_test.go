@@ -143,6 +143,19 @@ func TestBufferData_updateTimeRange(t *testing.T) {
 	}
 }
 
+func TestPriorityQueueString(t *testing.T) {
+	item := &Item{
+		segmentID:  0,
+		memorySize: 1,
+	}
+
+	assert.Equal(t, "<segmentID=0, memorySize=1>", item.String())
+
+	pq := &PriorityQueue{}
+	heap.Push(pq, item)
+	assert.Equal(t, "[<segmentID=0, memorySize=1>]", pq.String())
+}
+
 func Test_CompactSegBuff(t *testing.T) {
 	channelSegments := make(map[UniqueID]*Segment)
 	delBufferManager := &DelBufferManager{
