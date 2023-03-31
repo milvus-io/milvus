@@ -243,7 +243,7 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.queryShardPolicy == nil {
-		t.queryShardPolicy = mergeRoundRobinPolicy
+		t.queryShardPolicy = RoundRobinPolicy
 	}
 
 	t.Base.MsgType = commonpb.MsgType_Retrieve
@@ -454,7 +454,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, channelNum int) error {
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs ...string) error {
 	retrieveReq := typeutil.Clone(t.RetrieveRequest)
 	retrieveReq.GetBase().TargetID = nodeID
 	req := &querypb.QueryRequest{

@@ -44,7 +44,7 @@ func TestQueryTask_all(t *testing.T) {
 		expr   = fmt.Sprintf("%s > 0", testInt64Field)
 		hitNum = 10
 
-		errPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string, int) error, map[string][]nodeInfo) error {
+		errPolicy = func(context.Context, *shardClientMgr, queryFunc, map[string][]nodeInfo) error {
 			return fmt.Errorf("fake error")
 		}
 	)
@@ -181,7 +181,7 @@ func TestQueryTask_all(t *testing.T) {
 	task.queryShardPolicy = errPolicy
 	assert.Error(t, task.Execute(ctx))
 
-	task.queryShardPolicy = mergeRoundRobinPolicy
+	task.queryShardPolicy = RoundRobinPolicy
 	result1 := &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
 		Status: &commonpb.Status{

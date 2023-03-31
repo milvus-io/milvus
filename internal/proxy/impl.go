@@ -2590,10 +2590,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request:          request,
-		qc:               node.queryCoord,
-		queryShardPolicy: mergeRoundRobinPolicy,
-		shardMgr:         node.shardMgr,
+		request:  request,
+		qc:       node.queryCoord,
+		shardMgr: node.shardMgr,
 	}
 
 	method := "Query"
@@ -2924,8 +2923,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			qc:      node.queryCoord,
 			ids:     ids.IdArray,
 
-			queryShardPolicy: mergeRoundRobinPolicy,
-			shardMgr:         node.shardMgr,
+			shardMgr: node.shardMgr,
 		}
 
 		log := log.Ctx(ctx).With(

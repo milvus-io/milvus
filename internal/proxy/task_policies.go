@@ -2,161 +2,69 @@ package proxy
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"sync"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/merr"
 
 	"go.uber.org/zap"
 )
 
 // type pickShardPolicy func(ctx context.Context, mgr *shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
-type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string, int) error, map[string][]nodeInfo) error
+type queryFunc func(context.Context, UniqueID, types.QueryNode, ...string) error
+type pickShardPolicy func(context.Context, *shardClientMgr, queryFunc, map[string][]nodeInfo) error
 
 var (
-	errBegin               = errors.New("begin error")
 	errInvalidShardLeaders = errors.New("Invalid shard leader")
 )
 
-func updateShardsWithRoundRobin(shardsLeaders map[string][]nodeInfo) {
-	for channelID, leaders := range shardsLeaders {
-		if len(leaders) <= 1 {
-			continue
-		}
-
-		shardsLeaders[channelID] = append(leaders[1:], leaders[0])
-	}
-}
-
-// mergeErrSet merges all errors in ErrSet
-func mergeErrSet(errSet map[string]error) error {
-	var builder strings.Builder
-	for channel, err := range errSet {
-		if err == nil {
-			continue
-		}
-
-		builder.WriteString(fmt.Sprintf("Channel: %s returns err: %s", channel, err.Error()))
-	}
-	return errors.New(builder.String())
-}
-
-// group dml shard leader with same nodeID
-func groupShardleadersWithSameQueryNode(
-	ctx context.Context,
-	shard2leaders map[string][]nodeInfo,
-	nexts map[string]int, errSet map[string]error,
-	mgr *shardClientMgr) (map[int64][]string, map[int64]types.QueryNode, error) {
-	// check if all leaders were checked
-	for dml, idx := range nexts {
-		if idx >= len(shard2leaders[dml]) {
-			log.Ctx(ctx).Warn("no shard leaders were available",
-				zap.String("channel", dml),
-				zap.String("leaders", fmt.Sprintf("%v", shard2leaders[dml])))
-			if err, ok := errSet[dml]; ok {
-				return nil, nil, err
-			}
-			return nil, nil, fmt.Errorf("no available shard leader")
-		}
-	}
-	qnSet := make(map[int64]types.QueryNode)
-	node2dmls := make(map[int64][]string)
-	updates := make(map[string]int)
-
-	for dml, idx := range nexts {
-		updates[dml] = idx + 1
-		nodeInfo := shard2leaders[dml][idx]
-		if _, ok := qnSet[nodeInfo.nodeID]; !ok {
-			qn, err := mgr.GetClient(ctx, nodeInfo.nodeID)
-			if err != nil {
-				log.Ctx(ctx).Warn("failed to get shard leader", zap.Int64("nodeID", nodeInfo.nodeID), zap.Error(err))
-				// if get client failed, just record error and wait for next round to get client and do query
-				errSet[dml] = err
-				continue
-			}
-			qnSet[nodeInfo.nodeID] = qn
-		}
-		if _, ok := node2dmls[nodeInfo.nodeID]; !ok {
-			node2dmls[nodeInfo.nodeID] = make([]string, 0)
-		}
-		node2dmls[nodeInfo.nodeID] = append(node2dmls[nodeInfo.nodeID], dml)
-	}
-	// update idxes
-	for dml, idx := range updates {
-		nexts[dml] = idx
-	}
-	return node2dmls, qnSet, nil
-}
-
-// mergeRoundRobinPolicy first group shard leaders with same querynode, then do the query with multiple dml channels
-// if request failed, it finds shard leader for failed dml channels, and again groups shard leaders and do the query
+// RoundRobinPolicy do the query with multiple dml channels
+// if request failed, it finds shard leader for failed dml channels
 //
-// Suppose qn0 is the shard leader for dml-channel0 and dml-channel1, if search for dml-channel0 succeeded, but
-// failed for dml-channel1. In this case, an error returned from qn0, and next shard leaders for dml-channel0 and dml-channel1 will be
-// retrieved and dml-channel0 therefore will again be searched.
-//
-// TODO: In this senario, qn0 should return a partial success results for dml-channel0, and only retrys for dml-channel1
-func mergeRoundRobinPolicy(
+func RoundRobinPolicy(
 	ctx context.Context,
 	mgr *shardClientMgr,
-	query func(context.Context, UniqueID, types.QueryNode, []string, int) error,
+	query queryFunc,
 	dml2leaders map[string][]nodeInfo) error {
-	nexts := make(map[string]int)
-	errSet := make(map[string]error) // record err for dml channels
-	totalChannelNum := len(dml2leaders)
-	for dml := range dml2leaders {
-		nexts[dml] = 0
-	}
-	for len(nexts) > 0 {
-		node2dmls, nodeset, err := groupShardleadersWithSameQueryNode(ctx, dml2leaders, nexts, errSet, mgr)
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to search/query with round-robin policy", zap.Error(mergeErrSet(errSet)))
-			return err
-		}
-		wg := &sync.WaitGroup{}
-		mu := &sync.Mutex{}
-		wg.Add(len(node2dmls))
-		for nodeID, channels := range node2dmls {
-			nodeID := nodeID
-			channels := channels
-			qn := nodeset[nodeID]
-			go func() {
-				defer wg.Done()
-				if err := query(ctx, nodeID, qn, channels, totalChannelNum); err != nil {
-					log.Ctx(ctx).Warn("failed to do query with node", zap.Int64("nodeID", nodeID),
-						zap.Strings("dmlChannels", channels), zap.Error(err))
-					mu.Lock()
-					defer mu.Unlock()
-					for _, ch := range channels {
-						errSet[ch] = err
-					}
-					return
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				for _, channel := range channels {
-					delete(nexts, channel)
-					delete(errSet, channel)
-				}
-			}()
-		}
-		wg.Wait()
-		if len(nexts) > 0 {
-			nextSet := make(map[string]int64)
-			for dml, idx := range nexts {
-				if idx >= len(dml2leaders[dml]) {
-					nextSet[dml] = -1
-				} else {
-					nextSet[dml] = dml2leaders[dml][idx].nodeID
-				}
+
+	queryChannel := func(ctx context.Context, channel string) error {
+		var combineErr error
+		leaders := dml2leaders[channel]
+
+		for _, target := range leaders {
+			qn, err := mgr.GetClient(ctx, target.nodeID)
+			if err != nil {
+				log.Warn("query channel failed, node not available", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
+				combineErr = merr.Combine(combineErr, err)
+				continue
 			}
-			log.Ctx(ctx).Warn("retry another query node with round robin", zap.Any("Nexts", nextSet))
+			err = query(ctx, target.nodeID, qn, channel)
+			if err != nil {
+				log.Warn("query channel failed", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
+				combineErr = merr.Combine(combineErr, err)
+				continue
+			}
+			return nil
 		}
+
+		log.Ctx(ctx).Error("failed to do query on all shard leader",
+			zap.String("channel", channel), zap.Error(combineErr))
+		return combineErr
 	}
-	return nil
+
+	wg, ctx := errgroup.WithContext(ctx)
+	for channel := range dml2leaders {
+		channel := channel
+		wg.Go(func() error {
+			err := queryChannel(ctx, channel)
+			return err
+		})
+	}
+
+	err := wg.Wait()
+	return err
 }
