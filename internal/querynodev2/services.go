@@ -1006,9 +1006,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	for nodeID, infos := range addSegments {
 		err := shardDelegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-			Base:      req.GetBase(),
-			DstNodeID: nodeID,
-			Infos:     infos,
+			Base:         req.GetBase(),
+			DstNodeID:    nodeID,
+			Infos:        infos,
+			CollectionID: req.GetCollectionID(),
 		})
 		if err != nil {
 			return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, "failed to sync(load) segment", err), nil
@@ -1017,9 +1018,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	for _, action := range removeActions {
 		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-			NodeID:     action.GetNodeID(),
-			SegmentIDs: []int64{action.GetSegmentID()},
-			Scope:      querypb.DataScope_Historical,
+			NodeID:       action.GetNodeID(),
+			SegmentIDs:   []int64{action.GetSegmentID()},
+			Scope:        querypb.DataScope_Historical,
+			CollectionID: req.GetCollectionID(),
 		}, true)
 	}
 
