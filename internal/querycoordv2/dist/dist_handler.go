@@ -56,7 +56,7 @@ type distHandler struct {
 
 func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
-	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qnv2.distHandler", 1, 60)
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
 	log.Info("start dist handler")
 	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()

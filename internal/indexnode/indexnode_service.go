@@ -117,9 +117,12 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 }
 
 func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("ClusterID", req.GetClusterID()),
+	).WithRateGroup("in.queryJobs", 1, 60)
 	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		stateCode := i.lifetime.GetState()
-		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID))
+		log.Warn("index node not ready", zap.String("state", stateCode.String()))
 		return &indexpb.QueryJobsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -159,7 +162,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].IndexFileKeys = info.fileKeys
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
-			log.RatedDebug(5, "querying index build task", zap.String("ClusterID", req.ClusterID),
+			log.RatedDebug(5, "querying index build task",
 				zap.Int64("IndexBuildID", buildID), zap.String("state", info.state.String()),
 				zap.String("fail reason", info.failReason))
 		}
