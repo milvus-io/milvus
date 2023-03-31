@@ -94,7 +94,7 @@ type baseTask struct {
 
 	status   *atomic.Int32
 	priority Priority
-	err      error
+	err      *atomic.Error
 	actions  []Action
 	step     int
 }
@@ -114,6 +114,8 @@ func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID
 		cancel:   cancel,
 		doneCh:   make(chan struct{}),
 		canceled: atomic.NewBool(false),
+
+		err: atomic.NewError(nil),
 	}
 }
 
@@ -162,11 +164,11 @@ func (task *baseTask) SetPriority(priority Priority) {
 }
 
 func (task *baseTask) Err() error {
-	return task.err
+	return task.err.Load()
 }
 
 func (task *baseTask) SetErr(err error) {
-	task.err = err
+	task.err.Store(err)
 }
 
 func (task *baseTask) Cancel() {
@@ -178,7 +180,7 @@ func (task *baseTask) Cancel() {
 
 func (task *baseTask) Wait() error {
 	<-task.doneCh
-	return task.err
+	return task.Err()
 }
 
 func (task *baseTask) Actions() []Action {
