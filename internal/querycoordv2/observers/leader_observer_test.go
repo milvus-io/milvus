@@ -358,7 +358,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	}
 }
 
-func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
+func (suite *LeaderObserverTestSuite) TestSyncRemovedSegmentsWithTarget() {
 
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
@@ -394,6 +394,11 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 			{
 				Type:      querypb.SyncType_Remove,
 				SegmentID: 3,
+				NodeID:    2,
+			},
+			{
+				Type:      querypb.SyncType_Remove,
+				SegmentID: 2,
 				NodeID:    2,
 			},
 		},

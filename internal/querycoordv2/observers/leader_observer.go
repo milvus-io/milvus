@@ -168,18 +168,17 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	for _, s := range dists {
 		distMap[s.GetID()] = struct{}{}
 	}
+	// if a segment(segment_id, node_id) only exists in the leader view, it must be cleaned up
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		existInCurrentTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
-		existInNextTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
-		if ok || existInCurrentTarget || existInNextTarget {
+		if ok {
 			continue
 		}
-		log.Debug("leader observer append a segment to remove:", zap.Int64("collectionID", leaderView.CollectionID),
-			zap.String("Channel", leaderView.Channel), zap.Int64("leaderViewID", leaderView.ID),
-			zap.Int64("segmentID", sid), zap.Bool("distMap_exist", ok),
-			zap.Bool("existInCurrentTarget", existInCurrentTarget),
-			zap.Bool("existInNextTarget", existInNextTarget))
+		log.Debug("stale leader view segment found",
+			zap.Int64("collectionID", leaderView.CollectionID),
+			zap.String("channel", leaderView.Channel),
+			zap.Int64("leaderID", leaderView.ID),
+			zap.Int64("segmentID", sid))
 		ret = append(ret, &querypb.SyncAction{
 			Type:      querypb.SyncType_Remove,
 			SegmentID: sid,
