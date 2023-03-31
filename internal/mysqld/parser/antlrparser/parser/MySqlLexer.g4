@@ -233,6 +233,11 @@ WRITE:                               'WRITE';
 XOR:                                 'XOR';
 ZEROFILL:                            'ZEROFILL';
 
+// ANNS
+ANNS:                                'ANNS';
+ANNS_OP:                             '->';
+ANNS_PARAMS:                         'PARAMS';
+
 // DATA TYPE Keywords
 
 TINYINT:                             'TINYINT';
@@ -1249,6 +1254,8 @@ SINGLE_QUOTE_SYMB:                   '\'';
 DOUBLE_QUOTE_SYMB:                   '"';
 REVERSE_QUOTE_SYMB:                  '`';
 COLON_SYMB:                          ':';
+LR_BRACKETS:                         '[';
+RR_BRACKETS:                         ']';
 
 fragment QUOTE_SYMB
     : SINGLE_QUOTE_SYMB | DOUBLE_QUOTE_SYMB | REVERSE_QUOTE_SYMB

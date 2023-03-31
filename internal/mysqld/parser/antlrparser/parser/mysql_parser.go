@@ -63,22 +63,23 @@ func mysqlparserParserInit() {
 		"'TABLE'", "'TERMINATED'", "'THEN'", "'TO'", "'TRAILING'", "'TRIGGER'",
 		"'TRUE'", "'UNDO'", "'UNION'", "'UNIQUE'", "'UNLOCK'", "'UNSIGNED'",
 		"'UPDATE'", "'USAGE'", "'USE'", "'USING'", "'VALUES'", "'WHEN'", "'WHERE'",
-		"'WHILE'", "'WITH'", "'WRITE'", "'XOR'", "'ZEROFILL'", "'TINYINT'",
-		"'SMALLINT'", "'MEDIUMINT'", "'MIDDLEINT'", "'INT'", "'INT1'", "'INT2'",
-		"'INT3'", "'INT4'", "'INT8'", "'INTEGER'", "'BIGINT'", "'REAL'", "'DOUBLE'",
-		"'PRECISION'", "'FLOAT'", "'FLOAT4'", "'FLOAT8'", "'DECIMAL'", "'DEC'",
-		"'NUMERIC'", "'DATE'", "'TIME'", "'TIMESTAMP'", "'DATETIME'", "'YEAR'",
-		"'CHAR'", "'VARCHAR'", "'NVARCHAR'", "'NATIONAL'", "'BINARY'", "'VARBINARY'",
-		"'TINYBLOB'", "'BLOB'", "'MEDIUMBLOB'", "'LONG'", "'LONGBLOB'", "'TINYTEXT'",
-		"'TEXT'", "'MEDIUMTEXT'", "'LONGTEXT'", "'ENUM'", "'VARYING'", "'SERIAL'",
-		"'YEAR_MONTH'", "'DAY_HOUR'", "'DAY_MINUTE'", "'DAY_SECOND'", "'HOUR_MINUTE'",
-		"'HOUR_SECOND'", "'MINUTE_SECOND'", "'SECOND_MICROSECOND'", "'MINUTE_MICROSECOND'",
-		"'HOUR_MICROSECOND'", "'DAY_MICROSECOND'", "'JSON_ARRAY'", "'JSON_ARRAYAGG'",
-		"'JSON_ARRAY_APPEND'", "'JSON_ARRAY_INSERT'", "'JSON_CONTAINS'", "'JSON_CONTAINS_PATH'",
-		"'JSON_DEPTH'", "'JSON_EXTRACT'", "'JSON_INSERT'", "'JSON_KEYS'", "'JSON_LENGTH'",
-		"'JSON_MERGE'", "'JSON_MERGE_PATCH'", "'JSON_MERGE_PRESERVE'", "'JSON_OBJECT'",
-		"'JSON_OBJECTAGG'", "'JSON_OVERLAPS'", "'JSON_PRETTY'", "'JSON_QUOTE'",
-		"'JSON_REMOVE'", "'JSON_REPLACE'", "'JSON_SCHEMA_VALID'", "'JSON_SCHEMA_VALIDATION_REPORT'",
+		"'WHILE'", "'WITH'", "'WRITE'", "'XOR'", "'ZEROFILL'", "'ANNS'", "'->'",
+		"'PARAMS'", "'TINYINT'", "'SMALLINT'", "'MEDIUMINT'", "'MIDDLEINT'",
+		"'INT'", "'INT1'", "'INT2'", "'INT3'", "'INT4'", "'INT8'", "'INTEGER'",
+		"'BIGINT'", "'REAL'", "'DOUBLE'", "'PRECISION'", "'FLOAT'", "'FLOAT4'",
+		"'FLOAT8'", "'DECIMAL'", "'DEC'", "'NUMERIC'", "'DATE'", "'TIME'", "'TIMESTAMP'",
+		"'DATETIME'", "'YEAR'", "'CHAR'", "'VARCHAR'", "'NVARCHAR'", "'NATIONAL'",
+		"'BINARY'", "'VARBINARY'", "'TINYBLOB'", "'BLOB'", "'MEDIUMBLOB'", "'LONG'",
+		"'LONGBLOB'", "'TINYTEXT'", "'TEXT'", "'MEDIUMTEXT'", "'LONGTEXT'",
+		"'ENUM'", "'VARYING'", "'SERIAL'", "'YEAR_MONTH'", "'DAY_HOUR'", "'DAY_MINUTE'",
+		"'DAY_SECOND'", "'HOUR_MINUTE'", "'HOUR_SECOND'", "'MINUTE_SECOND'",
+		"'SECOND_MICROSECOND'", "'MINUTE_MICROSECOND'", "'HOUR_MICROSECOND'",
+		"'DAY_MICROSECOND'", "'JSON_ARRAY'", "'JSON_ARRAYAGG'", "'JSON_ARRAY_APPEND'",
+		"'JSON_ARRAY_INSERT'", "'JSON_CONTAINS'", "'JSON_CONTAINS_PATH'", "'JSON_DEPTH'",
+		"'JSON_EXTRACT'", "'JSON_INSERT'", "'JSON_KEYS'", "'JSON_LENGTH'", "'JSON_MERGE'",
+		"'JSON_MERGE_PATCH'", "'JSON_MERGE_PRESERVE'", "'JSON_OBJECT'", "'JSON_OBJECTAGG'",
+		"'JSON_OVERLAPS'", "'JSON_PRETTY'", "'JSON_QUOTE'", "'JSON_REMOVE'",
+		"'JSON_REPLACE'", "'JSON_SCHEMA_VALID'", "'JSON_SCHEMA_VALIDATION_REPORT'",
 		"'JSON_SEARCH'", "'JSON_SET'", "'JSON_STORAGE_FREE'", "'JSON_STORAGE_SIZE'",
 		"'JSON_TABLE'", "'JSON_TYPE'", "'JSON_UNQUOTE'", "'JSON_VALID'", "'JSON_VALUE'",
 		"'NESTED'", "'ORDINALITY'", "'PATH'", "'AVG'", "'BIT_AND'", "'BIT_OR'",
@@ -249,7 +250,7 @@ func mysqlparserParserInit() {
 		"'^='", "'|='", "'*'", "'/'", "'%'", "'+'", "'-'", "'DIV'", "'MOD'",
 		"'='", "'>'", "'<'", "'!'", "'~'", "'|'", "'&'", "'^'", "'.'", "'('",
 		"')'", "','", "';'", "'@'", "'0'", "'1'", "'2'", "'''", "'\"'", "'`'",
-		"':'",
+		"':'", "'['", "']'",
 	}
 	staticData.symbolicNames = []string{
 		"", "SPACE", "SPEC_MYSQL_COMMENT", "COMMENT_INPUT", "LINE_COMMENT",
@@ -279,68 +280,69 @@ func mysqlparserParserInit() {
 		"TABLE", "TERMINATED", "THEN", "TO", "TRAILING", "TRIGGER", "TRUE",
 		"UNDO", "UNION", "UNIQUE", "UNLOCK", "UNSIGNED", "UPDATE", "USAGE",
 		"USE", "USING", "VALUES", "WHEN", "WHERE", "WHILE", "WITH", "WRITE",
-		"XOR", "ZEROFILL", "TINYINT", "SMALLINT", "MEDIUMINT", "MIDDLEINT",
-		"INT", "INT1", "INT2", "INT3", "INT4", "INT8", "INTEGER", "BIGINT",
-		"REAL", "DOUBLE", "PRECISION", "FLOAT", "FLOAT4", "FLOAT8", "DECIMAL",
-		"DEC", "NUMERIC", "DATE", "TIME", "TIMESTAMP", "DATETIME", "YEAR", "CHAR",
-		"VARCHAR", "NVARCHAR", "NATIONAL", "BINARY", "VARBINARY", "TINYBLOB",
-		"BLOB", "MEDIUMBLOB", "LONG", "LONGBLOB", "TINYTEXT", "TEXT", "MEDIUMTEXT",
-		"LONGTEXT", "ENUM", "VARYING", "SERIAL", "YEAR_MONTH", "DAY_HOUR", "DAY_MINUTE",
-		"DAY_SECOND", "HOUR_MINUTE", "HOUR_SECOND", "MINUTE_SECOND", "SECOND_MICROSECOND",
-		"MINUTE_MICROSECOND", "HOUR_MICROSECOND", "DAY_MICROSECOND", "JSON_ARRAY",
-		"JSON_ARRAYAGG", "JSON_ARRAY_APPEND", "JSON_ARRAY_INSERT", "JSON_CONTAINS",
-		"JSON_CONTAINS_PATH", "JSON_DEPTH", "JSON_EXTRACT", "JSON_INSERT", "JSON_KEYS",
-		"JSON_LENGTH", "JSON_MERGE", "JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE",
-		"JSON_OBJECT", "JSON_OBJECTAGG", "JSON_OVERLAPS", "JSON_PRETTY", "JSON_QUOTE",
-		"JSON_REMOVE", "JSON_REPLACE", "JSON_SCHEMA_VALID", "JSON_SCHEMA_VALIDATION_REPORT",
-		"JSON_SEARCH", "JSON_SET", "JSON_STORAGE_FREE", "JSON_STORAGE_SIZE",
-		"JSON_TABLE", "JSON_TYPE", "JSON_UNQUOTE", "JSON_VALID", "JSON_VALUE",
-		"NESTED", "ORDINALITY", "PATH", "AVG", "BIT_AND", "BIT_OR", "BIT_XOR",
-		"COUNT", "CUME_DIST", "DENSE_RANK", "FIRST_VALUE", "GROUP_CONCAT", "LAG",
-		"LAST_VALUE", "LEAD", "MAX", "MIN", "NTILE", "NTH_VALUE", "PERCENT_RANK",
-		"RANK", "ROW_NUMBER", "STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
-		"SUM", "VAR_POP", "VAR_SAMP", "VARIANCE", "CURRENT_DATE", "CURRENT_TIME",
-		"CURRENT_TIMESTAMP", "LOCALTIME", "CURDATE", "CURTIME", "DATE_ADD",
-		"DATE_SUB", "EXTRACT", "LOCALTIMESTAMP", "NOW", "POSITION", "SUBSTR",
-		"SUBSTRING", "SYSDATE", "TRIM", "UTC_DATE", "UTC_TIME", "UTC_TIMESTAMP",
-		"ACCOUNT", "ACTION", "AFTER", "AGGREGATE", "ALGORITHM", "ANY", "AT",
-		"AUTHORS", "AUTOCOMMIT", "AUTOEXTEND_SIZE", "AUTO_INCREMENT", "AVG_ROW_LENGTH",
-		"BEGIN", "BINLOG", "BIT", "BLOCK", "BOOL", "BOOLEAN", "BTREE", "CACHE",
-		"CASCADED", "CHAIN", "CHANGED", "CHANNEL", "CHECKSUM", "PAGE_CHECKSUM",
-		"CIPHER", "CLASS_ORIGIN", "CLIENT", "CLOSE", "CLUSTERING", "COALESCE",
-		"CODE", "COLUMNS", "COLUMN_FORMAT", "COLUMN_NAME", "COMMENT", "COMMIT",
-		"COMPACT", "COMPLETION", "COMPRESSED", "COMPRESSION", "CONCURRENT",
-		"CONNECT", "CONNECTION", "CONSISTENT", "CONSTRAINT_CATALOG", "CONSTRAINT_SCHEMA",
-		"CONSTRAINT_NAME", "CONTAINS", "CONTEXT", "CONTRIBUTORS", "COPY", "CPU",
-		"CYCLE", "CURSOR_NAME", "DATA", "DATAFILE", "DEALLOCATE", "DEFAULT_AUTH",
-		"DEFINER", "DELAY_KEY_WRITE", "DES_KEY_FILE", "DIRECTORY", "DISABLE",
-		"DISCARD", "DISK", "DO", "DUMPFILE", "DUPLICATE", "DYNAMIC", "ENABLE",
-		"ENCRYPTED", "ENCRYPTION", "ENCRYPTION_KEY_ID", "END", "ENDS", "ENGINE",
-		"ENGINES", "ERROR", "ERRORS", "ESCAPE", "EVEN", "EVENT", "EVENTS", "EVERY",
-		"EXCHANGE", "EXCLUSIVE", "EXPIRE", "EXPORT", "EXTENDED", "EXTENT_SIZE",
-		"FAILED_LOGIN_ATTEMPTS", "FAST", "FAULTS", "FIELDS", "FILE_BLOCK_SIZE",
-		"FILTER", "FIRST", "FIXED", "FLUSH", "FOLLOWING", "FOLLOWS", "FOUND",
-		"FULL", "FUNCTION", "GENERAL", "GLOBAL", "GRANTS", "GROUP_REPLICATION",
-		"HANDLER", "HASH", "HELP", "HISTORY", "HOST", "HOSTS", "IDENTIFIED",
-		"IGNORE_SERVER_IDS", "IMPORT", "INCREMENT", "INDEXES", "INITIAL_SIZE",
-		"INPLACE", "INSERT_METHOD", "INSTALL", "INSTANCE", "INSTANT", "INVISIBLE",
-		"INVOKER", "IO", "IO_THREAD", "IPC", "ISOLATION", "ISSUER", "JSON",
-		"KEY_BLOCK_SIZE", "LANGUAGE", "LAST", "LEAVES", "LESS", "LEVEL", "LIST",
-		"LOCAL", "LOGFILE", "LOGS", "MASTER", "MASTER_AUTO_POSITION", "MASTER_CONNECT_RETRY",
-		"MASTER_DELAY", "MASTER_HEARTBEAT_PERIOD", "MASTER_HOST", "MASTER_LOG_FILE",
-		"MASTER_LOG_POS", "MASTER_PASSWORD", "MASTER_PORT", "MASTER_RETRY_COUNT",
-		"MASTER_SSL", "MASTER_SSL_CA", "MASTER_SSL_CAPATH", "MASTER_SSL_CERT",
-		"MASTER_SSL_CIPHER", "MASTER_SSL_CRL", "MASTER_SSL_CRLPATH", "MASTER_SSL_KEY",
-		"MASTER_TLS_VERSION", "MASTER_USER", "MAX_CONNECTIONS_PER_HOUR", "MAX_QUERIES_PER_HOUR",
-		"MAX_ROWS", "MAX_SIZE", "MAX_UPDATES_PER_HOUR", "MAX_USER_CONNECTIONS",
-		"MEDIUM", "MEMBER", "MERGE", "MESSAGE_TEXT", "MID", "MIGRATE", "MIN_ROWS",
-		"MODE", "MODIFY", "MUTEX", "MYSQL", "MYSQL_ERRNO", "NAME", "NAMES",
-		"NCHAR", "NEVER", "NEXT", "NO", "NOCACHE", "NOCOPY", "NOCYCLE", "NOMAXVALUE",
-		"NOMINVALUE", "NOWAIT", "NODEGROUP", "NONE", "ODBC", "OFFLINE", "OFFSET",
-		"OF", "OJ", "OLD_PASSWORD", "ONE", "ONLINE", "ONLY", "OPEN", "OPTIMIZER_COSTS",
-		"OPTIONS", "OWNER", "PACK_KEYS", "PAGE", "PAGE_COMPRESSED", "PAGE_COMPRESSION_LEVEL",
-		"PARSER", "PARTIAL", "PARTITIONING", "PARTITIONS", "PASSWORD", "PASSWORD_LOCK_TIME",
-		"PHASE", "PLUGIN", "PLUGIN_DIR", "PLUGINS", "PORT", "PRECEDES", "PRECEDING",
+		"XOR", "ZEROFILL", "ANNS", "ANNS_OP", "ANNS_PARAMS", "TINYINT", "SMALLINT",
+		"MEDIUMINT", "MIDDLEINT", "INT", "INT1", "INT2", "INT3", "INT4", "INT8",
+		"INTEGER", "BIGINT", "REAL", "DOUBLE", "PRECISION", "FLOAT", "FLOAT4",
+		"FLOAT8", "DECIMAL", "DEC", "NUMERIC", "DATE", "TIME", "TIMESTAMP",
+		"DATETIME", "YEAR", "CHAR", "VARCHAR", "NVARCHAR", "NATIONAL", "BINARY",
+		"VARBINARY", "TINYBLOB", "BLOB", "MEDIUMBLOB", "LONG", "LONGBLOB", "TINYTEXT",
+		"TEXT", "MEDIUMTEXT", "LONGTEXT", "ENUM", "VARYING", "SERIAL", "YEAR_MONTH",
+		"DAY_HOUR", "DAY_MINUTE", "DAY_SECOND", "HOUR_MINUTE", "HOUR_SECOND",
+		"MINUTE_SECOND", "SECOND_MICROSECOND", "MINUTE_MICROSECOND", "HOUR_MICROSECOND",
+		"DAY_MICROSECOND", "JSON_ARRAY", "JSON_ARRAYAGG", "JSON_ARRAY_APPEND",
+		"JSON_ARRAY_INSERT", "JSON_CONTAINS", "JSON_CONTAINS_PATH", "JSON_DEPTH",
+		"JSON_EXTRACT", "JSON_INSERT", "JSON_KEYS", "JSON_LENGTH", "JSON_MERGE",
+		"JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE", "JSON_OBJECT", "JSON_OBJECTAGG",
+		"JSON_OVERLAPS", "JSON_PRETTY", "JSON_QUOTE", "JSON_REMOVE", "JSON_REPLACE",
+		"JSON_SCHEMA_VALID", "JSON_SCHEMA_VALIDATION_REPORT", "JSON_SEARCH",
+		"JSON_SET", "JSON_STORAGE_FREE", "JSON_STORAGE_SIZE", "JSON_TABLE",
+		"JSON_TYPE", "JSON_UNQUOTE", "JSON_VALID", "JSON_VALUE", "NESTED", "ORDINALITY",
+		"PATH", "AVG", "BIT_AND", "BIT_OR", "BIT_XOR", "COUNT", "CUME_DIST",
+		"DENSE_RANK", "FIRST_VALUE", "GROUP_CONCAT", "LAG", "LAST_VALUE", "LEAD",
+		"MAX", "MIN", "NTILE", "NTH_VALUE", "PERCENT_RANK", "RANK", "ROW_NUMBER",
+		"STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "SUM", "VAR_POP", "VAR_SAMP",
+		"VARIANCE", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME",
+		"CURDATE", "CURTIME", "DATE_ADD", "DATE_SUB", "EXTRACT", "LOCALTIMESTAMP",
+		"NOW", "POSITION", "SUBSTR", "SUBSTRING", "SYSDATE", "TRIM", "UTC_DATE",
+		"UTC_TIME", "UTC_TIMESTAMP", "ACCOUNT", "ACTION", "AFTER", "AGGREGATE",
+		"ALGORITHM", "ANY", "AT", "AUTHORS", "AUTOCOMMIT", "AUTOEXTEND_SIZE",
+		"AUTO_INCREMENT", "AVG_ROW_LENGTH", "BEGIN", "BINLOG", "BIT", "BLOCK",
+		"BOOL", "BOOLEAN", "BTREE", "CACHE", "CASCADED", "CHAIN", "CHANGED",
+		"CHANNEL", "CHECKSUM", "PAGE_CHECKSUM", "CIPHER", "CLASS_ORIGIN", "CLIENT",
+		"CLOSE", "CLUSTERING", "COALESCE", "CODE", "COLUMNS", "COLUMN_FORMAT",
+		"COLUMN_NAME", "COMMENT", "COMMIT", "COMPACT", "COMPLETION", "COMPRESSED",
+		"COMPRESSION", "CONCURRENT", "CONNECT", "CONNECTION", "CONSISTENT",
+		"CONSTRAINT_CATALOG", "CONSTRAINT_SCHEMA", "CONSTRAINT_NAME", "CONTAINS",
+		"CONTEXT", "CONTRIBUTORS", "COPY", "CPU", "CYCLE", "CURSOR_NAME", "DATA",
+		"DATAFILE", "DEALLOCATE", "DEFAULT_AUTH", "DEFINER", "DELAY_KEY_WRITE",
+		"DES_KEY_FILE", "DIRECTORY", "DISABLE", "DISCARD", "DISK", "DO", "DUMPFILE",
+		"DUPLICATE", "DYNAMIC", "ENABLE", "ENCRYPTED", "ENCRYPTION", "ENCRYPTION_KEY_ID",
+		"END", "ENDS", "ENGINE", "ENGINES", "ERROR", "ERRORS", "ESCAPE", "EVEN",
+		"EVENT", "EVENTS", "EVERY", "EXCHANGE", "EXCLUSIVE", "EXPIRE", "EXPORT",
+		"EXTENDED", "EXTENT_SIZE", "FAILED_LOGIN_ATTEMPTS", "FAST", "FAULTS",
+		"FIELDS", "FILE_BLOCK_SIZE", "FILTER", "FIRST", "FIXED", "FLUSH", "FOLLOWING",
+		"FOLLOWS", "FOUND", "FULL", "FUNCTION", "GENERAL", "GLOBAL", "GRANTS",
+		"GROUP_REPLICATION", "HANDLER", "HASH", "HELP", "HISTORY", "HOST", "HOSTS",
+		"IDENTIFIED", "IGNORE_SERVER_IDS", "IMPORT", "INCREMENT", "INDEXES",
+		"INITIAL_SIZE", "INPLACE", "INSERT_METHOD", "INSTALL", "INSTANCE", "INSTANT",
+		"INVISIBLE", "INVOKER", "IO", "IO_THREAD", "IPC", "ISOLATION", "ISSUER",
+		"JSON", "KEY_BLOCK_SIZE", "LANGUAGE", "LAST", "LEAVES", "LESS", "LEVEL",
+		"LIST", "LOCAL", "LOGFILE", "LOGS", "MASTER", "MASTER_AUTO_POSITION",
+		"MASTER_CONNECT_RETRY", "MASTER_DELAY", "MASTER_HEARTBEAT_PERIOD", "MASTER_HOST",
+		"MASTER_LOG_FILE", "MASTER_LOG_POS", "MASTER_PASSWORD", "MASTER_PORT",
+		"MASTER_RETRY_COUNT", "MASTER_SSL", "MASTER_SSL_CA", "MASTER_SSL_CAPATH",
+		"MASTER_SSL_CERT", "MASTER_SSL_CIPHER", "MASTER_SSL_CRL", "MASTER_SSL_CRLPATH",
+		"MASTER_SSL_KEY", "MASTER_TLS_VERSION", "MASTER_USER", "MAX_CONNECTIONS_PER_HOUR",
+		"MAX_QUERIES_PER_HOUR", "MAX_ROWS", "MAX_SIZE", "MAX_UPDATES_PER_HOUR",
+		"MAX_USER_CONNECTIONS", "MEDIUM", "MEMBER", "MERGE", "MESSAGE_TEXT",
+		"MID", "MIGRATE", "MIN_ROWS", "MODE", "MODIFY", "MUTEX", "MYSQL", "MYSQL_ERRNO",
+		"NAME", "NAMES", "NCHAR", "NEVER", "NEXT", "NO", "NOCACHE", "NOCOPY",
+		"NOCYCLE", "NOMAXVALUE", "NOMINVALUE", "NOWAIT", "NODEGROUP", "NONE",
+		"ODBC", "OFFLINE", "OFFSET", "OF", "OJ", "OLD_PASSWORD", "ONE", "ONLINE",
+		"ONLY", "OPEN", "OPTIMIZER_COSTS", "OPTIONS", "OWNER", "PACK_KEYS",
+		"PAGE", "PAGE_COMPRESSED", "PAGE_COMPRESSION_LEVEL", "PARSER", "PARTIAL",
+		"PARTITIONING", "PARTITIONS", "PASSWORD", "PASSWORD_LOCK_TIME", "PHASE",
+		"PLUGIN", "PLUGIN_DIR", "PLUGINS", "PORT", "PRECEDES", "PRECEDING",
 		"PREPARE", "PRESERVE", "PREV", "PROCESSLIST", "PROFILE", "PROFILES",
 		"PROXY", "QUERY", "QUICK", "REBUILD", "RECOVER", "RECURSIVE", "REDO_BUFFER_SIZE",
 		"REDUNDANT", "RELAY", "RELAY_LOG_FILE", "RELAY_LOG_POS", "RELAYLOG",
@@ -447,7 +449,7 @@ func mysqlparserParserInit() {
 		"EXCLAMATION_SYMBOL", "BIT_NOT_OP", "BIT_OR_OP", "BIT_AND_OP", "BIT_XOR_OP",
 		"DOT", "LR_BRACKET", "RR_BRACKET", "COMMA", "SEMI", "AT_SIGN", "ZERO_DECIMAL",
 		"ONE_DECIMAL", "TWO_DECIMAL", "SINGLE_QUOTE_SYMB", "DOUBLE_QUOTE_SYMB",
-		"REVERSE_QUOTE_SYMB", "COLON_SYMB", "CHARSET_REVERSE_QOUTE_STRING",
+		"REVERSE_QUOTE_SYMB", "COLON_SYMB", "LR_BRACKETS", "RR_BRACKETS", "CHARSET_REVERSE_QOUTE_STRING",
 		"FILESIZE_LITERAL", "START_NATIONAL_STRING_LITERAL", "STRING_LITERAL",
 		"DECIMAL_LITERAL", "HEXADECIMAL_LITERAL", "REAL_LITERAL", "NULL_SPEC_LITERAL",
 		"BIT_STRING", "STRING_CHARSET_NAME", "DOT_ID", "ID", "REVERSE_QUOTE_ID",
@@ -456,201 +458,247 @@ func mysqlparserParserInit() {
 	staticData.ruleNames = []string{
 		"root", "sqlStatements", "sqlStatement", "emptyStatement_", "dmlStatement",
 		"selectStatement", "lockClause", "tableSources", "tableSource", "querySpecification",
-		"selectSpec", "selectElements", "selectElement", "fromClause", "limitClause",
-		"limitClauseAtom", "fullId", "tableName", "fullColumnName", "collationName",
-		"uid", "simpleId", "dottedId", "decimalLiteral", "stringLiteral", "booleanLiteral",
-		"hexadecimalLiteral", "constant", "expressions", "functionCall", "aggregateWindowedFunction",
-		"expression", "predicate", "expressionAtom", "unaryOperator", "comparisonOperator",
-		"logicalOperator",
+		"selectSpec", "selectElements", "selectElement", "fromClause", "annsClause",
+		"annsVectors", "annsVector", "annsParamsClause", "kvPairs", "kvPair",
+		"value", "limitClause", "limitClauseAtom", "fullId", "tableName", "fullColumnName",
+		"collationName", "uid", "simpleId", "dottedId", "decimalLiteral", "stringLiteral",
+		"booleanLiteral", "hexadecimalLiteral", "constant", "expressions", "functionCall",
+		"aggregateWindowedFunction", "expression", "predicate", "expressionAtom",
+		"array", "floatArray", "unaryOperator", "comparisonOperator", "logicalOperator",
 	}
 	staticData.predictionContextCache = antlr.NewPredictionContextCache()
 	staticData.serializedATN = []int32{
-		4, 1, 1155, 396, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4,
+		4, 1, 1160, 495, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4,
 		7, 4, 2, 5, 7, 5, 2, 6, 7, 6, 2, 7, 7, 7, 2, 8, 7, 8, 2, 9, 7, 9, 2, 10,
 		7, 10, 2, 11, 7, 11, 2, 12, 7, 12, 2, 13, 7, 13, 2, 14, 7, 14, 2, 15, 7,
 		15, 2, 16, 7, 16, 2, 17, 7, 17, 2, 18, 7, 18, 2, 19, 7, 19, 2, 20, 7, 20,
 		2, 21, 7, 21, 2, 22, 7, 22, 2, 23, 7, 23, 2, 24, 7, 24, 2, 25, 7, 25, 2,
 		26, 7, 26, 2, 27, 7, 27, 2, 28, 7, 28, 2, 29, 7, 29, 2, 30, 7, 30, 2, 31,
 		7, 31, 2, 32, 7, 32, 2, 33, 7, 33, 2, 34, 7, 34, 2, 35, 7, 35, 2, 36, 7,
-		36, 1, 0, 3, 0, 76, 8, 0, 1, 0, 1, 0, 3, 0, 80, 8, 0, 1, 0, 1, 0, 1, 1,
-		1, 1, 1, 1, 3, 1, 87, 8, 1, 1, 1, 3, 1, 90, 8, 1, 1, 1, 5, 1, 93, 8, 1,
-		10, 1, 12, 1, 96, 9, 1, 1, 1, 1, 1, 1, 1, 3, 1, 101, 8, 1, 1, 1, 3, 1,
-		104, 8, 1, 1, 1, 3, 1, 107, 8, 1, 1, 2, 1, 2, 1, 3, 1, 3, 1, 4, 1, 4, 1,
-		5, 1, 5, 3, 5, 117, 8, 5, 1, 6, 1, 6, 1, 6, 1, 6, 1, 6, 1, 6, 3, 6, 125,
-		8, 6, 1, 7, 1, 7, 1, 7, 5, 7, 130, 8, 7, 10, 7, 12, 7, 133, 9, 7, 1, 8,
-		1, 8, 1, 9, 1, 9, 5, 9, 139, 8, 9, 10, 9, 12, 9, 142, 9, 9, 1, 9, 1, 9,
-		3, 9, 146, 8, 9, 1, 9, 3, 9, 149, 8, 9, 1, 10, 1, 10, 1, 10, 1, 10, 1,
-		10, 1, 10, 1, 10, 1, 10, 3, 10, 159, 8, 10, 1, 11, 1, 11, 3, 11, 163, 8,
-		11, 1, 11, 1, 11, 5, 11, 167, 8, 11, 10, 11, 12, 11, 170, 9, 11, 1, 12,
-		1, 12, 3, 12, 174, 8, 12, 1, 12, 3, 12, 177, 8, 12, 1, 12, 1, 12, 3, 12,
-		181, 8, 12, 1, 12, 3, 12, 184, 8, 12, 3, 12, 186, 8, 12, 1, 13, 1, 13,
-		1, 13, 1, 13, 1, 13, 3, 13, 193, 8, 13, 1, 14, 1, 14, 1, 14, 1, 14, 3,
-		14, 199, 8, 14, 1, 14, 1, 14, 1, 14, 1, 14, 1, 14, 3, 14, 206, 8, 14, 1,
-		15, 1, 15, 1, 16, 1, 16, 1, 16, 1, 16, 3, 16, 214, 8, 16, 1, 17, 1, 17,
-		1, 18, 1, 18, 1, 18, 3, 18, 221, 8, 18, 3, 18, 223, 8, 18, 1, 18, 3, 18,
-		226, 8, 18, 1, 18, 1, 18, 3, 18, 230, 8, 18, 3, 18, 232, 8, 18, 1, 19,
-		1, 19, 3, 19, 236, 8, 19, 1, 20, 1, 20, 1, 20, 3, 20, 241, 8, 20, 1, 21,
-		1, 21, 1, 22, 1, 22, 1, 22, 3, 22, 248, 8, 22, 1, 23, 1, 23, 1, 24, 3,
-		24, 253, 8, 24, 1, 24, 1, 24, 3, 24, 257, 8, 24, 1, 24, 4, 24, 260, 8,
-		24, 11, 24, 12, 24, 261, 1, 24, 3, 24, 265, 8, 24, 1, 24, 1, 24, 3, 24,
-		269, 8, 24, 1, 24, 1, 24, 3, 24, 273, 8, 24, 3, 24, 275, 8, 24, 1, 25,
-		1, 25, 1, 26, 3, 26, 280, 8, 26, 1, 26, 1, 26, 1, 27, 1, 27, 1, 27, 1,
-		27, 1, 27, 1, 27, 1, 27, 3, 27, 291, 8, 27, 1, 28, 1, 28, 1, 28, 5, 28,
-		296, 8, 28, 10, 28, 12, 28, 299, 9, 28, 1, 29, 1, 29, 1, 30, 1, 30, 1,
-		30, 1, 30, 1, 30, 1, 31, 1, 31, 1, 31, 1, 31, 1, 31, 1, 31, 3, 31, 314,
-		8, 31, 1, 31, 1, 31, 1, 31, 3, 31, 319, 8, 31, 1, 31, 1, 31, 1, 31, 1,
-		31, 5, 31, 325, 8, 31, 10, 31, 12, 31, 328, 9, 31, 1, 32, 1, 32, 1, 32,
-		3, 32, 333, 8, 32, 1, 32, 1, 32, 1, 32, 1, 32, 1, 32, 1, 32, 1, 32, 1,
-		32, 3, 32, 343, 8, 32, 1, 32, 1, 32, 1, 32, 1, 32, 1, 32, 5, 32, 350, 8,
-		32, 10, 32, 12, 32, 353, 9, 32, 1, 33, 1, 33, 1, 33, 1, 33, 1, 33, 1, 33,
-		1, 33, 1, 33, 1, 33, 5, 33, 364, 8, 33, 10, 33, 12, 33, 367, 9, 33, 1,
-		33, 1, 33, 3, 33, 371, 8, 33, 1, 34, 1, 34, 1, 35, 1, 35, 1, 35, 1, 35,
-		1, 35, 1, 35, 1, 35, 1, 35, 1, 35, 1, 35, 1, 35, 3, 35, 386, 8, 35, 1,
-		36, 1, 36, 1, 36, 1, 36, 1, 36, 1, 36, 3, 36, 394, 8, 36, 1, 36, 0, 2,
-		62, 64, 37, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30,
-		32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66,
-		68, 70, 72, 0, 7, 2, 0, 6, 6, 49, 50, 1, 0, 624, 625, 3, 0, 1131, 1133,
-		1142, 1142, 1144, 1144, 2, 0, 62, 62, 176, 176, 2, 0, 113, 113, 1120, 1120,
-		3, 0, 62, 62, 176, 176, 660, 660, 3, 0, 113, 113, 1113, 1114, 1120, 1121,
-		436, 0, 75, 1, 0, 0, 0, 2, 94, 1, 0, 0, 0, 4, 108, 1, 0, 0, 0, 6, 110,
-		1, 0, 0, 0, 8, 112, 1, 0, 0, 0, 10, 114, 1, 0, 0, 0, 12, 124, 1, 0, 0,
-		0, 14, 126, 1, 0, 0, 0, 16, 134, 1, 0, 0, 0, 18, 136, 1, 0, 0, 0, 20, 158,
-		1, 0, 0, 0, 22, 162, 1, 0, 0, 0, 24, 185, 1, 0, 0, 0, 26, 187, 1, 0, 0,
-		0, 28, 194, 1, 0, 0, 0, 30, 207, 1, 0, 0, 0, 32, 209, 1, 0, 0, 0, 34, 215,
-		1, 0, 0, 0, 36, 231, 1, 0, 0, 0, 38, 235, 1, 0, 0, 0, 40, 240, 1, 0, 0,
-		0, 42, 242, 1, 0, 0, 0, 44, 247, 1, 0, 0, 0, 46, 249, 1, 0, 0, 0, 48, 274,
-		1, 0, 0, 0, 50, 276, 1, 0, 0, 0, 52, 279, 1, 0, 0, 0, 54, 290, 1, 0, 0,
-		0, 56, 292, 1, 0, 0, 0, 58, 300, 1, 0, 0, 0, 60, 302, 1, 0, 0, 0, 62, 318,
-		1, 0, 0, 0, 64, 329, 1, 0, 0, 0, 66, 370, 1, 0, 0, 0, 68, 372, 1, 0, 0,
-		0, 70, 385, 1, 0, 0, 0, 72, 393, 1, 0, 0, 0, 74, 76, 3, 2, 1, 0, 75, 74,
-		1, 0, 0, 0, 75, 76, 1, 0, 0, 0, 76, 79, 1, 0, 0, 0, 77, 78, 5, 1114, 0,
-		0, 78, 80, 5, 1114, 0, 0, 79, 77, 1, 0, 0, 0, 79, 80, 1, 0, 0, 0, 80, 81,
-		1, 0, 0, 0, 81, 82, 5, 0, 0, 1, 82, 1, 1, 0, 0, 0, 83, 86, 3, 4, 2, 0,
-		84, 85, 5, 1114, 0, 0, 85, 87, 5, 1114, 0, 0, 86, 84, 1, 0, 0, 0, 86, 87,
-		1, 0, 0, 0, 87, 89, 1, 0, 0, 0, 88, 90, 5, 1129, 0, 0, 89, 88, 1, 0, 0,
-		0, 89, 90, 1, 0, 0, 0, 90, 93, 1, 0, 0, 0, 91, 93, 3, 6, 3, 0, 92, 83,
-		1, 0, 0, 0, 92, 91, 1, 0, 0, 0, 93, 96, 1, 0, 0, 0, 94, 92, 1, 0, 0, 0,
-		94, 95, 1, 0, 0, 0, 95, 106, 1, 0, 0, 0, 96, 94, 1, 0, 0, 0, 97, 103, 3,
-		4, 2, 0, 98, 99, 5, 1114, 0, 0, 99, 101, 5, 1114, 0, 0, 100, 98, 1, 0,
-		0, 0, 100, 101, 1, 0, 0, 0, 101, 102, 1, 0, 0, 0, 102, 104, 5, 1129, 0,
-		0, 103, 100, 1, 0, 0, 0, 103, 104, 1, 0, 0, 0, 104, 107, 1, 0, 0, 0, 105,
-		107, 3, 6, 3, 0, 106, 97, 1, 0, 0, 0, 106, 105, 1, 0, 0, 0, 107, 3, 1,
-		0, 0, 0, 108, 109, 3, 8, 4, 0, 109, 5, 1, 0, 0, 0, 110, 111, 5, 1129, 0,
-		0, 111, 7, 1, 0, 0, 0, 112, 113, 3, 10, 5, 0, 113, 9, 1, 0, 0, 0, 114,
-		116, 3, 18, 9, 0, 115, 117, 3, 12, 6, 0, 116, 115, 1, 0, 0, 0, 116, 117,
-		1, 0, 0, 0, 117, 11, 1, 0, 0, 0, 118, 119, 5, 64, 0, 0, 119, 125, 5, 182,
-		0, 0, 120, 121, 5, 102, 0, 0, 121, 122, 5, 79, 0, 0, 122, 123, 5, 608,
-		0, 0, 123, 125, 5, 509, 0, 0, 124, 118, 1, 0, 0, 0, 124, 120, 1, 0, 0,
-		0, 125, 13, 1, 0, 0, 0, 126, 131, 3, 16, 8, 0, 127, 128, 5, 1128, 0, 0,
-		128, 130, 3, 16, 8, 0, 129, 127, 1, 0, 0, 0, 130, 133, 1, 0, 0, 0, 131,
-		129, 1, 0, 0, 0, 131, 132, 1, 0, 0, 0, 132, 15, 1, 0, 0, 0, 133, 131, 1,
-		0, 0, 0, 134, 135, 3, 34, 17, 0, 135, 17, 1, 0, 0, 0, 136, 140, 5, 151,
-		0, 0, 137, 139, 3, 20, 10, 0, 138, 137, 1, 0, 0, 0, 139, 142, 1, 0, 0,
-		0, 140, 138, 1, 0, 0, 0, 140, 141, 1, 0, 0, 0, 141, 143, 1, 0, 0, 0, 142,
-		140, 1, 0, 0, 0, 143, 145, 3, 22, 11, 0, 144, 146, 3, 26, 13, 0, 145, 144,
-		1, 0, 0, 0, 145, 146, 1, 0, 0, 0, 146, 148, 1, 0, 0, 0, 147, 149, 3, 28,
-		14, 0, 148, 147, 1, 0, 0, 0, 148, 149, 1, 0, 0, 0, 149, 19, 1, 0, 0, 0,
-		150, 159, 7, 0, 0, 0, 151, 159, 5, 74, 0, 0, 152, 159, 5, 169, 0, 0, 153,
-		159, 5, 164, 0, 0, 154, 159, 5, 162, 0, 0, 155, 159, 5, 623, 0, 0, 156,
-		159, 7, 1, 0, 0, 157, 159, 5, 163, 0, 0, 158, 150, 1, 0, 0, 0, 158, 151,
-		1, 0, 0, 0, 158, 152, 1, 0, 0, 0, 158, 153, 1, 0, 0, 0, 158, 154, 1, 0,
-		0, 0, 158, 155, 1, 0, 0, 0, 158, 156, 1, 0, 0, 0, 158, 157, 1, 0, 0, 0,
-		159, 21, 1, 0, 0, 0, 160, 163, 5, 1110, 0, 0, 161, 163, 3, 24, 12, 0, 162,
-		160, 1, 0, 0, 0, 162, 161, 1, 0, 0, 0, 163, 168, 1, 0, 0, 0, 164, 165,
-		5, 1128, 0, 0, 165, 167, 3, 24, 12, 0, 166, 164, 1, 0, 0, 0, 167, 170,
-		1, 0, 0, 0, 168, 166, 1, 0, 0, 0, 168, 169, 1, 0, 0, 0, 169, 23, 1, 0,
-		0, 0, 170, 168, 1, 0, 0, 0, 171, 176, 3, 36, 18, 0, 172, 174, 5, 12, 0,
-		0, 173, 172, 1, 0, 0, 0, 173, 174, 1, 0, 0, 0, 174, 175, 1, 0, 0, 0, 175,
-		177, 3, 40, 20, 0, 176, 173, 1, 0, 0, 0, 176, 177, 1, 0, 0, 0, 177, 186,
-		1, 0, 0, 0, 178, 183, 3, 58, 29, 0, 179, 181, 5, 12, 0, 0, 180, 179, 1,
-		0, 0, 0, 180, 181, 1, 0, 0, 0, 181, 182, 1, 0, 0, 0, 182, 184, 3, 40, 20,
-		0, 183, 180, 1, 0, 0, 0, 183, 184, 1, 0, 0, 0, 184, 186, 1, 0, 0, 0, 185,
-		171, 1, 0, 0, 0, 185, 178, 1, 0, 0, 0, 186, 25, 1, 0, 0, 0, 187, 188, 5,
-		67, 0, 0, 188, 189, 3, 14, 7, 0, 189, 192, 1, 0, 0, 0, 190, 191, 5, 188,
-		0, 0, 191, 193, 3, 62, 31, 0, 192, 190, 1, 0, 0, 0, 192, 193, 1, 0, 0,
-		0, 193, 27, 1, 0, 0, 0, 194, 205, 5, 98, 0, 0, 195, 196, 3, 30, 15, 0,
-		196, 197, 5, 1128, 0, 0, 197, 199, 1, 0, 0, 0, 198, 195, 1, 0, 0, 0, 198,
-		199, 1, 0, 0, 0, 199, 200, 1, 0, 0, 0, 200, 206, 3, 30, 15, 0, 201, 202,
-		3, 30, 15, 0, 202, 203, 5, 530, 0, 0, 203, 204, 3, 30, 15, 0, 204, 206,
-		1, 0, 0, 0, 205, 198, 1, 0, 0, 0, 205, 201, 1, 0, 0, 0, 206, 29, 1, 0,
-		0, 0, 207, 208, 3, 46, 23, 0, 208, 31, 1, 0, 0, 0, 209, 213, 3, 40, 20,
-		0, 210, 214, 5, 1148, 0, 0, 211, 212, 5, 1125, 0, 0, 212, 214, 3, 40, 20,
-		0, 213, 210, 1, 0, 0, 0, 213, 211, 1, 0, 0, 0, 213, 214, 1, 0, 0, 0, 214,
-		33, 1, 0, 0, 0, 215, 216, 3, 32, 16, 0, 216, 35, 1, 0, 0, 0, 217, 222,
-		3, 40, 20, 0, 218, 220, 3, 44, 22, 0, 219, 221, 3, 44, 22, 0, 220, 219,
-		1, 0, 0, 0, 220, 221, 1, 0, 0, 0, 221, 223, 1, 0, 0, 0, 222, 218, 1, 0,
-		0, 0, 222, 223, 1, 0, 0, 0, 223, 232, 1, 0, 0, 0, 224, 226, 9, 0, 0, 0,
-		225, 224, 1, 0, 0, 0, 225, 226, 1, 0, 0, 0, 226, 227, 1, 0, 0, 0, 227,
-		229, 3, 44, 22, 0, 228, 230, 3, 44, 22, 0, 229, 228, 1, 0, 0, 0, 229, 230,
-		1, 0, 0, 0, 230, 232, 1, 0, 0, 0, 231, 217, 1, 0, 0, 0, 231, 225, 1, 0,
-		0, 0, 232, 37, 1, 0, 0, 0, 233, 236, 3, 40, 20, 0, 234, 236, 5, 1141, 0,
-		0, 235, 233, 1, 0, 0, 0, 235, 234, 1, 0, 0, 0, 236, 39, 1, 0, 0, 0, 237,
-		241, 3, 42, 21, 0, 238, 241, 5, 1150, 0, 0, 239, 241, 5, 1138, 0, 0, 240,
-		237, 1, 0, 0, 0, 240, 238, 1, 0, 0, 0, 240, 239, 1, 0, 0, 0, 241, 41, 1,
-		0, 0, 0, 242, 243, 5, 1149, 0, 0, 243, 43, 1, 0, 0, 0, 244, 248, 5, 1148,
-		0, 0, 245, 246, 5, 1125, 0, 0, 246, 248, 3, 40, 20, 0, 247, 244, 1, 0,
-		0, 0, 247, 245, 1, 0, 0, 0, 248, 45, 1, 0, 0, 0, 249, 250, 7, 2, 0, 0,
-		250, 47, 1, 0, 0, 0, 251, 253, 5, 1147, 0, 0, 252, 251, 1, 0, 0, 0, 252,
-		253, 1, 0, 0, 0, 253, 254, 1, 0, 0, 0, 254, 257, 5, 1141, 0, 0, 255, 257,
-		5, 1140, 0, 0, 256, 252, 1, 0, 0, 0, 256, 255, 1, 0, 0, 0, 257, 259, 1,
-		0, 0, 0, 258, 260, 5, 1141, 0, 0, 259, 258, 1, 0, 0, 0, 260, 261, 1, 0,
-		0, 0, 261, 259, 1, 0, 0, 0, 261, 262, 1, 0, 0, 0, 262, 275, 1, 0, 0, 0,
-		263, 265, 5, 1147, 0, 0, 264, 263, 1, 0, 0, 0, 264, 265, 1, 0, 0, 0, 265,
-		266, 1, 0, 0, 0, 266, 269, 5, 1141, 0, 0, 267, 269, 5, 1140, 0, 0, 268,
-		264, 1, 0, 0, 0, 268, 267, 1, 0, 0, 0, 269, 272, 1, 0, 0, 0, 270, 271,
-		5, 27, 0, 0, 271, 273, 3, 38, 19, 0, 272, 270, 1, 0, 0, 0, 272, 273, 1,
-		0, 0, 0, 273, 275, 1, 0, 0, 0, 274, 256, 1, 0, 0, 0, 274, 268, 1, 0, 0,
-		0, 275, 49, 1, 0, 0, 0, 276, 277, 7, 3, 0, 0, 277, 51, 1, 0, 0, 0, 278,
-		280, 5, 1147, 0, 0, 279, 278, 1, 0, 0, 0, 279, 280, 1, 0, 0, 0, 280, 281,
-		1, 0, 0, 0, 281, 282, 5, 1143, 0, 0, 282, 53, 1, 0, 0, 0, 283, 291, 3,
-		48, 24, 0, 284, 291, 3, 46, 23, 0, 285, 286, 5, 1114, 0, 0, 286, 291, 3,
-		46, 23, 0, 287, 291, 3, 52, 26, 0, 288, 291, 3, 50, 25, 0, 289, 291, 5,
-		1144, 0, 0, 290, 283, 1, 0, 0, 0, 290, 284, 1, 0, 0, 0, 290, 285, 1, 0,
-		0, 0, 290, 287, 1, 0, 0, 0, 290, 288, 1, 0, 0, 0, 290, 289, 1, 0, 0, 0,
-		291, 55, 1, 0, 0, 0, 292, 297, 3, 62, 31, 0, 293, 294, 5, 1128, 0, 0, 294,
-		296, 3, 62, 31, 0, 295, 293, 1, 0, 0, 0, 296, 299, 1, 0, 0, 0, 297, 295,
-		1, 0, 0, 0, 297, 298, 1, 0, 0, 0, 298, 57, 1, 0, 0, 0, 299, 297, 1, 0,
-		0, 0, 300, 301, 3, 60, 30, 0, 301, 59, 1, 0, 0, 0, 302, 303, 5, 288, 0,
-		0, 303, 304, 5, 1126, 0, 0, 304, 305, 5, 1110, 0, 0, 305, 306, 5, 1127,
-		0, 0, 306, 61, 1, 0, 0, 0, 307, 308, 6, 31, -1, 0, 308, 309, 7, 4, 0, 0,
-		309, 319, 3, 62, 31, 4, 310, 311, 3, 64, 32, 0, 311, 313, 5, 87, 0, 0,
-		312, 314, 5, 113, 0, 0, 313, 312, 1, 0, 0, 0, 313, 314, 1, 0, 0, 0, 314,
-		315, 1, 0, 0, 0, 315, 316, 7, 5, 0, 0, 316, 319, 1, 0, 0, 0, 317, 319,
-		3, 64, 32, 0, 318, 307, 1, 0, 0, 0, 318, 310, 1, 0, 0, 0, 318, 317, 1,
-		0, 0, 0, 319, 326, 1, 0, 0, 0, 320, 321, 10, 3, 0, 0, 321, 322, 3, 72,
-		36, 0, 322, 323, 3, 62, 31, 4, 323, 325, 1, 0, 0, 0, 324, 320, 1, 0, 0,
-		0, 325, 328, 1, 0, 0, 0, 326, 324, 1, 0, 0, 0, 326, 327, 1, 0, 0, 0, 327,
-		63, 1, 0, 0, 0, 328, 326, 1, 0, 0, 0, 329, 332, 6, 32, -1, 0, 330, 331,
-		5, 1153, 0, 0, 331, 333, 5, 1101, 0, 0, 332, 330, 1, 0, 0, 0, 332, 333,
-		1, 0, 0, 0, 333, 334, 1, 0, 0, 0, 334, 335, 3, 66, 33, 0, 335, 351, 1,
-		0, 0, 0, 336, 337, 10, 2, 0, 0, 337, 338, 3, 70, 35, 0, 338, 339, 3, 64,
-		32, 3, 339, 350, 1, 0, 0, 0, 340, 342, 10, 3, 0, 0, 341, 343, 5, 113, 0,
-		0, 342, 341, 1, 0, 0, 0, 342, 343, 1, 0, 0, 0, 343, 344, 1, 0, 0, 0, 344,
-		345, 5, 79, 0, 0, 345, 346, 5, 1126, 0, 0, 346, 347, 3, 56, 28, 0, 347,
-		348, 5, 1127, 0, 0, 348, 350, 1, 0, 0, 0, 349, 336, 1, 0, 0, 0, 349, 340,
-		1, 0, 0, 0, 350, 353, 1, 0, 0, 0, 351, 349, 1, 0, 0, 0, 351, 352, 1, 0,
-		0, 0, 352, 65, 1, 0, 0, 0, 353, 351, 1, 0, 0, 0, 354, 371, 3, 54, 27, 0,
-		355, 371, 3, 36, 18, 0, 356, 357, 3, 68, 34, 0, 357, 358, 3, 66, 33, 0,
-		358, 371, 1, 0, 0, 0, 359, 360, 5, 1126, 0, 0, 360, 365, 3, 62, 31, 0,
-		361, 362, 5, 1128, 0, 0, 362, 364, 3, 62, 31, 0, 363, 361, 1, 0, 0, 0,
-		364, 367, 1, 0, 0, 0, 365, 363, 1, 0, 0, 0, 365, 366, 1, 0, 0, 0, 366,
-		368, 1, 0, 0, 0, 367, 365, 1, 0, 0, 0, 368, 369, 5, 1127, 0, 0, 369, 371,
-		1, 0, 0, 0, 370, 354, 1, 0, 0, 0, 370, 355, 1, 0, 0, 0, 370, 356, 1, 0,
-		0, 0, 370, 359, 1, 0, 0, 0, 371, 67, 1, 0, 0, 0, 372, 373, 7, 6, 0, 0,
-		373, 69, 1, 0, 0, 0, 374, 386, 5, 1117, 0, 0, 375, 386, 5, 1118, 0, 0,
-		376, 386, 5, 1119, 0, 0, 377, 378, 5, 1119, 0, 0, 378, 386, 5, 1117, 0,
-		0, 379, 380, 5, 1118, 0, 0, 380, 386, 5, 1117, 0, 0, 381, 382, 5, 1119,
-		0, 0, 382, 386, 5, 1118, 0, 0, 383, 384, 5, 1120, 0, 0, 384, 386, 5, 1117,
-		0, 0, 385, 374, 1, 0, 0, 0, 385, 375, 1, 0, 0, 0, 385, 376, 1, 0, 0, 0,
-		385, 377, 1, 0, 0, 0, 385, 379, 1, 0, 0, 0, 385, 381, 1, 0, 0, 0, 385,
-		383, 1, 0, 0, 0, 386, 71, 1, 0, 0, 0, 387, 394, 5, 10, 0, 0, 388, 389,
-		5, 1123, 0, 0, 389, 394, 5, 1123, 0, 0, 390, 394, 5, 122, 0, 0, 391, 392,
-		5, 1122, 0, 0, 392, 394, 5, 1122, 0, 0, 393, 387, 1, 0, 0, 0, 393, 388,
-		1, 0, 0, 0, 393, 390, 1, 0, 0, 0, 393, 391, 1, 0, 0, 0, 394, 73, 1, 0,
-		0, 0, 56, 75, 79, 86, 89, 92, 94, 100, 103, 106, 116, 124, 131, 140, 145,
-		148, 158, 162, 168, 173, 176, 180, 183, 185, 192, 198, 205, 213, 220, 222,
-		225, 229, 231, 235, 240, 247, 252, 256, 261, 264, 268, 272, 274, 279, 290,
-		297, 313, 318, 326, 332, 342, 349, 351, 365, 370, 385, 393,
+		36, 2, 37, 7, 37, 2, 38, 7, 38, 2, 39, 7, 39, 2, 40, 7, 40, 2, 41, 7, 41,
+		2, 42, 7, 42, 2, 43, 7, 43, 2, 44, 7, 44, 2, 45, 7, 45, 1, 0, 3, 0, 94,
+		8, 0, 1, 0, 1, 0, 3, 0, 98, 8, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 3, 1, 105,
+		8, 1, 1, 1, 3, 1, 108, 8, 1, 1, 1, 5, 1, 111, 8, 1, 10, 1, 12, 1, 114,
+		9, 1, 1, 1, 1, 1, 1, 1, 3, 1, 119, 8, 1, 1, 1, 3, 1, 122, 8, 1, 1, 1, 3,
+		1, 125, 8, 1, 1, 2, 1, 2, 1, 3, 1, 3, 1, 4, 1, 4, 1, 5, 1, 5, 3, 5, 135,
+		8, 5, 1, 6, 1, 6, 1, 6, 1, 6, 1, 6, 1, 6, 3, 6, 143, 8, 6, 1, 7, 1, 7,
+		1, 7, 5, 7, 148, 8, 7, 10, 7, 12, 7, 151, 9, 7, 1, 8, 1, 8, 1, 9, 1, 9,
+		5, 9, 157, 8, 9, 10, 9, 12, 9, 160, 9, 9, 1, 9, 1, 9, 3, 9, 164, 8, 9,
+		1, 9, 3, 9, 167, 8, 9, 1, 9, 3, 9, 170, 8, 9, 1, 10, 1, 10, 1, 10, 1, 10,
+		1, 10, 1, 10, 1, 10, 1, 10, 3, 10, 180, 8, 10, 1, 11, 1, 11, 3, 11, 184,
+		8, 11, 1, 11, 1, 11, 5, 11, 188, 8, 11, 10, 11, 12, 11, 191, 9, 11, 1,
+		12, 1, 12, 3, 12, 195, 8, 12, 1, 12, 3, 12, 198, 8, 12, 1, 12, 1, 12, 3,
+		12, 202, 8, 12, 1, 12, 3, 12, 205, 8, 12, 3, 12, 207, 8, 12, 1, 13, 1,
+		13, 1, 13, 1, 13, 1, 13, 3, 13, 214, 8, 13, 1, 14, 1, 14, 1, 14, 1, 14,
+		1, 14, 1, 14, 3, 14, 222, 8, 14, 1, 15, 1, 15, 1, 15, 1, 15, 5, 15, 228,
+		8, 15, 10, 15, 12, 15, 231, 9, 15, 3, 15, 233, 8, 15, 1, 15, 1, 15, 1,
+		16, 1, 16, 3, 16, 239, 8, 16, 1, 17, 1, 17, 1, 17, 1, 17, 1, 18, 1, 18,
+		1, 18, 1, 18, 5, 18, 249, 8, 18, 10, 18, 12, 18, 252, 9, 18, 3, 18, 254,
+		8, 18, 1, 18, 1, 18, 1, 19, 1, 19, 1, 19, 1, 19, 1, 20, 1, 20, 3, 20, 264,
+		8, 20, 1, 21, 1, 21, 1, 21, 1, 21, 3, 21, 270, 8, 21, 1, 21, 1, 21, 1,
+		21, 1, 21, 1, 21, 3, 21, 277, 8, 21, 1, 22, 1, 22, 1, 23, 1, 23, 1, 23,
+		1, 23, 3, 23, 285, 8, 23, 1, 24, 1, 24, 1, 25, 1, 25, 1, 25, 3, 25, 292,
+		8, 25, 3, 25, 294, 8, 25, 1, 25, 3, 25, 297, 8, 25, 1, 25, 1, 25, 3, 25,
+		301, 8, 25, 3, 25, 303, 8, 25, 1, 26, 1, 26, 3, 26, 307, 8, 26, 1, 27,
+		1, 27, 1, 27, 3, 27, 312, 8, 27, 1, 28, 1, 28, 1, 29, 1, 29, 1, 29, 3,
+		29, 319, 8, 29, 1, 30, 1, 30, 1, 31, 3, 31, 324, 8, 31, 1, 31, 1, 31, 3,
+		31, 328, 8, 31, 1, 31, 4, 31, 331, 8, 31, 11, 31, 12, 31, 332, 1, 31, 3,
+		31, 336, 8, 31, 1, 31, 1, 31, 3, 31, 340, 8, 31, 1, 31, 1, 31, 3, 31, 344,
+		8, 31, 3, 31, 346, 8, 31, 1, 32, 1, 32, 1, 33, 3, 33, 351, 8, 33, 1, 33,
+		1, 33, 1, 34, 1, 34, 1, 34, 1, 34, 1, 34, 1, 34, 1, 34, 1, 34, 3, 34, 363,
+		8, 34, 1, 35, 1, 35, 1, 35, 5, 35, 368, 8, 35, 10, 35, 12, 35, 371, 9,
+		35, 1, 36, 1, 36, 1, 37, 1, 37, 1, 37, 1, 37, 1, 37, 1, 38, 1, 38, 1, 38,
+		1, 38, 1, 38, 1, 38, 3, 38, 386, 8, 38, 1, 38, 1, 38, 1, 38, 3, 38, 391,
+		8, 38, 1, 38, 1, 38, 1, 38, 1, 38, 5, 38, 397, 8, 38, 10, 38, 12, 38, 400,
+		9, 38, 1, 39, 1, 39, 1, 39, 3, 39, 405, 8, 39, 1, 39, 1, 39, 1, 39, 1,
+		39, 1, 39, 1, 39, 1, 39, 1, 39, 3, 39, 415, 8, 39, 1, 39, 1, 39, 1, 39,
+		1, 39, 1, 39, 5, 39, 422, 8, 39, 10, 39, 12, 39, 425, 9, 39, 1, 40, 1,
+		40, 1, 40, 1, 40, 1, 40, 1, 40, 1, 40, 1, 40, 1, 40, 5, 40, 436, 8, 40,
+		10, 40, 12, 40, 439, 9, 40, 1, 40, 1, 40, 1, 40, 3, 40, 444, 8, 40, 1,
+		41, 1, 41, 1, 41, 1, 41, 5, 41, 450, 8, 41, 10, 41, 12, 41, 453, 9, 41,
+		3, 41, 455, 8, 41, 1, 41, 1, 41, 1, 42, 1, 42, 1, 42, 1, 42, 5, 42, 463,
+		8, 42, 10, 42, 12, 42, 466, 9, 42, 3, 42, 468, 8, 42, 1, 42, 1, 42, 1,
+		43, 1, 43, 1, 44, 1, 44, 1, 44, 1, 44, 1, 44, 1, 44, 1, 44, 1, 44, 1, 44,
+		1, 44, 1, 44, 3, 44, 485, 8, 44, 1, 45, 1, 45, 1, 45, 1, 45, 1, 45, 1,
+		45, 3, 45, 493, 8, 45, 1, 45, 0, 2, 76, 78, 46, 0, 2, 4, 6, 8, 10, 12,
+		14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,
+		50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84,
+		86, 88, 90, 0, 7, 2, 0, 6, 6, 49, 50, 1, 0, 627, 628, 3, 0, 1134, 1136,
+		1147, 1147, 1149, 1149, 2, 0, 62, 62, 176, 176, 2, 0, 113, 113, 1123, 1123,
+		3, 0, 62, 62, 176, 176, 663, 663, 3, 0, 113, 113, 1116, 1117, 1123, 1124,
+		540, 0, 93, 1, 0, 0, 0, 2, 112, 1, 0, 0, 0, 4, 126, 1, 0, 0, 0, 6, 128,
+		1, 0, 0, 0, 8, 130, 1, 0, 0, 0, 10, 132, 1, 0, 0, 0, 12, 142, 1, 0, 0,
+		0, 14, 144, 1, 0, 0, 0, 16, 152, 1, 0, 0, 0, 18, 154, 1, 0, 0, 0, 20, 179,
+		1, 0, 0, 0, 22, 183, 1, 0, 0, 0, 24, 206, 1, 0, 0, 0, 26, 208, 1, 0, 0,
+		0, 28, 215, 1, 0, 0, 0, 30, 223, 1, 0, 0, 0, 32, 238, 1, 0, 0, 0, 34, 240,
+		1, 0, 0, 0, 36, 244, 1, 0, 0, 0, 38, 257, 1, 0, 0, 0, 40, 263, 1, 0, 0,
+		0, 42, 265, 1, 0, 0, 0, 44, 278, 1, 0, 0, 0, 46, 280, 1, 0, 0, 0, 48, 286,
+		1, 0, 0, 0, 50, 302, 1, 0, 0, 0, 52, 306, 1, 0, 0, 0, 54, 311, 1, 0, 0,
+		0, 56, 313, 1, 0, 0, 0, 58, 318, 1, 0, 0, 0, 60, 320, 1, 0, 0, 0, 62, 345,
+		1, 0, 0, 0, 64, 347, 1, 0, 0, 0, 66, 350, 1, 0, 0, 0, 68, 362, 1, 0, 0,
+		0, 70, 364, 1, 0, 0, 0, 72, 372, 1, 0, 0, 0, 74, 374, 1, 0, 0, 0, 76, 390,
+		1, 0, 0, 0, 78, 401, 1, 0, 0, 0, 80, 443, 1, 0, 0, 0, 82, 445, 1, 0, 0,
+		0, 84, 458, 1, 0, 0, 0, 86, 471, 1, 0, 0, 0, 88, 484, 1, 0, 0, 0, 90, 492,
+		1, 0, 0, 0, 92, 94, 3, 2, 1, 0, 93, 92, 1, 0, 0, 0, 93, 94, 1, 0, 0, 0,
+		94, 97, 1, 0, 0, 0, 95, 96, 5, 1117, 0, 0, 96, 98, 5, 1117, 0, 0, 97, 95,
+		1, 0, 0, 0, 97, 98, 1, 0, 0, 0, 98, 99, 1, 0, 0, 0, 99, 100, 5, 0, 0, 1,
+		100, 1, 1, 0, 0, 0, 101, 104, 3, 4, 2, 0, 102, 103, 5, 1117, 0, 0, 103,
+		105, 5, 1117, 0, 0, 104, 102, 1, 0, 0, 0, 104, 105, 1, 0, 0, 0, 105, 107,
+		1, 0, 0, 0, 106, 108, 5, 1132, 0, 0, 107, 106, 1, 0, 0, 0, 107, 108, 1,
+		0, 0, 0, 108, 111, 1, 0, 0, 0, 109, 111, 3, 6, 3, 0, 110, 101, 1, 0, 0,
+		0, 110, 109, 1, 0, 0, 0, 111, 114, 1, 0, 0, 0, 112, 110, 1, 0, 0, 0, 112,
+		113, 1, 0, 0, 0, 113, 124, 1, 0, 0, 0, 114, 112, 1, 0, 0, 0, 115, 121,
+		3, 4, 2, 0, 116, 117, 5, 1117, 0, 0, 117, 119, 5, 1117, 0, 0, 118, 116,
+		1, 0, 0, 0, 118, 119, 1, 0, 0, 0, 119, 120, 1, 0, 0, 0, 120, 122, 5, 1132,
+		0, 0, 121, 118, 1, 0, 0, 0, 121, 122, 1, 0, 0, 0, 122, 125, 1, 0, 0, 0,
+		123, 125, 3, 6, 3, 0, 124, 115, 1, 0, 0, 0, 124, 123, 1, 0, 0, 0, 125,
+		3, 1, 0, 0, 0, 126, 127, 3, 8, 4, 0, 127, 5, 1, 0, 0, 0, 128, 129, 5, 1132,
+		0, 0, 129, 7, 1, 0, 0, 0, 130, 131, 3, 10, 5, 0, 131, 9, 1, 0, 0, 0, 132,
+		134, 3, 18, 9, 0, 133, 135, 3, 12, 6, 0, 134, 133, 1, 0, 0, 0, 134, 135,
+		1, 0, 0, 0, 135, 11, 1, 0, 0, 0, 136, 137, 5, 64, 0, 0, 137, 143, 5, 182,
+		0, 0, 138, 139, 5, 102, 0, 0, 139, 140, 5, 79, 0, 0, 140, 141, 5, 611,
+		0, 0, 141, 143, 5, 512, 0, 0, 142, 136, 1, 0, 0, 0, 142, 138, 1, 0, 0,
+		0, 143, 13, 1, 0, 0, 0, 144, 149, 3, 16, 8, 0, 145, 146, 5, 1131, 0, 0,
+		146, 148, 3, 16, 8, 0, 147, 145, 1, 0, 0, 0, 148, 151, 1, 0, 0, 0, 149,
+		147, 1, 0, 0, 0, 149, 150, 1, 0, 0, 0, 150, 15, 1, 0, 0, 0, 151, 149, 1,
+		0, 0, 0, 152, 153, 3, 48, 24, 0, 153, 17, 1, 0, 0, 0, 154, 158, 5, 151,
+		0, 0, 155, 157, 3, 20, 10, 0, 156, 155, 1, 0, 0, 0, 157, 160, 1, 0, 0,
+		0, 158, 156, 1, 0, 0, 0, 158, 159, 1, 0, 0, 0, 159, 161, 1, 0, 0, 0, 160,
+		158, 1, 0, 0, 0, 161, 163, 3, 22, 11, 0, 162, 164, 3, 26, 13, 0, 163, 162,
+		1, 0, 0, 0, 163, 164, 1, 0, 0, 0, 164, 166, 1, 0, 0, 0, 165, 167, 3, 28,
+		14, 0, 166, 165, 1, 0, 0, 0, 166, 167, 1, 0, 0, 0, 167, 169, 1, 0, 0, 0,
+		168, 170, 3, 42, 21, 0, 169, 168, 1, 0, 0, 0, 169, 170, 1, 0, 0, 0, 170,
+		19, 1, 0, 0, 0, 171, 180, 7, 0, 0, 0, 172, 180, 5, 74, 0, 0, 173, 180,
+		5, 169, 0, 0, 174, 180, 5, 164, 0, 0, 175, 180, 5, 162, 0, 0, 176, 180,
+		5, 626, 0, 0, 177, 180, 7, 1, 0, 0, 178, 180, 5, 163, 0, 0, 179, 171, 1,
+		0, 0, 0, 179, 172, 1, 0, 0, 0, 179, 173, 1, 0, 0, 0, 179, 174, 1, 0, 0,
+		0, 179, 175, 1, 0, 0, 0, 179, 176, 1, 0, 0, 0, 179, 177, 1, 0, 0, 0, 179,
+		178, 1, 0, 0, 0, 180, 21, 1, 0, 0, 0, 181, 184, 5, 1113, 0, 0, 182, 184,
+		3, 24, 12, 0, 183, 181, 1, 0, 0, 0, 183, 182, 1, 0, 0, 0, 184, 189, 1,
+		0, 0, 0, 185, 186, 5, 1131, 0, 0, 186, 188, 3, 24, 12, 0, 187, 185, 1,
+		0, 0, 0, 188, 191, 1, 0, 0, 0, 189, 187, 1, 0, 0, 0, 189, 190, 1, 0, 0,
+		0, 190, 23, 1, 0, 0, 0, 191, 189, 1, 0, 0, 0, 192, 197, 3, 50, 25, 0, 193,
+		195, 5, 12, 0, 0, 194, 193, 1, 0, 0, 0, 194, 195, 1, 0, 0, 0, 195, 196,
+		1, 0, 0, 0, 196, 198, 3, 54, 27, 0, 197, 194, 1, 0, 0, 0, 197, 198, 1,
+		0, 0, 0, 198, 207, 1, 0, 0, 0, 199, 204, 3, 72, 36, 0, 200, 202, 5, 12,
+		0, 0, 201, 200, 1, 0, 0, 0, 201, 202, 1, 0, 0, 0, 202, 203, 1, 0, 0, 0,
+		203, 205, 3, 54, 27, 0, 204, 201, 1, 0, 0, 0, 204, 205, 1, 0, 0, 0, 205,
+		207, 1, 0, 0, 0, 206, 192, 1, 0, 0, 0, 206, 199, 1, 0, 0, 0, 207, 25, 1,
+		0, 0, 0, 208, 209, 5, 67, 0, 0, 209, 210, 3, 14, 7, 0, 210, 213, 1, 0,
+		0, 0, 211, 212, 5, 188, 0, 0, 212, 214, 3, 76, 38, 0, 213, 211, 1, 0, 0,
+		0, 213, 214, 1, 0, 0, 0, 214, 27, 1, 0, 0, 0, 215, 216, 5, 194, 0, 0, 216,
+		217, 5, 19, 0, 0, 217, 218, 3, 50, 25, 0, 218, 219, 5, 195, 0, 0, 219,
+		221, 3, 30, 15, 0, 220, 222, 3, 34, 17, 0, 221, 220, 1, 0, 0, 0, 221, 222,
+		1, 0, 0, 0, 222, 29, 1, 0, 0, 0, 223, 232, 5, 1129, 0, 0, 224, 229, 3,
+		32, 16, 0, 225, 226, 5, 1131, 0, 0, 226, 228, 3, 32, 16, 0, 227, 225, 1,
+		0, 0, 0, 228, 231, 1, 0, 0, 0, 229, 227, 1, 0, 0, 0, 229, 230, 1, 0, 0,
+		0, 230, 233, 1, 0, 0, 0, 231, 229, 1, 0, 0, 0, 232, 224, 1, 0, 0, 0, 232,
+		233, 1, 0, 0, 0, 233, 234, 1, 0, 0, 0, 234, 235, 5, 1130, 0, 0, 235, 31,
+		1, 0, 0, 0, 236, 239, 3, 84, 42, 0, 237, 239, 5, 1151, 0, 0, 238, 236,
+		1, 0, 0, 0, 238, 237, 1, 0, 0, 0, 239, 33, 1, 0, 0, 0, 240, 241, 5, 196,
+		0, 0, 241, 242, 5, 1120, 0, 0, 242, 243, 3, 36, 18, 0, 243, 35, 1, 0, 0,
+		0, 244, 253, 5, 1129, 0, 0, 245, 250, 3, 38, 19, 0, 246, 247, 5, 1131,
+		0, 0, 247, 249, 3, 38, 19, 0, 248, 246, 1, 0, 0, 0, 249, 252, 1, 0, 0,
+		0, 250, 248, 1, 0, 0, 0, 250, 251, 1, 0, 0, 0, 251, 254, 1, 0, 0, 0, 252,
+		250, 1, 0, 0, 0, 253, 245, 1, 0, 0, 0, 253, 254, 1, 0, 0, 0, 254, 255,
+		1, 0, 0, 0, 255, 256, 5, 1130, 0, 0, 256, 37, 1, 0, 0, 0, 257, 258, 5,
+		1154, 0, 0, 258, 259, 5, 1120, 0, 0, 259, 260, 3, 40, 20, 0, 260, 39, 1,
+		0, 0, 0, 261, 264, 5, 1154, 0, 0, 262, 264, 3, 68, 34, 0, 263, 261, 1,
+		0, 0, 0, 263, 262, 1, 0, 0, 0, 264, 41, 1, 0, 0, 0, 265, 276, 5, 98, 0,
+		0, 266, 267, 3, 44, 22, 0, 267, 268, 5, 1131, 0, 0, 268, 270, 1, 0, 0,
+		0, 269, 266, 1, 0, 0, 0, 269, 270, 1, 0, 0, 0, 270, 271, 1, 0, 0, 0, 271,
+		277, 3, 44, 22, 0, 272, 273, 3, 44, 22, 0, 273, 274, 5, 533, 0, 0, 274,
+		275, 3, 44, 22, 0, 275, 277, 1, 0, 0, 0, 276, 269, 1, 0, 0, 0, 276, 272,
+		1, 0, 0, 0, 277, 43, 1, 0, 0, 0, 278, 279, 3, 60, 30, 0, 279, 45, 1, 0,
+		0, 0, 280, 284, 3, 54, 27, 0, 281, 285, 5, 1153, 0, 0, 282, 283, 5, 1128,
+		0, 0, 283, 285, 3, 54, 27, 0, 284, 281, 1, 0, 0, 0, 284, 282, 1, 0, 0,
+		0, 284, 285, 1, 0, 0, 0, 285, 47, 1, 0, 0, 0, 286, 287, 3, 46, 23, 0, 287,
+		49, 1, 0, 0, 0, 288, 293, 3, 54, 27, 0, 289, 291, 3, 58, 29, 0, 290, 292,
+		3, 58, 29, 0, 291, 290, 1, 0, 0, 0, 291, 292, 1, 0, 0, 0, 292, 294, 1,
+		0, 0, 0, 293, 289, 1, 0, 0, 0, 293, 294, 1, 0, 0, 0, 294, 303, 1, 0, 0,
+		0, 295, 297, 9, 0, 0, 0, 296, 295, 1, 0, 0, 0, 296, 297, 1, 0, 0, 0, 297,
+		298, 1, 0, 0, 0, 298, 300, 3, 58, 29, 0, 299, 301, 3, 58, 29, 0, 300, 299,
+		1, 0, 0, 0, 300, 301, 1, 0, 0, 0, 301, 303, 1, 0, 0, 0, 302, 288, 1, 0,
+		0, 0, 302, 296, 1, 0, 0, 0, 303, 51, 1, 0, 0, 0, 304, 307, 3, 54, 27, 0,
+		305, 307, 5, 1146, 0, 0, 306, 304, 1, 0, 0, 0, 306, 305, 1, 0, 0, 0, 307,
+		53, 1, 0, 0, 0, 308, 312, 3, 56, 28, 0, 309, 312, 5, 1155, 0, 0, 310, 312,
+		5, 1143, 0, 0, 311, 308, 1, 0, 0, 0, 311, 309, 1, 0, 0, 0, 311, 310, 1,
+		0, 0, 0, 312, 55, 1, 0, 0, 0, 313, 314, 5, 1154, 0, 0, 314, 57, 1, 0, 0,
+		0, 315, 319, 5, 1153, 0, 0, 316, 317, 5, 1128, 0, 0, 317, 319, 3, 54, 27,
+		0, 318, 315, 1, 0, 0, 0, 318, 316, 1, 0, 0, 0, 319, 59, 1, 0, 0, 0, 320,
+		321, 7, 2, 0, 0, 321, 61, 1, 0, 0, 0, 322, 324, 5, 1152, 0, 0, 323, 322,
+		1, 0, 0, 0, 323, 324, 1, 0, 0, 0, 324, 325, 1, 0, 0, 0, 325, 328, 5, 1146,
+		0, 0, 326, 328, 5, 1145, 0, 0, 327, 323, 1, 0, 0, 0, 327, 326, 1, 0, 0,
+		0, 328, 330, 1, 0, 0, 0, 329, 331, 5, 1146, 0, 0, 330, 329, 1, 0, 0, 0,
+		331, 332, 1, 0, 0, 0, 332, 330, 1, 0, 0, 0, 332, 333, 1, 0, 0, 0, 333,
+		346, 1, 0, 0, 0, 334, 336, 5, 1152, 0, 0, 335, 334, 1, 0, 0, 0, 335, 336,
+		1, 0, 0, 0, 336, 337, 1, 0, 0, 0, 337, 340, 5, 1146, 0, 0, 338, 340, 5,
+		1145, 0, 0, 339, 335, 1, 0, 0, 0, 339, 338, 1, 0, 0, 0, 340, 343, 1, 0,
+		0, 0, 341, 342, 5, 27, 0, 0, 342, 344, 3, 52, 26, 0, 343, 341, 1, 0, 0,
+		0, 343, 344, 1, 0, 0, 0, 344, 346, 1, 0, 0, 0, 345, 327, 1, 0, 0, 0, 345,
+		339, 1, 0, 0, 0, 346, 63, 1, 0, 0, 0, 347, 348, 7, 3, 0, 0, 348, 65, 1,
+		0, 0, 0, 349, 351, 5, 1152, 0, 0, 350, 349, 1, 0, 0, 0, 350, 351, 1, 0,
+		0, 0, 351, 352, 1, 0, 0, 0, 352, 353, 5, 1148, 0, 0, 353, 67, 1, 0, 0,
+		0, 354, 363, 3, 62, 31, 0, 355, 363, 3, 60, 30, 0, 356, 357, 5, 1117, 0,
+		0, 357, 363, 3, 60, 30, 0, 358, 363, 3, 66, 33, 0, 359, 363, 3, 64, 32,
+		0, 360, 363, 5, 1149, 0, 0, 361, 363, 5, 1151, 0, 0, 362, 354, 1, 0, 0,
+		0, 362, 355, 1, 0, 0, 0, 362, 356, 1, 0, 0, 0, 362, 358, 1, 0, 0, 0, 362,
+		359, 1, 0, 0, 0, 362, 360, 1, 0, 0, 0, 362, 361, 1, 0, 0, 0, 363, 69, 1,
+		0, 0, 0, 364, 369, 3, 76, 38, 0, 365, 366, 5, 1131, 0, 0, 366, 368, 3,
+		76, 38, 0, 367, 365, 1, 0, 0, 0, 368, 371, 1, 0, 0, 0, 369, 367, 1, 0,
+		0, 0, 369, 370, 1, 0, 0, 0, 370, 71, 1, 0, 0, 0, 371, 369, 1, 0, 0, 0,
+		372, 373, 3, 74, 37, 0, 373, 73, 1, 0, 0, 0, 374, 375, 5, 291, 0, 0, 375,
+		376, 5, 1129, 0, 0, 376, 377, 5, 1113, 0, 0, 377, 378, 5, 1130, 0, 0, 378,
+		75, 1, 0, 0, 0, 379, 380, 6, 38, -1, 0, 380, 381, 7, 4, 0, 0, 381, 391,
+		3, 76, 38, 4, 382, 383, 3, 78, 39, 0, 383, 385, 5, 87, 0, 0, 384, 386,
+		5, 113, 0, 0, 385, 384, 1, 0, 0, 0, 385, 386, 1, 0, 0, 0, 386, 387, 1,
+		0, 0, 0, 387, 388, 7, 5, 0, 0, 388, 391, 1, 0, 0, 0, 389, 391, 3, 78, 39,
+		0, 390, 379, 1, 0, 0, 0, 390, 382, 1, 0, 0, 0, 390, 389, 1, 0, 0, 0, 391,
+		398, 1, 0, 0, 0, 392, 393, 10, 3, 0, 0, 393, 394, 3, 90, 45, 0, 394, 395,
+		3, 76, 38, 4, 395, 397, 1, 0, 0, 0, 396, 392, 1, 0, 0, 0, 397, 400, 1,
+		0, 0, 0, 398, 396, 1, 0, 0, 0, 398, 399, 1, 0, 0, 0, 399, 77, 1, 0, 0,
+		0, 400, 398, 1, 0, 0, 0, 401, 404, 6, 39, -1, 0, 402, 403, 5, 1158, 0,
+		0, 403, 405, 5, 1104, 0, 0, 404, 402, 1, 0, 0, 0, 404, 405, 1, 0, 0, 0,
+		405, 406, 1, 0, 0, 0, 406, 407, 3, 80, 40, 0, 407, 423, 1, 0, 0, 0, 408,
+		409, 10, 2, 0, 0, 409, 410, 3, 88, 44, 0, 410, 411, 3, 78, 39, 3, 411,
+		422, 1, 0, 0, 0, 412, 414, 10, 3, 0, 0, 413, 415, 5, 113, 0, 0, 414, 413,
+		1, 0, 0, 0, 414, 415, 1, 0, 0, 0, 415, 416, 1, 0, 0, 0, 416, 417, 5, 79,
+		0, 0, 417, 418, 5, 1129, 0, 0, 418, 419, 3, 70, 35, 0, 419, 420, 5, 1130,
+		0, 0, 420, 422, 1, 0, 0, 0, 421, 408, 1, 0, 0, 0, 421, 412, 1, 0, 0, 0,
+		422, 425, 1, 0, 0, 0, 423, 421, 1, 0, 0, 0, 423, 424, 1, 0, 0, 0, 424,
+		79, 1, 0, 0, 0, 425, 423, 1, 0, 0, 0, 426, 444, 3, 68, 34, 0, 427, 444,
+		3, 50, 25, 0, 428, 429, 3, 86, 43, 0, 429, 430, 3, 80, 40, 0, 430, 444,
+		1, 0, 0, 0, 431, 432, 5, 1129, 0, 0, 432, 437, 3, 76, 38, 0, 433, 434,
+		5, 1131, 0, 0, 434, 436, 3, 76, 38, 0, 435, 433, 1, 0, 0, 0, 436, 439,
+		1, 0, 0, 0, 437, 435, 1, 0, 0, 0, 437, 438, 1, 0, 0, 0, 438, 440, 1, 0,
+		0, 0, 439, 437, 1, 0, 0, 0, 440, 441, 5, 1130, 0, 0, 441, 444, 1, 0, 0,
+		0, 442, 444, 3, 82, 41, 0, 443, 426, 1, 0, 0, 0, 443, 427, 1, 0, 0, 0,
+		443, 428, 1, 0, 0, 0, 443, 431, 1, 0, 0, 0, 443, 442, 1, 0, 0, 0, 444,
+		81, 1, 0, 0, 0, 445, 454, 5, 1141, 0, 0, 446, 451, 3, 76, 38, 0, 447, 448,
+		5, 1131, 0, 0, 448, 450, 3, 76, 38, 0, 449, 447, 1, 0, 0, 0, 450, 453,
+		1, 0, 0, 0, 451, 449, 1, 0, 0, 0, 451, 452, 1, 0, 0, 0, 452, 455, 1, 0,
+		0, 0, 453, 451, 1, 0, 0, 0, 454, 446, 1, 0, 0, 0, 454, 455, 1, 0, 0, 0,
+		455, 456, 1, 0, 0, 0, 456, 457, 5, 1142, 0, 0, 457, 83, 1, 0, 0, 0, 458,
+		467, 5, 1141, 0, 0, 459, 464, 3, 60, 30, 0, 460, 461, 5, 1131, 0, 0, 461,
+		463, 3, 60, 30, 0, 462, 460, 1, 0, 0, 0, 463, 466, 1, 0, 0, 0, 464, 462,
+		1, 0, 0, 0, 464, 465, 1, 0, 0, 0, 465, 468, 1, 0, 0, 0, 466, 464, 1, 0,
+		0, 0, 467, 459, 1, 0, 0, 0, 467, 468, 1, 0, 0, 0, 468, 469, 1, 0, 0, 0,
+		469, 470, 5, 1142, 0, 0, 470, 85, 1, 0, 0, 0, 471, 472, 7, 6, 0, 0, 472,
+		87, 1, 0, 0, 0, 473, 485, 5, 1120, 0, 0, 474, 485, 5, 1121, 0, 0, 475,
+		485, 5, 1122, 0, 0, 476, 477, 5, 1122, 0, 0, 477, 485, 5, 1120, 0, 0, 478,
+		479, 5, 1121, 0, 0, 479, 485, 5, 1120, 0, 0, 480, 481, 5, 1122, 0, 0, 481,
+		485, 5, 1121, 0, 0, 482, 483, 5, 1123, 0, 0, 483, 485, 5, 1120, 0, 0, 484,
+		473, 1, 0, 0, 0, 484, 474, 1, 0, 0, 0, 484, 475, 1, 0, 0, 0, 484, 476,
+		1, 0, 0, 0, 484, 478, 1, 0, 0, 0, 484, 480, 1, 0, 0, 0, 484, 482, 1, 0,
+		0, 0, 485, 89, 1, 0, 0, 0, 486, 493, 5, 10, 0, 0, 487, 488, 5, 1126, 0,
+		0, 488, 493, 5, 1126, 0, 0, 489, 493, 5, 122, 0, 0, 490, 491, 5, 1125,
+		0, 0, 491, 493, 5, 1125, 0, 0, 492, 486, 1, 0, 0, 0, 492, 487, 1, 0, 0,
+		0, 492, 489, 1, 0, 0, 0, 492, 490, 1, 0, 0, 0, 493, 91, 1, 0, 0, 0, 68,
+		93, 97, 104, 107, 110, 112, 118, 121, 124, 134, 142, 149, 158, 163, 166,
+		169, 179, 183, 189, 194, 197, 201, 204, 206, 213, 221, 229, 232, 238, 250,
+		253, 263, 269, 276, 284, 291, 293, 296, 300, 302, 306, 311, 318, 323, 327,
+		332, 335, 339, 343, 345, 350, 362, 369, 385, 390, 398, 404, 414, 421, 423,
+		437, 443, 451, 454, 464, 467, 484, 492,
 	}
 	deserializer := antlr.NewATNDeserializer(nil)
 	staticData.atn = deserializer.Deserialize(staticData.serializedATN)
@@ -882,968 +930,973 @@ const (
 	MySqlParserWRITE                             = 191
 	MySqlParserXOR                               = 192
 	MySqlParserZEROFILL                          = 193
-	MySqlParserTINYINT                           = 194
-	MySqlParserSMALLINT                          = 195
-	MySqlParserMEDIUMINT                         = 196
-	MySqlParserMIDDLEINT                         = 197
-	MySqlParserINT                               = 198
-	MySqlParserINT1                              = 199
-	MySqlParserINT2                              = 200
-	MySqlParserINT3                              = 201
-	MySqlParserINT4                              = 202
-	MySqlParserINT8                              = 203
-	MySqlParserINTEGER                           = 204
-	MySqlParserBIGINT                            = 205
-	MySqlParserREAL                              = 206
-	MySqlParserDOUBLE                            = 207
-	MySqlParserPRECISION                         = 208
-	MySqlParserFLOAT                             = 209
-	MySqlParserFLOAT4                            = 210
-	MySqlParserFLOAT8                            = 211
-	MySqlParserDECIMAL                           = 212
-	MySqlParserDEC                               = 213
-	MySqlParserNUMERIC                           = 214
-	MySqlParserDATE                              = 215
-	MySqlParserTIME                              = 216
-	MySqlParserTIMESTAMP                         = 217
-	MySqlParserDATETIME                          = 218
-	MySqlParserYEAR                              = 219
-	MySqlParserCHAR                              = 220
-	MySqlParserVARCHAR                           = 221
-	MySqlParserNVARCHAR                          = 222
-	MySqlParserNATIONAL                          = 223
-	MySqlParserBINARY                            = 224
-	MySqlParserVARBINARY                         = 225
-	MySqlParserTINYBLOB                          = 226
-	MySqlParserBLOB                              = 227
-	MySqlParserMEDIUMBLOB                        = 228
-	MySqlParserLONG                              = 229
-	MySqlParserLONGBLOB                          = 230
-	MySqlParserTINYTEXT                          = 231
-	MySqlParserTEXT                              = 232
-	MySqlParserMEDIUMTEXT                        = 233
-	MySqlParserLONGTEXT                          = 234
-	MySqlParserENUM                              = 235
-	MySqlParserVARYING                           = 236
-	MySqlParserSERIAL                            = 237
-	MySqlParserYEAR_MONTH                        = 238
-	MySqlParserDAY_HOUR                          = 239
-	MySqlParserDAY_MINUTE                        = 240
-	MySqlParserDAY_SECOND                        = 241
-	MySqlParserHOUR_MINUTE                       = 242
-	MySqlParserHOUR_SECOND                       = 243
-	MySqlParserMINUTE_SECOND                     = 244
-	MySqlParserSECOND_MICROSECOND                = 245
-	MySqlParserMINUTE_MICROSECOND                = 246
-	MySqlParserHOUR_MICROSECOND                  = 247
-	MySqlParserDAY_MICROSECOND                   = 248
-	MySqlParserJSON_ARRAY                        = 249
-	MySqlParserJSON_ARRAYAGG                     = 250
-	MySqlParserJSON_ARRAY_APPEND                 = 251
-	MySqlParserJSON_ARRAY_INSERT                 = 252
-	MySqlParserJSON_CONTAINS                     = 253
-	MySqlParserJSON_CONTAINS_PATH                = 254
-	MySqlParserJSON_DEPTH                        = 255
-	MySqlParserJSON_EXTRACT                      = 256
-	MySqlParserJSON_INSERT                       = 257
-	MySqlParserJSON_KEYS                         = 258
-	MySqlParserJSON_LENGTH                       = 259
-	MySqlParserJSON_MERGE                        = 260
-	MySqlParserJSON_MERGE_PATCH                  = 261
-	MySqlParserJSON_MERGE_PRESERVE               = 262
-	MySqlParserJSON_OBJECT                       = 263
-	MySqlParserJSON_OBJECTAGG                    = 264
-	MySqlParserJSON_OVERLAPS                     = 265
-	MySqlParserJSON_PRETTY                       = 266
-	MySqlParserJSON_QUOTE                        = 267
-	MySqlParserJSON_REMOVE                       = 268
-	MySqlParserJSON_REPLACE                      = 269
-	MySqlParserJSON_SCHEMA_VALID                 = 270
-	MySqlParserJSON_SCHEMA_VALIDATION_REPORT     = 271
-	MySqlParserJSON_SEARCH                       = 272
-	MySqlParserJSON_SET                          = 273
-	MySqlParserJSON_STORAGE_FREE                 = 274
-	MySqlParserJSON_STORAGE_SIZE                 = 275
-	MySqlParserJSON_TABLE                        = 276
-	MySqlParserJSON_TYPE                         = 277
-	MySqlParserJSON_UNQUOTE                      = 278
-	MySqlParserJSON_VALID                        = 279
-	MySqlParserJSON_VALUE                        = 280
-	MySqlParserNESTED                            = 281
-	MySqlParserORDINALITY                        = 282
-	MySqlParserPATH                              = 283
-	MySqlParserAVG                               = 284
-	MySqlParserBIT_AND                           = 285
-	MySqlParserBIT_OR                            = 286
-	MySqlParserBIT_XOR                           = 287
-	MySqlParserCOUNT                             = 288
-	MySqlParserCUME_DIST                         = 289
-	MySqlParserDENSE_RANK                        = 290
-	MySqlParserFIRST_VALUE                       = 291
-	MySqlParserGROUP_CONCAT                      = 292
-	MySqlParserLAG                               = 293
-	MySqlParserLAST_VALUE                        = 294
-	MySqlParserLEAD                              = 295
-	MySqlParserMAX                               = 296
-	MySqlParserMIN                               = 297
-	MySqlParserNTILE                             = 298
-	MySqlParserNTH_VALUE                         = 299
-	MySqlParserPERCENT_RANK                      = 300
-	MySqlParserRANK                              = 301
-	MySqlParserROW_NUMBER                        = 302
-	MySqlParserSTD                               = 303
-	MySqlParserSTDDEV                            = 304
-	MySqlParserSTDDEV_POP                        = 305
-	MySqlParserSTDDEV_SAMP                       = 306
-	MySqlParserSUM                               = 307
-	MySqlParserVAR_POP                           = 308
-	MySqlParserVAR_SAMP                          = 309
-	MySqlParserVARIANCE                          = 310
-	MySqlParserCURRENT_DATE                      = 311
-	MySqlParserCURRENT_TIME                      = 312
-	MySqlParserCURRENT_TIMESTAMP                 = 313
-	MySqlParserLOCALTIME                         = 314
-	MySqlParserCURDATE                           = 315
-	MySqlParserCURTIME                           = 316
-	MySqlParserDATE_ADD                          = 317
-	MySqlParserDATE_SUB                          = 318
-	MySqlParserEXTRACT                           = 319
-	MySqlParserLOCALTIMESTAMP                    = 320
-	MySqlParserNOW                               = 321
-	MySqlParserPOSITION                          = 322
-	MySqlParserSUBSTR                            = 323
-	MySqlParserSUBSTRING                         = 324
-	MySqlParserSYSDATE                           = 325
-	MySqlParserTRIM                              = 326
-	MySqlParserUTC_DATE                          = 327
-	MySqlParserUTC_TIME                          = 328
-	MySqlParserUTC_TIMESTAMP                     = 329
-	MySqlParserACCOUNT                           = 330
-	MySqlParserACTION                            = 331
-	MySqlParserAFTER                             = 332
-	MySqlParserAGGREGATE                         = 333
-	MySqlParserALGORITHM                         = 334
-	MySqlParserANY                               = 335
-	MySqlParserAT                                = 336
-	MySqlParserAUTHORS                           = 337
-	MySqlParserAUTOCOMMIT                        = 338
-	MySqlParserAUTOEXTEND_SIZE                   = 339
-	MySqlParserAUTO_INCREMENT                    = 340
-	MySqlParserAVG_ROW_LENGTH                    = 341
-	MySqlParserBEGIN                             = 342
-	MySqlParserBINLOG                            = 343
-	MySqlParserBIT                               = 344
-	MySqlParserBLOCK                             = 345
-	MySqlParserBOOL                              = 346
-	MySqlParserBOOLEAN                           = 347
-	MySqlParserBTREE                             = 348
-	MySqlParserCACHE                             = 349
-	MySqlParserCASCADED                          = 350
-	MySqlParserCHAIN                             = 351
-	MySqlParserCHANGED                           = 352
-	MySqlParserCHANNEL                           = 353
-	MySqlParserCHECKSUM                          = 354
-	MySqlParserPAGE_CHECKSUM                     = 355
-	MySqlParserCIPHER                            = 356
-	MySqlParserCLASS_ORIGIN                      = 357
-	MySqlParserCLIENT                            = 358
-	MySqlParserCLOSE                             = 359
-	MySqlParserCLUSTERING                        = 360
-	MySqlParserCOALESCE                          = 361
-	MySqlParserCODE                              = 362
-	MySqlParserCOLUMNS                           = 363
-	MySqlParserCOLUMN_FORMAT                     = 364
-	MySqlParserCOLUMN_NAME                       = 365
-	MySqlParserCOMMENT                           = 366
-	MySqlParserCOMMIT                            = 367
-	MySqlParserCOMPACT                           = 368
-	MySqlParserCOMPLETION                        = 369
-	MySqlParserCOMPRESSED                        = 370
-	MySqlParserCOMPRESSION                       = 371
-	MySqlParserCONCURRENT                        = 372
-	MySqlParserCONNECT                           = 373
-	MySqlParserCONNECTION                        = 374
-	MySqlParserCONSISTENT                        = 375
-	MySqlParserCONSTRAINT_CATALOG                = 376
-	MySqlParserCONSTRAINT_SCHEMA                 = 377
-	MySqlParserCONSTRAINT_NAME                   = 378
-	MySqlParserCONTAINS                          = 379
-	MySqlParserCONTEXT                           = 380
-	MySqlParserCONTRIBUTORS                      = 381
-	MySqlParserCOPY                              = 382
-	MySqlParserCPU                               = 383
-	MySqlParserCYCLE                             = 384
-	MySqlParserCURSOR_NAME                       = 385
-	MySqlParserDATA                              = 386
-	MySqlParserDATAFILE                          = 387
-	MySqlParserDEALLOCATE                        = 388
-	MySqlParserDEFAULT_AUTH                      = 389
-	MySqlParserDEFINER                           = 390
-	MySqlParserDELAY_KEY_WRITE                   = 391
-	MySqlParserDES_KEY_FILE                      = 392
-	MySqlParserDIRECTORY                         = 393
-	MySqlParserDISABLE                           = 394
-	MySqlParserDISCARD                           = 395
-	MySqlParserDISK                              = 396
-	MySqlParserDO                                = 397
-	MySqlParserDUMPFILE                          = 398
-	MySqlParserDUPLICATE                         = 399
-	MySqlParserDYNAMIC                           = 400
-	MySqlParserENABLE                            = 401
-	MySqlParserENCRYPTED                         = 402
-	MySqlParserENCRYPTION                        = 403
-	MySqlParserENCRYPTION_KEY_ID                 = 404
-	MySqlParserEND                               = 405
-	MySqlParserENDS                              = 406
-	MySqlParserENGINE                            = 407
-	MySqlParserENGINES                           = 408
-	MySqlParserERROR                             = 409
-	MySqlParserERRORS                            = 410
-	MySqlParserESCAPE                            = 411
-	MySqlParserEVEN                              = 412
-	MySqlParserEVENT                             = 413
-	MySqlParserEVENTS                            = 414
-	MySqlParserEVERY                             = 415
-	MySqlParserEXCHANGE                          = 416
-	MySqlParserEXCLUSIVE                         = 417
-	MySqlParserEXPIRE                            = 418
-	MySqlParserEXPORT                            = 419
-	MySqlParserEXTENDED                          = 420
-	MySqlParserEXTENT_SIZE                       = 421
-	MySqlParserFAILED_LOGIN_ATTEMPTS             = 422
-	MySqlParserFAST                              = 423
-	MySqlParserFAULTS                            = 424
-	MySqlParserFIELDS                            = 425
-	MySqlParserFILE_BLOCK_SIZE                   = 426
-	MySqlParserFILTER                            = 427
-	MySqlParserFIRST                             = 428
-	MySqlParserFIXED                             = 429
-	MySqlParserFLUSH                             = 430
-	MySqlParserFOLLOWING                         = 431
-	MySqlParserFOLLOWS                           = 432
-	MySqlParserFOUND                             = 433
-	MySqlParserFULL                              = 434
-	MySqlParserFUNCTION                          = 435
-	MySqlParserGENERAL                           = 436
-	MySqlParserGLOBAL                            = 437
-	MySqlParserGRANTS                            = 438
-	MySqlParserGROUP_REPLICATION                 = 439
-	MySqlParserHANDLER                           = 440
-	MySqlParserHASH                              = 441
-	MySqlParserHELP                              = 442
-	MySqlParserHISTORY                           = 443
-	MySqlParserHOST                              = 444
-	MySqlParserHOSTS                             = 445
-	MySqlParserIDENTIFIED                        = 446
-	MySqlParserIGNORE_SERVER_IDS                 = 447
-	MySqlParserIMPORT                            = 448
-	MySqlParserINCREMENT                         = 449
-	MySqlParserINDEXES                           = 450
-	MySqlParserINITIAL_SIZE                      = 451
-	MySqlParserINPLACE                           = 452
-	MySqlParserINSERT_METHOD                     = 453
-	MySqlParserINSTALL                           = 454
-	MySqlParserINSTANCE                          = 455
-	MySqlParserINSTANT                           = 456
-	MySqlParserINVISIBLE                         = 457
-	MySqlParserINVOKER                           = 458
-	MySqlParserIO                                = 459
-	MySqlParserIO_THREAD                         = 460
-	MySqlParserIPC                               = 461
-	MySqlParserISOLATION                         = 462
-	MySqlParserISSUER                            = 463
-	MySqlParserJSON                              = 464
-	MySqlParserKEY_BLOCK_SIZE                    = 465
-	MySqlParserLANGUAGE                          = 466
-	MySqlParserLAST                              = 467
-	MySqlParserLEAVES                            = 468
-	MySqlParserLESS                              = 469
-	MySqlParserLEVEL                             = 470
-	MySqlParserLIST                              = 471
-	MySqlParserLOCAL                             = 472
-	MySqlParserLOGFILE                           = 473
-	MySqlParserLOGS                              = 474
-	MySqlParserMASTER                            = 475
-	MySqlParserMASTER_AUTO_POSITION              = 476
-	MySqlParserMASTER_CONNECT_RETRY              = 477
-	MySqlParserMASTER_DELAY                      = 478
-	MySqlParserMASTER_HEARTBEAT_PERIOD           = 479
-	MySqlParserMASTER_HOST                       = 480
-	MySqlParserMASTER_LOG_FILE                   = 481
-	MySqlParserMASTER_LOG_POS                    = 482
-	MySqlParserMASTER_PASSWORD                   = 483
-	MySqlParserMASTER_PORT                       = 484
-	MySqlParserMASTER_RETRY_COUNT                = 485
-	MySqlParserMASTER_SSL                        = 486
-	MySqlParserMASTER_SSL_CA                     = 487
-	MySqlParserMASTER_SSL_CAPATH                 = 488
-	MySqlParserMASTER_SSL_CERT                   = 489
-	MySqlParserMASTER_SSL_CIPHER                 = 490
-	MySqlParserMASTER_SSL_CRL                    = 491
-	MySqlParserMASTER_SSL_CRLPATH                = 492
-	MySqlParserMASTER_SSL_KEY                    = 493
-	MySqlParserMASTER_TLS_VERSION                = 494
-	MySqlParserMASTER_USER                       = 495
-	MySqlParserMAX_CONNECTIONS_PER_HOUR          = 496
-	MySqlParserMAX_QUERIES_PER_HOUR              = 497
-	MySqlParserMAX_ROWS                          = 498
-	MySqlParserMAX_SIZE                          = 499
-	MySqlParserMAX_UPDATES_PER_HOUR              = 500
-	MySqlParserMAX_USER_CONNECTIONS              = 501
-	MySqlParserMEDIUM                            = 502
-	MySqlParserMEMBER                            = 503
-	MySqlParserMERGE                             = 504
-	MySqlParserMESSAGE_TEXT                      = 505
-	MySqlParserMID                               = 506
-	MySqlParserMIGRATE                           = 507
-	MySqlParserMIN_ROWS                          = 508
-	MySqlParserMODE                              = 509
-	MySqlParserMODIFY                            = 510
-	MySqlParserMUTEX                             = 511
-	MySqlParserMYSQL                             = 512
-	MySqlParserMYSQL_ERRNO                       = 513
-	MySqlParserNAME                              = 514
-	MySqlParserNAMES                             = 515
-	MySqlParserNCHAR                             = 516
-	MySqlParserNEVER                             = 517
-	MySqlParserNEXT                              = 518
-	MySqlParserNO                                = 519
-	MySqlParserNOCACHE                           = 520
-	MySqlParserNOCOPY                            = 521
-	MySqlParserNOCYCLE                           = 522
-	MySqlParserNOMAXVALUE                        = 523
-	MySqlParserNOMINVALUE                        = 524
-	MySqlParserNOWAIT                            = 525
-	MySqlParserNODEGROUP                         = 526
-	MySqlParserNONE                              = 527
-	MySqlParserODBC                              = 528
-	MySqlParserOFFLINE                           = 529
-	MySqlParserOFFSET                            = 530
-	MySqlParserOF                                = 531
-	MySqlParserOJ                                = 532
-	MySqlParserOLD_PASSWORD                      = 533
-	MySqlParserONE                               = 534
-	MySqlParserONLINE                            = 535
-	MySqlParserONLY                              = 536
-	MySqlParserOPEN                              = 537
-	MySqlParserOPTIMIZER_COSTS                   = 538
-	MySqlParserOPTIONS                           = 539
-	MySqlParserOWNER                             = 540
-	MySqlParserPACK_KEYS                         = 541
-	MySqlParserPAGE                              = 542
-	MySqlParserPAGE_COMPRESSED                   = 543
-	MySqlParserPAGE_COMPRESSION_LEVEL            = 544
-	MySqlParserPARSER                            = 545
-	MySqlParserPARTIAL                           = 546
-	MySqlParserPARTITIONING                      = 547
-	MySqlParserPARTITIONS                        = 548
-	MySqlParserPASSWORD                          = 549
-	MySqlParserPASSWORD_LOCK_TIME                = 550
-	MySqlParserPHASE                             = 551
-	MySqlParserPLUGIN                            = 552
-	MySqlParserPLUGIN_DIR                        = 553
-	MySqlParserPLUGINS                           = 554
-	MySqlParserPORT                              = 555
-	MySqlParserPRECEDES                          = 556
-	MySqlParserPRECEDING                         = 557
-	MySqlParserPREPARE                           = 558
-	MySqlParserPRESERVE                          = 559
-	MySqlParserPREV                              = 560
-	MySqlParserPROCESSLIST                       = 561
-	MySqlParserPROFILE                           = 562
-	MySqlParserPROFILES                          = 563
-	MySqlParserPROXY                             = 564
-	MySqlParserQUERY                             = 565
-	MySqlParserQUICK                             = 566
-	MySqlParserREBUILD                           = 567
-	MySqlParserRECOVER                           = 568
-	MySqlParserRECURSIVE                         = 569
-	MySqlParserREDO_BUFFER_SIZE                  = 570
-	MySqlParserREDUNDANT                         = 571
-	MySqlParserRELAY                             = 572
-	MySqlParserRELAY_LOG_FILE                    = 573
-	MySqlParserRELAY_LOG_POS                     = 574
-	MySqlParserRELAYLOG                          = 575
-	MySqlParserREMOVE                            = 576
-	MySqlParserREORGANIZE                        = 577
-	MySqlParserREPAIR                            = 578
-	MySqlParserREPLICATE_DO_DB                   = 579
-	MySqlParserREPLICATE_DO_TABLE                = 580
-	MySqlParserREPLICATE_IGNORE_DB               = 581
-	MySqlParserREPLICATE_IGNORE_TABLE            = 582
-	MySqlParserREPLICATE_REWRITE_DB              = 583
-	MySqlParserREPLICATE_WILD_DO_TABLE           = 584
-	MySqlParserREPLICATE_WILD_IGNORE_TABLE       = 585
-	MySqlParserREPLICATION                       = 586
-	MySqlParserRESET                             = 587
-	MySqlParserRESTART                           = 588
-	MySqlParserRESUME                            = 589
-	MySqlParserRETURNED_SQLSTATE                 = 590
-	MySqlParserRETURNING                         = 591
-	MySqlParserRETURNS                           = 592
-	MySqlParserREUSE                             = 593
-	MySqlParserROLE                              = 594
-	MySqlParserROLLBACK                          = 595
-	MySqlParserROLLUP                            = 596
-	MySqlParserROTATE                            = 597
-	MySqlParserROW                               = 598
-	MySqlParserROWS                              = 599
-	MySqlParserROW_FORMAT                        = 600
-	MySqlParserRTREE                             = 601
-	MySqlParserSAVEPOINT                         = 602
-	MySqlParserSCHEDULE                          = 603
-	MySqlParserSECURITY                          = 604
-	MySqlParserSEQUENCE                          = 605
-	MySqlParserSERVER                            = 606
-	MySqlParserSESSION                           = 607
-	MySqlParserSHARE                             = 608
-	MySqlParserSHARED                            = 609
-	MySqlParserSIGNED                            = 610
-	MySqlParserSIMPLE                            = 611
-	MySqlParserSLAVE                             = 612
-	MySqlParserSLOW                              = 613
-	MySqlParserSNAPSHOT                          = 614
-	MySqlParserSOCKET                            = 615
-	MySqlParserSOME                              = 616
-	MySqlParserSONAME                            = 617
-	MySqlParserSOUNDS                            = 618
-	MySqlParserSOURCE                            = 619
-	MySqlParserSQL_AFTER_GTIDS                   = 620
-	MySqlParserSQL_AFTER_MTS_GAPS                = 621
-	MySqlParserSQL_BEFORE_GTIDS                  = 622
-	MySqlParserSQL_BUFFER_RESULT                 = 623
-	MySqlParserSQL_CACHE                         = 624
-	MySqlParserSQL_NO_CACHE                      = 625
-	MySqlParserSQL_THREAD                        = 626
-	MySqlParserSTART                             = 627
-	MySqlParserSTARTS                            = 628
-	MySqlParserSTATS_AUTO_RECALC                 = 629
-	MySqlParserSTATS_PERSISTENT                  = 630
-	MySqlParserSTATS_SAMPLE_PAGES                = 631
-	MySqlParserSTATUS                            = 632
-	MySqlParserSTOP                              = 633
-	MySqlParserSTORAGE                           = 634
-	MySqlParserSTORED                            = 635
-	MySqlParserSTRING                            = 636
-	MySqlParserSUBCLASS_ORIGIN                   = 637
-	MySqlParserSUBJECT                           = 638
-	MySqlParserSUBPARTITION                      = 639
-	MySqlParserSUBPARTITIONS                     = 640
-	MySqlParserSUSPEND                           = 641
-	MySqlParserSWAPS                             = 642
-	MySqlParserSWITCHES                          = 643
-	MySqlParserTABLE_NAME                        = 644
-	MySqlParserTABLESPACE                        = 645
-	MySqlParserTABLE_TYPE                        = 646
-	MySqlParserTEMPORARY                         = 647
-	MySqlParserTEMPTABLE                         = 648
-	MySqlParserTHAN                              = 649
-	MySqlParserTRADITIONAL                       = 650
-	MySqlParserTRANSACTION                       = 651
-	MySqlParserTRANSACTIONAL                     = 652
-	MySqlParserTRIGGERS                          = 653
-	MySqlParserTRUNCATE                          = 654
-	MySqlParserUNBOUNDED                         = 655
-	MySqlParserUNDEFINED                         = 656
-	MySqlParserUNDOFILE                          = 657
-	MySqlParserUNDO_BUFFER_SIZE                  = 658
-	MySqlParserUNINSTALL                         = 659
-	MySqlParserUNKNOWN                           = 660
-	MySqlParserUNTIL                             = 661
-	MySqlParserUPGRADE                           = 662
-	MySqlParserUSER                              = 663
-	MySqlParserUSE_FRM                           = 664
-	MySqlParserUSER_RESOURCES                    = 665
-	MySqlParserVALIDATION                        = 666
-	MySqlParserVALUE                             = 667
-	MySqlParserVARIABLES                         = 668
-	MySqlParserVIEW                              = 669
-	MySqlParserVIRTUAL                           = 670
-	MySqlParserVISIBLE                           = 671
-	MySqlParserWAIT                              = 672
-	MySqlParserWARNINGS                          = 673
-	MySqlParserWINDOW                            = 674
-	MySqlParserWITHOUT                           = 675
-	MySqlParserWORK                              = 676
-	MySqlParserWRAPPER                           = 677
-	MySqlParserX509                              = 678
-	MySqlParserXA                                = 679
-	MySqlParserXML                               = 680
-	MySqlParserYES                               = 681
-	MySqlParserEUR                               = 682
-	MySqlParserUSA                               = 683
-	MySqlParserJIS                               = 684
-	MySqlParserISO                               = 685
-	MySqlParserINTERNAL                          = 686
-	MySqlParserQUARTER                           = 687
-	MySqlParserMONTH                             = 688
-	MySqlParserDAY                               = 689
-	MySqlParserHOUR                              = 690
-	MySqlParserMINUTE                            = 691
-	MySqlParserWEEK                              = 692
-	MySqlParserSECOND                            = 693
-	MySqlParserMICROSECOND                       = 694
-	MySqlParserADMIN                             = 695
-	MySqlParserAPPLICATION_PASSWORD_ADMIN        = 696
-	MySqlParserAUDIT_ADMIN                       = 697
-	MySqlParserBACKUP_ADMIN                      = 698
-	MySqlParserBINLOG_ADMIN                      = 699
-	MySqlParserBINLOG_ENCRYPTION_ADMIN           = 700
-	MySqlParserCLONE_ADMIN                       = 701
-	MySqlParserCONNECTION_ADMIN                  = 702
-	MySqlParserENCRYPTION_KEY_ADMIN              = 703
-	MySqlParserEXECUTE                           = 704
-	MySqlParserFILE                              = 705
-	MySqlParserFIREWALL_ADMIN                    = 706
-	MySqlParserFIREWALL_USER                     = 707
-	MySqlParserFLUSH_OPTIMIZER_COSTS             = 708
-	MySqlParserFLUSH_STATUS                      = 709
-	MySqlParserFLUSH_TABLES                      = 710
-	MySqlParserFLUSH_USER_RESOURCES              = 711
-	MySqlParserGROUP_REPLICATION_ADMIN           = 712
-	MySqlParserINNODB_REDO_LOG_ARCHIVE           = 713
-	MySqlParserINNODB_REDO_LOG_ENABLE            = 714
-	MySqlParserINVOKE                            = 715
-	MySqlParserLAMBDA                            = 716
-	MySqlParserNDB_STORED_USER                   = 717
-	MySqlParserPASSWORDLESS_USER_ADMIN           = 718
-	MySqlParserPERSIST_RO_VARIABLES_ADMIN        = 719
-	MySqlParserPRIVILEGES                        = 720
-	MySqlParserPROCESS                           = 721
-	MySqlParserRELOAD                            = 722
-	MySqlParserREPLICATION_APPLIER               = 723
-	MySqlParserREPLICATION_SLAVE_ADMIN           = 724
-	MySqlParserRESOURCE_GROUP_ADMIN              = 725
-	MySqlParserRESOURCE_GROUP_USER               = 726
-	MySqlParserROLE_ADMIN                        = 727
-	MySqlParserROUTINE                           = 728
-	MySqlParserS3                                = 729
-	MySqlParserSERVICE_CONNECTION_ADMIN          = 730
-	MySqlParserSESSION_VARIABLES_ADMIN           = 731
-	MySqlParserSET_USER_ID                       = 732
-	MySqlParserSHOW_ROUTINE                      = 733
-	MySqlParserSHUTDOWN                          = 734
-	MySqlParserSUPER                             = 735
-	MySqlParserSYSTEM_VARIABLES_ADMIN            = 736
-	MySqlParserTABLES                            = 737
-	MySqlParserTABLE_ENCRYPTION_ADMIN            = 738
-	MySqlParserVERSION_TOKEN_ADMIN               = 739
-	MySqlParserXA_RECOVER_ADMIN                  = 740
-	MySqlParserARMSCII8                          = 741
-	MySqlParserASCII                             = 742
-	MySqlParserBIG5                              = 743
-	MySqlParserCP1250                            = 744
-	MySqlParserCP1251                            = 745
-	MySqlParserCP1256                            = 746
-	MySqlParserCP1257                            = 747
-	MySqlParserCP850                             = 748
-	MySqlParserCP852                             = 749
-	MySqlParserCP866                             = 750
-	MySqlParserCP932                             = 751
-	MySqlParserDEC8                              = 752
-	MySqlParserEUCJPMS                           = 753
-	MySqlParserEUCKR                             = 754
-	MySqlParserGB18030                           = 755
-	MySqlParserGB2312                            = 756
-	MySqlParserGBK                               = 757
-	MySqlParserGEOSTD8                           = 758
-	MySqlParserGREEK                             = 759
-	MySqlParserHEBREW                            = 760
-	MySqlParserHP8                               = 761
-	MySqlParserKEYBCS2                           = 762
-	MySqlParserKOI8R                             = 763
-	MySqlParserKOI8U                             = 764
-	MySqlParserLATIN1                            = 765
-	MySqlParserLATIN2                            = 766
-	MySqlParserLATIN5                            = 767
-	MySqlParserLATIN7                            = 768
-	MySqlParserMACCE                             = 769
-	MySqlParserMACROMAN                          = 770
-	MySqlParserSJIS                              = 771
-	MySqlParserSWE7                              = 772
-	MySqlParserTIS620                            = 773
-	MySqlParserUCS2                              = 774
-	MySqlParserUJIS                              = 775
-	MySqlParserUTF16                             = 776
-	MySqlParserUTF16LE                           = 777
-	MySqlParserUTF32                             = 778
-	MySqlParserUTF8                              = 779
-	MySqlParserUTF8MB3                           = 780
-	MySqlParserUTF8MB4                           = 781
-	MySqlParserARCHIVE                           = 782
-	MySqlParserBLACKHOLE                         = 783
-	MySqlParserCSV                               = 784
-	MySqlParserFEDERATED                         = 785
-	MySqlParserINNODB                            = 786
-	MySqlParserMEMORY                            = 787
-	MySqlParserMRG_MYISAM                        = 788
-	MySqlParserMYISAM                            = 789
-	MySqlParserNDB                               = 790
-	MySqlParserNDBCLUSTER                        = 791
-	MySqlParserPERFORMANCE_SCHEMA                = 792
-	MySqlParserTOKUDB                            = 793
-	MySqlParserREPEATABLE                        = 794
-	MySqlParserCOMMITTED                         = 795
-	MySqlParserUNCOMMITTED                       = 796
-	MySqlParserSERIALIZABLE                      = 797
-	MySqlParserGEOMETRYCOLLECTION                = 798
-	MySqlParserGEOMCOLLECTION                    = 799
-	MySqlParserGEOMETRY                          = 800
-	MySqlParserLINESTRING                        = 801
-	MySqlParserMULTILINESTRING                   = 802
-	MySqlParserMULTIPOINT                        = 803
-	MySqlParserMULTIPOLYGON                      = 804
-	MySqlParserPOINT                             = 805
-	MySqlParserPOLYGON                           = 806
-	MySqlParserABS                               = 807
-	MySqlParserACOS                              = 808
-	MySqlParserADDDATE                           = 809
-	MySqlParserADDTIME                           = 810
-	MySqlParserAES_DECRYPT                       = 811
-	MySqlParserAES_ENCRYPT                       = 812
-	MySqlParserAREA                              = 813
-	MySqlParserASBINARY                          = 814
-	MySqlParserASIN                              = 815
-	MySqlParserASTEXT                            = 816
-	MySqlParserASWKB                             = 817
-	MySqlParserASWKT                             = 818
-	MySqlParserASYMMETRIC_DECRYPT                = 819
-	MySqlParserASYMMETRIC_DERIVE                 = 820
-	MySqlParserASYMMETRIC_ENCRYPT                = 821
-	MySqlParserASYMMETRIC_SIGN                   = 822
-	MySqlParserASYMMETRIC_VERIFY                 = 823
-	MySqlParserATAN                              = 824
-	MySqlParserATAN2                             = 825
-	MySqlParserBENCHMARK                         = 826
-	MySqlParserBIN                               = 827
-	MySqlParserBIT_COUNT                         = 828
-	MySqlParserBIT_LENGTH                        = 829
-	MySqlParserBUFFER                            = 830
-	MySqlParserCATALOG_NAME                      = 831
-	MySqlParserCEIL                              = 832
-	MySqlParserCEILING                           = 833
-	MySqlParserCENTROID                          = 834
-	MySqlParserCHARACTER_LENGTH                  = 835
-	MySqlParserCHARSET                           = 836
-	MySqlParserCHAR_LENGTH                       = 837
-	MySqlParserCOERCIBILITY                      = 838
-	MySqlParserCOLLATION                         = 839
-	MySqlParserCOMPRESS                          = 840
-	MySqlParserCONCAT                            = 841
-	MySqlParserCONCAT_WS                         = 842
-	MySqlParserCONNECTION_ID                     = 843
-	MySqlParserCONV                              = 844
-	MySqlParserCONVERT_TZ                        = 845
-	MySqlParserCOS                               = 846
-	MySqlParserCOT                               = 847
-	MySqlParserCRC32                             = 848
-	MySqlParserCREATE_ASYMMETRIC_PRIV_KEY        = 849
-	MySqlParserCREATE_ASYMMETRIC_PUB_KEY         = 850
-	MySqlParserCREATE_DH_PARAMETERS              = 851
-	MySqlParserCREATE_DIGEST                     = 852
-	MySqlParserCROSSES                           = 853
-	MySqlParserDATEDIFF                          = 854
-	MySqlParserDATE_FORMAT                       = 855
-	MySqlParserDAYNAME                           = 856
-	MySqlParserDAYOFMONTH                        = 857
-	MySqlParserDAYOFWEEK                         = 858
-	MySqlParserDAYOFYEAR                         = 859
-	MySqlParserDECODE                            = 860
-	MySqlParserDEGREES                           = 861
-	MySqlParserDES_DECRYPT                       = 862
-	MySqlParserDES_ENCRYPT                       = 863
-	MySqlParserDIMENSION                         = 864
-	MySqlParserDISJOINT                          = 865
-	MySqlParserELT                               = 866
-	MySqlParserENCODE                            = 867
-	MySqlParserENCRYPT                           = 868
-	MySqlParserENDPOINT                          = 869
-	MySqlParserENGINE_ATTRIBUTE                  = 870
-	MySqlParserENVELOPE                          = 871
-	MySqlParserEQUALS                            = 872
-	MySqlParserEXP                               = 873
-	MySqlParserEXPORT_SET                        = 874
-	MySqlParserEXTERIORRING                      = 875
-	MySqlParserEXTRACTVALUE                      = 876
-	MySqlParserFIELD                             = 877
-	MySqlParserFIND_IN_SET                       = 878
-	MySqlParserFLOOR                             = 879
-	MySqlParserFORMAT                            = 880
-	MySqlParserFOUND_ROWS                        = 881
-	MySqlParserFROM_BASE64                       = 882
-	MySqlParserFROM_DAYS                         = 883
-	MySqlParserFROM_UNIXTIME                     = 884
-	MySqlParserGEOMCOLLFROMTEXT                  = 885
-	MySqlParserGEOMCOLLFROMWKB                   = 886
-	MySqlParserGEOMETRYCOLLECTIONFROMTEXT        = 887
-	MySqlParserGEOMETRYCOLLECTIONFROMWKB         = 888
-	MySqlParserGEOMETRYFROMTEXT                  = 889
-	MySqlParserGEOMETRYFROMWKB                   = 890
-	MySqlParserGEOMETRYN                         = 891
-	MySqlParserGEOMETRYTYPE                      = 892
-	MySqlParserGEOMFROMTEXT                      = 893
-	MySqlParserGEOMFROMWKB                       = 894
-	MySqlParserGET_FORMAT                        = 895
-	MySqlParserGET_LOCK                          = 896
-	MySqlParserGLENGTH                           = 897
-	MySqlParserGREATEST                          = 898
-	MySqlParserGTID_SUBSET                       = 899
-	MySqlParserGTID_SUBTRACT                     = 900
-	MySqlParserHEX                               = 901
-	MySqlParserIFNULL                            = 902
-	MySqlParserINET6_ATON                        = 903
-	MySqlParserINET6_NTOA                        = 904
-	MySqlParserINET_ATON                         = 905
-	MySqlParserINET_NTOA                         = 906
-	MySqlParserINSTR                             = 907
-	MySqlParserINTERIORRINGN                     = 908
-	MySqlParserINTERSECTS                        = 909
-	MySqlParserISCLOSED                          = 910
-	MySqlParserISEMPTY                           = 911
-	MySqlParserISNULL                            = 912
-	MySqlParserISSIMPLE                          = 913
-	MySqlParserIS_FREE_LOCK                      = 914
-	MySqlParserIS_IPV4                           = 915
-	MySqlParserIS_IPV4_COMPAT                    = 916
-	MySqlParserIS_IPV4_MAPPED                    = 917
-	MySqlParserIS_IPV6                           = 918
-	MySqlParserIS_USED_LOCK                      = 919
-	MySqlParserLAST_INSERT_ID                    = 920
-	MySqlParserLCASE                             = 921
-	MySqlParserLEAST                             = 922
-	MySqlParserLENGTH                            = 923
-	MySqlParserLINEFROMTEXT                      = 924
-	MySqlParserLINEFROMWKB                       = 925
-	MySqlParserLINESTRINGFROMTEXT                = 926
-	MySqlParserLINESTRINGFROMWKB                 = 927
-	MySqlParserLN                                = 928
-	MySqlParserLOAD_FILE                         = 929
-	MySqlParserLOCATE                            = 930
-	MySqlParserLOG                               = 931
-	MySqlParserLOG10                             = 932
-	MySqlParserLOG2                              = 933
-	MySqlParserLOWER                             = 934
-	MySqlParserLPAD                              = 935
-	MySqlParserLTRIM                             = 936
-	MySqlParserMAKEDATE                          = 937
-	MySqlParserMAKETIME                          = 938
-	MySqlParserMAKE_SET                          = 939
-	MySqlParserMASTER_POS_WAIT                   = 940
-	MySqlParserMBRCONTAINS                       = 941
-	MySqlParserMBRDISJOINT                       = 942
-	MySqlParserMBREQUAL                          = 943
-	MySqlParserMBRINTERSECTS                     = 944
-	MySqlParserMBROVERLAPS                       = 945
-	MySqlParserMBRTOUCHES                        = 946
-	MySqlParserMBRWITHIN                         = 947
-	MySqlParserMD5                               = 948
-	MySqlParserMLINEFROMTEXT                     = 949
-	MySqlParserMLINEFROMWKB                      = 950
-	MySqlParserMONTHNAME                         = 951
-	MySqlParserMPOINTFROMTEXT                    = 952
-	MySqlParserMPOINTFROMWKB                     = 953
-	MySqlParserMPOLYFROMTEXT                     = 954
-	MySqlParserMPOLYFROMWKB                      = 955
-	MySqlParserMULTILINESTRINGFROMTEXT           = 956
-	MySqlParserMULTILINESTRINGFROMWKB            = 957
-	MySqlParserMULTIPOINTFROMTEXT                = 958
-	MySqlParserMULTIPOINTFROMWKB                 = 959
-	MySqlParserMULTIPOLYGONFROMTEXT              = 960
-	MySqlParserMULTIPOLYGONFROMWKB               = 961
-	MySqlParserNAME_CONST                        = 962
-	MySqlParserNULLIF                            = 963
-	MySqlParserNUMGEOMETRIES                     = 964
-	MySqlParserNUMINTERIORRINGS                  = 965
-	MySqlParserNUMPOINTS                         = 966
-	MySqlParserOCT                               = 967
-	MySqlParserOCTET_LENGTH                      = 968
-	MySqlParserORD                               = 969
-	MySqlParserOVERLAPS                          = 970
-	MySqlParserPERIOD_ADD                        = 971
-	MySqlParserPERIOD_DIFF                       = 972
-	MySqlParserPI                                = 973
-	MySqlParserPOINTFROMTEXT                     = 974
-	MySqlParserPOINTFROMWKB                      = 975
-	MySqlParserPOINTN                            = 976
-	MySqlParserPOLYFROMTEXT                      = 977
-	MySqlParserPOLYFROMWKB                       = 978
-	MySqlParserPOLYGONFROMTEXT                   = 979
-	MySqlParserPOLYGONFROMWKB                    = 980
-	MySqlParserPOW                               = 981
-	MySqlParserPOWER                             = 982
-	MySqlParserQUOTE                             = 983
-	MySqlParserRADIANS                           = 984
-	MySqlParserRAND                              = 985
-	MySqlParserRANDOM_BYTES                      = 986
-	MySqlParserRELEASE_LOCK                      = 987
-	MySqlParserREVERSE                           = 988
-	MySqlParserROUND                             = 989
-	MySqlParserROW_COUNT                         = 990
-	MySqlParserRPAD                              = 991
-	MySqlParserRTRIM                             = 992
-	MySqlParserSEC_TO_TIME                       = 993
-	MySqlParserSECONDARY_ENGINE_ATTRIBUTE        = 994
-	MySqlParserSESSION_USER                      = 995
-	MySqlParserSHA                               = 996
-	MySqlParserSHA1                              = 997
-	MySqlParserSHA2                              = 998
-	MySqlParserSCHEMA_NAME                       = 999
-	MySqlParserSIGN                              = 1000
-	MySqlParserSIN                               = 1001
-	MySqlParserSLEEP                             = 1002
-	MySqlParserSOUNDEX                           = 1003
-	MySqlParserSQL_THREAD_WAIT_AFTER_GTIDS       = 1004
-	MySqlParserSQRT                              = 1005
-	MySqlParserSRID                              = 1006
-	MySqlParserSTARTPOINT                        = 1007
-	MySqlParserSTRCMP                            = 1008
-	MySqlParserSTR_TO_DATE                       = 1009
-	MySqlParserST_AREA                           = 1010
-	MySqlParserST_ASBINARY                       = 1011
-	MySqlParserST_ASTEXT                         = 1012
-	MySqlParserST_ASWKB                          = 1013
-	MySqlParserST_ASWKT                          = 1014
-	MySqlParserST_BUFFER                         = 1015
-	MySqlParserST_CENTROID                       = 1016
-	MySqlParserST_CONTAINS                       = 1017
-	MySqlParserST_CROSSES                        = 1018
-	MySqlParserST_DIFFERENCE                     = 1019
-	MySqlParserST_DIMENSION                      = 1020
-	MySqlParserST_DISJOINT                       = 1021
-	MySqlParserST_DISTANCE                       = 1022
-	MySqlParserST_ENDPOINT                       = 1023
-	MySqlParserST_ENVELOPE                       = 1024
-	MySqlParserST_EQUALS                         = 1025
-	MySqlParserST_EXTERIORRING                   = 1026
-	MySqlParserST_GEOMCOLLFROMTEXT               = 1027
-	MySqlParserST_GEOMCOLLFROMTXT                = 1028
-	MySqlParserST_GEOMCOLLFROMWKB                = 1029
-	MySqlParserST_GEOMETRYCOLLECTIONFROMTEXT     = 1030
-	MySqlParserST_GEOMETRYCOLLECTIONFROMWKB      = 1031
-	MySqlParserST_GEOMETRYFROMTEXT               = 1032
-	MySqlParserST_GEOMETRYFROMWKB                = 1033
-	MySqlParserST_GEOMETRYN                      = 1034
-	MySqlParserST_GEOMETRYTYPE                   = 1035
-	MySqlParserST_GEOMFROMTEXT                   = 1036
-	MySqlParserST_GEOMFROMWKB                    = 1037
-	MySqlParserST_INTERIORRINGN                  = 1038
-	MySqlParserST_INTERSECTION                   = 1039
-	MySqlParserST_INTERSECTS                     = 1040
-	MySqlParserST_ISCLOSED                       = 1041
-	MySqlParserST_ISEMPTY                        = 1042
-	MySqlParserST_ISSIMPLE                       = 1043
-	MySqlParserST_LINEFROMTEXT                   = 1044
-	MySqlParserST_LINEFROMWKB                    = 1045
-	MySqlParserST_LINESTRINGFROMTEXT             = 1046
-	MySqlParserST_LINESTRINGFROMWKB              = 1047
-	MySqlParserST_NUMGEOMETRIES                  = 1048
-	MySqlParserST_NUMINTERIORRING                = 1049
-	MySqlParserST_NUMINTERIORRINGS               = 1050
-	MySqlParserST_NUMPOINTS                      = 1051
-	MySqlParserST_OVERLAPS                       = 1052
-	MySqlParserST_POINTFROMTEXT                  = 1053
-	MySqlParserST_POINTFROMWKB                   = 1054
-	MySqlParserST_POINTN                         = 1055
-	MySqlParserST_POLYFROMTEXT                   = 1056
-	MySqlParserST_POLYFROMWKB                    = 1057
-	MySqlParserST_POLYGONFROMTEXT                = 1058
-	MySqlParserST_POLYGONFROMWKB                 = 1059
-	MySqlParserST_SRID                           = 1060
-	MySqlParserST_STARTPOINT                     = 1061
-	MySqlParserST_SYMDIFFERENCE                  = 1062
-	MySqlParserST_TOUCHES                        = 1063
-	MySqlParserST_UNION                          = 1064
-	MySqlParserST_WITHIN                         = 1065
-	MySqlParserST_X                              = 1066
-	MySqlParserST_Y                              = 1067
-	MySqlParserSUBDATE                           = 1068
-	MySqlParserSUBSTRING_INDEX                   = 1069
-	MySqlParserSUBTIME                           = 1070
-	MySqlParserSYSTEM_USER                       = 1071
-	MySqlParserTAN                               = 1072
-	MySqlParserTIMEDIFF                          = 1073
-	MySqlParserTIMESTAMPADD                      = 1074
-	MySqlParserTIMESTAMPDIFF                     = 1075
-	MySqlParserTIME_FORMAT                       = 1076
-	MySqlParserTIME_TO_SEC                       = 1077
-	MySqlParserTOUCHES                           = 1078
-	MySqlParserTO_BASE64                         = 1079
-	MySqlParserTO_DAYS                           = 1080
-	MySqlParserTO_SECONDS                        = 1081
-	MySqlParserUCASE                             = 1082
-	MySqlParserUNCOMPRESS                        = 1083
-	MySqlParserUNCOMPRESSED_LENGTH               = 1084
-	MySqlParserUNHEX                             = 1085
-	MySqlParserUNIX_TIMESTAMP                    = 1086
-	MySqlParserUPDATEXML                         = 1087
-	MySqlParserUPPER                             = 1088
-	MySqlParserUUID                              = 1089
-	MySqlParserUUID_SHORT                        = 1090
-	MySqlParserVALIDATE_PASSWORD_STRENGTH        = 1091
-	MySqlParserVERSION                           = 1092
-	MySqlParserWAIT_UNTIL_SQL_THREAD_AFTER_GTIDS = 1093
-	MySqlParserWEEKDAY                           = 1094
-	MySqlParserWEEKOFYEAR                        = 1095
-	MySqlParserWEIGHT_STRING                     = 1096
-	MySqlParserWITHIN                            = 1097
-	MySqlParserYEARWEEK                          = 1098
-	MySqlParserY_FUNCTION                        = 1099
-	MySqlParserX_FUNCTION                        = 1100
-	MySqlParserVAR_ASSIGN                        = 1101
-	MySqlParserPLUS_ASSIGN                       = 1102
-	MySqlParserMINUS_ASSIGN                      = 1103
-	MySqlParserMULT_ASSIGN                       = 1104
-	MySqlParserDIV_ASSIGN                        = 1105
-	MySqlParserMOD_ASSIGN                        = 1106
-	MySqlParserAND_ASSIGN                        = 1107
-	MySqlParserXOR_ASSIGN                        = 1108
-	MySqlParserOR_ASSIGN                         = 1109
-	MySqlParserSTAR                              = 1110
-	MySqlParserDIVIDE                            = 1111
-	MySqlParserMODULE                            = 1112
-	MySqlParserPLUS                              = 1113
-	MySqlParserMINUS                             = 1114
-	MySqlParserDIV                               = 1115
-	MySqlParserMOD                               = 1116
-	MySqlParserEQUAL_SYMBOL                      = 1117
-	MySqlParserGREATER_SYMBOL                    = 1118
-	MySqlParserLESS_SYMBOL                       = 1119
-	MySqlParserEXCLAMATION_SYMBOL                = 1120
-	MySqlParserBIT_NOT_OP                        = 1121
-	MySqlParserBIT_OR_OP                         = 1122
-	MySqlParserBIT_AND_OP                        = 1123
-	MySqlParserBIT_XOR_OP                        = 1124
-	MySqlParserDOT                               = 1125
-	MySqlParserLR_BRACKET                        = 1126
-	MySqlParserRR_BRACKET                        = 1127
-	MySqlParserCOMMA                             = 1128
-	MySqlParserSEMI                              = 1129
-	MySqlParserAT_SIGN                           = 1130
-	MySqlParserZERO_DECIMAL                      = 1131
-	MySqlParserONE_DECIMAL                       = 1132
-	MySqlParserTWO_DECIMAL                       = 1133
-	MySqlParserSINGLE_QUOTE_SYMB                 = 1134
-	MySqlParserDOUBLE_QUOTE_SYMB                 = 1135
-	MySqlParserREVERSE_QUOTE_SYMB                = 1136
-	MySqlParserCOLON_SYMB                        = 1137
-	MySqlParserCHARSET_REVERSE_QOUTE_STRING      = 1138
-	MySqlParserFILESIZE_LITERAL                  = 1139
-	MySqlParserSTART_NATIONAL_STRING_LITERAL     = 1140
-	MySqlParserSTRING_LITERAL                    = 1141
-	MySqlParserDECIMAL_LITERAL                   = 1142
-	MySqlParserHEXADECIMAL_LITERAL               = 1143
-	MySqlParserREAL_LITERAL                      = 1144
-	MySqlParserNULL_SPEC_LITERAL                 = 1145
-	MySqlParserBIT_STRING                        = 1146
-	MySqlParserSTRING_CHARSET_NAME               = 1147
-	MySqlParserDOT_ID                            = 1148
-	MySqlParserID                                = 1149
-	MySqlParserREVERSE_QUOTE_ID                  = 1150
-	MySqlParserSTRING_USER_NAME                  = 1151
-	MySqlParserIP_ADDRESS                        = 1152
-	MySqlParserLOCAL_ID                          = 1153
-	MySqlParserGLOBAL_ID                         = 1154
-	MySqlParserERROR_RECONGNIGION                = 1155
+	MySqlParserANNS                              = 194
+	MySqlParserANNS_OP                           = 195
+	MySqlParserANNS_PARAMS                       = 196
+	MySqlParserTINYINT                           = 197
+	MySqlParserSMALLINT                          = 198
+	MySqlParserMEDIUMINT                         = 199
+	MySqlParserMIDDLEINT                         = 200
+	MySqlParserINT                               = 201
+	MySqlParserINT1                              = 202
+	MySqlParserINT2                              = 203
+	MySqlParserINT3                              = 204
+	MySqlParserINT4                              = 205
+	MySqlParserINT8                              = 206
+	MySqlParserINTEGER                           = 207
+	MySqlParserBIGINT                            = 208
+	MySqlParserREAL                              = 209
+	MySqlParserDOUBLE                            = 210
+	MySqlParserPRECISION                         = 211
+	MySqlParserFLOAT                             = 212
+	MySqlParserFLOAT4                            = 213
+	MySqlParserFLOAT8                            = 214
+	MySqlParserDECIMAL                           = 215
+	MySqlParserDEC                               = 216
+	MySqlParserNUMERIC                           = 217
+	MySqlParserDATE                              = 218
+	MySqlParserTIME                              = 219
+	MySqlParserTIMESTAMP                         = 220
+	MySqlParserDATETIME                          = 221
+	MySqlParserYEAR                              = 222
+	MySqlParserCHAR                              = 223
+	MySqlParserVARCHAR                           = 224
+	MySqlParserNVARCHAR                          = 225
+	MySqlParserNATIONAL                          = 226
+	MySqlParserBINARY                            = 227
+	MySqlParserVARBINARY                         = 228
+	MySqlParserTINYBLOB                          = 229
+	MySqlParserBLOB                              = 230
+	MySqlParserMEDIUMBLOB                        = 231
+	MySqlParserLONG                              = 232
+	MySqlParserLONGBLOB                          = 233
+	MySqlParserTINYTEXT                          = 234
+	MySqlParserTEXT                              = 235
+	MySqlParserMEDIUMTEXT                        = 236
+	MySqlParserLONGTEXT                          = 237
+	MySqlParserENUM                              = 238
+	MySqlParserVARYING                           = 239
+	MySqlParserSERIAL                            = 240
+	MySqlParserYEAR_MONTH                        = 241
+	MySqlParserDAY_HOUR                          = 242
+	MySqlParserDAY_MINUTE                        = 243
+	MySqlParserDAY_SECOND                        = 244
+	MySqlParserHOUR_MINUTE                       = 245
+	MySqlParserHOUR_SECOND                       = 246
+	MySqlParserMINUTE_SECOND                     = 247
+	MySqlParserSECOND_MICROSECOND                = 248
+	MySqlParserMINUTE_MICROSECOND                = 249
+	MySqlParserHOUR_MICROSECOND                  = 250
+	MySqlParserDAY_MICROSECOND                   = 251
+	MySqlParserJSON_ARRAY                        = 252
+	MySqlParserJSON_ARRAYAGG                     = 253
+	MySqlParserJSON_ARRAY_APPEND                 = 254
+	MySqlParserJSON_ARRAY_INSERT                 = 255
+	MySqlParserJSON_CONTAINS                     = 256
+	MySqlParserJSON_CONTAINS_PATH                = 257
+	MySqlParserJSON_DEPTH                        = 258
+	MySqlParserJSON_EXTRACT                      = 259
+	MySqlParserJSON_INSERT                       = 260
+	MySqlParserJSON_KEYS                         = 261
+	MySqlParserJSON_LENGTH                       = 262
+	MySqlParserJSON_MERGE                        = 263
+	MySqlParserJSON_MERGE_PATCH                  = 264
+	MySqlParserJSON_MERGE_PRESERVE               = 265
+	MySqlParserJSON_OBJECT                       = 266
+	MySqlParserJSON_OBJECTAGG                    = 267
+	MySqlParserJSON_OVERLAPS                     = 268
+	MySqlParserJSON_PRETTY                       = 269
+	MySqlParserJSON_QUOTE                        = 270
+	MySqlParserJSON_REMOVE                       = 271
+	MySqlParserJSON_REPLACE                      = 272
+	MySqlParserJSON_SCHEMA_VALID                 = 273
+	MySqlParserJSON_SCHEMA_VALIDATION_REPORT     = 274
+	MySqlParserJSON_SEARCH                       = 275
+	MySqlParserJSON_SET                          = 276
+	MySqlParserJSON_STORAGE_FREE                 = 277
+	MySqlParserJSON_STORAGE_SIZE                 = 278
+	MySqlParserJSON_TABLE                        = 279
+	MySqlParserJSON_TYPE                         = 280
+	MySqlParserJSON_UNQUOTE                      = 281
+	MySqlParserJSON_VALID                        = 282
+	MySqlParserJSON_VALUE                        = 283
+	MySqlParserNESTED                            = 284
+	MySqlParserORDINALITY                        = 285
+	MySqlParserPATH                              = 286
+	MySqlParserAVG                               = 287
+	MySqlParserBIT_AND                           = 288
+	MySqlParserBIT_OR                            = 289
+	MySqlParserBIT_XOR                           = 290
+	MySqlParserCOUNT                             = 291
+	MySqlParserCUME_DIST                         = 292
+	MySqlParserDENSE_RANK                        = 293
+	MySqlParserFIRST_VALUE                       = 294
+	MySqlParserGROUP_CONCAT                      = 295
+	MySqlParserLAG                               = 296
+	MySqlParserLAST_VALUE                        = 297
+	MySqlParserLEAD                              = 298
+	MySqlParserMAX                               = 299
+	MySqlParserMIN                               = 300
+	MySqlParserNTILE                             = 301
+	MySqlParserNTH_VALUE                         = 302
+	MySqlParserPERCENT_RANK                      = 303
+	MySqlParserRANK                              = 304
+	MySqlParserROW_NUMBER                        = 305
+	MySqlParserSTD                               = 306
+	MySqlParserSTDDEV                            = 307
+	MySqlParserSTDDEV_POP                        = 308
+	MySqlParserSTDDEV_SAMP                       = 309
+	MySqlParserSUM                               = 310
+	MySqlParserVAR_POP                           = 311
+	MySqlParserVAR_SAMP                          = 312
+	MySqlParserVARIANCE                          = 313
+	MySqlParserCURRENT_DATE                      = 314
+	MySqlParserCURRENT_TIME                      = 315
+	MySqlParserCURRENT_TIMESTAMP                 = 316
+	MySqlParserLOCALTIME                         = 317
+	MySqlParserCURDATE                           = 318
+	MySqlParserCURTIME                           = 319
+	MySqlParserDATE_ADD                          = 320
+	MySqlParserDATE_SUB                          = 321
+	MySqlParserEXTRACT                           = 322
+	MySqlParserLOCALTIMESTAMP                    = 323
+	MySqlParserNOW                               = 324
+	MySqlParserPOSITION                          = 325
+	MySqlParserSUBSTR                            = 326
+	MySqlParserSUBSTRING                         = 327
+	MySqlParserSYSDATE                           = 328
+	MySqlParserTRIM                              = 329
+	MySqlParserUTC_DATE                          = 330
+	MySqlParserUTC_TIME                          = 331
+	MySqlParserUTC_TIMESTAMP                     = 332
+	MySqlParserACCOUNT                           = 333
+	MySqlParserACTION                            = 334
+	MySqlParserAFTER                             = 335
+	MySqlParserAGGREGATE                         = 336
+	MySqlParserALGORITHM                         = 337
+	MySqlParserANY                               = 338
+	MySqlParserAT                                = 339
+	MySqlParserAUTHORS                           = 340
+	MySqlParserAUTOCOMMIT                        = 341
+	MySqlParserAUTOEXTEND_SIZE                   = 342
+	MySqlParserAUTO_INCREMENT                    = 343
+	MySqlParserAVG_ROW_LENGTH                    = 344
+	MySqlParserBEGIN                             = 345
+	MySqlParserBINLOG                            = 346
+	MySqlParserBIT                               = 347
+	MySqlParserBLOCK                             = 348
+	MySqlParserBOOL                              = 349
+	MySqlParserBOOLEAN                           = 350
+	MySqlParserBTREE                             = 351
+	MySqlParserCACHE                             = 352
+	MySqlParserCASCADED                          = 353
+	MySqlParserCHAIN                             = 354
+	MySqlParserCHANGED                           = 355
+	MySqlParserCHANNEL                           = 356
+	MySqlParserCHECKSUM                          = 357
+	MySqlParserPAGE_CHECKSUM                     = 358
+	MySqlParserCIPHER                            = 359
+	MySqlParserCLASS_ORIGIN                      = 360
+	MySqlParserCLIENT                            = 361
+	MySqlParserCLOSE                             = 362
+	MySqlParserCLUSTERING                        = 363
+	MySqlParserCOALESCE                          = 364
+	MySqlParserCODE                              = 365
+	MySqlParserCOLUMNS                           = 366
+	MySqlParserCOLUMN_FORMAT                     = 367
+	MySqlParserCOLUMN_NAME                       = 368
+	MySqlParserCOMMENT                           = 369
+	MySqlParserCOMMIT                            = 370
+	MySqlParserCOMPACT                           = 371
+	MySqlParserCOMPLETION                        = 372
+	MySqlParserCOMPRESSED                        = 373
+	MySqlParserCOMPRESSION                       = 374
+	MySqlParserCONCURRENT                        = 375
+	MySqlParserCONNECT                           = 376
+	MySqlParserCONNECTION                        = 377
+	MySqlParserCONSISTENT                        = 378
+	MySqlParserCONSTRAINT_CATALOG                = 379
+	MySqlParserCONSTRAINT_SCHEMA                 = 380
+	MySqlParserCONSTRAINT_NAME                   = 381
+	MySqlParserCONTAINS                          = 382
+	MySqlParserCONTEXT                           = 383
+	MySqlParserCONTRIBUTORS                      = 384
+	MySqlParserCOPY                              = 385
+	MySqlParserCPU                               = 386
+	MySqlParserCYCLE                             = 387
+	MySqlParserCURSOR_NAME                       = 388
+	MySqlParserDATA                              = 389
+	MySqlParserDATAFILE                          = 390
+	MySqlParserDEALLOCATE                        = 391
+	MySqlParserDEFAULT_AUTH                      = 392
+	MySqlParserDEFINER                           = 393
+	MySqlParserDELAY_KEY_WRITE                   = 394
+	MySqlParserDES_KEY_FILE                      = 395
+	MySqlParserDIRECTORY                         = 396
+	MySqlParserDISABLE                           = 397
+	MySqlParserDISCARD                           = 398
+	MySqlParserDISK                              = 399
+	MySqlParserDO                                = 400
+	MySqlParserDUMPFILE                          = 401
+	MySqlParserDUPLICATE                         = 402
+	MySqlParserDYNAMIC                           = 403
+	MySqlParserENABLE                            = 404
+	MySqlParserENCRYPTED                         = 405
+	MySqlParserENCRYPTION                        = 406
+	MySqlParserENCRYPTION_KEY_ID                 = 407
+	MySqlParserEND                               = 408
+	MySqlParserENDS                              = 409
+	MySqlParserENGINE                            = 410
+	MySqlParserENGINES                           = 411
+	MySqlParserERROR                             = 412
+	MySqlParserERRORS                            = 413
+	MySqlParserESCAPE                            = 414
+	MySqlParserEVEN                              = 415
+	MySqlParserEVENT                             = 416
+	MySqlParserEVENTS                            = 417
+	MySqlParserEVERY                             = 418
+	MySqlParserEXCHANGE                          = 419
+	MySqlParserEXCLUSIVE                         = 420
+	MySqlParserEXPIRE                            = 421
+	MySqlParserEXPORT                            = 422
+	MySqlParserEXTENDED                          = 423
+	MySqlParserEXTENT_SIZE                       = 424
+	MySqlParserFAILED_LOGIN_ATTEMPTS             = 425
+	MySqlParserFAST                              = 426
+	MySqlParserFAULTS                            = 427
+	MySqlParserFIELDS                            = 428
+	MySqlParserFILE_BLOCK_SIZE                   = 429
+	MySqlParserFILTER                            = 430
+	MySqlParserFIRST                             = 431
+	MySqlParserFIXED                             = 432
+	MySqlParserFLUSH                             = 433
+	MySqlParserFOLLOWING                         = 434
+	MySqlParserFOLLOWS                           = 435
+	MySqlParserFOUND                             = 436
+	MySqlParserFULL                              = 437
+	MySqlParserFUNCTION                          = 438
+	MySqlParserGENERAL                           = 439
+	MySqlParserGLOBAL                            = 440
+	MySqlParserGRANTS                            = 441
+	MySqlParserGROUP_REPLICATION                 = 442
+	MySqlParserHANDLER                           = 443
+	MySqlParserHASH                              = 444
+	MySqlParserHELP                              = 445
+	MySqlParserHISTORY                           = 446
+	MySqlParserHOST                              = 447
+	MySqlParserHOSTS                             = 448
+	MySqlParserIDENTIFIED                        = 449
+	MySqlParserIGNORE_SERVER_IDS                 = 450
+	MySqlParserIMPORT                            = 451
+	MySqlParserINCREMENT                         = 452
+	MySqlParserINDEXES                           = 453
+	MySqlParserINITIAL_SIZE                      = 454
+	MySqlParserINPLACE                           = 455
+	MySqlParserINSERT_METHOD                     = 456
+	MySqlParserINSTALL                           = 457
+	MySqlParserINSTANCE                          = 458
+	MySqlParserINSTANT                           = 459
+	MySqlParserINVISIBLE                         = 460
+	MySqlParserINVOKER                           = 461
+	MySqlParserIO                                = 462
+	MySqlParserIO_THREAD                         = 463
+	MySqlParserIPC                               = 464
+	MySqlParserISOLATION                         = 465
+	MySqlParserISSUER                            = 466
+	MySqlParserJSON                              = 467
+	MySqlParserKEY_BLOCK_SIZE                    = 468
+	MySqlParserLANGUAGE                          = 469
+	MySqlParserLAST                              = 470
+	MySqlParserLEAVES                            = 471
+	MySqlParserLESS                              = 472
+	MySqlParserLEVEL                             = 473
+	MySqlParserLIST                              = 474
+	MySqlParserLOCAL                             = 475
+	MySqlParserLOGFILE                           = 476
+	MySqlParserLOGS                              = 477
+	MySqlParserMASTER                            = 478
+	MySqlParserMASTER_AUTO_POSITION              = 479
+	MySqlParserMASTER_CONNECT_RETRY              = 480
+	MySqlParserMASTER_DELAY                      = 481
+	MySqlParserMASTER_HEARTBEAT_PERIOD           = 482
+	MySqlParserMASTER_HOST                       = 483
+	MySqlParserMASTER_LOG_FILE                   = 484
+	MySqlParserMASTER_LOG_POS                    = 485
+	MySqlParserMASTER_PASSWORD                   = 486
+	MySqlParserMASTER_PORT                       = 487
+	MySqlParserMASTER_RETRY_COUNT                = 488
+	MySqlParserMASTER_SSL                        = 489
+	MySqlParserMASTER_SSL_CA                     = 490
+	MySqlParserMASTER_SSL_CAPATH                 = 491
+	MySqlParserMASTER_SSL_CERT                   = 492
+	MySqlParserMASTER_SSL_CIPHER                 = 493
+	MySqlParserMASTER_SSL_CRL                    = 494
+	MySqlParserMASTER_SSL_CRLPATH                = 495
+	MySqlParserMASTER_SSL_KEY                    = 496
+	MySqlParserMASTER_TLS_VERSION                = 497
+	MySqlParserMASTER_USER                       = 498
+	MySqlParserMAX_CONNECTIONS_PER_HOUR          = 499
+	MySqlParserMAX_QUERIES_PER_HOUR              = 500
+	MySqlParserMAX_ROWS                          = 501
+	MySqlParserMAX_SIZE                          = 502
+	MySqlParserMAX_UPDATES_PER_HOUR              = 503
+	MySqlParserMAX_USER_CONNECTIONS              = 504
+	MySqlParserMEDIUM                            = 505
+	MySqlParserMEMBER                            = 506
+	MySqlParserMERGE                             = 507
+	MySqlParserMESSAGE_TEXT                      = 508
+	MySqlParserMID                               = 509
+	MySqlParserMIGRATE                           = 510
+	MySqlParserMIN_ROWS                          = 511
+	MySqlParserMODE                              = 512
+	MySqlParserMODIFY                            = 513
+	MySqlParserMUTEX                             = 514
+	MySqlParserMYSQL                             = 515
+	MySqlParserMYSQL_ERRNO                       = 516
+	MySqlParserNAME                              = 517
+	MySqlParserNAMES                             = 518
+	MySqlParserNCHAR                             = 519
+	MySqlParserNEVER                             = 520
+	MySqlParserNEXT                              = 521
+	MySqlParserNO                                = 522
+	MySqlParserNOCACHE                           = 523
+	MySqlParserNOCOPY                            = 524
+	MySqlParserNOCYCLE                           = 525
+	MySqlParserNOMAXVALUE                        = 526
+	MySqlParserNOMINVALUE                        = 527
+	MySqlParserNOWAIT                            = 528
+	MySqlParserNODEGROUP                         = 529
+	MySqlParserNONE                              = 530
+	MySqlParserODBC                              = 531
+	MySqlParserOFFLINE                           = 532
+	MySqlParserOFFSET                            = 533
+	MySqlParserOF                                = 534
+	MySqlParserOJ                                = 535
+	MySqlParserOLD_PASSWORD                      = 536
+	MySqlParserONE                               = 537
+	MySqlParserONLINE                            = 538
+	MySqlParserONLY                              = 539
+	MySqlParserOPEN                              = 540
+	MySqlParserOPTIMIZER_COSTS                   = 541
+	MySqlParserOPTIONS                           = 542
+	MySqlParserOWNER                             = 543
+	MySqlParserPACK_KEYS                         = 544
+	MySqlParserPAGE                              = 545
+	MySqlParserPAGE_COMPRESSED                   = 546
+	MySqlParserPAGE_COMPRESSION_LEVEL            = 547
+	MySqlParserPARSER                            = 548
+	MySqlParserPARTIAL                           = 549
+	MySqlParserPARTITIONING                      = 550
+	MySqlParserPARTITIONS                        = 551
+	MySqlParserPASSWORD                          = 552
+	MySqlParserPASSWORD_LOCK_TIME                = 553
+	MySqlParserPHASE                             = 554
+	MySqlParserPLUGIN                            = 555
+	MySqlParserPLUGIN_DIR                        = 556
+	MySqlParserPLUGINS                           = 557
+	MySqlParserPORT                              = 558
+	MySqlParserPRECEDES                          = 559
+	MySqlParserPRECEDING                         = 560
+	MySqlParserPREPARE                           = 561
+	MySqlParserPRESERVE                          = 562
+	MySqlParserPREV                              = 563
+	MySqlParserPROCESSLIST                       = 564
+	MySqlParserPROFILE                           = 565
+	MySqlParserPROFILES                          = 566
+	MySqlParserPROXY                             = 567
+	MySqlParserQUERY                             = 568
+	MySqlParserQUICK                             = 569
+	MySqlParserREBUILD                           = 570
+	MySqlParserRECOVER                           = 571
+	MySqlParserRECURSIVE                         = 572
+	MySqlParserREDO_BUFFER_SIZE                  = 573
+	MySqlParserREDUNDANT                         = 574
+	MySqlParserRELAY                             = 575
+	MySqlParserRELAY_LOG_FILE                    = 576
+	MySqlParserRELAY_LOG_POS                     = 577
+	MySqlParserRELAYLOG                          = 578
+	MySqlParserREMOVE                            = 579
+	MySqlParserREORGANIZE                        = 580
+	MySqlParserREPAIR                            = 581
+	MySqlParserREPLICATE_DO_DB                   = 582
+	MySqlParserREPLICATE_DO_TABLE                = 583
+	MySqlParserREPLICATE_IGNORE_DB               = 584
+	MySqlParserREPLICATE_IGNORE_TABLE            = 585
+	MySqlParserREPLICATE_REWRITE_DB              = 586
+	MySqlParserREPLICATE_WILD_DO_TABLE           = 587
+	MySqlParserREPLICATE_WILD_IGNORE_TABLE       = 588
+	MySqlParserREPLICATION                       = 589
+	MySqlParserRESET                             = 590
+	MySqlParserRESTART                           = 591
+	MySqlParserRESUME                            = 592
+	MySqlParserRETURNED_SQLSTATE                 = 593
+	MySqlParserRETURNING                         = 594
+	MySqlParserRETURNS                           = 595
+	MySqlParserREUSE                             = 596
+	MySqlParserROLE                              = 597
+	MySqlParserROLLBACK                          = 598
+	MySqlParserROLLUP                            = 599
+	MySqlParserROTATE                            = 600
+	MySqlParserROW                               = 601
+	MySqlParserROWS                              = 602
+	MySqlParserROW_FORMAT                        = 603
+	MySqlParserRTREE                             = 604
+	MySqlParserSAVEPOINT                         = 605
+	MySqlParserSCHEDULE                          = 606
+	MySqlParserSECURITY                          = 607
+	MySqlParserSEQUENCE                          = 608
+	MySqlParserSERVER                            = 609
+	MySqlParserSESSION                           = 610
+	MySqlParserSHARE                             = 611
+	MySqlParserSHARED                            = 612
+	MySqlParserSIGNED                            = 613
+	MySqlParserSIMPLE                            = 614
+	MySqlParserSLAVE                             = 615
+	MySqlParserSLOW                              = 616
+	MySqlParserSNAPSHOT                          = 617
+	MySqlParserSOCKET                            = 618
+	MySqlParserSOME                              = 619
+	MySqlParserSONAME                            = 620
+	MySqlParserSOUNDS                            = 621
+	MySqlParserSOURCE                            = 622
+	MySqlParserSQL_AFTER_GTIDS                   = 623
+	MySqlParserSQL_AFTER_MTS_GAPS                = 624
+	MySqlParserSQL_BEFORE_GTIDS                  = 625
+	MySqlParserSQL_BUFFER_RESULT                 = 626
+	MySqlParserSQL_CACHE                         = 627
+	MySqlParserSQL_NO_CACHE                      = 628
+	MySqlParserSQL_THREAD                        = 629
+	MySqlParserSTART                             = 630
+	MySqlParserSTARTS                            = 631
+	MySqlParserSTATS_AUTO_RECALC                 = 632
+	MySqlParserSTATS_PERSISTENT                  = 633
+	MySqlParserSTATS_SAMPLE_PAGES                = 634
+	MySqlParserSTATUS                            = 635
+	MySqlParserSTOP                              = 636
+	MySqlParserSTORAGE                           = 637
+	MySqlParserSTORED                            = 638
+	MySqlParserSTRING                            = 639
+	MySqlParserSUBCLASS_ORIGIN                   = 640
+	MySqlParserSUBJECT                           = 641
+	MySqlParserSUBPARTITION                      = 642
+	MySqlParserSUBPARTITIONS                     = 643
+	MySqlParserSUSPEND                           = 644
+	MySqlParserSWAPS                             = 645
+	MySqlParserSWITCHES                          = 646
+	MySqlParserTABLE_NAME                        = 647
+	MySqlParserTABLESPACE                        = 648
+	MySqlParserTABLE_TYPE                        = 649
+	MySqlParserTEMPORARY                         = 650
+	MySqlParserTEMPTABLE                         = 651
+	MySqlParserTHAN                              = 652
+	MySqlParserTRADITIONAL                       = 653
+	MySqlParserTRANSACTION                       = 654
+	MySqlParserTRANSACTIONAL                     = 655
+	MySqlParserTRIGGERS                          = 656
+	MySqlParserTRUNCATE                          = 657
+	MySqlParserUNBOUNDED                         = 658
+	MySqlParserUNDEFINED                         = 659
+	MySqlParserUNDOFILE                          = 660
+	MySqlParserUNDO_BUFFER_SIZE                  = 661
+	MySqlParserUNINSTALL                         = 662
+	MySqlParserUNKNOWN                           = 663
+	MySqlParserUNTIL                             = 664
+	MySqlParserUPGRADE                           = 665
+	MySqlParserUSER                              = 666
+	MySqlParserUSE_FRM                           = 667
+	MySqlParserUSER_RESOURCES                    = 668
+	MySqlParserVALIDATION                        = 669
+	MySqlParserVALUE                             = 670
+	MySqlParserVARIABLES                         = 671
+	MySqlParserVIEW                              = 672
+	MySqlParserVIRTUAL                           = 673
+	MySqlParserVISIBLE                           = 674
+	MySqlParserWAIT                              = 675
+	MySqlParserWARNINGS                          = 676
+	MySqlParserWINDOW                            = 677
+	MySqlParserWITHOUT                           = 678
+	MySqlParserWORK                              = 679
+	MySqlParserWRAPPER                           = 680
+	MySqlParserX509                              = 681
+	MySqlParserXA                                = 682
+	MySqlParserXML                               = 683
+	MySqlParserYES                               = 684
+	MySqlParserEUR                               = 685
+	MySqlParserUSA                               = 686
+	MySqlParserJIS                               = 687
+	MySqlParserISO                               = 688
+	MySqlParserINTERNAL                          = 689
+	MySqlParserQUARTER                           = 690
+	MySqlParserMONTH                             = 691
+	MySqlParserDAY                               = 692
+	MySqlParserHOUR                              = 693
+	MySqlParserMINUTE                            = 694
+	MySqlParserWEEK                              = 695
+	MySqlParserSECOND                            = 696
+	MySqlParserMICROSECOND                       = 697
+	MySqlParserADMIN                             = 698
+	MySqlParserAPPLICATION_PASSWORD_ADMIN        = 699
+	MySqlParserAUDIT_ADMIN                       = 700
+	MySqlParserBACKUP_ADMIN                      = 701
+	MySqlParserBINLOG_ADMIN                      = 702
+	MySqlParserBINLOG_ENCRYPTION_ADMIN           = 703
+	MySqlParserCLONE_ADMIN                       = 704
+	MySqlParserCONNECTION_ADMIN                  = 705
+	MySqlParserENCRYPTION_KEY_ADMIN              = 706
+	MySqlParserEXECUTE                           = 707
+	MySqlParserFILE                              = 708
+	MySqlParserFIREWALL_ADMIN                    = 709
+	MySqlParserFIREWALL_USER                     = 710
+	MySqlParserFLUSH_OPTIMIZER_COSTS             = 711
+	MySqlParserFLUSH_STATUS                      = 712
+	MySqlParserFLUSH_TABLES                      = 713
+	MySqlParserFLUSH_USER_RESOURCES              = 714
+	MySqlParserGROUP_REPLICATION_ADMIN           = 715
+	MySqlParserINNODB_REDO_LOG_ARCHIVE           = 716
+	MySqlParserINNODB_REDO_LOG_ENABLE            = 717
+	MySqlParserINVOKE                            = 718
+	MySqlParserLAMBDA                            = 719
+	MySqlParserNDB_STORED_USER                   = 720
+	MySqlParserPASSWORDLESS_USER_ADMIN           = 721
+	MySqlParserPERSIST_RO_VARIABLES_ADMIN        = 722
+	MySqlParserPRIVILEGES                        = 723
+	MySqlParserPROCESS                           = 724
+	MySqlParserRELOAD                            = 725
+	MySqlParserREPLICATION_APPLIER               = 726
+	MySqlParserREPLICATION_SLAVE_ADMIN           = 727
+	MySqlParserRESOURCE_GROUP_ADMIN              = 728
+	MySqlParserRESOURCE_GROUP_USER               = 729
+	MySqlParserROLE_ADMIN                        = 730
+	MySqlParserROUTINE                           = 731
+	MySqlParserS3                                = 732
+	MySqlParserSERVICE_CONNECTION_ADMIN          = 733
+	MySqlParserSESSION_VARIABLES_ADMIN           = 734
+	MySqlParserSET_USER_ID                       = 735
+	MySqlParserSHOW_ROUTINE                      = 736
+	MySqlParserSHUTDOWN                          = 737
+	MySqlParserSUPER                             = 738
+	MySqlParserSYSTEM_VARIABLES_ADMIN            = 739
+	MySqlParserTABLES                            = 740
+	MySqlParserTABLE_ENCRYPTION_ADMIN            = 741
+	MySqlParserVERSION_TOKEN_ADMIN               = 742
+	MySqlParserXA_RECOVER_ADMIN                  = 743
+	MySqlParserARMSCII8                          = 744
+	MySqlParserASCII                             = 745
+	MySqlParserBIG5                              = 746
+	MySqlParserCP1250                            = 747
+	MySqlParserCP1251                            = 748
+	MySqlParserCP1256                            = 749
+	MySqlParserCP1257                            = 750
+	MySqlParserCP850                             = 751
+	MySqlParserCP852                             = 752
+	MySqlParserCP866                             = 753
+	MySqlParserCP932                             = 754
+	MySqlParserDEC8                              = 755
+	MySqlParserEUCJPMS                           = 756
+	MySqlParserEUCKR                             = 757
+	MySqlParserGB18030                           = 758
+	MySqlParserGB2312                            = 759
+	MySqlParserGBK                               = 760
+	MySqlParserGEOSTD8                           = 761
+	MySqlParserGREEK                             = 762
+	MySqlParserHEBREW                            = 763
+	MySqlParserHP8                               = 764
+	MySqlParserKEYBCS2                           = 765
+	MySqlParserKOI8R                             = 766
+	MySqlParserKOI8U                             = 767
+	MySqlParserLATIN1                            = 768
+	MySqlParserLATIN2                            = 769
+	MySqlParserLATIN5                            = 770
+	MySqlParserLATIN7                            = 771
+	MySqlParserMACCE                             = 772
+	MySqlParserMACROMAN                          = 773
+	MySqlParserSJIS                              = 774
+	MySqlParserSWE7                              = 775
+	MySqlParserTIS620                            = 776
+	MySqlParserUCS2                              = 777
+	MySqlParserUJIS                              = 778
+	MySqlParserUTF16                             = 779
+	MySqlParserUTF16LE                           = 780
+	MySqlParserUTF32                             = 781
+	MySqlParserUTF8                              = 782
+	MySqlParserUTF8MB3                           = 783
+	MySqlParserUTF8MB4                           = 784
+	MySqlParserARCHIVE                           = 785
+	MySqlParserBLACKHOLE                         = 786
+	MySqlParserCSV                               = 787
+	MySqlParserFEDERATED                         = 788
+	MySqlParserINNODB                            = 789
+	MySqlParserMEMORY                            = 790
+	MySqlParserMRG_MYISAM                        = 791
+	MySqlParserMYISAM                            = 792
+	MySqlParserNDB                               = 793
+	MySqlParserNDBCLUSTER                        = 794
+	MySqlParserPERFORMANCE_SCHEMA                = 795
+	MySqlParserTOKUDB                            = 796
+	MySqlParserREPEATABLE                        = 797
+	MySqlParserCOMMITTED                         = 798
+	MySqlParserUNCOMMITTED                       = 799
+	MySqlParserSERIALIZABLE                      = 800
+	MySqlParserGEOMETRYCOLLECTION                = 801
+	MySqlParserGEOMCOLLECTION                    = 802
+	MySqlParserGEOMETRY                          = 803
+	MySqlParserLINESTRING                        = 804
+	MySqlParserMULTILINESTRING                   = 805
+	MySqlParserMULTIPOINT                        = 806
+	MySqlParserMULTIPOLYGON                      = 807
+	MySqlParserPOINT                             = 808
+	MySqlParserPOLYGON                           = 809
+	MySqlParserABS                               = 810
+	MySqlParserACOS                              = 811
+	MySqlParserADDDATE                           = 812
+	MySqlParserADDTIME                           = 813
+	MySqlParserAES_DECRYPT                       = 814
+	MySqlParserAES_ENCRYPT                       = 815
+	MySqlParserAREA                              = 816
+	MySqlParserASBINARY                          = 817
+	MySqlParserASIN                              = 818
+	MySqlParserASTEXT                            = 819
+	MySqlParserASWKB                             = 820
+	MySqlParserASWKT                             = 821
+	MySqlParserASYMMETRIC_DECRYPT                = 822
+	MySqlParserASYMMETRIC_DERIVE                 = 823
+	MySqlParserASYMMETRIC_ENCRYPT                = 824
+	MySqlParserASYMMETRIC_SIGN                   = 825
+	MySqlParserASYMMETRIC_VERIFY                 = 826
+	MySqlParserATAN                              = 827
+	MySqlParserATAN2                             = 828
+	MySqlParserBENCHMARK                         = 829
+	MySqlParserBIN                               = 830
+	MySqlParserBIT_COUNT                         = 831
+	MySqlParserBIT_LENGTH                        = 832
+	MySqlParserBUFFER                            = 833
+	MySqlParserCATALOG_NAME                      = 834
+	MySqlParserCEIL                              = 835
+	MySqlParserCEILING                           = 836
+	MySqlParserCENTROID                          = 837
+	MySqlParserCHARACTER_LENGTH                  = 838
+	MySqlParserCHARSET                           = 839
+	MySqlParserCHAR_LENGTH                       = 840
+	MySqlParserCOERCIBILITY                      = 841
+	MySqlParserCOLLATION                         = 842
+	MySqlParserCOMPRESS                          = 843
+	MySqlParserCONCAT                            = 844
+	MySqlParserCONCAT_WS                         = 845
+	MySqlParserCONNECTION_ID                     = 846
+	MySqlParserCONV                              = 847
+	MySqlParserCONVERT_TZ                        = 848
+	MySqlParserCOS                               = 849
+	MySqlParserCOT                               = 850
+	MySqlParserCRC32                             = 851
+	MySqlParserCREATE_ASYMMETRIC_PRIV_KEY        = 852
+	MySqlParserCREATE_ASYMMETRIC_PUB_KEY         = 853
+	MySqlParserCREATE_DH_PARAMETERS              = 854
+	MySqlParserCREATE_DIGEST                     = 855
+	MySqlParserCROSSES                           = 856
+	MySqlParserDATEDIFF                          = 857
+	MySqlParserDATE_FORMAT                       = 858
+	MySqlParserDAYNAME                           = 859
+	MySqlParserDAYOFMONTH                        = 860
+	MySqlParserDAYOFWEEK                         = 861
+	MySqlParserDAYOFYEAR                         = 862
+	MySqlParserDECODE                            = 863
+	MySqlParserDEGREES                           = 864
+	MySqlParserDES_DECRYPT                       = 865
+	MySqlParserDES_ENCRYPT                       = 866
+	MySqlParserDIMENSION                         = 867
+	MySqlParserDISJOINT                          = 868
+	MySqlParserELT                               = 869
+	MySqlParserENCODE                            = 870
+	MySqlParserENCRYPT                           = 871
+	MySqlParserENDPOINT                          = 872
+	MySqlParserENGINE_ATTRIBUTE                  = 873
+	MySqlParserENVELOPE                          = 874
+	MySqlParserEQUALS                            = 875
+	MySqlParserEXP                               = 876
+	MySqlParserEXPORT_SET                        = 877
+	MySqlParserEXTERIORRING                      = 878
+	MySqlParserEXTRACTVALUE                      = 879
+	MySqlParserFIELD                             = 880
+	MySqlParserFIND_IN_SET                       = 881
+	MySqlParserFLOOR                             = 882
+	MySqlParserFORMAT                            = 883
+	MySqlParserFOUND_ROWS                        = 884
+	MySqlParserFROM_BASE64                       = 885
+	MySqlParserFROM_DAYS                         = 886
+	MySqlParserFROM_UNIXTIME                     = 887
+	MySqlParserGEOMCOLLFROMTEXT                  = 888
+	MySqlParserGEOMCOLLFROMWKB                   = 889
+	MySqlParserGEOMETRYCOLLECTIONFROMTEXT        = 890
+	MySqlParserGEOMETRYCOLLECTIONFROMWKB         = 891
+	MySqlParserGEOMETRYFROMTEXT                  = 892
+	MySqlParserGEOMETRYFROMWKB                   = 893
+	MySqlParserGEOMETRYN                         = 894
+	MySqlParserGEOMETRYTYPE                      = 895
+	MySqlParserGEOMFROMTEXT                      = 896
+	MySqlParserGEOMFROMWKB                       = 897
+	MySqlParserGET_FORMAT                        = 898
+	MySqlParserGET_LOCK                          = 899
+	MySqlParserGLENGTH                           = 900
+	MySqlParserGREATEST                          = 901
+	MySqlParserGTID_SUBSET                       = 902
+	MySqlParserGTID_SUBTRACT                     = 903
+	MySqlParserHEX                               = 904
+	MySqlParserIFNULL                            = 905
+	MySqlParserINET6_ATON                        = 906
+	MySqlParserINET6_NTOA                        = 907
+	MySqlParserINET_ATON                         = 908
+	MySqlParserINET_NTOA                         = 909
+	MySqlParserINSTR                             = 910
+	MySqlParserINTERIORRINGN                     = 911
+	MySqlParserINTERSECTS                        = 912
+	MySqlParserISCLOSED                          = 913
+	MySqlParserISEMPTY                           = 914
+	MySqlParserISNULL                            = 915
+	MySqlParserISSIMPLE                          = 916
+	MySqlParserIS_FREE_LOCK                      = 917
+	MySqlParserIS_IPV4                           = 918
+	MySqlParserIS_IPV4_COMPAT                    = 919
+	MySqlParserIS_IPV4_MAPPED                    = 920
+	MySqlParserIS_IPV6                           = 921
+	MySqlParserIS_USED_LOCK                      = 922
+	MySqlParserLAST_INSERT_ID                    = 923
+	MySqlParserLCASE                             = 924
+	MySqlParserLEAST                             = 925
+	MySqlParserLENGTH                            = 926
+	MySqlParserLINEFROMTEXT                      = 927
+	MySqlParserLINEFROMWKB                       = 928
+	MySqlParserLINESTRINGFROMTEXT                = 929
+	MySqlParserLINESTRINGFROMWKB                 = 930
+	MySqlParserLN                                = 931
+	MySqlParserLOAD_FILE                         = 932
+	MySqlParserLOCATE                            = 933
+	MySqlParserLOG                               = 934
+	MySqlParserLOG10                             = 935
+	MySqlParserLOG2                              = 936
+	MySqlParserLOWER                             = 937
+	MySqlParserLPAD                              = 938
+	MySqlParserLTRIM                             = 939
+	MySqlParserMAKEDATE                          = 940
+	MySqlParserMAKETIME                          = 941
+	MySqlParserMAKE_SET                          = 942
+	MySqlParserMASTER_POS_WAIT                   = 943
+	MySqlParserMBRCONTAINS                       = 944
+	MySqlParserMBRDISJOINT                       = 945
+	MySqlParserMBREQUAL                          = 946
+	MySqlParserMBRINTERSECTS                     = 947
+	MySqlParserMBROVERLAPS                       = 948
+	MySqlParserMBRTOUCHES                        = 949
+	MySqlParserMBRWITHIN                         = 950
+	MySqlParserMD5                               = 951
+	MySqlParserMLINEFROMTEXT                     = 952
+	MySqlParserMLINEFROMWKB                      = 953
+	MySqlParserMONTHNAME                         = 954
+	MySqlParserMPOINTFROMTEXT                    = 955
+	MySqlParserMPOINTFROMWKB                     = 956
+	MySqlParserMPOLYFROMTEXT                     = 957
+	MySqlParserMPOLYFROMWKB                      = 958
+	MySqlParserMULTILINESTRINGFROMTEXT           = 959
+	MySqlParserMULTILINESTRINGFROMWKB            = 960
+	MySqlParserMULTIPOINTFROMTEXT                = 961
+	MySqlParserMULTIPOINTFROMWKB                 = 962
+	MySqlParserMULTIPOLYGONFROMTEXT              = 963
+	MySqlParserMULTIPOLYGONFROMWKB               = 964
+	MySqlParserNAME_CONST                        = 965
+	MySqlParserNULLIF                            = 966
+	MySqlParserNUMGEOMETRIES                     = 967
+	MySqlParserNUMINTERIORRINGS                  = 968
+	MySqlParserNUMPOINTS                         = 969
+	MySqlParserOCT                               = 970
+	MySqlParserOCTET_LENGTH                      = 971
+	MySqlParserORD                               = 972
+	MySqlParserOVERLAPS                          = 973
+	MySqlParserPERIOD_ADD                        = 974
+	MySqlParserPERIOD_DIFF                       = 975
+	MySqlParserPI                                = 976
+	MySqlParserPOINTFROMTEXT                     = 977
+	MySqlParserPOINTFROMWKB                      = 978
+	MySqlParserPOINTN                            = 979
+	MySqlParserPOLYFROMTEXT                      = 980
+	MySqlParserPOLYFROMWKB                       = 981
+	MySqlParserPOLYGONFROMTEXT                   = 982
+	MySqlParserPOLYGONFROMWKB                    = 983
+	MySqlParserPOW                               = 984
+	MySqlParserPOWER                             = 985
+	MySqlParserQUOTE                             = 986
+	MySqlParserRADIANS                           = 987
+	MySqlParserRAND                              = 988
+	MySqlParserRANDOM_BYTES                      = 989
+	MySqlParserRELEASE_LOCK                      = 990
+	MySqlParserREVERSE                           = 991
+	MySqlParserROUND                             = 992
+	MySqlParserROW_COUNT                         = 993
+	MySqlParserRPAD                              = 994
+	MySqlParserRTRIM                             = 995
+	MySqlParserSEC_TO_TIME                       = 996
+	MySqlParserSECONDARY_ENGINE_ATTRIBUTE        = 997
+	MySqlParserSESSION_USER                      = 998
+	MySqlParserSHA                               = 999
+	MySqlParserSHA1                              = 1000
+	MySqlParserSHA2                              = 1001
+	MySqlParserSCHEMA_NAME                       = 1002
+	MySqlParserSIGN                              = 1003
+	MySqlParserSIN                               = 1004
+	MySqlParserSLEEP                             = 1005
+	MySqlParserSOUNDEX                           = 1006
+	MySqlParserSQL_THREAD_WAIT_AFTER_GTIDS       = 1007
+	MySqlParserSQRT                              = 1008
+	MySqlParserSRID                              = 1009
+	MySqlParserSTARTPOINT                        = 1010
+	MySqlParserSTRCMP                            = 1011
+	MySqlParserSTR_TO_DATE                       = 1012
+	MySqlParserST_AREA                           = 1013
+	MySqlParserST_ASBINARY                       = 1014
+	MySqlParserST_ASTEXT                         = 1015
+	MySqlParserST_ASWKB                          = 1016
+	MySqlParserST_ASWKT                          = 1017
+	MySqlParserST_BUFFER                         = 1018
+	MySqlParserST_CENTROID                       = 1019
+	MySqlParserST_CONTAINS                       = 1020
+	MySqlParserST_CROSSES                        = 1021
+	MySqlParserST_DIFFERENCE                     = 1022
+	MySqlParserST_DIMENSION                      = 1023
+	MySqlParserST_DISJOINT                       = 1024
+	MySqlParserST_DISTANCE                       = 1025
+	MySqlParserST_ENDPOINT                       = 1026
+	MySqlParserST_ENVELOPE                       = 1027
+	MySqlParserST_EQUALS                         = 1028
+	MySqlParserST_EXTERIORRING                   = 1029
+	MySqlParserST_GEOMCOLLFROMTEXT               = 1030
+	MySqlParserST_GEOMCOLLFROMTXT                = 1031
+	MySqlParserST_GEOMCOLLFROMWKB                = 1032
+	MySqlParserST_GEOMETRYCOLLECTIONFROMTEXT     = 1033
+	MySqlParserST_GEOMETRYCOLLECTIONFROMWKB      = 1034
+	MySqlParserST_GEOMETRYFROMTEXT               = 1035
+	MySqlParserST_GEOMETRYFROMWKB                = 1036
+	MySqlParserST_GEOMETRYN                      = 1037
+	MySqlParserST_GEOMETRYTYPE                   = 1038
+	MySqlParserST_GEOMFROMTEXT                   = 1039
+	MySqlParserST_GEOMFROMWKB                    = 1040
+	MySqlParserST_INTERIORRINGN                  = 1041
+	MySqlParserST_INTERSECTION                   = 1042
+	MySqlParserST_INTERSECTS                     = 1043
+	MySqlParserST_ISCLOSED                       = 1044
+	MySqlParserST_ISEMPTY                        = 1045
+	MySqlParserST_ISSIMPLE                       = 1046
+	MySqlParserST_LINEFROMTEXT                   = 1047
+	MySqlParserST_LINEFROMWKB                    = 1048
+	MySqlParserST_LINESTRINGFROMTEXT             = 1049
+	MySqlParserST_LINESTRINGFROMWKB              = 1050
+	MySqlParserST_NUMGEOMETRIES                  = 1051
+	MySqlParserST_NUMINTERIORRING                = 1052
+	MySqlParserST_NUMINTERIORRINGS               = 1053
+	MySqlParserST_NUMPOINTS                      = 1054
+	MySqlParserST_OVERLAPS                       = 1055
+	MySqlParserST_POINTFROMTEXT                  = 1056
+	MySqlParserST_POINTFROMWKB                   = 1057
+	MySqlParserST_POINTN                         = 1058
+	MySqlParserST_POLYFROMTEXT                   = 1059
+	MySqlParserST_POLYFROMWKB                    = 1060
+	MySqlParserST_POLYGONFROMTEXT                = 1061
+	MySqlParserST_POLYGONFROMWKB                 = 1062
+	MySqlParserST_SRID                           = 1063
+	MySqlParserST_STARTPOINT                     = 1064
+	MySqlParserST_SYMDIFFERENCE                  = 1065
+	MySqlParserST_TOUCHES                        = 1066
+	MySqlParserST_UNION                          = 1067
+	MySqlParserST_WITHIN                         = 1068
+	MySqlParserST_X                              = 1069
+	MySqlParserST_Y                              = 1070
+	MySqlParserSUBDATE                           = 1071
+	MySqlParserSUBSTRING_INDEX                   = 1072
+	MySqlParserSUBTIME                           = 1073
+	MySqlParserSYSTEM_USER                       = 1074
+	MySqlParserTAN                               = 1075
+	MySqlParserTIMEDIFF                          = 1076
+	MySqlParserTIMESTAMPADD                      = 1077
+	MySqlParserTIMESTAMPDIFF                     = 1078
+	MySqlParserTIME_FORMAT                       = 1079
+	MySqlParserTIME_TO_SEC                       = 1080
+	MySqlParserTOUCHES                           = 1081
+	MySqlParserTO_BASE64                         = 1082
+	MySqlParserTO_DAYS                           = 1083
+	MySqlParserTO_SECONDS                        = 1084
+	MySqlParserUCASE                             = 1085
+	MySqlParserUNCOMPRESS                        = 1086
+	MySqlParserUNCOMPRESSED_LENGTH               = 1087
+	MySqlParserUNHEX                             = 1088
+	MySqlParserUNIX_TIMESTAMP                    = 1089
+	MySqlParserUPDATEXML                         = 1090
+	MySqlParserUPPER                             = 1091
+	MySqlParserUUID                              = 1092
+	MySqlParserUUID_SHORT                        = 1093
+	MySqlParserVALIDATE_PASSWORD_STRENGTH        = 1094
+	MySqlParserVERSION                           = 1095
+	MySqlParserWAIT_UNTIL_SQL_THREAD_AFTER_GTIDS = 1096
+	MySqlParserWEEKDAY                           = 1097
+	MySqlParserWEEKOFYEAR                        = 1098
+	MySqlParserWEIGHT_STRING                     = 1099
+	MySqlParserWITHIN                            = 1100
+	MySqlParserYEARWEEK                          = 1101
+	MySqlParserY_FUNCTION                        = 1102
+	MySqlParserX_FUNCTION                        = 1103
+	MySqlParserVAR_ASSIGN                        = 1104
+	MySqlParserPLUS_ASSIGN                       = 1105
+	MySqlParserMINUS_ASSIGN                      = 1106
+	MySqlParserMULT_ASSIGN                       = 1107
+	MySqlParserDIV_ASSIGN                        = 1108
+	MySqlParserMOD_ASSIGN                        = 1109
+	MySqlParserAND_ASSIGN                        = 1110
+	MySqlParserXOR_ASSIGN                        = 1111
+	MySqlParserOR_ASSIGN                         = 1112
+	MySqlParserSTAR                              = 1113
+	MySqlParserDIVIDE                            = 1114
+	MySqlParserMODULE                            = 1115
+	MySqlParserPLUS                              = 1116
+	MySqlParserMINUS                             = 1117
+	MySqlParserDIV                               = 1118
+	MySqlParserMOD                               = 1119
+	MySqlParserEQUAL_SYMBOL                      = 1120
+	MySqlParserGREATER_SYMBOL                    = 1121
+	MySqlParserLESS_SYMBOL                       = 1122
+	MySqlParserEXCLAMATION_SYMBOL                = 1123
+	MySqlParserBIT_NOT_OP                        = 1124
+	MySqlParserBIT_OR_OP                         = 1125
+	MySqlParserBIT_AND_OP                        = 1126
+	MySqlParserBIT_XOR_OP                        = 1127
+	MySqlParserDOT                               = 1128
+	MySqlParserLR_BRACKET                        = 1129
+	MySqlParserRR_BRACKET                        = 1130
+	MySqlParserCOMMA                             = 1131
+	MySqlParserSEMI                              = 1132
+	MySqlParserAT_SIGN                           = 1133
+	MySqlParserZERO_DECIMAL                      = 1134
+	MySqlParserONE_DECIMAL                       = 1135
+	MySqlParserTWO_DECIMAL                       = 1136
+	MySqlParserSINGLE_QUOTE_SYMB                 = 1137
+	MySqlParserDOUBLE_QUOTE_SYMB                 = 1138
+	MySqlParserREVERSE_QUOTE_SYMB                = 1139
+	MySqlParserCOLON_SYMB                        = 1140
+	MySqlParserLR_BRACKETS                       = 1141
+	MySqlParserRR_BRACKETS                       = 1142
+	MySqlParserCHARSET_REVERSE_QOUTE_STRING      = 1143
+	MySqlParserFILESIZE_LITERAL                  = 1144
+	MySqlParserSTART_NATIONAL_STRING_LITERAL     = 1145
+	MySqlParserSTRING_LITERAL                    = 1146
+	MySqlParserDECIMAL_LITERAL                   = 1147
+	MySqlParserHEXADECIMAL_LITERAL               = 1148
+	MySqlParserREAL_LITERAL                      = 1149
+	MySqlParserNULL_SPEC_LITERAL                 = 1150
+	MySqlParserBIT_STRING                        = 1151
+	MySqlParserSTRING_CHARSET_NAME               = 1152
+	MySqlParserDOT_ID                            = 1153
+	MySqlParserID                                = 1154
+	MySqlParserREVERSE_QUOTE_ID                  = 1155
+	MySqlParserSTRING_USER_NAME                  = 1156
+	MySqlParserIP_ADDRESS                        = 1157
+	MySqlParserLOCAL_ID                          = 1158
+	MySqlParserGLOBAL_ID                         = 1159
+	MySqlParserERROR_RECONGNIGION                = 1160
 )
 
 // MySqlParser rules.
@@ -1862,29 +1915,38 @@ const (
 	MySqlParserRULE_selectElements            = 11
 	MySqlParserRULE_selectElement             = 12
 	MySqlParserRULE_fromClause                = 13
-	MySqlParserRULE_limitClause               = 14
-	MySqlParserRULE_limitClauseAtom           = 15
-	MySqlParserRULE_fullId                    = 16
-	MySqlParserRULE_tableName                 = 17
-	MySqlParserRULE_fullColumnName            = 18
-	MySqlParserRULE_collationName             = 19
-	MySqlParserRULE_uid                       = 20
-	MySqlParserRULE_simpleId                  = 21
-	MySqlParserRULE_dottedId                  = 22
-	MySqlParserRULE_decimalLiteral            = 23
-	MySqlParserRULE_stringLiteral             = 24
-	MySqlParserRULE_booleanLiteral            = 25
-	MySqlParserRULE_hexadecimalLiteral        = 26
-	MySqlParserRULE_constant                  = 27
-	MySqlParserRULE_expressions               = 28
-	MySqlParserRULE_functionCall              = 29
-	MySqlParserRULE_aggregateWindowedFunction = 30
-	MySqlParserRULE_expression                = 31
-	MySqlParserRULE_predicate                 = 32
-	MySqlParserRULE_expressionAtom            = 33
-	MySqlParserRULE_unaryOperator             = 34
-	MySqlParserRULE_comparisonOperator        = 35
-	MySqlParserRULE_logicalOperator           = 36
+	MySqlParserRULE_annsClause                = 14
+	MySqlParserRULE_annsVectors               = 15
+	MySqlParserRULE_annsVector                = 16
+	MySqlParserRULE_annsParamsClause          = 17
+	MySqlParserRULE_kvPairs                   = 18
+	MySqlParserRULE_kvPair                    = 19
+	MySqlParserRULE_value                     = 20
+	MySqlParserRULE_limitClause               = 21
+	MySqlParserRULE_limitClauseAtom           = 22
+	MySqlParserRULE_fullId                    = 23
+	MySqlParserRULE_tableName                 = 24
+	MySqlParserRULE_fullColumnName            = 25
+	MySqlParserRULE_collationName             = 26
+	MySqlParserRULE_uid                       = 27
+	MySqlParserRULE_simpleId                  = 28
+	MySqlParserRULE_dottedId                  = 29
+	MySqlParserRULE_decimalLiteral            = 30
+	MySqlParserRULE_stringLiteral             = 31
+	MySqlParserRULE_booleanLiteral            = 32
+	MySqlParserRULE_hexadecimalLiteral        = 33
+	MySqlParserRULE_constant                  = 34
+	MySqlParserRULE_expressions               = 35
+	MySqlParserRULE_functionCall              = 36
+	MySqlParserRULE_aggregateWindowedFunction = 37
+	MySqlParserRULE_expression                = 38
+	MySqlParserRULE_predicate                 = 39
+	MySqlParserRULE_expressionAtom            = 40
+	MySqlParserRULE_array                     = 41
+	MySqlParserRULE_floatArray                = 42
+	MySqlParserRULE_unaryOperator             = 43
+	MySqlParserRULE_comparisonOperator        = 44
+	MySqlParserRULE_logicalOperator           = 45
 )
 
 // IRootContext is an interface to support dynamic dispatch.
@@ -1996,34 +2058,34 @@ func (p *MySqlParser) Root() (localctx IRootContext) {
 	}()
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(75)
+	p.SetState(93)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserSELECT || _la == MySqlParserSEMI {
 		{
-			p.SetState(74)
+			p.SetState(92)
 			p.SqlStatements()
 		}
 
 	}
-	p.SetState(79)
+	p.SetState(97)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserMINUS {
 		{
-			p.SetState(77)
+			p.SetState(95)
 			p.Match(MySqlParserMINUS)
 		}
 		{
-			p.SetState(78)
+			p.SetState(96)
 			p.Match(MySqlParserMINUS)
 		}
 
 	}
 	{
-		p.SetState(81)
+		p.SetState(99)
 		p.Match(MySqlParserEOF)
 	}
 
@@ -2211,42 +2273,42 @@ func (p *MySqlParser) SqlStatements() (localctx ISqlStatementsContext) {
 	var _alt int
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(94)
+	p.SetState(112)
 	p.GetErrorHandler().Sync(p)
 	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 5, p.GetParserRuleContext())
 
 	for _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
 		if _alt == 1 {
-			p.SetState(92)
+			p.SetState(110)
 			p.GetErrorHandler().Sync(p)
 
 			switch p.GetTokenStream().LA(1) {
 			case MySqlParserSELECT:
 				{
-					p.SetState(83)
+					p.SetState(101)
 					p.SqlStatement()
 				}
-				p.SetState(86)
+				p.SetState(104)
 				p.GetErrorHandler().Sync(p)
 				_la = p.GetTokenStream().LA(1)
 
 				if _la == MySqlParserMINUS {
 					{
-						p.SetState(84)
+						p.SetState(102)
 						p.Match(MySqlParserMINUS)
 					}
 					{
-						p.SetState(85)
+						p.SetState(103)
 						p.Match(MySqlParserMINUS)
 					}
 
 				}
-				p.SetState(89)
+				p.SetState(107)
 				p.GetErrorHandler().Sync(p)
 
 				if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 3, p.GetParserRuleContext()) == 1 {
 					{
-						p.SetState(88)
+						p.SetState(106)
 						p.Match(MySqlParserSEMI)
 					}
 
@@ -2254,7 +2316,7 @@ func (p *MySqlParser) SqlStatements() (localctx ISqlStatementsContext) {
 
 			case MySqlParserSEMI:
 				{
-					p.SetState(91)
+					p.SetState(109)
 					p.EmptyStatement_()
 				}
 
@@ -2263,40 +2325,40 @@ func (p *MySqlParser) SqlStatements() (localctx ISqlStatementsContext) {
 			}
 
 		}
-		p.SetState(96)
+		p.SetState(114)
 		p.GetErrorHandler().Sync(p)
 		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 5, p.GetParserRuleContext())
 	}
-	p.SetState(106)
+	p.SetState(124)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserSELECT:
 		{
-			p.SetState(97)
+			p.SetState(115)
 			p.SqlStatement()
 		}
-		p.SetState(103)
+		p.SetState(121)
 		p.GetErrorHandler().Sync(p)
 
 		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 7, p.GetParserRuleContext()) == 1 {
-			p.SetState(100)
+			p.SetState(118)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 
 			if _la == MySqlParserMINUS {
 				{
-					p.SetState(98)
+					p.SetState(116)
 					p.Match(MySqlParserMINUS)
 				}
 				{
-					p.SetState(99)
+					p.SetState(117)
 					p.Match(MySqlParserMINUS)
 				}
 
 			}
 			{
-				p.SetState(102)
+				p.SetState(120)
 				p.Match(MySqlParserSEMI)
 			}
 
@@ -2304,7 +2366,7 @@ func (p *MySqlParser) SqlStatements() (localctx ISqlStatementsContext) {
 
 	case MySqlParserSEMI:
 		{
-			p.SetState(105)
+			p.SetState(123)
 			p.EmptyStatement_()
 		}
 
@@ -2412,7 +2474,7 @@ func (p *MySqlParser) SqlStatement() (localctx ISqlStatementContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(108)
+		p.SetState(126)
 		p.DmlStatement()
 	}
 
@@ -2504,7 +2566,7 @@ func (p *MySqlParser) EmptyStatement_() (localctx IEmptyStatement_Context) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(110)
+		p.SetState(128)
 		p.Match(MySqlParserSEMI)
 	}
 
@@ -2608,7 +2670,7 @@ func (p *MySqlParser) DmlStatement() (localctx IDmlStatementContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(112)
+		p.SetState(130)
 		p.SelectStatement()
 	}
 
@@ -2752,16 +2814,16 @@ func (p *MySqlParser) SelectStatement() (localctx ISelectStatementContext) {
 	localctx = NewSimpleSelectContext(p, localctx)
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(114)
+		p.SetState(132)
 		p.QuerySpecification()
 	}
-	p.SetState(116)
+	p.SetState(134)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserFOR || _la == MySqlParserLOCK {
 		{
-			p.SetState(115)
+			p.SetState(133)
 			p.LockClause()
 		}
 
@@ -2873,37 +2935,37 @@ func (p *MySqlParser) LockClause() (localctx ILockClauseContext) {
 		}
 	}()
 
-	p.SetState(124)
+	p.SetState(142)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserFOR:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(118)
+			p.SetState(136)
 			p.Match(MySqlParserFOR)
 		}
 		{
-			p.SetState(119)
+			p.SetState(137)
 			p.Match(MySqlParserUPDATE)
 		}
 
 	case MySqlParserLOCK:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(120)
+			p.SetState(138)
 			p.Match(MySqlParserLOCK)
 		}
 		{
-			p.SetState(121)
+			p.SetState(139)
 			p.Match(MySqlParserIN)
 		}
 		{
-			p.SetState(122)
+			p.SetState(140)
 			p.Match(MySqlParserSHARE)
 		}
 		{
-			p.SetState(123)
+			p.SetState(141)
 			p.Match(MySqlParserMODE)
 		}
 
@@ -3045,24 +3107,24 @@ func (p *MySqlParser) TableSources() (localctx ITableSourcesContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(126)
+		p.SetState(144)
 		p.TableSource()
 	}
-	p.SetState(131)
+	p.SetState(149)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	for _la == MySqlParserCOMMA {
 		{
-			p.SetState(127)
+			p.SetState(145)
 			p.Match(MySqlParserCOMMA)
 		}
 		{
-			p.SetState(128)
+			p.SetState(146)
 			p.TableSource()
 		}
 
-		p.SetState(133)
+		p.SetState(151)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 	}
@@ -3190,7 +3252,7 @@ func (p *MySqlParser) TableSource() (localctx ITableSourceContext) {
 	localctx = NewTableSourceBaseContext(p, localctx)
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(134)
+		p.SetState(152)
 		p.TableName()
 	}
 
@@ -3312,6 +3374,22 @@ func (s *QuerySpecificationContext) FromClause() IFromClauseContext {
 	return t.(IFromClauseContext)
 }
 
+func (s *QuerySpecificationContext) AnnsClause() IAnnsClauseContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IAnnsClauseContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IAnnsClauseContext)
+}
+
 func (s *QuerySpecificationContext) LimitClause() ILimitClauseContext {
 	var t antlr.RuleContext
 	for _, ctx := range s.GetChildren() {
@@ -3374,47 +3452,58 @@ func (p *MySqlParser) QuerySpecification() (localctx IQuerySpecificationContext)
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(136)
+		p.SetState(154)
 		p.Match(MySqlParserSELECT)
 	}
-	p.SetState(140)
+	p.SetState(158)
 	p.GetErrorHandler().Sync(p)
 	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 12, p.GetParserRuleContext())
 
 	for _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
 		if _alt == 1 {
 			{
-				p.SetState(137)
+				p.SetState(155)
 				p.SelectSpec()
 			}
 
 		}
-		p.SetState(142)
+		p.SetState(160)
 		p.GetErrorHandler().Sync(p)
 		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 12, p.GetParserRuleContext())
 	}
 	{
-		p.SetState(143)
+		p.SetState(161)
 		p.SelectElements()
 	}
-	p.SetState(145)
+	p.SetState(163)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserFROM {
 		{
-			p.SetState(144)
+			p.SetState(162)
 			p.FromClause()
 		}
 
 	}
-	p.SetState(148)
+	p.SetState(166)
+	p.GetErrorHandler().Sync(p)
+	_la = p.GetTokenStream().LA(1)
+
+	if _la == MySqlParserANNS {
+		{
+			p.SetState(165)
+			p.AnnsClause()
+		}
+
+	}
+	p.SetState(169)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserLIMIT {
 		{
-			p.SetState(147)
+			p.SetState(168)
 			p.LimitClause()
 		}
 
@@ -3547,14 +3636,14 @@ func (p *MySqlParser) SelectSpec() (localctx ISelectSpecContext) {
 		}
 	}()
 
-	p.SetState(158)
+	p.SetState(179)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserALL, MySqlParserDISTINCT, MySqlParserDISTINCTROW:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(150)
+			p.SetState(171)
 			_la = p.GetTokenStream().LA(1)
 
 			if !((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&1688849860264000) != 0) {
@@ -3568,42 +3657,42 @@ func (p *MySqlParser) SelectSpec() (localctx ISelectSpecContext) {
 	case MySqlParserHIGH_PRIORITY:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(151)
+			p.SetState(172)
 			p.Match(MySqlParserHIGH_PRIORITY)
 		}
 
 	case MySqlParserSTRAIGHT_JOIN:
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(152)
+			p.SetState(173)
 			p.Match(MySqlParserSTRAIGHT_JOIN)
 		}
 
 	case MySqlParserSQL_SMALL_RESULT:
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(153)
+			p.SetState(174)
 			p.Match(MySqlParserSQL_SMALL_RESULT)
 		}
 
 	case MySqlParserSQL_BIG_RESULT:
 		p.EnterOuterAlt(localctx, 5)
 		{
-			p.SetState(154)
+			p.SetState(175)
 			p.Match(MySqlParserSQL_BIG_RESULT)
 		}
 
 	case MySqlParserSQL_BUFFER_RESULT:
 		p.EnterOuterAlt(localctx, 6)
 		{
-			p.SetState(155)
+			p.SetState(176)
 			p.Match(MySqlParserSQL_BUFFER_RESULT)
 		}
 
 	case MySqlParserSQL_CACHE, MySqlParserSQL_NO_CACHE:
 		p.EnterOuterAlt(localctx, 7)
 		{
-			p.SetState(156)
+			p.SetState(177)
 			_la = p.GetTokenStream().LA(1)
 
 			if !(_la == MySqlParserSQL_CACHE || _la == MySqlParserSQL_NO_CACHE) {
@@ -3617,7 +3706,7 @@ func (p *MySqlParser) SelectSpec() (localctx ISelectSpecContext) {
 	case MySqlParserSQL_CALC_FOUND_ROWS:
 		p.EnterOuterAlt(localctx, 8)
 		{
-			p.SetState(157)
+			p.SetState(178)
 			p.Match(MySqlParserSQL_CALC_FOUND_ROWS)
 		}
 
@@ -3773,12 +3862,12 @@ func (p *MySqlParser) SelectElements() (localctx ISelectElementsContext) {
 	}()
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(162)
+	p.SetState(183)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 16, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 17, p.GetParserRuleContext()) {
 	case 1:
 		{
-			p.SetState(160)
+			p.SetState(181)
 
 			var _m = p.Match(MySqlParserSTAR)
 
@@ -3787,26 +3876,26 @@ func (p *MySqlParser) SelectElements() (localctx ISelectElementsContext) {
 
 	case 2:
 		{
-			p.SetState(161)
+			p.SetState(182)
 			p.SelectElement()
 		}
 
 	}
-	p.SetState(168)
+	p.SetState(189)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	for _la == MySqlParserCOMMA {
 		{
-			p.SetState(164)
+			p.SetState(185)
 			p.Match(MySqlParserCOMMA)
 		}
 		{
-			p.SetState(165)
+			p.SetState(186)
 			p.SelectElement()
 		}
 
-		p.SetState(170)
+		p.SetState(191)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 	}
@@ -4016,34 +4105,34 @@ func (p *MySqlParser) SelectElement() (localctx ISelectElementContext) {
 		}
 	}()
 
-	p.SetState(185)
+	p.SetState(206)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 22, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 23, p.GetParserRuleContext()) {
 	case 1:
 		localctx = NewSelectColumnElementContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(171)
+			p.SetState(192)
 			p.FullColumnName()
 		}
-		p.SetState(176)
+		p.SetState(197)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 
-		if _la == MySqlParserAS || (int64((_la-1138)) & ^0x3f) == 0 && ((int64(1)<<(_la-1138))&6145) != 0 {
-			p.SetState(173)
+		if _la == MySqlParserAS || (int64((_la-1143)) & ^0x3f) == 0 && ((int64(1)<<(_la-1143))&6145) != 0 {
+			p.SetState(194)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 
 			if _la == MySqlParserAS {
 				{
-					p.SetState(172)
+					p.SetState(193)
 					p.Match(MySqlParserAS)
 				}
 
 			}
 			{
-				p.SetState(175)
+				p.SetState(196)
 				p.Uid()
 			}
 
@@ -4053,27 +4142,27 @@ func (p *MySqlParser) SelectElement() (localctx ISelectElementContext) {
 		localctx = NewSelectFunctionElementContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(178)
+			p.SetState(199)
 			p.FunctionCall()
 		}
-		p.SetState(183)
+		p.SetState(204)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 
-		if _la == MySqlParserAS || (int64((_la-1138)) & ^0x3f) == 0 && ((int64(1)<<(_la-1138))&6145) != 0 {
-			p.SetState(180)
+		if _la == MySqlParserAS || (int64((_la-1143)) & ^0x3f) == 0 && ((int64(1)<<(_la-1143))&6145) != 0 {
+			p.SetState(201)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 
 			if _la == MySqlParserAS {
 				{
-					p.SetState(179)
+					p.SetState(200)
 					p.Match(MySqlParserAS)
 				}
 
 			}
 			{
-				p.SetState(182)
+				p.SetState(203)
 				p.Uid()
 			}
 
@@ -4217,31 +4306,1051 @@ func (p *MySqlParser) FromClause() (localctx IFromClauseContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(187)
+		p.SetState(208)
 		p.Match(MySqlParserFROM)
 	}
 	{
-		p.SetState(188)
+		p.SetState(209)
 		p.TableSources()
 	}
 
-	p.SetState(192)
+	p.SetState(213)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserWHERE {
 		{
-			p.SetState(190)
+			p.SetState(211)
 			p.Match(MySqlParserWHERE)
 		}
 		{
-			p.SetState(191)
+			p.SetState(212)
 
 			var _x = p.expression(0)
 
 			localctx.(*FromClauseContext).whereExpr = _x
 		}
 
+	}
+
+	return localctx
+}
+
+// IAnnsClauseContext is an interface to support dynamic dispatch.
+type IAnnsClauseContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsAnnsClauseContext differentiates from other interfaces.
+	IsAnnsClauseContext()
+}
+
+type AnnsClauseContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyAnnsClauseContext() *AnnsClauseContext {
+	var p = new(AnnsClauseContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_annsClause
+	return p
+}
+
+func (*AnnsClauseContext) IsAnnsClauseContext() {}
+
+func NewAnnsClauseContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *AnnsClauseContext {
+	var p = new(AnnsClauseContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_annsClause
+
+	return p
+}
+
+func (s *AnnsClauseContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *AnnsClauseContext) ANNS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserANNS, 0)
+}
+
+func (s *AnnsClauseContext) BY() antlr.TerminalNode {
+	return s.GetToken(MySqlParserBY, 0)
+}
+
+func (s *AnnsClauseContext) FullColumnName() IFullColumnNameContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IFullColumnNameContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IFullColumnNameContext)
+}
+
+func (s *AnnsClauseContext) ANNS_OP() antlr.TerminalNode {
+	return s.GetToken(MySqlParserANNS_OP, 0)
+}
+
+func (s *AnnsClauseContext) AnnsVectors() IAnnsVectorsContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IAnnsVectorsContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IAnnsVectorsContext)
+}
+
+func (s *AnnsClauseContext) AnnsParamsClause() IAnnsParamsClauseContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IAnnsParamsClauseContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IAnnsParamsClauseContext)
+}
+
+func (s *AnnsClauseContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *AnnsClauseContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *AnnsClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitAnnsClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) AnnsClause() (localctx IAnnsClauseContext) {
+	this := p
+	_ = this
+
+	localctx = NewAnnsClauseContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 28, MySqlParserRULE_annsClause)
+	var _la int
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(215)
+		p.Match(MySqlParserANNS)
+	}
+	{
+		p.SetState(216)
+		p.Match(MySqlParserBY)
+	}
+	{
+		p.SetState(217)
+		p.FullColumnName()
+	}
+	{
+		p.SetState(218)
+		p.Match(MySqlParserANNS_OP)
+	}
+	{
+		p.SetState(219)
+		p.AnnsVectors()
+	}
+	p.SetState(221)
+	p.GetErrorHandler().Sync(p)
+	_la = p.GetTokenStream().LA(1)
+
+	if _la == MySqlParserANNS_PARAMS {
+		{
+			p.SetState(220)
+			p.AnnsParamsClause()
+		}
+
+	}
+
+	return localctx
+}
+
+// IAnnsVectorsContext is an interface to support dynamic dispatch.
+type IAnnsVectorsContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsAnnsVectorsContext differentiates from other interfaces.
+	IsAnnsVectorsContext()
+}
+
+type AnnsVectorsContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyAnnsVectorsContext() *AnnsVectorsContext {
+	var p = new(AnnsVectorsContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_annsVectors
+	return p
+}
+
+func (*AnnsVectorsContext) IsAnnsVectorsContext() {}
+
+func NewAnnsVectorsContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *AnnsVectorsContext {
+	var p = new(AnnsVectorsContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_annsVectors
+
+	return p
+}
+
+func (s *AnnsVectorsContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *AnnsVectorsContext) LR_BRACKET() antlr.TerminalNode {
+	return s.GetToken(MySqlParserLR_BRACKET, 0)
+}
+
+func (s *AnnsVectorsContext) RR_BRACKET() antlr.TerminalNode {
+	return s.GetToken(MySqlParserRR_BRACKET, 0)
+}
+
+func (s *AnnsVectorsContext) AllAnnsVector() []IAnnsVectorContext {
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IAnnsVectorContext); ok {
+			len++
+		}
+	}
+
+	tst := make([]IAnnsVectorContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IAnnsVectorContext); ok {
+			tst[i] = t.(IAnnsVectorContext)
+			i++
+		}
+	}
+
+	return tst
+}
+
+func (s *AnnsVectorsContext) AnnsVector(i int) IAnnsVectorContext {
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IAnnsVectorContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IAnnsVectorContext)
+}
+
+func (s *AnnsVectorsContext) AllCOMMA() []antlr.TerminalNode {
+	return s.GetTokens(MySqlParserCOMMA)
+}
+
+func (s *AnnsVectorsContext) COMMA(i int) antlr.TerminalNode {
+	return s.GetToken(MySqlParserCOMMA, i)
+}
+
+func (s *AnnsVectorsContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *AnnsVectorsContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *AnnsVectorsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitAnnsVectors(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) AnnsVectors() (localctx IAnnsVectorsContext) {
+	this := p
+	_ = this
+
+	localctx = NewAnnsVectorsContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 30, MySqlParserRULE_annsVectors)
+	var _la int
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(223)
+		p.Match(MySqlParserLR_BRACKET)
+	}
+	p.SetState(232)
+	p.GetErrorHandler().Sync(p)
+	_la = p.GetTokenStream().LA(1)
+
+	if _la == MySqlParserLR_BRACKETS || _la == MySqlParserBIT_STRING {
+		{
+			p.SetState(224)
+			p.AnnsVector()
+		}
+		p.SetState(229)
+		p.GetErrorHandler().Sync(p)
+		_la = p.GetTokenStream().LA(1)
+
+		for _la == MySqlParserCOMMA {
+			{
+				p.SetState(225)
+				p.Match(MySqlParserCOMMA)
+			}
+			{
+				p.SetState(226)
+				p.AnnsVector()
+			}
+
+			p.SetState(231)
+			p.GetErrorHandler().Sync(p)
+			_la = p.GetTokenStream().LA(1)
+		}
+
+	}
+	{
+		p.SetState(234)
+		p.Match(MySqlParserRR_BRACKET)
+	}
+
+	return localctx
+}
+
+// IAnnsVectorContext is an interface to support dynamic dispatch.
+type IAnnsVectorContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsAnnsVectorContext differentiates from other interfaces.
+	IsAnnsVectorContext()
+}
+
+type AnnsVectorContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyAnnsVectorContext() *AnnsVectorContext {
+	var p = new(AnnsVectorContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_annsVector
+	return p
+}
+
+func (*AnnsVectorContext) IsAnnsVectorContext() {}
+
+func NewAnnsVectorContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *AnnsVectorContext {
+	var p = new(AnnsVectorContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_annsVector
+
+	return p
+}
+
+func (s *AnnsVectorContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *AnnsVectorContext) FloatArray() IFloatArrayContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IFloatArrayContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IFloatArrayContext)
+}
+
+func (s *AnnsVectorContext) BIT_STRING() antlr.TerminalNode {
+	return s.GetToken(MySqlParserBIT_STRING, 0)
+}
+
+func (s *AnnsVectorContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *AnnsVectorContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *AnnsVectorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitAnnsVector(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) AnnsVector() (localctx IAnnsVectorContext) {
+	this := p
+	_ = this
+
+	localctx = NewAnnsVectorContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 32, MySqlParserRULE_annsVector)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	p.SetState(238)
+	p.GetErrorHandler().Sync(p)
+
+	switch p.GetTokenStream().LA(1) {
+	case MySqlParserLR_BRACKETS:
+		{
+			p.SetState(236)
+			p.FloatArray()
+		}
+
+	case MySqlParserBIT_STRING:
+		{
+			p.SetState(237)
+			p.Match(MySqlParserBIT_STRING)
+		}
+
+	default:
+		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
+	}
+
+	return localctx
+}
+
+// IAnnsParamsClauseContext is an interface to support dynamic dispatch.
+type IAnnsParamsClauseContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsAnnsParamsClauseContext differentiates from other interfaces.
+	IsAnnsParamsClauseContext()
+}
+
+type AnnsParamsClauseContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyAnnsParamsClauseContext() *AnnsParamsClauseContext {
+	var p = new(AnnsParamsClauseContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_annsParamsClause
+	return p
+}
+
+func (*AnnsParamsClauseContext) IsAnnsParamsClauseContext() {}
+
+func NewAnnsParamsClauseContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *AnnsParamsClauseContext {
+	var p = new(AnnsParamsClauseContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_annsParamsClause
+
+	return p
+}
+
+func (s *AnnsParamsClauseContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *AnnsParamsClauseContext) ANNS_PARAMS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserANNS_PARAMS, 0)
+}
+
+func (s *AnnsParamsClauseContext) EQUAL_SYMBOL() antlr.TerminalNode {
+	return s.GetToken(MySqlParserEQUAL_SYMBOL, 0)
+}
+
+func (s *AnnsParamsClauseContext) KvPairs() IKvPairsContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IKvPairsContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IKvPairsContext)
+}
+
+func (s *AnnsParamsClauseContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *AnnsParamsClauseContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *AnnsParamsClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitAnnsParamsClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) AnnsParamsClause() (localctx IAnnsParamsClauseContext) {
+	this := p
+	_ = this
+
+	localctx = NewAnnsParamsClauseContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 34, MySqlParserRULE_annsParamsClause)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(240)
+		p.Match(MySqlParserANNS_PARAMS)
+	}
+	{
+		p.SetState(241)
+		p.Match(MySqlParserEQUAL_SYMBOL)
+	}
+	{
+		p.SetState(242)
+		p.KvPairs()
+	}
+
+	return localctx
+}
+
+// IKvPairsContext is an interface to support dynamic dispatch.
+type IKvPairsContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsKvPairsContext differentiates from other interfaces.
+	IsKvPairsContext()
+}
+
+type KvPairsContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyKvPairsContext() *KvPairsContext {
+	var p = new(KvPairsContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_kvPairs
+	return p
+}
+
+func (*KvPairsContext) IsKvPairsContext() {}
+
+func NewKvPairsContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *KvPairsContext {
+	var p = new(KvPairsContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_kvPairs
+
+	return p
+}
+
+func (s *KvPairsContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *KvPairsContext) LR_BRACKET() antlr.TerminalNode {
+	return s.GetToken(MySqlParserLR_BRACKET, 0)
+}
+
+func (s *KvPairsContext) RR_BRACKET() antlr.TerminalNode {
+	return s.GetToken(MySqlParserRR_BRACKET, 0)
+}
+
+func (s *KvPairsContext) AllKvPair() []IKvPairContext {
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IKvPairContext); ok {
+			len++
+		}
+	}
+
+	tst := make([]IKvPairContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IKvPairContext); ok {
+			tst[i] = t.(IKvPairContext)
+			i++
+		}
+	}
+
+	return tst
+}
+
+func (s *KvPairsContext) KvPair(i int) IKvPairContext {
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IKvPairContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IKvPairContext)
+}
+
+func (s *KvPairsContext) AllCOMMA() []antlr.TerminalNode {
+	return s.GetTokens(MySqlParserCOMMA)
+}
+
+func (s *KvPairsContext) COMMA(i int) antlr.TerminalNode {
+	return s.GetToken(MySqlParserCOMMA, i)
+}
+
+func (s *KvPairsContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *KvPairsContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *KvPairsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitKvPairs(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) KvPairs() (localctx IKvPairsContext) {
+	this := p
+	_ = this
+
+	localctx = NewKvPairsContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 36, MySqlParserRULE_kvPairs)
+	var _la int
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(244)
+		p.Match(MySqlParserLR_BRACKET)
+	}
+	p.SetState(253)
+	p.GetErrorHandler().Sync(p)
+	_la = p.GetTokenStream().LA(1)
+
+	if _la == MySqlParserID {
+		{
+			p.SetState(245)
+			p.KvPair()
+		}
+		p.SetState(250)
+		p.GetErrorHandler().Sync(p)
+		_la = p.GetTokenStream().LA(1)
+
+		for _la == MySqlParserCOMMA {
+			{
+				p.SetState(246)
+				p.Match(MySqlParserCOMMA)
+			}
+			{
+				p.SetState(247)
+				p.KvPair()
+			}
+
+			p.SetState(252)
+			p.GetErrorHandler().Sync(p)
+			_la = p.GetTokenStream().LA(1)
+		}
+
+	}
+	{
+		p.SetState(255)
+		p.Match(MySqlParserRR_BRACKET)
+	}
+
+	return localctx
+}
+
+// IKvPairContext is an interface to support dynamic dispatch.
+type IKvPairContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsKvPairContext differentiates from other interfaces.
+	IsKvPairContext()
+}
+
+type KvPairContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyKvPairContext() *KvPairContext {
+	var p = new(KvPairContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_kvPair
+	return p
+}
+
+func (*KvPairContext) IsKvPairContext() {}
+
+func NewKvPairContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *KvPairContext {
+	var p = new(KvPairContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_kvPair
+
+	return p
+}
+
+func (s *KvPairContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *KvPairContext) ID() antlr.TerminalNode {
+	return s.GetToken(MySqlParserID, 0)
+}
+
+func (s *KvPairContext) EQUAL_SYMBOL() antlr.TerminalNode {
+	return s.GetToken(MySqlParserEQUAL_SYMBOL, 0)
+}
+
+func (s *KvPairContext) Value() IValueContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IValueContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IValueContext)
+}
+
+func (s *KvPairContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *KvPairContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *KvPairContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitKvPair(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) KvPair() (localctx IKvPairContext) {
+	this := p
+	_ = this
+
+	localctx = NewKvPairContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 38, MySqlParserRULE_kvPair)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(257)
+		p.Match(MySqlParserID)
+	}
+	{
+		p.SetState(258)
+		p.Match(MySqlParserEQUAL_SYMBOL)
+	}
+	{
+		p.SetState(259)
+		p.Value()
+	}
+
+	return localctx
+}
+
+// IValueContext is an interface to support dynamic dispatch.
+type IValueContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsValueContext differentiates from other interfaces.
+	IsValueContext()
+}
+
+type ValueContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyValueContext() *ValueContext {
+	var p = new(ValueContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_value
+	return p
+}
+
+func (*ValueContext) IsValueContext() {}
+
+func NewValueContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *ValueContext {
+	var p = new(ValueContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_value
+
+	return p
+}
+
+func (s *ValueContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *ValueContext) ID() antlr.TerminalNode {
+	return s.GetToken(MySqlParserID, 0)
+}
+
+func (s *ValueContext) Constant() IConstantContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IConstantContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IConstantContext)
+}
+
+func (s *ValueContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *ValueContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *ValueContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitValue(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) Value() (localctx IValueContext) {
+	this := p
+	_ = this
+
+	localctx = NewValueContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 40, MySqlParserRULE_value)
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	p.SetState(263)
+	p.GetErrorHandler().Sync(p)
+
+	switch p.GetTokenStream().LA(1) {
+	case MySqlParserID:
+		{
+			p.SetState(261)
+			p.Match(MySqlParserID)
+		}
+
+	case MySqlParserFALSE, MySqlParserTRUE, MySqlParserMINUS, MySqlParserZERO_DECIMAL, MySqlParserONE_DECIMAL, MySqlParserTWO_DECIMAL, MySqlParserSTART_NATIONAL_STRING_LITERAL, MySqlParserSTRING_LITERAL, MySqlParserDECIMAL_LITERAL, MySqlParserHEXADECIMAL_LITERAL, MySqlParserREAL_LITERAL, MySqlParserBIT_STRING, MySqlParserSTRING_CHARSET_NAME:
+		{
+			p.SetState(262)
+			p.Constant()
+		}
+
+	default:
+		panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
 	}
 
 	return localctx
@@ -4383,7 +5492,7 @@ func (p *MySqlParser) LimitClause() (localctx ILimitClauseContext) {
 	_ = this
 
 	localctx = NewLimitClauseContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 28, MySqlParserRULE_limitClause)
+	p.EnterRule(localctx, 42, MySqlParserRULE_limitClause)
 
 	defer func() {
 		p.ExitRule()
@@ -4403,32 +5512,32 @@ func (p *MySqlParser) LimitClause() (localctx ILimitClauseContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(194)
+		p.SetState(265)
 		p.Match(MySqlParserLIMIT)
 	}
-	p.SetState(205)
+	p.SetState(276)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 25, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 33, p.GetParserRuleContext()) {
 	case 1:
-		p.SetState(198)
+		p.SetState(269)
 		p.GetErrorHandler().Sync(p)
 
-		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 24, p.GetParserRuleContext()) == 1 {
+		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 32, p.GetParserRuleContext()) == 1 {
 			{
-				p.SetState(195)
+				p.SetState(266)
 
 				var _x = p.LimitClauseAtom()
 
 				localctx.(*LimitClauseContext).offset = _x
 			}
 			{
-				p.SetState(196)
+				p.SetState(267)
 				p.Match(MySqlParserCOMMA)
 			}
 
 		}
 		{
-			p.SetState(200)
+			p.SetState(271)
 
 			var _x = p.LimitClauseAtom()
 
@@ -4437,18 +5546,18 @@ func (p *MySqlParser) LimitClause() (localctx ILimitClauseContext) {
 
 	case 2:
 		{
-			p.SetState(201)
+			p.SetState(272)
 
 			var _x = p.LimitClauseAtom()
 
 			localctx.(*LimitClauseContext).limit = _x
 		}
 		{
-			p.SetState(202)
+			p.SetState(273)
 			p.Match(MySqlParserOFFSET)
 		}
 		{
-			p.SetState(203)
+			p.SetState(274)
 
 			var _x = p.LimitClauseAtom()
 
@@ -4537,7 +5646,7 @@ func (p *MySqlParser) LimitClauseAtom() (localctx ILimitClauseAtomContext) {
 	_ = this
 
 	localctx = NewLimitClauseAtomContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 30, MySqlParserRULE_limitClauseAtom)
+	p.EnterRule(localctx, 44, MySqlParserRULE_limitClauseAtom)
 
 	defer func() {
 		p.ExitRule()
@@ -4557,7 +5666,7 @@ func (p *MySqlParser) LimitClauseAtom() (localctx ILimitClauseAtomContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(207)
+		p.SetState(278)
 		p.DecimalLiteral()
 	}
 
@@ -4674,7 +5783,7 @@ func (p *MySqlParser) FullId() (localctx IFullIdContext) {
 	_ = this
 
 	localctx = NewFullIdContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 32, MySqlParserRULE_fullId)
+	p.EnterRule(localctx, 46, MySqlParserRULE_fullId)
 
 	defer func() {
 		p.ExitRule()
@@ -4694,30 +5803,30 @@ func (p *MySqlParser) FullId() (localctx IFullIdContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(209)
+		p.SetState(280)
 		p.Uid()
 	}
-	p.SetState(213)
+	p.SetState(284)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserDOT_ID:
 		{
-			p.SetState(210)
+			p.SetState(281)
 			p.Match(MySqlParserDOT_ID)
 		}
 
 	case MySqlParserDOT:
 		{
-			p.SetState(211)
+			p.SetState(282)
 			p.Match(MySqlParserDOT)
 		}
 		{
-			p.SetState(212)
+			p.SetState(283)
 			p.Uid()
 		}
 
-	case MySqlParserEOF, MySqlParserFOR, MySqlParserLIMIT, MySqlParserLOCK, MySqlParserSELECT, MySqlParserWHERE, MySqlParserMINUS, MySqlParserCOMMA, MySqlParserSEMI:
+	case MySqlParserEOF, MySqlParserFOR, MySqlParserLIMIT, MySqlParserLOCK, MySqlParserSELECT, MySqlParserWHERE, MySqlParserANNS, MySqlParserMINUS, MySqlParserCOMMA, MySqlParserSEMI:
 
 	default:
 	}
@@ -4802,7 +5911,7 @@ func (p *MySqlParser) TableName() (localctx ITableNameContext) {
 	_ = this
 
 	localctx = NewTableNameContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 34, MySqlParserRULE_tableName)
+	p.EnterRule(localctx, 48, MySqlParserRULE_tableName)
 
 	defer func() {
 		p.ExitRule()
@@ -4822,7 +5931,7 @@ func (p *MySqlParser) TableName() (localctx ITableNameContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(215)
+		p.SetState(286)
 		p.FullId()
 	}
 
@@ -4947,7 +6056,7 @@ func (p *MySqlParser) FullColumnName() (localctx IFullColumnNameContext) {
 	_ = this
 
 	localctx = NewFullColumnNameContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 36, MySqlParserRULE_fullColumnName)
+	p.EnterRule(localctx, 50, MySqlParserRULE_fullColumnName)
 
 	defer func() {
 		p.ExitRule()
@@ -4965,29 +6074,29 @@ func (p *MySqlParser) FullColumnName() (localctx IFullColumnNameContext) {
 		}
 	}()
 
-	p.SetState(231)
+	p.SetState(302)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 31, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 39, p.GetParserRuleContext()) {
 	case 1:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(217)
+			p.SetState(288)
 			p.Uid()
 		}
-		p.SetState(222)
+		p.SetState(293)
 		p.GetErrorHandler().Sync(p)
 
-		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 28, p.GetParserRuleContext()) == 1 {
+		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 36, p.GetParserRuleContext()) == 1 {
 			{
-				p.SetState(218)
+				p.SetState(289)
 				p.DottedId()
 			}
-			p.SetState(220)
+			p.SetState(291)
 			p.GetErrorHandler().Sync(p)
 
-			if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 27, p.GetParserRuleContext()) == 1 {
+			if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 35, p.GetParserRuleContext()) == 1 {
 				{
-					p.SetState(219)
+					p.SetState(290)
 					p.DottedId()
 				}
 
@@ -4997,24 +6106,24 @@ func (p *MySqlParser) FullColumnName() (localctx IFullColumnNameContext) {
 
 	case 2:
 		p.EnterOuterAlt(localctx, 2)
-		p.SetState(225)
+		p.SetState(296)
 		p.GetErrorHandler().Sync(p)
 
-		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 29, p.GetParserRuleContext()) == 1 {
-			p.SetState(224)
+		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 37, p.GetParserRuleContext()) == 1 {
+			p.SetState(295)
 			p.MatchWildcard()
 
 		}
 		{
-			p.SetState(227)
+			p.SetState(298)
 			p.DottedId()
 		}
-		p.SetState(229)
+		p.SetState(300)
 		p.GetErrorHandler().Sync(p)
 
-		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 30, p.GetParserRuleContext()) == 1 {
+		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 38, p.GetParserRuleContext()) == 1 {
 			{
-				p.SetState(228)
+				p.SetState(299)
 				p.DottedId()
 			}
 
@@ -5106,7 +6215,7 @@ func (p *MySqlParser) CollationName() (localctx ICollationNameContext) {
 	_ = this
 
 	localctx = NewCollationNameContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 38, MySqlParserRULE_collationName)
+	p.EnterRule(localctx, 52, MySqlParserRULE_collationName)
 
 	defer func() {
 		p.ExitRule()
@@ -5124,21 +6233,21 @@ func (p *MySqlParser) CollationName() (localctx ICollationNameContext) {
 		}
 	}()
 
-	p.SetState(235)
+	p.SetState(306)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserCHARSET_REVERSE_QOUTE_STRING, MySqlParserID, MySqlParserREVERSE_QUOTE_ID:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(233)
+			p.SetState(304)
 			p.Uid()
 		}
 
 	case MySqlParserSTRING_LITERAL:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(234)
+			p.SetState(305)
 			p.Match(MySqlParserSTRING_LITERAL)
 		}
 
@@ -5234,7 +6343,7 @@ func (p *MySqlParser) Uid() (localctx IUidContext) {
 	_ = this
 
 	localctx = NewUidContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 40, MySqlParserRULE_uid)
+	p.EnterRule(localctx, 54, MySqlParserRULE_uid)
 
 	defer func() {
 		p.ExitRule()
@@ -5252,28 +6361,28 @@ func (p *MySqlParser) Uid() (localctx IUidContext) {
 		}
 	}()
 
-	p.SetState(240)
+	p.SetState(311)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserID:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(237)
+			p.SetState(308)
 			p.SimpleId()
 		}
 
 	case MySqlParserREVERSE_QUOTE_ID:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(238)
+			p.SetState(309)
 			p.Match(MySqlParserREVERSE_QUOTE_ID)
 		}
 
 	case MySqlParserCHARSET_REVERSE_QOUTE_STRING:
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(239)
+			p.SetState(310)
 			p.Match(MySqlParserCHARSET_REVERSE_QOUTE_STRING)
 		}
 
@@ -5349,7 +6458,7 @@ func (p *MySqlParser) SimpleId() (localctx ISimpleIdContext) {
 	_ = this
 
 	localctx = NewSimpleIdContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 42, MySqlParserRULE_simpleId)
+	p.EnterRule(localctx, 56, MySqlParserRULE_simpleId)
 
 	defer func() {
 		p.ExitRule()
@@ -5369,7 +6478,7 @@ func (p *MySqlParser) SimpleId() (localctx ISimpleIdContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(242)
+		p.SetState(313)
 		p.Match(MySqlParserID)
 	}
 
@@ -5461,7 +6570,7 @@ func (p *MySqlParser) DottedId() (localctx IDottedIdContext) {
 	_ = this
 
 	localctx = NewDottedIdContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 44, MySqlParserRULE_dottedId)
+	p.EnterRule(localctx, 58, MySqlParserRULE_dottedId)
 
 	defer func() {
 		p.ExitRule()
@@ -5479,25 +6588,25 @@ func (p *MySqlParser) DottedId() (localctx IDottedIdContext) {
 		}
 	}()
 
-	p.SetState(247)
+	p.SetState(318)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserDOT_ID:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(244)
+			p.SetState(315)
 			p.Match(MySqlParserDOT_ID)
 		}
 
 	case MySqlParserDOT:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(245)
+			p.SetState(316)
 			p.Match(MySqlParserDOT)
 		}
 		{
-			p.SetState(246)
+			p.SetState(317)
 			p.Uid()
 		}
 
@@ -5589,7 +6698,7 @@ func (p *MySqlParser) DecimalLiteral() (localctx IDecimalLiteralContext) {
 	_ = this
 
 	localctx = NewDecimalLiteralContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 46, MySqlParserRULE_decimalLiteral)
+	p.EnterRule(localctx, 60, MySqlParserRULE_decimalLiteral)
 	var _la int
 
 	defer func() {
@@ -5610,10 +6719,10 @@ func (p *MySqlParser) DecimalLiteral() (localctx IDecimalLiteralContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(249)
+		p.SetState(320)
 		_la = p.GetTokenStream().LA(1)
 
-		if !((int64((_la-1131)) & ^0x3f) == 0 && ((int64(1)<<(_la-1131))&10247) != 0) {
+		if !((int64((_la-1134)) & ^0x3f) == 0 && ((int64(1)<<(_la-1134))&40967) != 0) {
 			p.GetErrorHandler().RecoverInline(p)
 		} else {
 			p.GetErrorHandler().ReportMatch(p)
@@ -5721,7 +6830,7 @@ func (p *MySqlParser) StringLiteral() (localctx IStringLiteralContext) {
 	_ = this
 
 	localctx = NewStringLiteralContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 48, MySqlParserRULE_stringLiteral)
+	p.EnterRule(localctx, 62, MySqlParserRULE_stringLiteral)
 	var _la int
 
 	defer func() {
@@ -5742,49 +6851,49 @@ func (p *MySqlParser) StringLiteral() (localctx IStringLiteralContext) {
 
 	var _alt int
 
-	p.SetState(274)
+	p.SetState(345)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 41, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 49, p.GetParserRuleContext()) {
 	case 1:
 		p.EnterOuterAlt(localctx, 1)
-		p.SetState(256)
+		p.SetState(327)
 		p.GetErrorHandler().Sync(p)
 
 		switch p.GetTokenStream().LA(1) {
 		case MySqlParserSTRING_LITERAL, MySqlParserSTRING_CHARSET_NAME:
-			p.SetState(252)
+			p.SetState(323)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 
 			if _la == MySqlParserSTRING_CHARSET_NAME {
 				{
-					p.SetState(251)
+					p.SetState(322)
 					p.Match(MySqlParserSTRING_CHARSET_NAME)
 				}
 
 			}
 			{
-				p.SetState(254)
+				p.SetState(325)
 				p.Match(MySqlParserSTRING_LITERAL)
 			}
 
 		case MySqlParserSTART_NATIONAL_STRING_LITERAL:
 			{
-				p.SetState(255)
+				p.SetState(326)
 				p.Match(MySqlParserSTART_NATIONAL_STRING_LITERAL)
 			}
 
 		default:
 			panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
 		}
-		p.SetState(259)
+		p.SetState(330)
 		p.GetErrorHandler().Sync(p)
 		_alt = 1
 		for ok := true; ok; ok = _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
 			switch _alt {
 			case 1:
 				{
-					p.SetState(258)
+					p.SetState(329)
 					p.Match(MySqlParserSTRING_LITERAL)
 				}
 
@@ -5792,53 +6901,53 @@ func (p *MySqlParser) StringLiteral() (localctx IStringLiteralContext) {
 				panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
 			}
 
-			p.SetState(261)
+			p.SetState(332)
 			p.GetErrorHandler().Sync(p)
-			_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 37, p.GetParserRuleContext())
+			_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 45, p.GetParserRuleContext())
 		}
 
 	case 2:
 		p.EnterOuterAlt(localctx, 2)
-		p.SetState(268)
+		p.SetState(339)
 		p.GetErrorHandler().Sync(p)
 
 		switch p.GetTokenStream().LA(1) {
 		case MySqlParserSTRING_LITERAL, MySqlParserSTRING_CHARSET_NAME:
-			p.SetState(264)
+			p.SetState(335)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 
 			if _la == MySqlParserSTRING_CHARSET_NAME {
 				{
-					p.SetState(263)
+					p.SetState(334)
 					p.Match(MySqlParserSTRING_CHARSET_NAME)
 				}
 
 			}
 			{
-				p.SetState(266)
+				p.SetState(337)
 				p.Match(MySqlParserSTRING_LITERAL)
 			}
 
 		case MySqlParserSTART_NATIONAL_STRING_LITERAL:
 			{
-				p.SetState(267)
+				p.SetState(338)
 				p.Match(MySqlParserSTART_NATIONAL_STRING_LITERAL)
 			}
 
 		default:
 			panic(antlr.NewNoViableAltException(p, nil, nil, nil, nil, nil))
 		}
-		p.SetState(272)
+		p.SetState(343)
 		p.GetErrorHandler().Sync(p)
 
-		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 40, p.GetParserRuleContext()) == 1 {
+		if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 48, p.GetParserRuleContext()) == 1 {
 			{
-				p.SetState(270)
+				p.SetState(341)
 				p.Match(MySqlParserCOLLATE)
 			}
 			{
-				p.SetState(271)
+				p.SetState(342)
 				p.CollationName()
 			}
 
@@ -5918,7 +7027,7 @@ func (p *MySqlParser) BooleanLiteral() (localctx IBooleanLiteralContext) {
 	_ = this
 
 	localctx = NewBooleanLiteralContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 50, MySqlParserRULE_booleanLiteral)
+	p.EnterRule(localctx, 64, MySqlParserRULE_booleanLiteral)
 	var _la int
 
 	defer func() {
@@ -5939,7 +7048,7 @@ func (p *MySqlParser) BooleanLiteral() (localctx IBooleanLiteralContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(276)
+		p.SetState(347)
 		_la = p.GetTokenStream().LA(1)
 
 		if !(_la == MySqlParserFALSE || _la == MySqlParserTRUE) {
@@ -6022,7 +7131,7 @@ func (p *MySqlParser) HexadecimalLiteral() (localctx IHexadecimalLiteralContext)
 	_ = this
 
 	localctx = NewHexadecimalLiteralContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 52, MySqlParserRULE_hexadecimalLiteral)
+	p.EnterRule(localctx, 66, MySqlParserRULE_hexadecimalLiteral)
 	var _la int
 
 	defer func() {
@@ -6042,19 +7151,19 @@ func (p *MySqlParser) HexadecimalLiteral() (localctx IHexadecimalLiteralContext)
 	}()
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(279)
+	p.SetState(350)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	if _la == MySqlParserSTRING_CHARSET_NAME {
 		{
-			p.SetState(278)
+			p.SetState(349)
 			p.Match(MySqlParserSTRING_CHARSET_NAME)
 		}
 
 	}
 	{
-		p.SetState(281)
+		p.SetState(352)
 		p.Match(MySqlParserHEXADECIMAL_LITERAL)
 	}
 
@@ -6171,6 +7280,10 @@ func (s *ConstantContext) REAL_LITERAL() antlr.TerminalNode {
 	return s.GetToken(MySqlParserREAL_LITERAL, 0)
 }
 
+func (s *ConstantContext) BIT_STRING() antlr.TerminalNode {
+	return s.GetToken(MySqlParserBIT_STRING, 0)
+}
+
 func (s *ConstantContext) GetRuleContext() antlr.RuleContext {
 	return s
 }
@@ -6194,7 +7307,7 @@ func (p *MySqlParser) Constant() (localctx IConstantContext) {
 	_ = this
 
 	localctx = NewConstantContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 54, MySqlParserRULE_constant)
+	p.EnterRule(localctx, 68, MySqlParserRULE_constant)
 
 	defer func() {
 		p.ExitRule()
@@ -6212,53 +7325,60 @@ func (p *MySqlParser) Constant() (localctx IConstantContext) {
 		}
 	}()
 
-	p.SetState(290)
+	p.SetState(362)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 43, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 51, p.GetParserRuleContext()) {
 	case 1:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(283)
+			p.SetState(354)
 			p.StringLiteral()
 		}
 
 	case 2:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(284)
+			p.SetState(355)
 			p.DecimalLiteral()
 		}
 
 	case 3:
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(285)
+			p.SetState(356)
 			p.Match(MySqlParserMINUS)
 		}
 		{
-			p.SetState(286)
+			p.SetState(357)
 			p.DecimalLiteral()
 		}
 
 	case 4:
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(287)
+			p.SetState(358)
 			p.HexadecimalLiteral()
 		}
 
 	case 5:
 		p.EnterOuterAlt(localctx, 5)
 		{
-			p.SetState(288)
+			p.SetState(359)
 			p.BooleanLiteral()
 		}
 
 	case 6:
 		p.EnterOuterAlt(localctx, 6)
 		{
-			p.SetState(289)
+			p.SetState(360)
 			p.Match(MySqlParserREAL_LITERAL)
+		}
+
+	case 7:
+		p.EnterOuterAlt(localctx, 7)
+		{
+			p.SetState(361)
+			p.Match(MySqlParserBIT_STRING)
 		}
 
 	}
@@ -6376,7 +7496,7 @@ func (p *MySqlParser) Expressions() (localctx IExpressionsContext) {
 	_ = this
 
 	localctx = NewExpressionsContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 56, MySqlParserRULE_expressions)
+	p.EnterRule(localctx, 70, MySqlParserRULE_expressions)
 	var _la int
 
 	defer func() {
@@ -6397,24 +7517,24 @@ func (p *MySqlParser) Expressions() (localctx IExpressionsContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(292)
+		p.SetState(364)
 		p.expression(0)
 	}
-	p.SetState(297)
+	p.SetState(369)
 	p.GetErrorHandler().Sync(p)
 	_la = p.GetTokenStream().LA(1)
 
 	for _la == MySqlParserCOMMA {
 		{
-			p.SetState(293)
+			p.SetState(365)
 			p.Match(MySqlParserCOMMA)
 		}
 		{
-			p.SetState(294)
+			p.SetState(366)
 			p.expression(0)
 		}
 
-		p.SetState(299)
+		p.SetState(371)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 	}
@@ -6521,7 +7641,7 @@ func (p *MySqlParser) FunctionCall() (localctx IFunctionCallContext) {
 	_ = this
 
 	localctx = NewFunctionCallContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 58, MySqlParserRULE_functionCall)
+	p.EnterRule(localctx, 72, MySqlParserRULE_functionCall)
 
 	defer func() {
 		p.ExitRule()
@@ -6542,7 +7662,7 @@ func (p *MySqlParser) FunctionCall() (localctx IFunctionCallContext) {
 	localctx = NewAggregateFunctionCallContext(p, localctx)
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(300)
+		p.SetState(372)
 		p.AggregateWindowedFunction()
 	}
 
@@ -6637,7 +7757,7 @@ func (p *MySqlParser) AggregateWindowedFunction() (localctx IAggregateWindowedFu
 	_ = this
 
 	localctx = NewAggregateWindowedFunctionContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 60, MySqlParserRULE_aggregateWindowedFunction)
+	p.EnterRule(localctx, 74, MySqlParserRULE_aggregateWindowedFunction)
 
 	defer func() {
 		p.ExitRule()
@@ -6657,16 +7777,16 @@ func (p *MySqlParser) AggregateWindowedFunction() (localctx IAggregateWindowedFu
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(302)
+		p.SetState(374)
 		p.Match(MySqlParserCOUNT)
 	}
 	{
-		p.SetState(303)
+		p.SetState(375)
 		p.Match(MySqlParserLR_BRACKET)
 	}
 
 	{
-		p.SetState(304)
+		p.SetState(376)
 
 		var _m = p.Match(MySqlParserSTAR)
 
@@ -6674,7 +7794,7 @@ func (p *MySqlParser) AggregateWindowedFunction() (localctx IAggregateWindowedFu
 	}
 
 	{
-		p.SetState(305)
+		p.SetState(377)
 		p.Match(MySqlParserRR_BRACKET)
 	}
 
@@ -6999,8 +8119,8 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 	localctx = NewExpressionContext(p, p.GetParserRuleContext(), _parentState)
 	var _prevctx IExpressionContext = localctx
 	var _ antlr.ParserRuleContext = _prevctx // TODO: To prevent unused variable warning.
-	_startState := 62
-	p.EnterRecursionRule(localctx, 62, MySqlParserRULE_expression, _p)
+	_startState := 76
+	p.EnterRecursionRule(localctx, 76, MySqlParserRULE_expression, _p)
 	var _la int
 
 	defer func() {
@@ -7022,16 +8142,16 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 	var _alt int
 
 	p.EnterOuterAlt(localctx, 1)
-	p.SetState(318)
+	p.SetState(390)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 46, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 54, p.GetParserRuleContext()) {
 	case 1:
 		localctx = NewNotExpressionContext(p, localctx)
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 
 		{
-			p.SetState(308)
+			p.SetState(380)
 
 			var _lt = p.GetTokenStream().LT(1)
 
@@ -7049,7 +8169,7 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 			}
 		}
 		{
-			p.SetState(309)
+			p.SetState(381)
 			p.expression(4)
 		}
 
@@ -7058,26 +8178,26 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 		{
-			p.SetState(310)
+			p.SetState(382)
 			p.predicate(0)
 		}
 		{
-			p.SetState(311)
+			p.SetState(383)
 			p.Match(MySqlParserIS)
 		}
-		p.SetState(313)
+		p.SetState(385)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 
 		if _la == MySqlParserNOT {
 			{
-				p.SetState(312)
+				p.SetState(384)
 				p.Match(MySqlParserNOT)
 			}
 
 		}
 		{
-			p.SetState(315)
+			p.SetState(387)
 
 			var _lt = p.GetTokenStream().LT(1)
 
@@ -7100,15 +8220,15 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 		p.SetParserRuleContext(localctx)
 		_prevctx = localctx
 		{
-			p.SetState(317)
+			p.SetState(389)
 			p.predicate(0)
 		}
 
 	}
 	p.GetParserRuleContext().SetStop(p.GetTokenStream().LT(-1))
-	p.SetState(326)
+	p.SetState(398)
 	p.GetErrorHandler().Sync(p)
-	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 47, p.GetParserRuleContext())
+	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 55, p.GetParserRuleContext())
 
 	for _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
 		if _alt == 1 {
@@ -7118,24 +8238,24 @@ func (p *MySqlParser) expression(_p int) (localctx IExpressionContext) {
 			_prevctx = localctx
 			localctx = NewLogicalExpressionContext(p, NewExpressionContext(p, _parentctx, _parentState))
 			p.PushNewRecursionContext(localctx, _startState, MySqlParserRULE_expression)
-			p.SetState(320)
+			p.SetState(392)
 
 			if !(p.Precpred(p.GetParserRuleContext(), 3)) {
 				panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 3)", ""))
 			}
 			{
-				p.SetState(321)
+				p.SetState(393)
 				p.LogicalOperator()
 			}
 			{
-				p.SetState(322)
+				p.SetState(394)
 				p.expression(4)
 			}
 
 		}
-		p.SetState(328)
+		p.SetState(400)
 		p.GetErrorHandler().Sync(p)
-		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 47, p.GetParserRuleContext())
+		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 55, p.GetParserRuleContext())
 	}
 
 	return localctx
@@ -7427,8 +8547,8 @@ func (p *MySqlParser) predicate(_p int) (localctx IPredicateContext) {
 	localctx = NewPredicateContext(p, p.GetParserRuleContext(), _parentState)
 	var _prevctx IPredicateContext = localctx
 	var _ antlr.ParserRuleContext = _prevctx // TODO: To prevent unused variable warning.
-	_startState := 64
-	p.EnterRecursionRule(localctx, 64, MySqlParserRULE_predicate, _p)
+	_startState := 78
+	p.EnterRecursionRule(localctx, 78, MySqlParserRULE_predicate, _p)
 	var _la int
 
 	defer func() {
@@ -7454,29 +8574,29 @@ func (p *MySqlParser) predicate(_p int) (localctx IPredicateContext) {
 	p.SetParserRuleContext(localctx)
 	_prevctx = localctx
 
-	p.SetState(332)
+	p.SetState(404)
 	p.GetErrorHandler().Sync(p)
 
-	if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 48, p.GetParserRuleContext()) == 1 {
+	if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 56, p.GetParserRuleContext()) == 1 {
 		{
-			p.SetState(330)
+			p.SetState(402)
 			p.Match(MySqlParserLOCAL_ID)
 		}
 		{
-			p.SetState(331)
+			p.SetState(403)
 			p.Match(MySqlParserVAR_ASSIGN)
 		}
 
 	}
 	{
-		p.SetState(334)
+		p.SetState(406)
 		p.ExpressionAtom()
 	}
 
 	p.GetParserRuleContext().SetStop(p.GetTokenStream().LT(-1))
-	p.SetState(351)
+	p.SetState(423)
 	p.GetErrorHandler().Sync(p)
-	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 51, p.GetParserRuleContext())
+	_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 59, p.GetParserRuleContext())
 
 	for _alt != 2 && _alt != antlr.ATNInvalidAltNumber {
 		if _alt == 1 {
@@ -7484,25 +8604,25 @@ func (p *MySqlParser) predicate(_p int) (localctx IPredicateContext) {
 				p.TriggerExitRuleEvent()
 			}
 			_prevctx = localctx
-			p.SetState(349)
+			p.SetState(421)
 			p.GetErrorHandler().Sync(p)
-			switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 50, p.GetParserRuleContext()) {
+			switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 58, p.GetParserRuleContext()) {
 			case 1:
 				localctx = NewBinaryComparisonPredicateContext(p, NewPredicateContext(p, _parentctx, _parentState))
 				localctx.(*BinaryComparisonPredicateContext).left = _prevctx
 
 				p.PushNewRecursionContext(localctx, _startState, MySqlParserRULE_predicate)
-				p.SetState(336)
+				p.SetState(408)
 
 				if !(p.Precpred(p.GetParserRuleContext(), 2)) {
 					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 2)", ""))
 				}
 				{
-					p.SetState(337)
+					p.SetState(409)
 					p.ComparisonOperator()
 				}
 				{
-					p.SetState(338)
+					p.SetState(410)
 
 					var _x = p.predicate(3)
 
@@ -7512,45 +8632,45 @@ func (p *MySqlParser) predicate(_p int) (localctx IPredicateContext) {
 			case 2:
 				localctx = NewInPredicateContext(p, NewPredicateContext(p, _parentctx, _parentState))
 				p.PushNewRecursionContext(localctx, _startState, MySqlParserRULE_predicate)
-				p.SetState(340)
+				p.SetState(412)
 
 				if !(p.Precpred(p.GetParserRuleContext(), 3)) {
 					panic(antlr.NewFailedPredicateException(p, "p.Precpred(p.GetParserRuleContext(), 3)", ""))
 				}
-				p.SetState(342)
+				p.SetState(414)
 				p.GetErrorHandler().Sync(p)
 				_la = p.GetTokenStream().LA(1)
 
 				if _la == MySqlParserNOT {
 					{
-						p.SetState(341)
+						p.SetState(413)
 						p.Match(MySqlParserNOT)
 					}
 
 				}
 				{
-					p.SetState(344)
+					p.SetState(416)
 					p.Match(MySqlParserIN)
 				}
 				{
-					p.SetState(345)
+					p.SetState(417)
 					p.Match(MySqlParserLR_BRACKET)
 				}
 				{
-					p.SetState(346)
+					p.SetState(418)
 					p.Expressions()
 				}
 				{
-					p.SetState(347)
+					p.SetState(419)
 					p.Match(MySqlParserRR_BRACKET)
 				}
 
 			}
 
 		}
-		p.SetState(353)
+		p.SetState(425)
 		p.GetErrorHandler().Sync(p)
-		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 51, p.GetParserRuleContext())
+		_alt = p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 59, p.GetParserRuleContext())
 	}
 
 	return localctx
@@ -7710,6 +8830,50 @@ func (s *ConstantExpressionAtomContext) Accept(visitor antlr.ParseTreeVisitor) i
 	}
 }
 
+type ArrayExpressionAtomContext struct {
+	*ExpressionAtomContext
+}
+
+func NewArrayExpressionAtomContext(parser antlr.Parser, ctx antlr.ParserRuleContext) *ArrayExpressionAtomContext {
+	var p = new(ArrayExpressionAtomContext)
+
+	p.ExpressionAtomContext = NewEmptyExpressionAtomContext()
+	p.parser = parser
+	p.CopyFrom(ctx.(*ExpressionAtomContext))
+
+	return p
+}
+
+func (s *ArrayExpressionAtomContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *ArrayExpressionAtomContext) Array() IArrayContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IArrayContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IArrayContext)
+}
+
+func (s *ArrayExpressionAtomContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitArrayExpressionAtom(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 type FullColumnNameExpressionAtomContext struct {
 	*ExpressionAtomContext
 }
@@ -7844,7 +9008,7 @@ func (p *MySqlParser) ExpressionAtom() (localctx IExpressionAtomContext) {
 	_ = this
 
 	localctx = NewExpressionAtomContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 66, MySqlParserRULE_expressionAtom)
+	p.EnterRule(localctx, 80, MySqlParserRULE_expressionAtom)
 	var _la int
 
 	defer func() {
@@ -7863,14 +9027,14 @@ func (p *MySqlParser) ExpressionAtom() (localctx IExpressionAtomContext) {
 		}
 	}()
 
-	p.SetState(370)
+	p.SetState(443)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 53, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 61, p.GetParserRuleContext()) {
 	case 1:
 		localctx = NewConstantExpressionAtomContext(p, localctx)
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(354)
+			p.SetState(426)
 			p.Constant()
 		}
 
@@ -7878,7 +9042,7 @@ func (p *MySqlParser) ExpressionAtom() (localctx IExpressionAtomContext) {
 		localctx = NewFullColumnNameExpressionAtomContext(p, localctx)
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(355)
+			p.SetState(427)
 			p.FullColumnName()
 		}
 
@@ -7886,11 +9050,11 @@ func (p *MySqlParser) ExpressionAtom() (localctx IExpressionAtomContext) {
 		localctx = NewUnaryExpressionAtomContext(p, localctx)
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(356)
+			p.SetState(428)
 			p.UnaryOperator()
 		}
 		{
-			p.SetState(357)
+			p.SetState(429)
 			p.ExpressionAtom()
 		}
 
@@ -7898,36 +9062,401 @@ func (p *MySqlParser) ExpressionAtom() (localctx IExpressionAtomContext) {
 		localctx = NewNestedExpressionAtomContext(p, localctx)
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(359)
+			p.SetState(431)
 			p.Match(MySqlParserLR_BRACKET)
 		}
 		{
-			p.SetState(360)
+			p.SetState(432)
 			p.expression(0)
 		}
-		p.SetState(365)
+		p.SetState(437)
 		p.GetErrorHandler().Sync(p)
 		_la = p.GetTokenStream().LA(1)
 
 		for _la == MySqlParserCOMMA {
 			{
-				p.SetState(361)
+				p.SetState(433)
 				p.Match(MySqlParserCOMMA)
 			}
 			{
-				p.SetState(362)
+				p.SetState(434)
 				p.expression(0)
 			}
 
-			p.SetState(367)
+			p.SetState(439)
 			p.GetErrorHandler().Sync(p)
 			_la = p.GetTokenStream().LA(1)
 		}
 		{
-			p.SetState(368)
+			p.SetState(440)
 			p.Match(MySqlParserRR_BRACKET)
 		}
 
+	case 5:
+		localctx = NewArrayExpressionAtomContext(p, localctx)
+		p.EnterOuterAlt(localctx, 5)
+		{
+			p.SetState(442)
+			p.Array()
+		}
+
+	}
+
+	return localctx
+}
+
+// IArrayContext is an interface to support dynamic dispatch.
+type IArrayContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsArrayContext differentiates from other interfaces.
+	IsArrayContext()
+}
+
+type ArrayContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyArrayContext() *ArrayContext {
+	var p = new(ArrayContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_array
+	return p
+}
+
+func (*ArrayContext) IsArrayContext() {}
+
+func NewArrayContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *ArrayContext {
+	var p = new(ArrayContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_array
+
+	return p
+}
+
+func (s *ArrayContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *ArrayContext) LR_BRACKETS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserLR_BRACKETS, 0)
+}
+
+func (s *ArrayContext) RR_BRACKETS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserRR_BRACKETS, 0)
+}
+
+func (s *ArrayContext) AllExpression() []IExpressionContext {
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExpressionContext); ok {
+			len++
+		}
+	}
+
+	tst := make([]IExpressionContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExpressionContext); ok {
+			tst[i] = t.(IExpressionContext)
+			i++
+		}
+	}
+
+	return tst
+}
+
+func (s *ArrayContext) Expression(i int) IExpressionContext {
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExpressionContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IExpressionContext)
+}
+
+func (s *ArrayContext) AllCOMMA() []antlr.TerminalNode {
+	return s.GetTokens(MySqlParserCOMMA)
+}
+
+func (s *ArrayContext) COMMA(i int) antlr.TerminalNode {
+	return s.GetToken(MySqlParserCOMMA, i)
+}
+
+func (s *ArrayContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *ArrayContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *ArrayContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitArray(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) Array() (localctx IArrayContext) {
+	this := p
+	_ = this
+
+	localctx = NewArrayContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 82, MySqlParserRULE_array)
+	var _la int
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(445)
+		p.Match(MySqlParserLR_BRACKETS)
+	}
+	p.SetState(454)
+	p.GetErrorHandler().Sync(p)
+
+	if p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 63, p.GetParserRuleContext()) == 1 {
+		{
+			p.SetState(446)
+			p.expression(0)
+		}
+		p.SetState(451)
+		p.GetErrorHandler().Sync(p)
+		_la = p.GetTokenStream().LA(1)
+
+		for _la == MySqlParserCOMMA {
+			{
+				p.SetState(447)
+				p.Match(MySqlParserCOMMA)
+			}
+			{
+				p.SetState(448)
+				p.expression(0)
+			}
+
+			p.SetState(453)
+			p.GetErrorHandler().Sync(p)
+			_la = p.GetTokenStream().LA(1)
+		}
+
+	}
+	{
+		p.SetState(456)
+		p.Match(MySqlParserRR_BRACKETS)
+	}
+
+	return localctx
+}
+
+// IFloatArrayContext is an interface to support dynamic dispatch.
+type IFloatArrayContext interface {
+	antlr.ParserRuleContext
+
+	// GetParser returns the parser.
+	GetParser() antlr.Parser
+
+	// IsFloatArrayContext differentiates from other interfaces.
+	IsFloatArrayContext()
+}
+
+type FloatArrayContext struct {
+	*antlr.BaseParserRuleContext
+	parser antlr.Parser
+}
+
+func NewEmptyFloatArrayContext() *FloatArrayContext {
+	var p = new(FloatArrayContext)
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(nil, -1)
+	p.RuleIndex = MySqlParserRULE_floatArray
+	return p
+}
+
+func (*FloatArrayContext) IsFloatArrayContext() {}
+
+func NewFloatArrayContext(parser antlr.Parser, parent antlr.ParserRuleContext, invokingState int) *FloatArrayContext {
+	var p = new(FloatArrayContext)
+
+	p.BaseParserRuleContext = antlr.NewBaseParserRuleContext(parent, invokingState)
+
+	p.parser = parser
+	p.RuleIndex = MySqlParserRULE_floatArray
+
+	return p
+}
+
+func (s *FloatArrayContext) GetParser() antlr.Parser { return s.parser }
+
+func (s *FloatArrayContext) LR_BRACKETS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserLR_BRACKETS, 0)
+}
+
+func (s *FloatArrayContext) RR_BRACKETS() antlr.TerminalNode {
+	return s.GetToken(MySqlParserRR_BRACKETS, 0)
+}
+
+func (s *FloatArrayContext) AllDecimalLiteral() []IDecimalLiteralContext {
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IDecimalLiteralContext); ok {
+			len++
+		}
+	}
+
+	tst := make([]IDecimalLiteralContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IDecimalLiteralContext); ok {
+			tst[i] = t.(IDecimalLiteralContext)
+			i++
+		}
+	}
+
+	return tst
+}
+
+func (s *FloatArrayContext) DecimalLiteral(i int) IDecimalLiteralContext {
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IDecimalLiteralContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IDecimalLiteralContext)
+}
+
+func (s *FloatArrayContext) AllCOMMA() []antlr.TerminalNode {
+	return s.GetTokens(MySqlParserCOMMA)
+}
+
+func (s *FloatArrayContext) COMMA(i int) antlr.TerminalNode {
+	return s.GetToken(MySqlParserCOMMA, i)
+}
+
+func (s *FloatArrayContext) GetRuleContext() antlr.RuleContext {
+	return s
+}
+
+func (s *FloatArrayContext) ToStringTree(ruleNames []string, recog antlr.Recognizer) string {
+	return antlr.TreesStringTree(s, ruleNames, recog)
+}
+
+func (s *FloatArrayContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case MySqlParserVisitor:
+		return t.VisitFloatArray(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
+func (p *MySqlParser) FloatArray() (localctx IFloatArrayContext) {
+	this := p
+	_ = this
+
+	localctx = NewFloatArrayContext(p, p.GetParserRuleContext(), p.GetState())
+	p.EnterRule(localctx, 84, MySqlParserRULE_floatArray)
+	var _la int
+
+	defer func() {
+		p.ExitRule()
+	}()
+
+	defer func() {
+		if err := recover(); err != nil {
+			if v, ok := err.(antlr.RecognitionException); ok {
+				localctx.SetException(v)
+				p.GetErrorHandler().ReportError(p, v)
+				p.GetErrorHandler().Recover(p, v)
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
+	p.EnterOuterAlt(localctx, 1)
+	{
+		p.SetState(458)
+		p.Match(MySqlParserLR_BRACKETS)
+	}
+	p.SetState(467)
+	p.GetErrorHandler().Sync(p)
+	_la = p.GetTokenStream().LA(1)
+
+	if (int64((_la-1134)) & ^0x3f) == 0 && ((int64(1)<<(_la-1134))&40967) != 0 {
+		{
+			p.SetState(459)
+			p.DecimalLiteral()
+		}
+		p.SetState(464)
+		p.GetErrorHandler().Sync(p)
+		_la = p.GetTokenStream().LA(1)
+
+		for _la == MySqlParserCOMMA {
+			{
+				p.SetState(460)
+				p.Match(MySqlParserCOMMA)
+			}
+			{
+				p.SetState(461)
+				p.DecimalLiteral()
+			}
+
+			p.SetState(466)
+			p.GetErrorHandler().Sync(p)
+			_la = p.GetTokenStream().LA(1)
+		}
+
+	}
+	{
+		p.SetState(469)
+		p.Match(MySqlParserRR_BRACKETS)
 	}
 
 	return localctx
@@ -8014,7 +9543,7 @@ func (p *MySqlParser) UnaryOperator() (localctx IUnaryOperatorContext) {
 	_ = this
 
 	localctx = NewUnaryOperatorContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 68, MySqlParserRULE_unaryOperator)
+	p.EnterRule(localctx, 86, MySqlParserRULE_unaryOperator)
 	var _la int
 
 	defer func() {
@@ -8035,10 +9564,10 @@ func (p *MySqlParser) UnaryOperator() (localctx IUnaryOperatorContext) {
 
 	p.EnterOuterAlt(localctx, 1)
 	{
-		p.SetState(372)
+		p.SetState(471)
 		_la = p.GetTokenStream().LA(1)
 
-		if !(_la == MySqlParserNOT || (int64((_la-1113)) & ^0x3f) == 0 && ((int64(1)<<(_la-1113))&387) != 0) {
+		if !(_la == MySqlParserNOT || (int64((_la-1116)) & ^0x3f) == 0 && ((int64(1)<<(_la-1116))&387) != 0) {
 			p.GetErrorHandler().RecoverInline(p)
 		} else {
 			p.GetErrorHandler().ReportMatch(p)
@@ -8126,7 +9655,7 @@ func (p *MySqlParser) ComparisonOperator() (localctx IComparisonOperatorContext)
 	_ = this
 
 	localctx = NewComparisonOperatorContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 70, MySqlParserRULE_comparisonOperator)
+	p.EnterRule(localctx, 88, MySqlParserRULE_comparisonOperator)
 
 	defer func() {
 		p.ExitRule()
@@ -8144,71 +9673,71 @@ func (p *MySqlParser) ComparisonOperator() (localctx IComparisonOperatorContext)
 		}
 	}()
 
-	p.SetState(385)
+	p.SetState(484)
 	p.GetErrorHandler().Sync(p)
-	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 54, p.GetParserRuleContext()) {
+	switch p.GetInterpreter().AdaptivePredict(p.GetTokenStream(), 66, p.GetParserRuleContext()) {
 	case 1:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(374)
+			p.SetState(473)
 			p.Match(MySqlParserEQUAL_SYMBOL)
 		}
 
 	case 2:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(375)
+			p.SetState(474)
 			p.Match(MySqlParserGREATER_SYMBOL)
 		}
 
 	case 3:
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(376)
+			p.SetState(475)
 			p.Match(MySqlParserLESS_SYMBOL)
 		}
 
 	case 4:
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(377)
+			p.SetState(476)
 			p.Match(MySqlParserLESS_SYMBOL)
 		}
 		{
-			p.SetState(378)
+			p.SetState(477)
 			p.Match(MySqlParserEQUAL_SYMBOL)
 		}
 
 	case 5:
 		p.EnterOuterAlt(localctx, 5)
 		{
-			p.SetState(379)
+			p.SetState(478)
 			p.Match(MySqlParserGREATER_SYMBOL)
 		}
 		{
-			p.SetState(380)
+			p.SetState(479)
 			p.Match(MySqlParserEQUAL_SYMBOL)
 		}
 
 	case 6:
 		p.EnterOuterAlt(localctx, 6)
 		{
-			p.SetState(381)
+			p.SetState(480)
 			p.Match(MySqlParserLESS_SYMBOL)
 		}
 		{
-			p.SetState(382)
+			p.SetState(481)
 			p.Match(MySqlParserGREATER_SYMBOL)
 		}
 
 	case 7:
 		p.EnterOuterAlt(localctx, 7)
 		{
-			p.SetState(383)
+			p.SetState(482)
 			p.Match(MySqlParserEXCLAMATION_SYMBOL)
 		}
 		{
-			p.SetState(384)
+			p.SetState(483)
 			p.Match(MySqlParserEQUAL_SYMBOL)
 		}
 
@@ -8302,7 +9831,7 @@ func (p *MySqlParser) LogicalOperator() (localctx ILogicalOperatorContext) {
 	_ = this
 
 	localctx = NewLogicalOperatorContext(p, p.GetParserRuleContext(), p.GetState())
-	p.EnterRule(localctx, 72, MySqlParserRULE_logicalOperator)
+	p.EnterRule(localctx, 90, MySqlParserRULE_logicalOperator)
 
 	defer func() {
 		p.ExitRule()
@@ -8320,43 +9849,43 @@ func (p *MySqlParser) LogicalOperator() (localctx ILogicalOperatorContext) {
 		}
 	}()
 
-	p.SetState(393)
+	p.SetState(492)
 	p.GetErrorHandler().Sync(p)
 
 	switch p.GetTokenStream().LA(1) {
 	case MySqlParserAND:
 		p.EnterOuterAlt(localctx, 1)
 		{
-			p.SetState(387)
+			p.SetState(486)
 			p.Match(MySqlParserAND)
 		}
 
 	case MySqlParserBIT_AND_OP:
 		p.EnterOuterAlt(localctx, 2)
 		{
-			p.SetState(388)
+			p.SetState(487)
 			p.Match(MySqlParserBIT_AND_OP)
 		}
 		{
-			p.SetState(389)
+			p.SetState(488)
 			p.Match(MySqlParserBIT_AND_OP)
 		}
 
 	case MySqlParserOR:
 		p.EnterOuterAlt(localctx, 3)
 		{
-			p.SetState(390)
+			p.SetState(489)
 			p.Match(MySqlParserOR)
 		}
 
 	case MySqlParserBIT_OR_OP:
 		p.EnterOuterAlt(localctx, 4)
 		{
-			p.SetState(391)
+			p.SetState(490)
 			p.Match(MySqlParserBIT_OR_OP)
 		}
 		{
-			p.SetState(392)
+			p.SetState(491)
 			p.Match(MySqlParserBIT_OR_OP)
 		}
 
@@ -8369,14 +9898,14 @@ func (p *MySqlParser) LogicalOperator() (localctx ILogicalOperatorContext) {
 
 func (p *MySqlParser) Sempred(localctx antlr.RuleContext, ruleIndex, predIndex int) bool {
 	switch ruleIndex {
-	case 31:
+	case 38:
 		var t *ExpressionContext = nil
 		if localctx != nil {
 			t = localctx.(*ExpressionContext)
 		}
 		return p.Expression_Sempred(t, predIndex)
 
-	case 32:
+	case 39:
 		var t *PredicateContext = nil
 		if localctx != nil {
 			t = localctx.(*PredicateContext)

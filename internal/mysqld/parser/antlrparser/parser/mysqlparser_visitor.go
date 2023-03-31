@@ -52,6 +52,27 @@ type MySqlParserVisitor interface {
 	// Visit a parse tree produced by MySqlParser#fromClause.
 	VisitFromClause(ctx *FromClauseContext) interface{}
 
+	// Visit a parse tree produced by MySqlParser#annsClause.
+	VisitAnnsClause(ctx *AnnsClauseContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#annsVectors.
+	VisitAnnsVectors(ctx *AnnsVectorsContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#annsVector.
+	VisitAnnsVector(ctx *AnnsVectorContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#annsParamsClause.
+	VisitAnnsParamsClause(ctx *AnnsParamsClauseContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#kvPairs.
+	VisitKvPairs(ctx *KvPairsContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#kvPair.
+	VisitKvPair(ctx *KvPairContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#value.
+	VisitValue(ctx *ValueContext) interface{}
+
 	// Visit a parse tree produced by MySqlParser#limitClause.
 	VisitLimitClause(ctx *LimitClauseContext) interface{}
 
@@ -135,6 +156,15 @@ type MySqlParserVisitor interface {
 
 	// Visit a parse tree produced by MySqlParser#nestedExpressionAtom.
 	VisitNestedExpressionAtom(ctx *NestedExpressionAtomContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#arrayExpressionAtom.
+	VisitArrayExpressionAtom(ctx *ArrayExpressionAtomContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#array.
+	VisitArray(ctx *ArrayContext) interface{}
+
+	// Visit a parse tree produced by MySqlParser#floatArray.
+	VisitFloatArray(ctx *FloatArrayContext) interface{}
 
 	// Visit a parse tree produced by MySqlParser#unaryOperator.
 	VisitUnaryOperator(ctx *UnaryOperatorContext) interface{}

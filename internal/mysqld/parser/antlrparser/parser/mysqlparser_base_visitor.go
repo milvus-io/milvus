@@ -67,6 +67,34 @@ func (v *BaseMySqlParserVisitor) VisitFromClause(ctx *FromClauseContext) interfa
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseMySqlParserVisitor) VisitAnnsClause(ctx *AnnsClauseContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitAnnsVectors(ctx *AnnsVectorsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitAnnsVector(ctx *AnnsVectorContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitAnnsParamsClause(ctx *AnnsParamsClauseContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitKvPairs(ctx *KvPairsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitKvPair(ctx *KvPairContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitValue(ctx *ValueContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseMySqlParserVisitor) VisitLimitClause(ctx *LimitClauseContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -176,6 +204,18 @@ func (v *BaseMySqlParserVisitor) VisitUnaryExpressionAtom(ctx *UnaryExpressionAt
 }
 
 func (v *BaseMySqlParserVisitor) VisitNestedExpressionAtom(ctx *NestedExpressionAtomContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitArrayExpressionAtom(ctx *ArrayExpressionAtomContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitArray(ctx *ArrayContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitFloatArray(ctx *FloatArrayContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
