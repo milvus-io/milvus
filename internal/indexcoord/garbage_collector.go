@@ -176,6 +176,8 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 		if meta.IsDeleted || gc.metaTable.IsIndexDeleted(meta.CollectionID, meta.IndexID) {
 			if meta.NodeID != 0 {
 				// wait for releasing reference lock
+				log.Ctx(gc.ctx).Warn("nodeID is not zero, wait for releasing reference lock",
+					zap.Int64("buildID", meta.BuildID), zap.Int64("segID", meta.SegmentID), zap.Int64("nodeID", meta.NodeID))
 				continue
 			}
 			if err := gc.metaTable.RemoveSegmentIndex(meta.CollectionID, meta.PartitionID, meta.SegmentID, meta.BuildID); err != nil {
@@ -245,6 +247,8 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 							zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
 						continue
 					}
+					log.Ctx(gc.ctx).Info("IndexCoord garbageCollector recycleUnusedIndexFiles remove index files success",
+						zap.Int64("buildID", buildID), zap.String("prefix", key))
 					continue
 				}
 				log.Ctx(gc.ctx).Info("index meta can be recycled, recycle index files", zap.Int64("buildID", buildID))
