@@ -110,6 +110,17 @@ func Error(status *commonpb.Status) error {
 	return newMilvusError(status.GetReason(), code, code&retriableFlag != 0)
 }
 
+// CheckHealthy checks whether the state is healthy,
+// returns nil if healthy,
+// otherwise returns ErrServiceNotReady wrapped with current state
+func CheckHealthy(state commonpb.StateCode) error {
+	if state != commonpb.StateCode_Healthy {
+		return WrapErrServiceNotReady(state.String())
+	}
+
+	return nil
+}
+
 // Service related
 func WrapErrServiceNotReady(stage string, msg ...string) error {
 	err := errors.Wrapf(ErrServiceNotReady, "stage=%s", stage)

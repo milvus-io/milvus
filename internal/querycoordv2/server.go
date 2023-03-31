@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -55,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -68,7 +68,7 @@ type Server struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
-	status              atomic.Value
+	status              atomic.Int32
 	etcdCli             *clientv3.Client
 	address             string
 	session             *sessionutil.Session
@@ -471,7 +471,11 @@ func (s *Server) Stop() error {
 
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
-	s.status.Store(code)
+	s.status.Store(int32(code))
+}
+
+func (s *Server) State() commonpb.StateCode {
+	return commonpb.StateCode(s.status.Load())
 }
 
 func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -482,7 +486,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	serviceComponentInfo := &milvuspb.ComponentInfo{
 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
 		NodeID:    nodeID,
-		StateCode: s.status.Load().(commonpb.StateCode),
+		StateCode: s.State(),
 	}
 
 	return &milvuspb.ComponentStates{

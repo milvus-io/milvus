@@ -61,11 +61,10 @@ var (
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		msg := "failed to show collections"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to show collections", zap.Error(err))
 		return &querypb.ShowCollectionsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -134,11 +133,10 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 
 	log.Info("show partitions request received", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		msg := "failed to show partitions"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to show partitions", zap.Error(err))
 		return &querypb.ShowPartitionsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -193,11 +191,11 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load collection"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	// If refresh mode is ON.
@@ -244,11 +242,11 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to release collection"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	releaseJob := job.NewReleaseCollectionJob(ctx,
@@ -288,11 +286,11 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load partitions"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	// If refresh mode is ON.
@@ -356,11 +354,11 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	log.Info("release partitions", zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to release partitions"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
@@ -402,11 +400,11 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 	log.Info("get partition states", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get partition states"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &querypb.GetPartitionStatesResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -470,11 +468,11 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 	log.Info("get segment info", zap.Int64s("segments", req.GetSegmentIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get segment info"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &querypb.GetSegmentInfoResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -512,9 +510,9 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	log.Info("received sync new created partition request")
 
 	failedMsg := "failed to sync new created partition"
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(failedMsg, zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, failedMsg, ErrNotHealthy), nil
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(failedMsg, zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster)
@@ -539,11 +537,11 @@ func (s *Server) refreshCollection(ctx context.Context, collID int64) (*commonpb
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID),
 	)
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to refresh collection"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	// Check that collection is fully loaded.
@@ -593,11 +591,11 @@ func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []
 		zap.Int64("collectionID", collID),
 		zap.Int64s("partitionIDs", partIDs),
 	)
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to refresh partitions"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return merr.Status(err), nil
 	}
 
 	// Check that all partitions are fully loaded.
@@ -659,10 +657,10 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		zap.Int64s("dest", req.GetDstNodeIDs()),
 		zap.Int64s("segments", req.GetSealedSegmentIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		log.Warn(msg, zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	// Verify request
@@ -713,11 +711,11 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 	log.Info("show configurations request received", zap.String("pattern", req.GetPattern()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show configurations"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &internalpb.ShowConfigurationsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 	configList := make([]*commonpb.KeyValuePair, 0)
@@ -744,11 +742,11 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.RatedDebug(60, "get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -792,11 +790,11 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	log.Info("get replicas request received", zap.Bool("with-shard-nodes", req.GetWithShardNodes()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get replicas"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetReplicasResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -833,11 +831,11 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	)
 
 	log.Info("get shard leaders request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get shard leaders"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+		log.Warn(msg, zap.Error(err))
 		return &querypb.GetShardLeadersResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -947,7 +945,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		reason := errorutil.UnHealthReason("querycoord", paramtable.GetNodeID(), "querycoord is unhealthy")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
@@ -984,15 +982,15 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	)
 
 	log.Info("create resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrCreateResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrCreateResourceGroupFailed.Error(), ErrNotHealthy), nil
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to create resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	err := s.meta.ResourceManager.AddResourceGroup(req.GetResourceGroup())
 	if err != nil {
-		log.Warn(ErrCreateResourceGroupFailed.Error(), zap.Error(err))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrCreateResourceGroupFailed.Error(), err), nil
+		log.Warn("failed to create resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 	return merr.Status(nil), nil
 }
@@ -1003,9 +1001,9 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 	)
 
 	log.Info("drop resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), ErrNotHealthy), nil
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to drop resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	replicas := s.meta.ReplicaManager.GetByResourceGroup(req.GetResourceGroup())
@@ -1016,8 +1014,8 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 
 	err := s.meta.ResourceManager.RemoveResourceGroup(req.GetResourceGroup())
 	if err != nil {
-		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(err))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), err), nil
+		log.Warn("failed to drop resource group", zap.Error(err))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, "failed to drop resource group", err), nil
 	}
 	return merr.Status(nil), nil
 }
@@ -1030,9 +1028,9 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 	)
 
 	log.Info("transfer node between resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), ErrNotHealthy), nil
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to transfer node between resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
@@ -1085,9 +1083,9 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 	)
 
 	log.Info("transfer replica request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrTransferReplicaFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferReplicaFailed.Error(), ErrNotHealthy), nil
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to transfer replica between resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
@@ -1157,9 +1155,9 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 	resp := &milvuspb.ListResourceGroupsResponse{
 		Status: merr.Status(nil),
 	}
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrListResourceGroupsFailed.Error(), zap.Error(ErrNotHealthy))
-		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrListResourceGroupsFailed.Error(), ErrNotHealthy)
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to list resource group", zap.Error(err))
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
@@ -1176,9 +1174,9 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 	resp := &querypb.DescribeResourceGroupResponse{
 		Status: merr.Status(nil),
 	}
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		log.Warn(ErrDescribeResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDescribeResourceGroupFailed.Error(), ErrNotHealthy)
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(ErrDescribeResourceGroupFailed.Error(), zap.Error(err))
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 

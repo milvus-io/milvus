@@ -24,8 +24,6 @@ import (
 )
 
 var (
-	ErrNotHealthy = errors.New("NotHealthy")
-
 	// Node Availability
 	ErrLackSegment           = errors.New("LackSegment")
 	ErrNodeOffline           = errors.New("NodeOffline")
