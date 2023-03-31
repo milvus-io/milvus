@@ -67,6 +67,18 @@ func (v *BaseMySqlParserVisitor) VisitFromClause(ctx *FromClauseContext) interfa
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseMySqlParserVisitor) VisitAnnsClause(ctx *AnnsClauseContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitAnnsFuncClause(ctx *AnnsFuncClauseContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitAnnsArgs(ctx *AnnsArgsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseMySqlParserVisitor) VisitLimitClause(ctx *LimitClauseContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -176,6 +188,14 @@ func (v *BaseMySqlParserVisitor) VisitUnaryExpressionAtom(ctx *UnaryExpressionAt
 }
 
 func (v *BaseMySqlParserVisitor) VisitNestedExpressionAtom(ctx *NestedExpressionAtomContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitArrayExpressionAtom(ctx *ArrayExpressionAtomContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMySqlParserVisitor) VisitArray(ctx *ArrayContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

@@ -1070,7 +1070,7 @@ tableSource
 
 querySpecification
     : SELECT selectSpec* selectElements
-      fromClause? limitClause?
+      fromClause? annsClause? limitClause?
     ;
 
 // querySpecificationNointo
@@ -1180,6 +1180,18 @@ selectElement
 fromClause
     : (FROM tableSources)
       (WHERE whereExpr=expression)?
+    ;
+
+annsClause
+    : ANNS BY annsFuncClause
+    ;
+
+annsFuncClause
+    : func = (L2 | IP) '(' annsArgs ')'
+    ;
+
+annsArgs
+    : (expression ( ',' expression)* )?
     ;
 
 // groupByClause
@@ -2212,7 +2224,7 @@ constant
     | '-' decimalLiteral
     | hexadecimalLiteral | booleanLiteral
     | REAL_LITERAL
-//    | BIT_STRING
+    | BIT_STRING
 //    | NOT? nullLiteral=(NULL_LITERAL | NULL_SPEC_LITERAL)
     ;
 
@@ -2640,6 +2652,11 @@ expressionAtom
     | unaryOperator expressionAtom                                  #unaryExpressionAtom
 //    | BINARY expressionAtom                                         #binaryExpressionAtom
     | '(' expression (',' expression)* ')'                          #nestedExpressionAtom
+    | array                                                         #arrayExpressionAtom
+    ;
+
+array
+    : '[' ( expression ( ',' expression )* )? ']'
     ;
 
 unaryOperator
