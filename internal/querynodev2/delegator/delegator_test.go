@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -259,6 +260,39 @@ func (s *DelegatorSuite) TestSearch() {
 		s.Equal(3, len(results))
 	})
 
+	s.Run("partition_not_loaded", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Return(&internalpb.SearchResults{}, nil)
+		worker2.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Return(&internalpb.SearchResults{}, nil)
+
+		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				PartitionIDs: []int64{500},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		errors.Is(err, merr.ErrPartitionNotLoaded)
+	})
+
 	s.Run("worker_return_error", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -476,6 +510,39 @@ func (s *DelegatorSuite) TestQuery() {
 
 		s.NoError(err)
 		s.Equal(3, len(results))
+	})
+
+	s.Run("partition_not_loaded", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		worker2 := &cluster.MockWorker{}
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+			Return(&internalpb.RetrieveResults{}, nil)
+		worker2.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+			Return(&internalpb.RetrieveResults{}, nil)
+
+		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				PartitionIDs: []int64{500},
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+
+		errors.Is(err, merr.ErrPartitionNotLoaded)
 	})
 
 	s.Run("worker_return_error", func() {

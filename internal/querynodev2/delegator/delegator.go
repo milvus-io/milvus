@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/samber/lo"
@@ -205,6 +206,11 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
+	partitions := req.GetReq().GetPartitionIDs()
+	if !sd.collection.ExistPartition(partitions...) {
+		return nil, merr.WrapErrPartitionNotLoaded(partitions)
+	}
+
 	// wait tsafe
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
@@ -249,6 +255,11 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+	}
+
+	partitions := req.GetReq().GetPartitionIDs()
+	if !sd.collection.ExistPartition(partitions...) {
+		return nil, merr.WrapErrPartitionNotLoaded(partitions)
 	}
 
 	// wait tsafe
