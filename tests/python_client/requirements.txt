@@ -23,7 +23,6 @@ delayed-assert==0.3.5
 kubernetes==17.17.0
 PyYAML==6.0
 pytest-sugar==0.9.5
-pytest-reportportal==5.0.10
 pytest-parallel
 pytest-random-order
 
