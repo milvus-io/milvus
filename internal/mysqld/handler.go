@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/xelabs/go-mysqlstack/driver"
 	"github.com/xelabs/go-mysqlstack/sqlparser/depends/query"
 	querypb "github.com/xelabs/go-mysqlstack/sqlparser/depends/query"

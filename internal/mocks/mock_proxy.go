@@ -32,6 +32,14 @@ func (_m *ProxyComponent) EXPECT() *ProxyComponent_Expecter {
 	return &ProxyComponent_Expecter{mock: &_m.Mock}
 }
 
+func (_m *ProxyComponent) FlushAll(ctx context.Context, request *milvuspb.FlushAllRequest) (*milvuspb.FlushAllResponse, error) {
+	return nil, nil
+}
+
+func (_m *ProxyComponent) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	return nil, nil
+}
+
 // AlterAlias provides a mock function with given fields: ctx, request
 func (_m *ProxyComponent) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, request)

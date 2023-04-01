@@ -15,7 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	querypb "github.com/xelabs/go-mysqlstack/sqlparser/depends/query"
 
 	"github.com/milvus-io/milvus/internal/mysqld/planner"
