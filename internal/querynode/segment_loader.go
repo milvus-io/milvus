@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	ants "github.com/panjf2000/ants/v2"
+	"github.com/panjf2000/ants/v2"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -993,7 +994,7 @@ func newSegmentLoader(
 		ioPoolSize = 256
 	}
 	ioPool := conc.NewPool(ioPoolSize, ants.WithPreAlloc(true))
-	cpuPool := conc.NewPool(cpuNum, ants.WithPreAlloc(true))
+	cpuPool := conc.NewDefaultPool()
 
 	log.Info("SegmentLoader created",
 		zap.Int("ioPoolSize", ioPoolSize),
