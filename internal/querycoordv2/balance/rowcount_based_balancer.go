@@ -37,7 +37,7 @@ type RowCountBasedBalancer struct {
 	targetMgr *meta.TargetManager
 }
 
-func (b *RowCountBasedBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
 	nodeItems := b.convertToNodeItems(nodes)
 	if len(nodeItems) == 0 {
 		return nil

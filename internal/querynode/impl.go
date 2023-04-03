@@ -435,7 +435,6 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	nodeID := node.session.ServerID
-	log.Info("wayblink", zap.Int64("nodeID", nodeID))
 	// check node healthy
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		err := fmt.Errorf("query node %d is not ready", nodeID)

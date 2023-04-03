@@ -18,11 +18,17 @@ package balance
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"go.uber.org/zap"
+)
+
+const (
+	InfoPrefix = "Balance-Info:"
 )
 
 func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
@@ -104,4 +110,76 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 		ret = append(ret, task)
 	}
 	return ret
+}
+
+func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
+	channelPlans []ChannelAssignPlan) {
+	balanceInfo := fmt.Sprintf("%s{collectionID:%d, replicaID:%d, ", InfoPrefix, collectionID, replicaID)
+	for _, segmentPlan := range segmentPlans {
+		balanceInfo += segmentPlan.ToString()
+	}
+	for _, channelPlan := range channelPlans {
+		balanceInfo += channelPlan.ToString()
+	}
+	balanceInfo += "}"
+	log.Info(balanceInfo)
+}
+
+func PrintCurrentReplicaDist(replica *meta.Replica,
+	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
+	channelManager *meta.ChannelDistManager) {
+	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", InfoPrefix, replica.CollectionID, replica.GetID())
+	//1. print stopping nodes segment distribution
+	distInfo += "[stoppingNodesSegmentDist:"
+	for stoppingNodeID, stoppedSegments := range stoppingNodesSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", stoppingNodeID)
+		distInfo += "stopped-segments:["
+		for _, stoppedSegment := range stoppedSegments {
+			distInfo += fmt.Sprintf("%d,", stoppedSegment.GetID())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+	//2. print normal nodes segment distribution
+	distInfo += "[normalNodesSegmentDist:"
+	for normalNodeID, normalNodeSegments := range nodeSegments {
+		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
+		distInfo += "loaded-segments:["
+		nodeRowSum := int64(0)
+		for _, normalSegment := range normalNodeSegments {
+			distInfo += fmt.Sprintf("[segmentID: %d, rowCount: %d] ",
+				normalSegment.GetID(), normalSegment.GetNumOfRows())
+			nodeRowSum += normalSegment.GetNumOfRows()
+		}
+		distInfo += fmt.Sprintf("] nodeRowSum:%d]", nodeRowSum)
+	}
+	distInfo += "]\n"
+
+	//3. print stopping nodes channel distribution
+	distInfo += "[stoppingNodesChannelDist:"
+	for stoppingNodeID := range stoppingNodesSegments {
+		stoppingNodeChannels := channelManager.GetByNode(stoppingNodeID)
+		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", stoppingNodeID, len(stoppingNodeChannels))
+		distInfo += "channels:["
+		for _, stoppingChan := range stoppingNodeChannels {
+			distInfo += fmt.Sprintf("%s,", stoppingChan.GetChannelName())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+
+	//4. print normal nodes channel distribution
+	distInfo += "[normalNodesChannelDist:"
+	for normalNodeID := range nodeSegments {
+		normalNodeChannels := channelManager.GetByNode(normalNodeID)
+		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", normalNodeID, len(normalNodeChannels))
+		distInfo += "channels:["
+		for _, normalNodeChan := range normalNodeChannels {
+			distInfo += fmt.Sprintf("%s,", normalNodeChan.GetChannelName())
+		}
+		distInfo += "]]"
+	}
+	distInfo += "]\n"
+
+	log.Info(distInfo)
 }

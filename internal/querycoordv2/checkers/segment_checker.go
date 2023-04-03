@@ -26,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -39,6 +41,7 @@ type SegmentChecker struct {
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
 	balancer  balance.Balance
+	nodeMgr   *session.NodeManager
 }
 
 func NewSegmentChecker(
@@ -46,12 +49,14 @@ func NewSegmentChecker(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
 ) *SegmentChecker {
 	return &SegmentChecker{
 		meta:      meta,
 		dist:      dist,
 		targetMgr: targetMgr,
 		balancer:  balancer,
+		nodeMgr:   nodeMgr,
 	}
 }
 
@@ -274,9 +279,13 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	}
 	outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
 	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
-		return !outboundNodes.Contain(node)
+		stop, err := c.nodeMgr.IsStoppingNode(node)
+		if err != nil {
+			return false
+		}
+		return !outboundNodes.Contain(node) && !stop
 	})
-	plans := c.balancer.AssignSegment(packedSegments, availableNodes)
+	plans := c.balancer.AssignSegment(replica.CollectionID, packedSegments, availableNodes)
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}
