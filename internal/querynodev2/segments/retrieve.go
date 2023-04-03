@@ -30,7 +30,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 	var retrieveResults []*segcorepb.RetrieveResults
 
 	for _, segID := range segIDs {
-		segment := manager.Segment.Get(segID).(*LocalSegment)
+		segment, _ := manager.Segment.Get(segID).(*LocalSegment)
 		if segment == nil {
 			continue
 		}
