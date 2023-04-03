@@ -457,7 +457,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 		collValidator: func(collID int64) bool {
 			resp, err := s.rootCoordClient.DescribeCollectionInternal(context.Background(), &milvuspb.DescribeCollectionRequest{
-				Base:         commonpbutil.NewMsgBase(),
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+				),
 				CollectionID: collID,
 			})
 			if err != nil {
