@@ -30,15 +30,12 @@ static IndexType
 InferIndexType(const Json& search_params) {
     // ivf -> nprobe
     // hnsw -> ef
-    // annoy -> search_k
-    // ngtpanng / ngtonng -> max_search_edges / epsilon
     static const std::map<std::string, IndexType> key_list = [] {
         std::map<std::string, IndexType> list;
         namespace ip = knowhere::indexparam;
         namespace ie = knowhere::IndexEnum;
         list.emplace(ip::NPROBE, ie::INDEX_FAISS_IVFFLAT);
         list.emplace(ip::EF, ie::INDEX_HNSW);
-        list.emplace(ip::SEARCH_K, ie::INDEX_ANNOY);
         return list;
     }();
     auto dbg_str = search_params.dump();

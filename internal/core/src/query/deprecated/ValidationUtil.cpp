@@ -201,7 +201,6 @@ ValidateVectorIndexType(std::string& index_type, bool is_binary) {
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::IndexEnum::INDEX_HNSW,
-        knowhere::IndexEnum::INDEX_ANNOY,
     };
 
     static std::set<std::string> s_binary_index_types = {
@@ -332,12 +331,6 @@ ValidateIndexParams(const milvus::json& index_params,
         }
         status = CheckParameterRange(
             index_params, knowhere::IndexParams::efConstruction, 8, 512);
-        if (!status.ok()) {
-            return status;
-        }
-    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        auto status = CheckParameterRange(
-            index_params, knowhere::IndexParams::n_trees, 1, 1024);
         if (!status.ok()) {
             return status;
         }

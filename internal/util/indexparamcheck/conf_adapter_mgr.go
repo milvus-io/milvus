@@ -55,7 +55,6 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
 	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
 	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
-	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
 	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
 }
 

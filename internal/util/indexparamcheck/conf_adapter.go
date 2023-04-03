@@ -359,24 +359,7 @@ func newHNSWConfAdapter() *HNSWConfAdapter {
 	return &HNSWConfAdapter{}
 }
 
-// ANNOYConfAdapter checks if an ANNOY index can be built.
-type ANNOYConfAdapter struct {
-	BaseConfAdapter
-}
-
-// CheckTrain checks if an annoy index can be built with specific parameters.
-func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, NTREES, MinNTrees, MaxNTrees) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
-}
-
-func newANNOYConfAdapter() *ANNOYConfAdapter {
-	return &ANNOYConfAdapter{}
-}
-
+// DISKANNConfAdapter checks if an diskann index can be built.
 type DISKANNConfAdapter struct {
 	BaseConfAdapter
 }

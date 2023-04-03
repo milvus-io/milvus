@@ -124,8 +124,7 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 
-	IndexHNSW  = "HNSW"
-	IndexANNOY = "ANNOY"
+	IndexHNSW = "HNSW"
 
 	// metric type
 	L2       = "L2"
@@ -140,9 +139,6 @@ const (
 	nprobe         = 8
 	efConstruction = 200
 	ef             = 200
-	edgeSize       = 10
-	epsilon        = 0.1
-	maxSearchEdges = 50
 )
 
 // ---------- unittest util functions ----------
@@ -463,9 +459,6 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		//indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexANNOY {
-		indexParams["n_trees"] = strconv.Itoa(4)
-		indexParams["search_k"] = strconv.Itoa(100)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)

@@ -241,12 +241,6 @@ generate_build_conf(const milvus::IndexType& index_type,
             {knowhere::indexparam::HNSW_M, "16"},
             {knowhere::indexparam::EFCONSTRUCTION, "200"},
         };
-    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        return knowhere::Json{
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, std::to_string(DIM)},
-            {knowhere::indexparam::N_TREES, "4"},
-        };
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
@@ -298,8 +292,6 @@ generate_search_conf(const milvus::IndexType& index_type,
         conf[knowhere::indexparam::NPROBE] = 4;
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;
-    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        conf[knowhere::indexparam::SEARCH_K] = 100;
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
         conf[milvus::index::DISK_ANN_QUERY_LIST] = K * 2;
     }
@@ -326,8 +318,6 @@ generate_range_search_conf(const milvus::IndexType& index_type,
         conf[knowhere::indexparam::NPROBE] = 4;
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;
-    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        conf[knowhere::indexparam::SEARCH_K] = 100;
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
         conf[milvus::index::DISK_ANN_QUERY_LIST] = K * 2;
     }
