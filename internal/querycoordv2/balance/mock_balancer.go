@@ -60,13 +60,13 @@ func (_c *MockBalancer_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *Mock
 	return _c
 }
 
-// AssignSegment provides a mock function with given fields: segments, nodes
-func (_m *MockBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
-	ret := _m.Called(segments, nodes)
+// AssignSegment provides a mock function with given fields: collectionID, segments, nodes
+func (_m *MockBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+	ret := _m.Called(collectionID, segments, nodes)
 
 	var r0 []SegmentAssignPlan
-	if rf, ok := ret.Get(0).(func([]*meta.Segment, []int64) []SegmentAssignPlan); ok {
-		r0 = rf(segments, nodes)
+	if rf, ok := ret.Get(0).(func(int64, []*meta.Segment, []int64) []SegmentAssignPlan); ok {
+		r0 = rf(collectionID, segments, nodes)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]SegmentAssignPlan)
@@ -82,15 +82,16 @@ type MockBalancer_AssignSegment_Call struct {
 }
 
 // AssignSegment is a helper method to define mock.On call
-//  - segments []*meta.Segment
-//  - nodes []int64
-func (_e *MockBalancer_Expecter) AssignSegment(segments interface{}, nodes interface{}) *MockBalancer_AssignSegment_Call {
-	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", segments, nodes)}
+//   - collectionID int64
+//   - segments []*meta.Segment
+//   - nodes []int64
+func (_e *MockBalancer_Expecter) AssignSegment(collectionID interface{}, segments interface{}, nodes interface{}) *MockBalancer_AssignSegment_Call {
+	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", collectionID, segments, nodes)}
 }
 
-func (_c *MockBalancer_AssignSegment_Call) Run(run func(segments []*meta.Segment, nodes []int64)) *MockBalancer_AssignSegment_Call {
+func (_c *MockBalancer_AssignSegment_Call) Run(run func(collectionID int64, segments []*meta.Segment, nodes []int64)) *MockBalancer_AssignSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*meta.Segment), args[1].([]int64))
+		run(args[0].(int64), args[1].([]*meta.Segment), args[2].([]int64))
 	})
 	return _c
 }
