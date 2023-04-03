@@ -102,16 +102,6 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeNumConsumers = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "consumer_num",
-			Help:      "number of consumers",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	QueryNodeSQCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -363,7 +353,6 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumSegments)
 	registry.MustRegister(QueryNodeNumDmlChannels)
 	registry.MustRegister(QueryNodeNumDeltaChannels)
-	registry.MustRegister(QueryNodeNumConsumers)
 	registry.MustRegister(QueryNodeSQCount)
 	registry.MustRegister(QueryNodeSQReqLatency)
 	registry.MustRegister(QueryNodeSQLatencyInQueue)

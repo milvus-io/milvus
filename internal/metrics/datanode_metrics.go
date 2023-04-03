@@ -56,16 +56,6 @@ var (
 			msgTypeLabelName,
 		})
 
-	DataNodeNumConsumers = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "consumer_num",
-			Help:      "number of consumers",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	DataNodeNumProducers = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -215,7 +205,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumFlowGraphs)
 	registry.MustRegister(DataNodeConsumeMsgRowsCount)
 	registry.MustRegister(DataNodeFlushedSize)
-	registry.MustRegister(DataNodeNumConsumers)
 	registry.MustRegister(DataNodeNumProducers)
 	registry.MustRegister(DataNodeConsumeTimeTickLag)
 	registry.MustRegister(DataNodeEncodeBufferLatency)

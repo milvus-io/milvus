@@ -27,9 +27,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -117,6 +119,8 @@ func NewDispatcher(factory msgstream.Factory,
 		targets:       make(map[string]*target),
 		stream:        stream,
 	}
+
+	metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return d, nil
 }
 
@@ -178,6 +182,7 @@ func (d *Dispatcher) Handle(signal signal) {
 		d.cancel()
 		d.wg.Wait()
 		d.once.Do(func() {
+			metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Dec()
 			d.stream.Close()
 		})
 	}

@@ -224,9 +224,6 @@ func (q *queryNodeFlowGraph) newDmInputNode(collectionID UniqueID, vchannel Chan
 func (q *queryNodeFlowGraph) close() {
 	q.dispClient.Deregister(q.vchannel)
 	q.flowGraph.Close()
-	if q.consumerCnt > 0 {
-		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(q.consumerCnt))
-	}
 	log.Info("stop query node flow graph",
 		zap.Int64("collectionID", q.collectionID),
 		zap.String("vchannel", q.vchannel),

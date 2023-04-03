@@ -17,22 +17,22 @@
 package metrics
 
 import (
-	"testing"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func TestRegisterMetrics(t *testing.T) {
-	r := prometheus.NewRegistry()
-	// Make sure it doesn't panic.
-	RegisterRootCoord(r)
-	RegisterDataNode(r)
-	RegisterDataCoord(r)
-	RegisterIndexNode(r)
-	RegisterProxy(r)
-	RegisterQueryNode(r)
-	RegisterQueryCoord(r)
-	RegisterEtcdMetrics(r)
-	RegisterMq(r)
-	Register(r)
+var (
+	NumConsumers = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "msg_queue",
+			Name:      "consumer_num",
+			Help:      "number of consumers",
+		}, []string{
+			roleNameLabelName,
+			nodeIDLabelName,
+		})
+)
+
+func RegisterMq(registry *prometheus.Registry) {
+	registry.MustRegister(NumConsumers)
 }

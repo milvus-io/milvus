@@ -718,7 +718,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	defer func() {
-		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+		metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Dec()
 		stream.Close()
 	}()
 
@@ -748,7 +748,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		return nil
 	}
 
-	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+	metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Inc()
 	err = stream.Seek([]*msgpb.MsgPosition{position})
 	if err != nil {
 		return err
