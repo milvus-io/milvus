@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -643,6 +644,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		return failRet, nil
 	}
+
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "searchRequestReduce")
 	ret, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
@@ -650,6 +653,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+	metrics.QueryNodeReduceLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	if !req.FromShardLeader {
 		collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"go.uber.org/zap"
 )
 
@@ -34,6 +35,8 @@ type SearchTask struct {
 	originNqs      []int64
 	others         []*SearchTask
 	notifier       chan error
+
+	tr *timerecord.TimeRecorder
 }
 
 func NewSearchTask(ctx context.Context,
@@ -49,6 +52,8 @@ func NewSearchTask(ctx context.Context,
 		originTopks:    []int64{req.GetReq().GetTopk()},
 		originNqs:      []int64{req.GetReq().GetNq()},
 		notifier:       make(chan error, 1),
+
+		tr: timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 	}
 }
 
@@ -102,6 +107,7 @@ func (t *SearchTask) Execute() error {
 		return nil
 	}
 
+	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "searchTaskReduce")
 	blobs, err := segments.ReduceSearchResultsAndFillData(
 		searchReq.Plan(),
 		results,
@@ -123,6 +129,11 @@ func (t *SearchTask) Execute() error {
 	// Note: blob is unsafe because get from C
 	bs := make([]byte, len(blob))
 	copy(bs, blob)
+
+	metrics.QueryNodeReduceLatency.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	t.result = &internalpb.SearchResults{
 		Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
