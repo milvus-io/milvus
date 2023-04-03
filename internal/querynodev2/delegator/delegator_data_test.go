@@ -319,7 +319,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		sealed, _, _ := s.delegator.GetDistribution().GetCurrent()
+		sealed, _ := s.delegator.GetSegmentInfo()
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
@@ -395,7 +395,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		sealed, _, _ := s.delegator.GetDistribution().GetCurrent()
+		sealed, _ := s.delegator.GetSegmentInfo()
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
@@ -410,7 +410,6 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				PartitionID: 500,
 			},
 		}, sealed[0].Segments)
-
 	})
 
 	s.Run("get_worker_fail", func() {
@@ -599,8 +598,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
-	sealed, growing, version := s.delegator.GetDistribution().GetCurrent()
-	s.delegator.GetDistribution().FinishUsage(version)
+	sealed, growing := s.delegator.GetSegmentInfo()
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
 	s.ElementsMatch([]SegmentEntry{
@@ -627,8 +625,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	}, false)
 
 	s.NoError(err)
-	sealed, _, version = s.delegator.GetDistribution().GetCurrent()
-	s.delegator.GetDistribution().FinishUsage(version)
+	sealed, _ = s.delegator.GetSegmentInfo()
 	s.Equal(0, len(sealed))
 
 	err = s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
@@ -639,8 +636,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	}, false)
 
 	s.NoError(err)
-	_, growing, version = s.delegator.GetDistribution().GetCurrent()
-	s.delegator.GetDistribution().FinishUsage(version)
+	_, growing = s.delegator.GetSegmentInfo()
 	s.Equal(0, len(growing))
 
 	err = s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{

@@ -87,41 +87,50 @@ func (_c *MockShardDelegator_Collection_Call) Return(_a0 int64) *MockShardDelega
 	return _c
 }
 
-// GetDistribution provides a mock function with given fields:
-func (_m *MockShardDelegator) GetDistribution() *distribution {
+// GetSegmentInfo provides a mock function with given fields:
+func (_m *MockShardDelegator) GetSegmentInfo() ([]SnapshotItem, []SegmentEntry) {
 	ret := _m.Called()
 
-	var r0 *distribution
-	if rf, ok := ret.Get(0).(func() *distribution); ok {
+	var r0 []SnapshotItem
+	if rf, ok := ret.Get(0).(func() []SnapshotItem); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*distribution)
+			r0 = ret.Get(0).([]SnapshotItem)
 		}
 	}
 
-	return r0
+	var r1 []SegmentEntry
+	if rf, ok := ret.Get(1).(func() []SegmentEntry); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]SegmentEntry)
+		}
+	}
+
+	return r0, r1
 }
 
-// MockShardDelegator_GetDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDistribution'
-type MockShardDelegator_GetDistribution_Call struct {
+// MockShardDelegator_GetSegmentInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentInfo'
+type MockShardDelegator_GetSegmentInfo_Call struct {
 	*mock.Call
 }
 
-// GetDistribution is a helper method to define mock.On call
-func (_e *MockShardDelegator_Expecter) GetDistribution() *MockShardDelegator_GetDistribution_Call {
-	return &MockShardDelegator_GetDistribution_Call{Call: _e.mock.On("GetDistribution")}
+// GetSegmentInfo is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetSegmentInfo() *MockShardDelegator_GetSegmentInfo_Call {
+	return &MockShardDelegator_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo")}
 }
 
-func (_c *MockShardDelegator_GetDistribution_Call) Run(run func()) *MockShardDelegator_GetDistribution_Call {
+func (_c *MockShardDelegator_GetSegmentInfo_Call) Run(run func()) *MockShardDelegator_GetSegmentInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockShardDelegator_GetDistribution_Call) Return(_a0 *distribution) *MockShardDelegator_GetDistribution_Call {
-	_c.Call.Return(_a0)
+func (_c *MockShardDelegator_GetSegmentInfo_Call) Return(sealed []SnapshotItem, growing []SegmentEntry) *MockShardDelegator_GetSegmentInfo_Call {
+	_c.Call.Return(sealed, growing)
 	return _c
 }
 

@@ -1190,9 +1190,8 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 
 	delegator, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.True(ok)
-	sealedSegments, _, version := delegator.GetDistribution().GetCurrent()
+	sealedSegments, _ := delegator.GetSegmentInfo()
 	suite.Len(sealedSegments[0].Segments, 3)
-	delegator.GetDistribution().FinishUsage(version)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -1215,9 +1214,8 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _, version = delegator.GetDistribution().GetCurrent()
+	sealedSegments, _ = delegator.GetSegmentInfo()
 	suite.Len(sealedSegments[0].Segments, 3)
-	delegator.GetDistribution().FinishUsage(version)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -1230,9 +1228,8 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _, version = delegator.GetDistribution().GetCurrent()
+	sealedSegments, _ = delegator.GetSegmentInfo()
 	suite.Len(sealedSegments[0].Segments, 2)
-	delegator.GetDistribution().FinishUsage(version)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {
