@@ -364,6 +364,23 @@ func WrapErrMetricNotFound(name string, msg ...string) error {
 	return err
 }
 
+// Topic related
+func WrapErrTopicNotFound(name string, msg ...string) error {
+	err := errors.Wrapf(ErrTopicNotFound, "topic=%s", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrTopicNotEmpty(name string, msg ...string) error {
+	err := errors.Wrapf(ErrTopicNotEmpty, "topic=%s", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }

@@ -296,6 +296,10 @@ func (ms *simpleMockMsgStream) GetLatestMsgID(channel string) (msgstream.Message
 	return nil, nil
 }
 
+func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
+	return nil
+}
+
 func newSimpleMockMsgStream() *simpleMockMsgStream {
 	return &simpleMockMsgStream{
 		msgChan:  make(chan *msgstream.MsgPack, 1024),

@@ -211,6 +211,10 @@ type commonConfig struct {
 
 	SessionTTL        ParamItem `refreshable:"false"`
 	SessionRetryTimes ParamItem `refreshable:"false"`
+
+	PreCreatedTopicEnabled ParamItem `refreshable:"true"`
+	TopicNames             ParamItem `refreshable:"true"`
+	TimeTicker             ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -613,6 +617,24 @@ like the old password verification when updating the credential`,
 	}
 	p.SessionRetryTimes.Init(base.mgr)
 
+	p.PreCreatedTopicEnabled = ParamItem{
+		Key:          "common.preCreatedTopic.enabled",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+	}
+	p.PreCreatedTopicEnabled.Init(base.mgr)
+
+	p.TopicNames = ParamItem{
+		Key:     "common.preCreatedTopic.names",
+		Version: "2.3.0",
+	}
+	p.TopicNames.Init(base.mgr)
+
+	p.TimeTicker = ParamItem{
+		Key:     "common.preCreatedTopic.timeticker",
+		Version: "2.3.0",
+	}
+	p.TimeTicker.Init(base.mgr)
 }
 
 type traceConfig struct {

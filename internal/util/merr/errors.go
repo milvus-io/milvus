@@ -99,6 +99,10 @@ var (
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
+	// Topic related
+	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
+	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)

@@ -24,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/retry"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -150,6 +151,20 @@ func (pc *Consumer) Close() {
 func (pc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
 	return &pulsarID{messageID: msgID}, err
+}
+
+func (pc *Consumer) CheckTopicValid(topic string) error {
+	latestMsgID, err := pc.GetLatestMsgID()
+	// Pulsar creates that topic under the namespace provided in the topic name automatically
+	if err != nil {
+		return err
+	}
+
+	if !latestMsgID.AtEarliestPosition() {
+		return merr.WrapErrTopicNotEmpty(topic, "topic is not empty")
+	}
+	log.Info("created topic is empty", zap.String("topic", topic))
+	return nil
 }
 
 // patchEarliestMessageID unsafe patch logic to change messageID partitionIdx to 0

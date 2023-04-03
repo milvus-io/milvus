@@ -30,6 +30,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
@@ -993,6 +994,55 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 	msgID, err = rmq.GetLatestMsg(channelName)
 	assert.Equal(t, msgID, DefaultMessageID)
 	assert.NotNil(t, err)
+}
+
+func TestRocksmq_CheckPreTopicValid(t *testing.T) {
+	suffix := "_topic"
+	kvPath := rmqPath + kvPathSuffix + suffix
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := rmqPath + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
+	defer os.RemoveAll(rocksdbPath)
+	paramtable.Init()
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	channelName1 := "topic1"
+	// topic not exist
+	err = rmq.CheckTopicValid(channelName1)
+	assert.Equal(t, true, errors.Is(err, merr.ErrTopicNotFound))
+
+	channelName2 := "topic2"
+	// topic is not empty
+	err = rmq.CreateTopic(channelName2)
+	defer rmq.DestroyTopic(channelName2)
+	assert.Nil(t, err)
+	topicMu.Store(channelName2, new(sync.Mutex))
+
+	pMsgs := make([]ProducerMessage, 10)
+	for i := 0; i < 10; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	_, err = rmq.Produce(channelName2, pMsgs)
+	assert.NoError(t, err)
+
+	err = rmq.CheckTopicValid(channelName2)
+	assert.Equal(t, true, errors.Is(err, merr.ErrTopicNotEmpty))
+
+	channelName3 := "topic3"
+	// pass
+	err = rmq.CreateTopic(channelName3)
+	defer rmq.DestroyTopic(channelName3)
+	assert.Nil(t, err)
+
+	topicMu.Store(channelName3, new(sync.Mutex))
+	err = rmq.CheckTopicValid(channelName3)
+	assert.NoError(t, err)
 }
 
 func TestRocksmq_Close(t *testing.T) {

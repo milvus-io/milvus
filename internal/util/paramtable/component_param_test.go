@@ -122,6 +122,14 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
+
+		assert.Equal(t, false, Params.PreCreatedTopicEnabled.GetAsBool())
+
+		params.Save("common.preCreatedTopic.names", "topic1,topic2,topic3")
+		assert.Equal(t, []string{"topic1", "topic2", "topic3"}, Params.TopicNames.GetAsStrings())
+
+		params.Save("common.preCreatedTopic.timeticker", "timeticker")
+		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

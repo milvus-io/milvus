@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -158,6 +159,13 @@ func TestDmlChannels(t *testing.T) {
 
 	dml.removeChannels(chans0...)
 	assert.Equal(t, 0, dml.getChannelNum())
+
+	paramtable.Get().Save(Params.CommonCfg.PreCreatedTopicEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.TopicNames.Key, "topic1,topic2")
+	defer paramtable.Get().Reset(Params.CommonCfg.PreCreatedTopicEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
+
+	assert.Panics(t, func() { newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum) })
 }
 
 func TestDmChannelsFailure(t *testing.T) {

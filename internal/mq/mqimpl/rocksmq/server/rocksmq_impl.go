@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1072,5 +1073,26 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 			return err
 		}
 	}
+	return nil
+}
+
+func (rmq *rocksmq) CheckTopicValid(topic string) error {
+	// Check if key exists
+	log := log.With(zap.String("topic", topic))
+
+	_, ok := topicMu.Load(topic)
+	if !ok {
+		return merr.WrapErrTopicNotFound(topic, "failed to get topic")
+	}
+
+	latestMsgID, err := rmq.GetLatestMsg(topic)
+	if err != nil {
+		return err
+	}
+
+	if latestMsgID != DefaultMessageID {
+		return merr.WrapErrTopicNotEmpty(topic, "topic is not empty")
+	}
+	log.Info("created topic is empty")
 	return nil
 }
