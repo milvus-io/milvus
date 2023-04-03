@@ -379,7 +379,9 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
 	}
 
-	log.Debug("Search Execute done.")
+	log.Debug("Search Execute done.",
+		zap.Int64("collection", t.GetCollectionID()),
+		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
 }
 
@@ -420,6 +422,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	// Reduce all search results
 	log.Ctx(ctx).Debug("proxy search post execute reduce",
+		zap.Int64("collection", t.GetCollectionID()),
+		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int("number of valid search results", len(validSearchResults)))
 	tr.CtxRecord(ctx, "reduceResultStart")
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(t.schema)
@@ -437,7 +441,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 
-	log.Ctx(ctx).Debug("Search post execute done")
+	log.Ctx(ctx).Debug("Search post execute done",
+		zap.Int64("collection", t.GetCollectionID()),
+		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
 }
 
@@ -451,6 +457,11 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		TotalChannelNum: t.channelNum,
 	}
 
+	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
+		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
+		zap.Int64("nodeID", nodeID),
+		zap.Strings("channels", channelIDs))
+
 	queryNode := querynode.GetQueryNode()
 	var result *internalpb.SearchResults
 	var err error
@@ -461,23 +472,17 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		result, err = qn.Search(ctx, req)
 	}
 	if err != nil {
-		log.Ctx(ctx).Warn("QueryNode search return error",
-			zap.Int64("nodeID", nodeID),
-			zap.Strings("channels", channelIDs),
-			zap.Error(err))
+		log.Warn("QueryNode search return error", zap.Error(err))
 		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
-			zap.Int64("nodeID", nodeID),
-			zap.Strings("channels", channelIDs))
+		log.Warn("QueryNode is not shardLeader")
 		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Ctx(ctx).Warn("QueryNode search result error",
-			zap.Int64("nodeID", nodeID),
+		log.Warn("QueryNode search result error",
 			zap.String("reason", result.GetStatus().GetReason()))
 		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
