@@ -704,9 +704,8 @@ func TestSessionEventType_String(t *testing.T) {
 
 func TestSession_apply(t *testing.T) {
 	session := &Session{}
-	opts := []SessionOption{WithCustomConfigEnable(), WithTTL(100), WithRetryTimes(200)}
+	opts := []SessionOption{WithTTL(100), WithRetryTimes(200)}
 	session.apply(opts...)
-	assert.True(t, session.useCustomConfig)
 	assert.Equal(t, int64(100), session.sessionTTL)
 	assert.Equal(t, int64(200), session.sessionRetryTimes)
 }
