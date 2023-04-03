@@ -183,7 +183,7 @@ get_wrong_format_dict = [
 
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
-                   "RAFT_IVF_FLAT", "RAFT_IVF_PQ"]
+                   "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                         {"M": 48, "efConstruction": 500}, {}, {"nlist": 128}, {"nlist": 128},
