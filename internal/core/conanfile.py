@@ -36,6 +36,7 @@ class MilvusConan(ConanFile):
         "flex/2.6.4",
         "xsimd/9.0.1",
         "xz_utils/5.4.0",
+        "prometheus-cpp/1.1.0",
         "folly/2023.02.24@milvus/dev",
         "velox/2023.02.24@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
