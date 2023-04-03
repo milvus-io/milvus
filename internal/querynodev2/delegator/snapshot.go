@@ -76,6 +76,15 @@ func (s *snapshot) Expire(cleanup snapshotCleanup) {
 func (s *snapshot) Get(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
 	s.inUse.Inc()
 
+	return s.filter(partitions...)
+}
+
+// Peek returns segment distributions without increasing inUse.
+func (s *snapshot) Peek(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+	return s.filter(partitions...)
+}
+
+func (s *snapshot) filter(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
 	filter := func(entry SegmentEntry, idx int) bool {
 		return len(partitions) == 0 || funcutil.SliceContain(partitions, entry.PartitionID)
 	}
@@ -120,13 +129,4 @@ func (s *snapshot) checkCleared(cleanup snapshotCleanup) {
 			}()
 		})
 	}
-}
-
-func inList(list []int64, target int64) bool {
-	for _, i := range list {
-		if i == target {
-			return true
-		}
-	}
-	return false
 }

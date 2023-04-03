@@ -142,9 +142,8 @@ func (s *DelegatorSuite) TestBasicInfo() {
 	s.True(s.delegator.Serviceable())
 }
 
-func (s *DelegatorSuite) TestDistribution() {
-	sealed, growing, version := s.delegator.GetDistribution().GetCurrent()
-	s.delegator.GetDistribution().FinishUsage(version)
+func (s *DelegatorSuite) TestGetSegmentInfo() {
+	sealed, growing := s.delegator.GetSegmentInfo()
 	s.Equal(0, len(sealed))
 	s.Equal(0, len(growing))
 
@@ -155,7 +154,7 @@ func (s *DelegatorSuite) TestDistribution() {
 		Version:     2001,
 	})
 
-	sealed, growing, version = s.delegator.GetDistribution().GetCurrent()
+	sealed, growing = s.delegator.GetSegmentInfo()
 	s.EqualValues([]SnapshotItem{
 		{
 			NodeID: 1,
@@ -170,7 +169,6 @@ func (s *DelegatorSuite) TestDistribution() {
 		},
 	}, sealed)
 	s.Equal(0, len(growing))
-	s.delegator.GetDistribution().FinishUsage(version)
 }
 
 func (s *DelegatorSuite) TestSearch() {

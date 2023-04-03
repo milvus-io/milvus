@@ -45,7 +45,7 @@ type distribution struct {
 	snapshots *typeutil.ConcurrentMap[int64, *snapshot]
 	// current is the snapshot for quick usage for search/query
 	// generated for each change of distribution
-	current *snapshot
+	current *atomic.Pointer[snapshot]
 	// protects current & segments
 	mut sync.RWMutex
 }
@@ -65,6 +65,7 @@ func NewDistribution() *distribution {
 		growingSegments: make(map[UniqueID]SegmentEntry),
 		sealedSegments:  make(map[UniqueID]SegmentEntry),
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
+		current:         atomic.NewPointer[snapshot](nil),
 	}
 
 	dist.genSnapshot()
@@ -76,8 +77,9 @@ func (d *distribution) GetCurrent(partitions ...int64) (sealed []SnapshotItem, g
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
-	sealed, growing = d.current.Get(partitions...)
-	version = d.current.version
+	current := d.current.Load()
+	sealed, growing = current.Get(partitions...)
+	version = current.version
 	return
 }
 
@@ -87,6 +89,14 @@ func (d *distribution) FinishUsage(version int64) {
 	if ok {
 		snapshot.Done(d.getCleanup(snapshot.version))
 	}
+}
+
+// Peek returns current snapshot without increasing inuse count
+// show only used by GetDataDistribution.
+func (d *distribution) Peek(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+	current := d.current.Load()
+	sealed, growing = current.Peek(partitions...)
+	return sealed, growing
 }
 
 // Serviceable returns wether current snapshot is serviceable.
@@ -215,12 +225,13 @@ func (d *distribution) genSnapshot() chan struct{} {
 
 	// stores last snapshot
 	// ok to be nil
-	last := d.current
+	last := d.current.Load()
 	// increase version
 	d.version++
-	d.current = NewSnapshot(dist, growing, last, d.version)
+	newSnapShot := NewSnapshot(dist, growing, last, d.version)
+	d.current.Store(newSnapShot)
 	// shall be a new one
-	d.snapshots.GetOrInsert(d.version, d.current)
+	d.snapshots.GetOrInsert(d.version, newSnapShot)
 
 	// first snapshot, return closed chan
 	if last == nil {

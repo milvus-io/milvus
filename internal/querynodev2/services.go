@@ -902,9 +902,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Version:    value.Version(),
 		})
 
-		sealed, growing, version := value.GetDistribution().GetCurrent()
-		value.GetDistribution().FinishUsage(version)
-
+		sealed, growing := value.GetSegmentInfo()
 		sealedSegments := make(map[int64]*querypb.SegmentDist)
 		for _, item := range sealed {
 			for _, segment := range item.Segments {

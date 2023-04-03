@@ -75,7 +75,7 @@ func newLifetime() *lifetime {
 type ShardDelegator interface {
 	Collection() int64
 	Version() int64
-	GetDistribution() *distribution
+	GetSegmentInfo() (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
@@ -161,8 +161,9 @@ func (sd *shardDelegator) Version() int64 {
 	return sd.version
 }
 
-func (sd *shardDelegator) GetDistribution() *distribution {
-	return sd.distribution
+// GetSegmentInfo returns current segment distribution snapshot.
+func (sd *shardDelegator) GetSegmentInfo() ([]SnapshotItem, []SegmentEntry) {
+	return sd.distribution.Peek()
 }
 
 // SyncDistribution revises distribution.
