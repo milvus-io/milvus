@@ -111,7 +111,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 //test filter node with collection load partition
 func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	//data
-	suite.validSegmentIDs = []int64{2, 4, 6}
+	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
 	//mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
@@ -138,7 +138,7 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	for _, msg := range nodeMsg.insertMsgs {
 		suite.True(lo.Contains(suite.validSegmentIDs, msg.SegmentID))
 	}
-	suite.Equal(suite.deleteSegmentSum/2, len(nodeMsg.deleteMsgs))
+	suite.Equal(suite.deleteSegmentSum, len(nodeMsg.deleteMsgs))
 }
 
 func (suite *FilterNodeSuite) buildMsgPack() *msgstream.MsgPack {
