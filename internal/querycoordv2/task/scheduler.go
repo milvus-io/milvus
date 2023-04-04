@@ -752,7 +752,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 		case ActionTypeGrow:
 			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
 			if segment == nil {
-				log.Warn("task stale due tu the segment to load not exists in targets",
+				log.Warn("task stale due to the segment to load not exists in targets",
 					zap.Int64("segment", task.segmentID))
 				return true
 			}
