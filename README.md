@@ -72,7 +72,7 @@ Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy 
 
 Check the requirements first.
 
-Linux systems (Ubuntu 18.04 or later recommended):
+Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
 go: >= 1.18
 cmake: >= 3.18
@@ -83,14 +83,14 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
 go: >= 1.18
 cmake: >= 3.18
-llvm: >= 12
+llvm: >= 15
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 ```bash
 go: >= 1.18 (Arch=ARM64)
 cmake: >= 3.18
-llvm: >= 13
+llvm: >= 15
 ```
 
 Clone Milvus repo and build.

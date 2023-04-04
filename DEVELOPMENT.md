@@ -4,24 +4,29 @@ This document will help to set up your Milvus development environment and to run
 
 Table of contents
 =================
-- [Building Milvus with Docker](#building-milvus-with-docker)
-- [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
-  - [Hardware Requirements](#hardware-requirements)
-  - [Software Requirements](#software-requirements)
-    - [Dependencies](#dependencies)
-    - [CMake](#cmake)
-    - [Go](#go)
-    - [Docker & Docker Compose](#docker--docker-compose)
-  - [Building Milvus](#building-milvus)
-- [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
-  - [Pre-submission Verification](#pre-submission-verification)
-  - [Unit Tests](#unit-tests)
-  - [Code coverage](#code-coverage)
-  - [E2E Tests](#e2e-tests)
-  - [Test on local branch](#test-on-local-branch)
-    - [With Linux and MacOS](#with-linux-and-macos)
-    - [With docker](#with-docker)
-- [GitHub Flow](#github-flow)
+- [Development](#development)
+- [Table of contents](#table-of-contents)
+  - [Building Milvus with Docker](#building-milvus-with-docker)
+  - [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
+    - [Hardware Requirements](#hardware-requirements)
+    - [Software Requirements](#software-requirements)
+      - [Prerequisites](#prerequisites)
+      - [Installing Dependencies](#installing-dependencies)
+      - [Caveats](#caveats)
+      - [CMake \& Conan](#cmake--conan)
+      - [Go](#go)
+      - [Docker \& Docker Compose](#docker--docker-compose)
+    - [Building Milvus](#building-milvus)
+  - [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
+    - [Pre-submission Verification](#pre-submission-verification)
+    - [Unit Tests](#unit-tests)
+    - [Code coverage](#code-coverage)
+    - [E2E Tests](#e2e-tests)
+    - [Test on local branch](#test-on-local-branch)
+      - [With Linux and MacOS](#with-linux-and-macos)
+      - [With docker](#with-docker)
+  - [GitHub Flow](#github-flow)
+  - [FAQs](#faqs)
 
 
 ## Building Milvus with Docker
@@ -64,14 +69,14 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
 go: >= 1.18
 cmake: >= 3.18
-llvm: >= 12
+llvm: >= 15
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 ```bash
-go: >= 1.17 (Arch=ARM64)
+go: >= 1.18 (Arch=ARM64)
 cmake: >= 3.18
-llvm: >= 13
+llvm: >= 15
 ```
 
 
@@ -92,7 +97,7 @@ $ gcc --version
 $ make --version
 ```
 
-#### CMake
+#### CMake & Conan
 
 The algorithm library of Milvus, Knowhere is written in c++. CMake is required in the Milvus compilation. If you don't have it, please follow the instructions in the [Installing CMake](https://cmake.org/install/).
 
@@ -101,7 +106,16 @@ Confirm that cmake is available:
 ```shell
 $ cmake --version
 ```
-Note: 3.18 or higher cmake version is required to build Milvus.
+Note: 3.25 or higher cmake version is required to build Milvus.
+
+Milvus uses Conan to manage third-party dependencies for c++.
+
+Install Conan 
+
+```shell
+pip install conan==1.58.0
+```
+Note: Conan version 2.x is not currently supported, please use version 1.58.
 
 #### Go
 
@@ -126,7 +140,7 @@ Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these i
 To build the Milvus project, run the following command:
 
 ```shell
-$ make milvus
+$ make
 ```
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
