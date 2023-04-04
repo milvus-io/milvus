@@ -160,8 +160,6 @@ MatchKnowhereError(knowhere::Status status) {
             return "err: index already trained";
         case knowhere::Status::faiss_inner_error:
             return "err: faiss inner error";
-        case knowhere::Status::annoy_inner_error:
-            return "err: annoy inner error";
         case knowhere::Status::hnsw_inner_error:
             return "err: hnsw inner error";
         case knowhere::Status::malloc_error:
