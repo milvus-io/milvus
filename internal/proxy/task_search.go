@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -232,7 +233,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.SearchRequest.GetPartitionIDs())
+	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.SearchRequest.GetPartitionIDs(), t.request.GetPartitionNames())
 	if err != nil {
 		return fmt.Errorf("checkIfLoaded failed when search, collection:%v, partitions:%v, err = %s", collectionName, t.request.GetPartitionNames(), err)
 	}
@@ -537,12 +538,19 @@ func (t *searchTask) collectSearchResults(ctx context.Context) error {
 }
 
 // checkIfLoaded check if collection was loaded into QueryNode
-func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName string, searchPartitionIDs []UniqueID) (bool, error) {
+func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName string, searchPartitionIDs []UniqueID, searchPartitionNames []string) (bool, error) {
 	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return false, fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", collectionName, err)
 	}
 	if info.isLoaded {
+		// to check if the loaded collection contains the partition
+		for _, partitionName := range searchPartitionNames {
+			_, ok := info.partInfo[partitionName]
+			if !ok {
+				return false, merr.WrapErrPartitionNotLoaded(partitionName)
+			}
+		}
 		return true, nil
 	}
 	if len(searchPartitionIDs) == 0 {

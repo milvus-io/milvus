@@ -1565,122 +1565,161 @@ func Test_checkIfLoaded(t *testing.T) {
 		})
 		globalMetaCache = cache
 		var qc types.QueryCoord
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{}, []string{""})
 		assert.Error(t, err)
 	})
 
-	t.Run("collection loaded", func(t *testing.T) {
+	t.Run("collection loaded, and the partition were included", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: true}, nil
+			return &collectionInfo{isLoaded: true, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		var qc types.QueryCoord
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1}, []string{"test"})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
 
+	t.Run("collection loaded, and the partition were not included", func(t *testing.T) {
+		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
+			return &collectionInfo{isLoaded: true, partInfo: pInfo}, nil
+		})
+		globalMetaCache = cache
+		var qc types.QueryCoord
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1}, []string{"TEST"})
+		assert.Error(t, err)
+	})
+
 	t.Run("show partitions failed", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Times(1)
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.Error(t, err)
 	})
 
 	t.Run("show partitions but didn't success", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil).Times(1)
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.Error(t, err)
 	})
 
 	t.Run("partitions loaded", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
 			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 100}}, nil).Times(1)
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
 
 	t.Run("partitions loaded, some patitions not fully loaded", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
 			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 50}}, nil).Times(1)
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
 
 	t.Run("no specified partitions, show partitions failed", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Times(1)
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.Error(t, err)
 	})
 
 	t.Run("no specified partitions, show partitions but didn't succeed", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil).Times(1)
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2}, []string{"test", "TEST"})
 		assert.Error(t, err)
 	})
 
 	t.Run("not fully loaded", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
 			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{1, 2}}, nil).Times(1)
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{}, []string{"test", "TEST"})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
 
 	t.Run("not loaded", func(t *testing.T) {
 		cache := newMockCache()
+		pInfo := make(map[string]*partitionInfo)
+		pInfo["test"] = &partitionInfo{partitionID: 1}
+		pInfo["TEST"] = &partitionInfo{partitionID: 2}
 		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
-			return &collectionInfo{isLoaded: false}, nil
+			return &collectionInfo{isLoaded: false, partInfo: pInfo}, nil
 		})
 		globalMetaCache = cache
 		qc := getQueryCoord()
 		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
 			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{}}, nil).Times(1)
-		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{}, []string{"test", "TEST"})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})

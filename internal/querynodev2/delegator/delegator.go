@@ -211,7 +211,6 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	if !sd.collection.ExistPartition(partitions...) {
 		return nil, merr.WrapErrPartitionNotLoaded(partitions)
 	}
-
 	// wait tsafe
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
