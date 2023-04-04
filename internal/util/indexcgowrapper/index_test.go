@@ -19,8 +19,7 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 
-	IndexHNSW  = "HNSW"
-	IndexANNOY = "ANNOY"
+	IndexHNSW = "HNSW"
 
 	// metric type
 	L2       = "L2"
@@ -60,8 +59,6 @@ func generateFloatVectorTestCases() []vecTestCase {
 		{IndexFaissIVFSQ8, IP, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, L2, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, IP, false, schemapb.DataType_FloatVector},
-		{IndexANNOY, L2, false, schemapb.DataType_FloatVector},
-		{IndexANNOY, IP, false, schemapb.DataType_FloatVector},
 	}
 }
 
@@ -103,10 +100,6 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexANNOY {
-		indexParams["dim"] = strconv.Itoa(dim)
-		indexParams["n_trees"] = strconv.Itoa(4)
-		indexParams["search_k"] = strconv.Itoa(100)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)

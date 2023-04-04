@@ -57,7 +57,6 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 	IndexHNSW            = "HNSW"
-	IndexANNOY           = "ANNOY"
 
 	L2       = "L2"
 	IP       = "IP"
@@ -789,9 +788,6 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		//indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexANNOY {
-		indexParams["n_trees"] = strconv.Itoa(4)
-		indexParams["search_k"] = strconv.Itoa(100)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
