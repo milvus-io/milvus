@@ -268,6 +268,61 @@ func (b *RowCountBasedBalancer) getChannelPlan(replica *meta.Replica, onlineNode
 		}
 		channelPlans = append(channelPlans, plans...)
 	}
+
+	if len(channelPlans) == 0 && len(onlineNodes) > 1 {
+		// start to balance channels on all available nodes
+		channels := b.dist.ChannelDistManager.GetByCollection(replica.CollectionID)
+		channelsOnNode := lo.GroupBy(channels, func(channel *meta.DmChannel) int64 { return channel.Node })
+
+		nodes := replica.GetNodes()
+		getChannelNum := func(node int64) int {
+			if channelsOnNode[node] == nil {
+				return 0
+			}
+			return len(channelsOnNode[node])
+		}
+		sort.Slice(nodes, func(i, j int) bool { return getChannelNum(nodes[i]) < getChannelNum(nodes[j]) })
+
+		start := int64(0)
+		end := int64(len(nodes) - 1)
+		averageChannel := len(channels) / len(onlineNodes)
+		if averageChannel == 0 || getChannelNum(nodes[start]) >= getChannelNum(nodes[end]) {
+			return channelPlans
+		}
+
+		for start < end {
+			sourceNode := nodes[start]
+			targetNode := nodes[end]
+
+			// remove channel from end node
+			selectChannel := channelsOnNode[targetNode][0]
+			channelsOnNode[targetNode] = channelsOnNode[targetNode][1:]
+
+			// add channel to start node
+			if channelsOnNode[sourceNode] == nil {
+				channelsOnNode[sourceNode] = make([]*meta.DmChannel, 0)
+			}
+			channelsOnNode[sourceNode] = append(channelsOnNode[sourceNode], selectChannel)
+
+			// generate channel plan
+			plan := ChannelAssignPlan{
+				Channel:   selectChannel,
+				From:      targetNode,
+				To:        sourceNode,
+				ReplicaID: replica.ID,
+				Weight:    GetWeight(1),
+			}
+			channelPlans = append(channelPlans, plan)
+			for end > 0 && getChannelNum(nodes[end]) <= averageChannel {
+				end--
+			}
+
+			for start < end && getChannelNum(nodes[start]) >= averageChannel {
+				start++
+			}
+		}
+
+	}
 	return channelPlans
 }
 

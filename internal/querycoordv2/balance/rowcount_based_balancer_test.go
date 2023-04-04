@@ -211,19 +211,55 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 		},
 		{
-			name:            "already balanced",
-			nodes:           []int64{1, 2},
-			notExistedNodes: []int64{10},
-			segmentCnts:     []int{1, 2},
-			states:          []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			name:        "balance channel",
+			nodes:       []int64{2, 3},
+			segmentCnts: []int{2, 2},
+			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			shouldMock:  true,
 			distributions: map[int64][]*meta.Segment{
-				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 1}},
 				2: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
 				},
+				3: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3},
+				},
+			},
+			distributionChannels: map[int64][]*meta.DmChannel{
+				2: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2},
+				},
+				3: {},
+			},
+			expectPlans: []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2}, From: 2, To: 3, ReplicaID: 1, Weight: weightHigh},
+			},
+		},
+		{
+			name:            "already balanced",
+			nodes:           []int64{11, 22},
+			notExistedNodes: []int64{10},
+			segmentCnts:     []int{1, 2},
+			states:          []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 11}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 22},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 22},
+				},
 				10: {{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 30}, Node: 10}},
 			},
+			// distributionChannels: map[int64][]*meta.DmChannel{
+			// 	1: {
+			// 		{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1},
+			// 	},
+			// 	2: {
+			// 		{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2},
+			// 	},
+			// },
 			expectPlans:        []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
