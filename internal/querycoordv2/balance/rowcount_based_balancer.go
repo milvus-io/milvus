@@ -113,7 +113,6 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 	stoppingNodesSegments := make(map[int64][]*meta.Segment)
 
 	outboundNodes := b.meta.ResourceManager.CheckOutboundNodes(replica)
-	log.Info("nodes info", zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ID), zap.Int64s("nodes", nodes))
 
 	totalCnt := 0
 	for _, nid := range nodes {
