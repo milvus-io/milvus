@@ -54,7 +54,10 @@ services:
     image: jaegertracing/all-in-one:latest
     ports:
       - "6831:6831/udp"
-      - "16686:16686"
+      - "4317:4317" # OLTP over gRPC
+      - "4318:4318" # OLTP over HTTP
+      - "16686:16686" # frontent
+      - "14268:14268" # jaeger.thirft
 
 networks:
   default:
