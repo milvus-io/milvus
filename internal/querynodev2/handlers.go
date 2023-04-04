@@ -21,10 +21,13 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -33,8 +36,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
@@ -249,6 +254,69 @@ func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequ
 	}, nil
 }
 
+func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, deleg delegator.ShardDelegator) (*querypb.SearchRequest, error) {
+	// no hook applied, just return
+	if node.queryHook == nil {
+		return req, nil
+	}
+
+	log := log.Ctx(ctx)
+
+	serializedPlan := req.GetReq().GetSerializedExprPlan()
+	// plan not found
+	if serializedPlan == nil {
+		log.Warn("serialized plan not found")
+		return req, merr.WrapErrParameterInvalid("serialized search plan", "nil")
+	}
+
+	channelNum := req.GetTotalChannelNum()
+	// not set, change to conservative channel num 1
+	if channelNum <= 0 {
+		channelNum = 1
+	}
+
+	plan := planpb.PlanNode{}
+	err := proto.Unmarshal(serializedPlan, &plan)
+	if err != nil {
+		log.Warn("failed to unmarshal plan", zap.Error(err))
+		return nil, merr.WrapErrParameterInvalid("valid serialized search plan", "no unmarshalable one", err.Error())
+	}
+
+	switch plan.GetNode().(type) {
+	case *planpb.PlanNode_VectorAnns:
+		// ignore growing ones for now since they will always be brute force
+		sealed, _ := deleg.GetSegmentInfo()
+		sealedNum := lo.Reduce(sealed, func(sum int, item delegator.SnapshotItem, _ int) int {
+			return sum + len(item.Segments)
+		}, 0)
+		// use shardNum * segments num in shard to estimate total segment number
+		estSegmentNum := sealedNum * int(channelNum)
+		queryInfo := plan.GetVectorAnns().GetQueryInfo()
+		params := map[string]any{
+			common.TopKKey:        queryInfo.GetTopk(),
+			common.SearchParamKey: queryInfo.GetSearchParams(),
+			common.SegmentNumKey:  estSegmentNum,
+		}
+		err := node.queryHook.Run(params)
+		if err != nil {
+			log.Warn("failed to execute queryHook", zap.Error(err))
+			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
+		}
+		queryInfo.Topk = params[common.TopKKey].(int64)
+		queryInfo.SearchParams = params[common.SearchParamKey].(string)
+		serializedExprPlan, err := proto.Marshal(&plan)
+		if err != nil {
+			log.Warn("failed to marshal optimized plan", zap.Error(err))
+			return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
+		}
+		req.Req.SerializedExprPlan = serializedExprPlan
+
+	default:
+		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
+	}
+	return req, nil
+}
+
 func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchRequest, channel string) (*internalpb.SearchResults, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
@@ -270,7 +338,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// TODO From Shard Delegator
 	if req.GetFromShardLeader() {
 		tr := timerecord.NewTimeRecorder("searchChannel")
 		log.Debug("search channel...")
@@ -312,6 +379,11 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	if !ok {
 		log.Warn("Query failed, failed to get query shard delegator", zap.Error(ErrGetDelegatorFailed))
 		return nil, ErrGetDelegatorFailed
+	}
+	req, err := node.optimizeSearchParams(ctx, req, sd)
+	if err != nil {
+		log.Warn("failed to optimize search params", zap.Error(err))
+		return nil, err
 	}
 	// do search
 	results, err := sd.Search(searchCtx, req)
