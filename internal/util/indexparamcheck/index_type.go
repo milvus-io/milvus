@@ -25,6 +25,5 @@ const (
 	IndexFaissBinIDMap   IndexType = "BIN_FLAT"
 	IndexFaissBinIvfFlat IndexType = "BIN_IVF_FLAT"
 	IndexHNSW            IndexType = "HNSW"
-	IndexANNOY           IndexType = "ANNOY"
 	IndexDISKANN         IndexType = "DISKANN"
 )

@@ -54,7 +54,6 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
             {knowhere::IndexEnum::INDEX_HNSW, false},
-            {knowhere::IndexEnum::INDEX_ANNOY, false},
         };
 
         is_binary = is_binary_map[index_type];
@@ -115,8 +114,7 @@ INSTANTIATE_TEST_CASE_P(
                   knowhere::metric::TANIMOTO),
         std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
                   knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2)));
+        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
 TEST_P(IndexWrapperTest, BuildAndQuery) {
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(

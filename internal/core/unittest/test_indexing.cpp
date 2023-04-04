@@ -312,7 +312,6 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
             {knowhere::IndexEnum::INDEX_HNSW, false},
-            {knowhere::IndexEnum::INDEX_ANNOY, false},
             {knowhere::IndexEnum::INDEX_DISKANN, false},
         };
 
@@ -374,12 +373,12 @@ INSTANTIATE_TEST_CASE_P(
                   knowhere::metric::TANIMOTO),
         std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
                   knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)
         // ci ut not start minio, so not run ut about diskann index for now
         // #ifdef BUILD_DISK_ANN
-        //                      std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+        //     std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
         // #endif
-        std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2)));
+        ));
 
 TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::CreateIndexInfo create_index_info;
@@ -446,10 +445,8 @@ TEST_P(IndexTest, BuildAndQuery) {
     if (!is_binary) {
         EXPECT_EQ(result->seg_offsets_[0], query_offset);
     }
-    if (index_type != knowhere::IndexEnum::INDEX_ANNOY) {
-        search_info.search_params_ = range_search_conf;
-        vec_index->Query(xq_dataset, search_info, nullptr);
-    }
+    search_info.search_params_ = range_search_conf;
+    vec_index->Query(xq_dataset, search_info, nullptr);
 }
 
 // #ifdef BUILD_DISK_ANN

@@ -375,37 +375,7 @@ func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
-// ANNOYConfAdapter checks if an annoy index can be built
-func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
-	validParams := map[string]string{
-		DIM:    strconv.Itoa(128),
-		NTREES: strconv.Itoa(4),
-		Metric: L2,
-	}
-
-	invalidTreeParamsMin := copyParams(validParams)
-	invalidTreeParamsMin[NTREES] = strconv.Itoa(MinNTrees - 1)
-
-	invalidTreeParamsMax := copyParams(validParams)
-	invalidTreeParamsMax[NTREES] = strconv.Itoa(MaxNTrees + 1)
-
-	cases := []struct {
-		params map[string]string
-		want   bool
-	}{
-		{validParams, true},
-		{invalidTreeParamsMin, false},
-		{invalidTreeParamsMax, false},
-	}
-
-	adapter := newANNOYConfAdapter()
-	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
-			t.Errorf("ANNOYConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
-		}
-	}
-}
-
+// DISKANNConfAdapter checks if an diskann index can be built
 func TestDiskAnnConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),

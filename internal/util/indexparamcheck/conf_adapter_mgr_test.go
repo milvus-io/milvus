@@ -70,12 +70,6 @@ func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*HNSWConfAdapter)
 	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexANNOY)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*ANNOYConfAdapter)
-	assert.Equal(t, true, ok)
 }
 
 func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
@@ -129,12 +123,6 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*HNSWConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexANNOY)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*ANNOYConfAdapter)
 	assert.Equal(t, true, ok)
 }
 

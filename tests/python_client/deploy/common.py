@@ -1,10 +1,10 @@
 import json
 from utils.util_log import test_log as log
 
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "BIN_FLAT", "BIN_IVF_FLAT"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"nlist": 128}, {"nlist": 128}]
+                        {"M": 48, "efConstruction": 500}, {"nlist": 128}, {"nlist": 128}]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
 
