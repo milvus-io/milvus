@@ -567,7 +567,7 @@ func (s *Server) recover() error {
 func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
 	err := s.targetMgr.UpdateCollectionNextTarget(collection)
 	if err != nil {
-		msg := "failed to update next target for collection"
+		msg := fmt.Sprintf("failed to update next target for collection %d", collection)
 		log.Error(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}

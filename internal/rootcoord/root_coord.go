@@ -1299,6 +1299,7 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 
 	log := log.Ctx(ctx).With(
 		zap.String("collection", in.GetCollectionName()),
+		zap.Int64("collectionID", in.GetCollectionID()),
 		zap.Int64("msgID", in.GetBase().GetMsgID()),
 		zap.Bool("allowUnavailable", allowUnavailable))
 
