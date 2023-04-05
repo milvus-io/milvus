@@ -54,8 +54,7 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 
-	IndexHNSW  = "HNSW"
-	IndexANNOY = "ANNOY"
+	IndexHNSW = "HNSW"
 )
 
 // ---------- unittest util functions ----------
