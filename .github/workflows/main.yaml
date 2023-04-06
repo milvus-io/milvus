@@ -32,7 +32,7 @@ on:
       - '!build/ci/jenkins/**'
 
 jobs:
-  UT:
+  Build:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 180
@@ -78,54 +78,114 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+      - name: Cache Conan Packages
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
+          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+      - name: Build
+        run: |
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage generated-proto-go-without-cpp"
+      - name: Archive code
+        uses: actions/upload-artifact@v3
+        with:
+          name: code
+          path: |
+            ./
+            !.git
+            !.docker
+  UT-Cpp:
+    name: UT for Cpp
+    needs: Build
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [20.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: code
+      - name: Cache Conan Packages
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
+          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
+      - name: UT
+        run: |
+          chmod +x build/builder.sh
+          chmod +x scripts/*
+          chmod +x internal/core/output/unittest/*
+          ./build/builder.sh /bin/bash -c ./scripts/run_cpp_codecov.sh
+      - name: Archive result
+        uses: actions/upload-artifact@v3
+        with:
+          name: cpp-result
+          path: |
+            ./go_coverage.txt
+            ./lcov_output.info
+            *.info
+            *.out
+  UT-Go:
+    name: UT for Go
+    needs: Build
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [20.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: code
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
-      - name: Cache Conan Packages
-        # uses: actions/cache@v3
-        uses: pat-s/always-upload-cache@v3
-        with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: Start Service
         shell: bash
         run: |
           docker-compose up -d pulsar etcd minio
-      - name: Build and UnitTest
+      - name: UT
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} ci-ut"
-      - name: Get the status & restart count for containers when ut failed
-        if: ${{ failure() }}
-        run: |
-          echo "----show current status for each container---"
-          docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
-          for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
-              echo "restart count for ${container} is $(docker inspect ${container} --format '{{json .RestartCount}}')"
-          done
-      - name: Archive code coverage results
+          chmod +x build/builder.sh
+          chmod +x scripts/run_go_codecov.sh
+          ./build/builder.sh /bin/bash -c ./scripts/run_go_codecov.sh
+      - name: Archive result
         uses: actions/upload-artifact@v3
         with:
-          name: code-coverage-result
+          name: go-result
           path: |
             ./go_coverage.txt
             ./lcov_output.info
             *.info
             *.out
-            .git
   codecov:
     name: Upload Code Coverage
-    needs: UT
+    needs: [UT-Cpp, UT-Go]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Download code coverage results
+      - name: Download Cpp code coverage results
         uses: actions/download-artifact@v3.0.1
         with:
-          name: code-coverage-result
+          name: cpp-result
+      - name: Download Go code coverage results
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: go-result
       - name: Display structure of code coverage results
         run: |
           ls -lah
