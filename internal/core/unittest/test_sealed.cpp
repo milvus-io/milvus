@@ -21,7 +21,8 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using milvus::segcore::LoadIndexInfo;
 
-const int64_t ROW_COUNT = 100 * 1000;
+const int64_t ROW_COUNT = 10 * 1000;
+const int64_t BIAS = 4200;
 
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
@@ -62,7 +63,7 @@ TEST(Sealed, without_predicate) {
     for (int64_t i = 0; i < 1000 * dim; ++i) {
         vec_col.push_back(0);
     }
-    auto query_ptr = vec_col.data() + 4200 * dim;
+    auto query_ptr = vec_col.data() + BIAS * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0,
@@ -153,8 +154,8 @@ TEST(Sealed, with_predicate) {
             {
                 "range": {
                     "counter": {
-                        "GE": 42000,
-                        "LT": 42005
+                        "GE": 4200,
+                        "LT": 4205
                     }
                 }
             },
@@ -179,7 +180,7 @@ TEST(Sealed, with_predicate) {
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
-    auto query_ptr = vec_col.data() + 42000 * dim;
+    auto query_ptr = vec_col.data() + BIAS * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0,
@@ -243,7 +244,7 @@ TEST(Sealed, with_predicate) {
 
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(sr->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(sr->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(sr->distances_[offset], 0.0);
     }
 }
@@ -266,8 +267,8 @@ TEST(Sealed, with_predicate_filter_all) {
             {
                 "range": {
                     "counter": {
-                        "GE": 42000,
-                        "LT": 41999
+                        "GE": 4200,
+                        "LT": 4199
                     }
                 }
             },
@@ -292,7 +293,7 @@ TEST(Sealed, with_predicate_filter_all) {
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
-    auto query_ptr = vec_col.data() + 42000 * dim;
+    auto query_ptr = vec_col.data() + BIAS * dim;
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw =

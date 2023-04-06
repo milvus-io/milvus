@@ -42,7 +42,8 @@ using milvus::segcore::LoadIndexInfo;
 
 namespace {
 // const int DIM = 16;
-const int64_t ROW_COUNT = 100 * 1000;
+const int64_t ROW_COUNT = 10 * 1000;
+const int64_t BIAS = 4200;
 const CStorageConfig c_storage_config = get_default_cstorage_config();
 
 const char*
@@ -243,7 +244,7 @@ TEST(CApiTest, SegmentTest) {
 
 TEST(CApiTest, CPlan) {
     std::string schema_string =
-        generate_collection_schema("JACCARD", DIM, true);
+        generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
 
     const char* dsl_string = R"(
@@ -1653,16 +1654,13 @@ TEST(CApiTest, LoadIndexInfo) {
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = knowhere::IndexFactory::Instance().Create(
-        knowhere::IndexEnum::INDEX_FAISS_IVFPQ);
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
                        {knowhere::meta::TOPK, TOPK},
                        {knowhere::indexparam::NLIST, 100},
-                       {knowhere::indexparam::NPROBE, 4},
-                       {knowhere::indexparam::M, 4},
-                       {knowhere::indexparam::NBITS, 8},
-                       {knowhere::meta::DEVICE_ID, 0}};
+                       {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
     indexing.Train(*database, conf);
@@ -1677,7 +1675,7 @@ TEST(CApiTest, LoadIndexInfo) {
     auto status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_param_key1 = "index_type";
-    std::string index_param_value1 = "IVF_PQ";
+    std::string index_param_value1 = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
     status = AppendIndexParam(
         c_load_index_info, index_param_key1.data(), index_param_value1.data());
     std::string index_param_key2 = knowhere::meta::METRIC_TYPE;
@@ -1698,19 +1696,16 @@ TEST(CApiTest, LoadIndex_Search) {
     // generator index
     constexpr auto TOPK = 10;
 
-    auto N = 1024 * 1024;
+    auto N = 1024 * 10;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create("IVFPQ");
+    auto indexing = knowhere::IndexFactory::Instance().Create(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
                        {knowhere::meta::TOPK, TOPK},
                        {knowhere::indexparam::NLIST, 100},
-                       {knowhere::indexparam::NPROBE, 4},
-                       {knowhere::indexparam::M, 4},
-                       {knowhere::indexparam::NBITS, 8},
-                       {knowhere::meta::DEVICE_ID, 0}};
+                       {knowhere::indexparam::NPROBE, 4}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
     indexing.Train(*database, conf);
@@ -1726,14 +1721,12 @@ TEST(CApiTest, LoadIndex_Search) {
     // fill loadIndexInfo
     milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
-    index_params["index_type"] = "IVF_PQ";
-    load_index_info.index = std::make_unique<VectorMemIndex>(
-        index_params["index_type"], knowhere::metric::L2);
+    index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
+    load_index_info.index = std::make_unique<VectorMemIndex>(index_params["index_type"], knowhere::metric::L2);
     load_index_info.index->Load(binary_set);
 
     // search
-    auto query_dataset =
-        knowhere::GenDataSet(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto query_dataset = knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
     auto result = indexing.Search(*query_dataset, conf, nullptr);
 
@@ -1748,7 +1741,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -1756,7 +1749,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1821,7 +1814,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -1850,9 +1843,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -1898,7 +1891,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -1906,7 +1899,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1967,7 +1960,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -1996,9 +1989,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2044,7 +2037,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2052,7 +2045,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -2073,8 +2066,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
              {
                  "range": {
                      "counter": {
-                         "GE": 42000,
-                         "LT": 42010
+                         "GE": 4200,
+                         "LT": 4210
                      }
                  }
              },
@@ -2129,7 +2122,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -2158,9 +2151,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2186,7 +2179,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -2204,15 +2197,15 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
-    auto N = 1000 * 1000;
+    auto N = 1000 * 10;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     {
         int64_t offset;
@@ -2242,7 +2235,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                                      >
                                                      op: GreaterEqual
                                                      value: <
-                                                       int64_val: 420000
+                                                       int64_val: 4200
                                                      >
                                                    >
                                                  >
@@ -2254,7 +2247,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                                      >
                                                      op: LessThan
                                                      value: <
-                                                       int64_val: 420010
+                                                       int64_val: 4210
                                                      >
                                                    >
                                                  >
@@ -2304,7 +2297,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -2333,9 +2326,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2361,7 +2354,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -2379,7 +2372,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2387,7 +2380,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -2408,7 +2401,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
              {
                  "term": {
                      "counter": {
-                         "values": [42000, 42001, 42002, 42003, 42004]
+                         "values": [4200, 4201, 4202, 4203, 4204]
                      }
                  }
              },
@@ -2462,7 +2455,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -2491,9 +2484,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2519,7 +2512,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -2537,15 +2530,15 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
-    auto N = 1000 * 1000;
+    auto N = 1000 * 10;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 420000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -2570,19 +2563,19 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
          data_type: Int64
        >
        values: <
-         int64_val: 420000
+         int64_val: 4200
        >
        values: <
-         int64_val: 420001
+         int64_val: 4201
        >
        values: <
-         int64_val: 420002
+         int64_val: 4202
        >
        values: <
-         int64_val: 420003
+         int64_val: 4203
        >
        values: <
-         int64_val: 420004
+         int64_val: 4204
        >
      >
    >
@@ -2630,7 +2623,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -2659,9 +2652,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2687,7 +2680,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -2706,15 +2699,15 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string =
-        generate_collection_schema("JACCARD", DIM, true);
+        generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
-    auto N = 1000 * 1000;
+    auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -2735,8 +2728,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
              {
                  "range": {
                      "counter": {
-                         "GE": 420000,
-                         "LT": 420010
+                         "GE": 4200,
+                         "LT": 4210
                      }
                  }
              },
@@ -2820,9 +2813,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "JACCARD";
+    std::string metric_type_value = knowhere::metric::JACCARD;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -2848,7 +2841,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -2867,7 +2860,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string =
-        generate_collection_schema("JACCARD", DIM, true);
+        generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2875,7 +2868,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -2903,7 +2896,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                                     >
                                                     op: GreaterEqual
                                                     value: <
-                                                      int64_val: 42000
+                                                      int64_val: 4200
                                                     >
                                                   >
                                                 >
@@ -2915,7 +2908,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                                     >
                                                     op: LessThan
                                                     value: <
-                                                      int64_val: 42010
+                                                      int64_val: 4210
                                                     >
                                                   >
                                                 >
@@ -2995,9 +2988,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "JACCARD";
+    std::string metric_type_value = knowhere::metric::JACCARD;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -3023,7 +3016,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[offset]);
     }
@@ -3042,7 +3035,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string =
-        generate_collection_schema("JACCARD", DIM, true);
+        generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -3050,7 +3043,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3071,7 +3064,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
             {
                 "term": {
                     "counter": {
-                        "values": [42000, 42001, 42002, 42003, 42004]
+                        "values": [4200, 4201, 4202, 4203, 4204]
                     }
                 }
             },
@@ -3155,9 +3148,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "JACCARD";
+    std::string metric_type_value = knowhere::metric::JACCARD;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -3204,7 +3197,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
         auto offset = search_result_on_bigIndex->topk_per_nq_prefix_sum_[i];
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[i * TOPK]);
     }
@@ -3224,7 +3217,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string =
-        generate_collection_schema("JACCARD", DIM, true);
+        generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -3232,7 +3225,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<uint8_t>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM / 8;
+    auto query_ptr = vec_col.data() + BIAS * DIM / 8;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -3256,19 +3249,19 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                                   data_type: Int64
                                                 >
                                                 values: <
-                                                  int64_val: 42000
+                                                  int64_val: 4200
                                                 >
                                                 values: <
-                                                  int64_val: 42001
+                                                  int64_val: 4201
                                                 >
                                                 values: <
-                                                  int64_val: 42002
+                                                  int64_val: 4202
                                                 >
                                                 values: <
-                                                  int64_val: 42003
+                                                  int64_val: 4203
                                                 >
                                                 values: <
-                                                  int64_val: 42004
+                                                  int64_val: 4204
                                                 >
                                               >
                                             >
@@ -3346,9 +3339,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "JACCARD";
+    std::string metric_type_value = knowhere::metric::JACCARD;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -3395,7 +3388,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
         auto offset = search_result_on_bigIndex->topk_per_nq_prefix_sum_[i];
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
                   search_result_on_raw_index->distances_[i * TOPK]);
     }
@@ -3440,7 +3433,7 @@ TEST(CApiTest, SealedSegmentTest) {
 TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
@@ -3448,7 +3441,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
     FieldMeta counter_field_meta(
@@ -3475,8 +3468,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
             {
                 "range": {
                     "counter": {
-                        "GE": 42000,
-                        "LT": 42010
+                        "GE": 4200,
+                        "LT": 4210
                     }
                 }
             },
@@ -3521,7 +3514,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
     auto binary_set = indexing->Serialize(milvus::Config{});
@@ -3529,9 +3522,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -3547,7 +3540,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     search_info.topk_ = TOPK;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.search_params_ = generate_search_conf(
-        IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2);
+        IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
     auto result_on_index =
         vec_index->Query(query_dataset, search_info, nullptr);
     EXPECT_EQ(result_on_index->distances_.size(), num_queries * TOPK);
@@ -3596,7 +3589,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -3609,7 +3602,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
 TEST(CApiTest, SealedSegment_search_without_predicates) {
     constexpr auto TOPK = 5;
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
@@ -3618,7 +3611,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     uint64_t ts_offset = 1000;
     auto dataset = DataGen(schema, N, ts_offset);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     auto vec_array = dataset.get_col(FieldId(100));
     auto vec_data = serialize(vec_array.get());
@@ -3731,7 +3724,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("L2", DIM, false);
+    std::string schema_string = generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
@@ -3739,7 +3732,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + 42000 * DIM;
+    auto query_ptr = vec_col.data() + BIAS * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
     FieldMeta counter_field_meta(
@@ -3773,7 +3766,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                                     >
                                                     op: GreaterEqual
                                                     value: <
-                                                      int64_val: 42000
+                                                      int64_val: 4200
                                                     >
                                                   >
                                                 >
@@ -3785,7 +3778,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                                     >
                                                     op: LessThan
                                                     value: <
-                                                      int64_val: 42010
+                                                      int64_val: 4210
                                                     >
                                                   >
                                                 >
@@ -3826,7 +3819,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto indexing = generate_index(vec_col.data(),
                                    DataType::VECTOR_FLOAT,
                                    knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
 
@@ -3835,9 +3828,9 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     ASSERT_EQ(status.error_code, Success);
     std::string index_type_key = "index_type";
-    std::string index_type_value = "IVF_PQ";
+    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
     std::string metric_type_key = "metric_type";
-    std::string metric_type_value = "L2";
+    std::string metric_type_value = knowhere::metric::L2;
 
     AppendIndexParam(
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
@@ -3905,7 +3898,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
-        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
+        ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
