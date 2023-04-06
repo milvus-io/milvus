@@ -102,6 +102,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames),
 		zap.String("policy_info", policyInfo))
 
+	logWithCurrentRequestInfo.Info("restful api operation record...", zap.String("operation", reflect.TypeOf(req).String()))
 	policy := fmt.Sprintf("[%s]", policyInfo)
 	b := []byte(policy)
 	a := jsonadapter.NewAdapter(&b)

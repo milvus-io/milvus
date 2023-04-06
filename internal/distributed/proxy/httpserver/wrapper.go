@@ -11,7 +11,9 @@ import (
 )
 
 var (
-	errBadRequest = errors.New("bad request")
+	errBadRequest     = errors.New("bad request")
+	errUnauthorized   = errors.New("authorization header required")
+	errPermissionDeny = errors.New("permission deny")
 )
 
 // handlerFunc handles http request with gin context
@@ -39,6 +41,13 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 					Reason:    err.Error(),
 				}
 				c.Negotiate(http.StatusBadRequest, bodyFormatNegotiate)
+				return
+			case errors.Is(err, errUnauthorized), errors.Is(err, errPermissionDeny):
+				bodyFormatNegotiate.Data = ErrResponse{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    err.Error(),
+				}
+				c.Negotiate(http.StatusUnauthorized, bodyFormatNegotiate)
 				return
 			default:
 				bodyFormatNegotiate.Data = ErrResponse{

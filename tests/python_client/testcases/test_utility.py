@@ -4050,3 +4050,72 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.create_role()
         error = {"err_code": 41, "err_msg": "the privilege name[%s] in the privilege entity is invalid" % p_name}
         self.utility_wrap.role_revoke("Global", "*", p_name, check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestUtilityRestfulRBAC(TestcaseBase):
+        @pytest.mark.tags(ct.CaseLabel.L3)
+        def test_restful_api_with_authentication(self, host, port):
+            self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                         password=ct.default_password, check_task=ct.CheckTasks.ccr)
+            user = cf.gen_unique_str("user")
+            r_name = cf.gen_unique_str(prefix+"_role")
+            password = "123456"
+
+            self.utility_wrap.create_user(user=user, password=password)
+            self.utility_wrap.init_role(r_name)
+            self.utility_wrap.create_role()
+            self.utility_wrap.role_grant("Global", "*", "CreateCollection")
+            self.utility_wrap.role_add_user(user)
+
+            import requests
+            data = {
+                "collection_name": "book",
+                "schema": {
+                    "autoID": False,
+                    "description": "Test book search",
+                    "fields": [
+                        {
+                            "name": "book_id",
+                            "description": "book id",
+                            "is_primary_key": True,
+                            "autoID": False,
+                            "data_type": 5
+                        },
+                        {
+                            "name": "word_count",
+                            "description": "count of words",
+                            "is_primary_key": False,
+                            "data_type": 5
+                        },
+                        {
+                            "name": "book_intro",
+                            "description": "embedded vector of book introduction",
+                            "data_type": 101,
+                            "is_primary_key": False,
+                            "type_params": [
+                                {
+                                    "key": "dim",
+                                    "value": "2"
+                                }
+                            ]
+                        }
+                    ],
+                    "name": "book"
+                },
+            }
+
+            url = f'http://{host}:9091/api/v1/collection'
+
+            res0 = requests.post(url, json=data, auth=(user, "xxxxx"))
+            assert res0.status_code == 400
+            assert "bad request" in str(res0.content)
+
+            res1 = requests.post(url, json=data, auth=(user, password))
+            assert res1.status_code == 200
+
+            res2 = requests.delete(url, json={"collection_name": "book"}, auth=(user, password))
+            assert res2.status_code == 401
+            assert "permission deny" in str(res2.content)
+
+            res3 = requests.delete(url, json={"collection_name": "book"}, auth=(ct.default_user, ct.default_password))
+            assert res3.status_code == 200
