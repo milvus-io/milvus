@@ -314,7 +314,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		CollectionID:    cit.collectionID,
 		FieldID:         cit.fieldSchema.GetFieldID(),
 		IndexName:       cit.req.GetIndexName(),
-		TypeParams:      cit.fieldSchema.GetTypeParams(),
+		TypeParams:      cit.newTypeParams,
 		IndexParams:     cit.newIndexParams,
 		IsAutoIndex:     cit.isAutoIndex,
 		UserIndexParams: cit.req.GetExtraParams(),
