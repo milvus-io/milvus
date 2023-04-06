@@ -622,7 +622,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
 		}
+
 		runningGp.Go(func() error {
+
 			ret, err := node.searchChannel(runningCtx, req, ch)
 			mu.Lock()
 			defer mu.Unlock()
@@ -632,9 +634,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 				return err
 			}
 			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				failRet.Status.Reason = ret.Status.Reason
-				failRet.Status.ErrorCode = ret.Status.ErrorCode
-				return fmt.Errorf("%s", ret.Status.Reason)
+				return merr.Error(failRet.GetStatus())
 			}
 			toReduceResults = append(toReduceResults, ret)
 			return nil

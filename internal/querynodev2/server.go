@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"plugin"
 	"runtime/debug"
 	"sync"
 	"syscall"
@@ -43,6 +44,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/config"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -121,13 +123,16 @@ type QueryNode struct {
 	loadPool *conc.Pool
 	// Pool for search/query
 	taskPool *conc.Pool
+
+	// parameter turning hook
+	queryHook queryHook
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:      ctx1,
+		ctx:      ctx,
 		cancel:   cancel,
 		factory:  factory,
 		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
@@ -222,6 +227,16 @@ func (node *QueryNode) Init() error {
 			log.Error("QueryNode init session failed", zap.Error(err))
 			initError = err
 			return
+		}
+
+		err = node.initHook()
+		if err != nil {
+			log.Error("QueryNode init hook failed", zap.Error(err))
+			// auto index cannot work if hook init failed
+			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+				initError = err
+				return
+			}
 		}
 
 		node.factory.Init(paramtable.Get())
@@ -355,4 +370,49 @@ func (node *QueryNode) GetAddress() string {
 
 func (node *QueryNode) SetAddress(address string) {
 	node.address = address
+}
+
+type queryHook interface {
+	Run(map[string]any) error
+	Init(string) error
+}
+
+// initHook initializes parameter tuning hook.
+func (node *QueryNode) initHook() error {
+	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
+	if path == "" {
+		return fmt.Errorf("fail to set the plugin path")
+	}
+	log.Debug("start to load plugin", zap.String("path", path))
+
+	p, err := plugin.Open(path)
+	if err != nil {
+		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
+	}
+	log.Debug("plugin open")
+
+	h, err := p.Lookup("QueryNodePlugin")
+	if err != nil {
+		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+	}
+
+	hoo, ok := h.(queryHook)
+	if !ok {
+		return fmt.Errorf("fail to convert the `Hook` interface")
+	}
+	if err = hoo.Init(paramtable.Get().HookCfg.QueryNodePluginConfig.GetValue()); err != nil {
+		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+	}
+
+	node.queryHook = hoo
+	onEvent := func(event *config.Event) {
+		if node.queryHook != nil {
+			if err := node.queryHook.Init(event.Value); err != nil {
+				log.Error("failed to refresh hook config", zap.Error(err))
+			}
+		}
+	}
+	paramtable.Get().Watch(paramtable.Get().HookCfg.QueryNodePluginConfig.Key, config.NewHandler("queryHook", onEvent))
+
+	return nil
 }
