@@ -310,8 +310,24 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,
 				}
-				sub := tsoutil.SubByNow(maxTs)
-				metrics.ProxySyncTimeTickLag.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "default").Set(float64(sub))
+
+				func() {
+					// we should pay more attention to the max lag.
+					minTs := maxTs
+					minTsOfChannel := "default"
+
+					// find the min ts and the related channel.
+					for channel, ts := range stats {
+						if ts < minTs {
+							minTs = ts
+							minTsOfChannel = channel
+						}
+					}
+
+					sub := tsoutil.SubByNow(minTs)
+					metrics.ProxySyncTimeTickLag.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), minTsOfChannel).Set(float64(sub))
+				}()
+
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
