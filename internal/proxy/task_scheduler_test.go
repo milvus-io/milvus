@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func TestBaseTaskQueue(t *testing.T) {

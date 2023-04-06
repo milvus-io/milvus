@@ -3,8 +3,9 @@ package rocksdbkv
 import (
 	"runtime"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/tecbot/gorocksdb"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 /**

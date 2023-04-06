@@ -22,12 +22,13 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/conc"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/suite"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SegmentLoaderSuite struct {

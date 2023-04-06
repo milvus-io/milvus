@@ -21,11 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // check whether rg lack of node, try to transfer node from default rg

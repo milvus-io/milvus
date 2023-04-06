@@ -26,30 +26,29 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
+	ants "github.com/panjf2000/ants/v2"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/conc"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/hardware"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
-	"github.com/samber/lo"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -807,18 +806,18 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 				usedMemAfterLoad += neededMemSize
 				usedLocalSizeAfterLoad += neededDiskSize
 			} else {
-				usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+				usedMemAfterLoad += uint64(getFieldSizeFromFieldBinlog(fieldBinlog))
 			}
 		}
 
 		// get size of state data
 		for _, fieldBinlog := range loadInfo.Statslogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+			usedMemAfterLoad += uint64(getFieldSizeFromFieldBinlog(fieldBinlog))
 		}
 
 		// get size of delete data
 		for _, fieldBinlog := range loadInfo.Deltalogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+			usedMemAfterLoad += uint64(getFieldSizeFromFieldBinlog(fieldBinlog))
 		}
 
 		if usedMemAfterLoad-oldUsedMem > maxSegmentSize {
@@ -859,6 +858,15 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	}
 
 	return nil
+}
+
+func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.LogSize
+	}
+
+	return fieldSize
 }
 
 func NewLoader(

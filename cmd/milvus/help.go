@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (

@@ -24,8 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/util/merr"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 )
 

@@ -19,8 +19,9 @@ package meta
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 type SegmentDistManagerSuite struct {

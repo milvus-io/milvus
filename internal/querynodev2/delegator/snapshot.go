@@ -19,9 +19,10 @@ package delegator
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 // SnapshotItem group segmentEntry slice

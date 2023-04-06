@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 func TestFlowGraphManager(t *testing.T) {

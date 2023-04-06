@@ -24,16 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
 const (
 	idCountPerRPC = 200000
 )
-
-// UniqueID is alias of typeutil.UniqueID
-type UniqueID = typeutil.UniqueID
 
 // IDAllocator allocates Unique and monotonically increasing IDs from Root Coord.
 // It could also batch allocate for less root coord server access

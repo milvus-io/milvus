@@ -20,13 +20,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func Test_createPartitionTask_Prepare(t *testing.T) {

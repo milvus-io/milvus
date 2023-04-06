@@ -26,11 +26,10 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.

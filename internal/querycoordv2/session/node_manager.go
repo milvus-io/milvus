@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"go.uber.org/atomic"
 )
 

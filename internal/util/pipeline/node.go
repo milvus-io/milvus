@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"go.uber.org/zap"
 )
 

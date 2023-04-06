@@ -21,11 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUpperLimitCalBySchema(t *testing.T) {

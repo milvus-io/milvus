@@ -27,15 +27,17 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ typeutil.ResultWithID = &internalpb.RetrieveResults{}
+
 var _ typeutil.ResultWithID = &segcorepb.RetrieveResults{}
 
 func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*internalpb.GetStatisticsResponse, error) {
@@ -293,7 +295,7 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := typeutil.GetTS(validRetrieveResults[sel], cursors[sel])
+		ts := getTS(validRetrieveResults[sel], cursors[sel])
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
 			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
@@ -315,6 +317,20 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 
 	return ret, nil
+}
+
+func getTS(i *internalpb.RetrieveResults, idx int64) uint64 {
+	if i.FieldsData == nil {
+		return 0
+	}
+	for _, fieldData := range i.FieldsData {
+		fieldID := fieldData.FieldId
+		if fieldID == common.TimeStampField {
+			res := fieldData.GetScalars().GetLongData().Data
+			return uint64(res[idx])
+		}
+	}
+	return 0
 }
 
 func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, limit int64) (*segcorepb.RetrieveResults, error) {
@@ -390,7 +406,7 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 		return nil, err
 	}
 
-	if err := typeutil.FillRetrieveResultIfEmpty(typeutil.NewSegcoreResults(mergedResult), outputFieldsID, schema); err != nil {
+	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), outputFieldsID, schema); err != nil {
 		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
 	}
 
@@ -410,7 +426,7 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 		return nil, err
 	}
 
-	if err := typeutil.FillRetrieveResultIfEmpty(typeutil.NewInternalResult(mergedResult), outputFieldsID, schema); err != nil {
+	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), outputFieldsID, schema); err != nil {
 		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
 	}
 

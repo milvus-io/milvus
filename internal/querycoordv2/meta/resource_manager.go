@@ -20,14 +20,14 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
@@ -52,6 +52,7 @@ var (
 )
 
 var DefaultResourceGroupName = "__default_resource_group"
+
 var DefaultResourceGroupCapacity = 1000000
 
 type ResourceGroup struct {

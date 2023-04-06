@@ -13,7 +13,7 @@ package rmq
 
 import (
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 // Check rmqMessage implements ConsumerMessage

@@ -21,10 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
-
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 func TestSyncPeriodically(t *testing.T) {

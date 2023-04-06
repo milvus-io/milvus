@@ -3,9 +3,10 @@ package planparserv2
 import (
 	"encoding/json"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type ShowExprVisitor struct {

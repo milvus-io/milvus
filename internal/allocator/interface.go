@@ -16,6 +16,13 @@
 
 package allocator
 
+import (
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
+// UniqueID is alias of typeutil.UniqueID
+type UniqueID = typeutil.UniqueID
+
 // Allocator interface is an interface for alloc id.
 // Alloc allocates the id of the count number.
 // AllocOne allocates one id.

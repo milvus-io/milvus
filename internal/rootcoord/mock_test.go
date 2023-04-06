@@ -22,29 +22,28 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -257,10 +256,10 @@ func newMockQueryCoord() *mockQueryCoord {
 
 func newMockIDAllocator() *allocator.MockGIDAllocator {
 	r := allocator.NewMockGIDAllocator()
-	r.AllocF = func(count uint32) (allocator.UniqueID, allocator.UniqueID, error) {
+	r.AllocF = func(count uint32) (UniqueID, UniqueID, error) {
 		return 0, 0, nil
 	}
-	r.AllocOneF = func() (allocator.UniqueID, error) {
+	r.AllocOneF = func() (UniqueID, error) {
 		return 0, nil
 	}
 	return r
@@ -414,7 +413,7 @@ func withIDAllocator(idAllocator allocator.Interface) Opt {
 
 func withValidIDAllocator() Opt {
 	idAllocator := newMockIDAllocator()
-	idAllocator.AllocOneF = func() (allocator.UniqueID, error) {
+	idAllocator.AllocOneF = func() (UniqueID, error) {
 		return rand.Int63(), nil
 	}
 	return withIDAllocator(idAllocator)
@@ -422,10 +421,10 @@ func withValidIDAllocator() Opt {
 
 func withInvalidIDAllocator() Opt {
 	idAllocator := newMockIDAllocator()
-	idAllocator.AllocOneF = func() (allocator.UniqueID, error) {
+	idAllocator.AllocOneF = func() (UniqueID, error) {
 		return -1, errors.New("error mock AllocOne")
 	}
-	idAllocator.AllocF = func(count uint32) (allocator.UniqueID, allocator.UniqueID, error) {
+	idAllocator.AllocF = func(count uint32) (UniqueID, UniqueID, error) {
 		return -1, -1, errors.New("error mock Alloc")
 	}
 	return withIDAllocator(idAllocator)

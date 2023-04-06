@@ -23,23 +23,24 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/common"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/merr"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/assert"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/allocator"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var rmqPath = "/tmp/rocksmq"
+
 var kvPathSuffix = "_kv"
+
 var metaPathSuffix = "_meta"
 
 func TestMain(m *testing.M) {
@@ -361,6 +362,7 @@ func TestRocksmq_MultiConsumer(t *testing.T) {
 		assert.Equal(t, string(cMsgs[0].Payload), "message_0")
 	}
 }
+
 func TestRocksmq_Dummy(t *testing.T) {
 	suffix := "_dummy"
 	kvPath := rmqPath + kvPathSuffix + suffix

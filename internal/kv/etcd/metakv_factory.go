@@ -17,12 +17,13 @@
 package etcdkv
 
 import (
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // NewMetaKvFactory returns an object that implements the kv.MetaKv interface using etcd.

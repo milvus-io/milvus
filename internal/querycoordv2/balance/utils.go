@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const (

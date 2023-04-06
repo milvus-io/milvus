@@ -19,7 +19,7 @@ package datanode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 

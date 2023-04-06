@@ -19,9 +19,10 @@ package storage
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
 
 func TestIndexFileBinlogCodec(t *testing.T) {

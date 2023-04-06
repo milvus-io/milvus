@@ -21,12 +21,13 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/merr"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Replica struct {

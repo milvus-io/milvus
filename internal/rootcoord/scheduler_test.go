@@ -24,11 +24,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type mockFailTask struct {

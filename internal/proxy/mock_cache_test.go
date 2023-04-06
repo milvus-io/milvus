@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type getCollectionIDFunc func(ctx context.Context, collectionName string) (typeutil.UniqueID, error)

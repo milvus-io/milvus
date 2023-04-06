@@ -5,8 +5,8 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/console"
-	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (

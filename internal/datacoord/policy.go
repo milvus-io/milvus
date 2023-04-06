@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"stathat.com/c/consistent"

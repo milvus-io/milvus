@@ -22,8 +22,9 @@ import (
 	"sync"
 	"testing"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/stretchr/testify/assert"
+
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
 func TestRocksdbKV(t *testing.T) {

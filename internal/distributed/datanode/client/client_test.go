@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/internal/util/mock"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proxy"

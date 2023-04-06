@@ -22,15 +22,15 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type QueryNodeSuite struct {
@@ -80,6 +80,7 @@ func (suite *QueryNodeSuite) TearDownTest() {
 	suite.etcd.Close()
 	os.RemoveAll("/tmp/milvus-test")
 }
+
 func (suite *QueryNodeSuite) TestBasic() {
 	// mock expect
 	suite.factory.EXPECT().Init(mock.Anything).Return()

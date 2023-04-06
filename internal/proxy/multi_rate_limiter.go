@@ -26,13 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/config"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var QuotaErrorString = map[commonpb.ErrorCode]string{
@@ -143,13 +143,30 @@ func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
 	for _, r := range rates {
 		if limit, ok := rl.limiters.Get(r.GetRt()); ok {
 			limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-			metrics.SetRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), r.GetR())
+			setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), r.GetR())
 		} else {
 			return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
 		}
 	}
-	// rl.printRates(rates)
 	return nil
+}
+
+// setRateGaugeByRateType sets ProxyLimiterRate metrics.
+func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, rate float64) {
+	if ratelimitutil.Limit(rate) == ratelimitutil.Inf {
+		return
+	}
+	nodeIDStr := strconv.FormatInt(nodeID, 10)
+	switch rateType {
+	case internalpb.RateType_DMLInsert:
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.InsertLabel).Set(rate)
+	case internalpb.RateType_DMLDelete:
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.DeleteLabel).Set(rate)
+	case internalpb.RateType_DQLSearch:
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.SearchLabel).Set(rate)
+	case internalpb.RateType_DQLQuery:
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.QueryLabel).Set(rate)
+	}
 }
 
 // printRates logs the rate info.

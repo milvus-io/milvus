@@ -15,8 +15,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
 func TestConsumer_newConsumer(t *testing.T) {

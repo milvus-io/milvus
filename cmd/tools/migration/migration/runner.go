@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
@@ -20,8 +21,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/backend"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 type Runner struct {

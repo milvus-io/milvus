@@ -24,12 +24,13 @@ package initcore
 #include "common/init_c.h"
 */
 import "C"
+
 import (
 	"os"
 	"path/filepath"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func InitLocalStorageConfig(params *paramtable.ComponentParam) {

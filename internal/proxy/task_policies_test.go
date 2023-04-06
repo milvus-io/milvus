@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 func TestRoundRobinPolicy(t *testing.T) {

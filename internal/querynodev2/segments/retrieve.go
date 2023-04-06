@@ -21,7 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // retrieveOnSegments performs retrieve on listed segments

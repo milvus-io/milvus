@@ -5,6 +5,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type RetrieveResults interface {
@@ -27,7 +28,7 @@ func (r *segcoreResults) AppendFieldData(fieldData *schemapb.FieldData) {
 }
 
 func (r *segcoreResults) ResultEmpty() bool {
-	return GetSizeOfIDs(r.result.GetIds()) <= 0
+	return typeutil.GetSizeOfIDs(r.result.GetIds()) <= 0
 }
 
 func NewSegcoreResults(result *segcorepb.RetrieveResults) RetrieveResults {
@@ -47,7 +48,7 @@ func (r *internalResults) AppendFieldData(fieldData *schemapb.FieldData) {
 }
 
 func (r *internalResults) ResultEmpty() bool {
-	return GetSizeOfIDs(r.result.GetIds()) <= 0
+	return typeutil.GetSizeOfIDs(r.result.GetIds()) <= 0
 }
 
 func NewInternalResult(result *internalpb.RetrieveResults) RetrieveResults {

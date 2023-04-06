@@ -31,7 +31,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"go.uber.org/zap"

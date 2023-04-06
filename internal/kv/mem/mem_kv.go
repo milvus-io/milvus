@@ -22,7 +22,7 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // MemoryKV implements BaseKv interface and relies on underling btree.BTree.

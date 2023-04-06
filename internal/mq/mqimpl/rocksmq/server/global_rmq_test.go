@@ -18,12 +18,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/allocator"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/allocator"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 func Test_InitRmq(t *testing.T) {

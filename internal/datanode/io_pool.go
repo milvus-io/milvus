@@ -3,7 +3,7 @@ package datanode
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 )
 
 var ioPool *conc.Pool

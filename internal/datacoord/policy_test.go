@@ -20,9 +20,10 @@ import (
 	"testing"
 	"time"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/stretchr/testify/assert"
 	"stathat.com/c/consistent"
+
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
 func fillEmptyPosition(operations ChannelOpSet) {

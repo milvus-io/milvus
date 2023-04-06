@@ -24,17 +24,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	rocksmqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
 	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-
-	"github.com/apache/pulsar-client-go/pulsar"
-
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	pulsarwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestMain(m *testing.M) {

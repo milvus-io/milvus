@@ -31,8 +31,8 @@ package indexnode
 // 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 // 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 // 	"github.com/milvus-io/milvus/internal/storage"
-// 	"github.com/milvus-io/milvus/internal/util/etcd"
-// 	"github.com/milvus-io/milvus/internal/util/timerecord"
+// 	"github.com/milvus-io/milvus/pkg/util/etcd"
+// 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 // 	"github.com/stretchr/testify/assert"
 // )
 

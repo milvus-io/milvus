@@ -4,13 +4,11 @@ import (
 	"math"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_verifyLengthPerRow(t *testing.T) {

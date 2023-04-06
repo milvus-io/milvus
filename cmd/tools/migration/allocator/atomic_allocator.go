@@ -1,7 +1,7 @@
 package allocator
 
 import (
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 )
 

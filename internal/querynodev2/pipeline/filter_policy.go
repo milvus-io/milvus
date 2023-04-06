@@ -18,6 +18,7 @@ package pipeline
 
 //MsgFilter will return error if Msg was invalid
 type InsertMsgFilter = func(n *filterNode, c *Collection, msg *InsertMsg) error
+
 type DeleteMsgFilter = func(n *filterNode, c *Collection, msg *DeleteMsg) error
 
 //Chack msg is aligned --

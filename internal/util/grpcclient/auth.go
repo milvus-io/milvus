@@ -3,7 +3,7 @@ package grpcclient
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type Token struct {

@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
-	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type Backend interface {

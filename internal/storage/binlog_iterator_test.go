@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
 
 	"github.com/stretchr/testify/assert"
 )

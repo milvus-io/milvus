@@ -19,12 +19,13 @@ package segments
 import (
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	storage "github.com/milvus-io/milvus/internal/storage"
+	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type bloomFilterSet struct {

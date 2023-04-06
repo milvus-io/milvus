@@ -3,9 +3,9 @@ package kv
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_mockSnapshotKV_Save(t *testing.T) {

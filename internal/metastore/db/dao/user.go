@@ -4,13 +4,12 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+
+	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type userDb struct {

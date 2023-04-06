@@ -2,7 +2,7 @@ package meta
 
 import (
 	"github.com/blang/semver/v4"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID

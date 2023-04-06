@@ -20,16 +20,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.RootCoordRole)))

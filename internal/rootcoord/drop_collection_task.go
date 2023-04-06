@@ -20,14 +20,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/pkg/common"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 

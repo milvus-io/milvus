@@ -23,14 +23,15 @@ package segments
 #include "segcore/segment_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SegmentFilter func(segment Segment) bool
