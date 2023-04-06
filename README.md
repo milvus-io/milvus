@@ -1,9 +1,7 @@
 <img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="milvus banner">
 
 <div class="column" align="middle">
-  <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
-    <img src="https://img.shields.io/badge/Join-Slack-orange" alt="join-slack"/>
-  </a>
+  <a href="https://milvusio.slack.com/"><img src="https://img.shields.io/badge/Join-Slack-orange?logo=slack&amp;logoColor=white&style=flat-square"></a>
   <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
   <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" alt="docker-pull-count" />
 </div>
