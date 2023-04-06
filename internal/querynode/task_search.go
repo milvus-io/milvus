@@ -115,7 +115,7 @@ func (s *searchTask) searchOnStreaming() error {
 	}
 	defer searchReq.delete()
 
-	partResults, _, _, sErr := searchStreaming(ctx, s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
+	partResults, _, _, sErr := searchStreaming(ctx, s.QS.metaReplica, searchReq, s.CollectionID, nil, s.req.GetDmlChannels()[0])
 	if sErr != nil {
 		log.Ctx(ctx).Warn("failed to search streaming data", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
