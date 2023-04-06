@@ -210,8 +210,8 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreInit(cEasyloggingYaml)
 	C.free(unsafe.Pointer(cEasyloggingYaml))
 
-	cpuNum := runtime.GOMAXPROCS(0)
-	C.SegcoreSetThreadPoolNum(C.uint32_t(cpuNum))
+	cKnowhereThreadPoolSize := C.uint32_t(Params.QueryNodeCfg.KnowhereThreadPoolSize)
+	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
 
 	// override segcore chunk size
 	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows)
