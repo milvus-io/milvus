@@ -582,7 +582,7 @@ func BgBalanceCheck(nodeChannels []*NodeChannelInfo, ts time.Time) ([]*NodeChann
 	for _, nChannels := range nodeChannels {
 		chCount := len(nChannels.Channels)
 		if chCount <= channelCountPerNode+1 {
-			log.Info("node channel count is not much larger than average, skip reallocate",
+			log.Info("node channel count is not much larger than average, skip reallocating",
 				zap.Int64("nodeID", nChannels.NodeID), zap.Int("channelCount", chCount),
 				zap.Int("channelCountPerNode", channelCountPerNode))
 			continue

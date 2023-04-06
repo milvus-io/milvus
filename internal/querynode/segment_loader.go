@@ -100,7 +100,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		return nil, nil
 	}
 
-	log.Info("segmentLoader start loading...", zap.Any("segmentNum", segmentNum))
+	log.Info("segmentLoader start loading...", zap.Any("segmentNum", segmentNum), zap.Int64("msgID", req.GetBase().GetMsgID()))
 
 	// check memory limit
 	min := func(first int, values ...int) int {
@@ -637,12 +637,17 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
 	usedMem := hardware.GetUsedMemoryCount()
-	totalMem := hardware.GetMemoryCount()
+	currentAvailableMemCount := hardware.GetAvailableMemoryCount()
+	totalMem := currentAvailableMemCount + usedMem
+	//calculating totalMem with available and used memory rather than using hardware min(container_limit, stats.total)
+	//because container limit memory can be quite larger than truly available memory for a container,
+	//which may result in wrong memory prediction and lead to oom in the process of loading segment file.
+	//Instead, using available memory is relatively conservative and can lower the possibility of oom crash
 	if len(segmentLoadInfos) < concurrency {
 		concurrency = len(segmentLoadInfos)
 	}
 
-	if usedMem == 0 || totalMem == 0 {
+	if usedMem == 0 || currentAvailableMemCount == 0 {
 		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
 	}
 
@@ -707,17 +712,21 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Int64("collectionID", collectionID),
 		zap.Int("concurrency", concurrency),
-		zap.Uint64("memUsage", toMB(memLoadingUsage)),
+		zap.Uint64("memLoadingUsage", toMB(memLoadingUsage)),
 		zap.Uint64("memUsageAfterLoad", toMB(usedMemAfterLoad)),
-		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
+		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)),
+		zap.Uint64("currentUsedMem", toMB(usedMem)),
+		zap.Uint64("currentAvailableFreeMemory", toMB(currentAvailableMemCount)),
+		zap.Uint64("currentTotalMemory", toMB(totalMem)))
 
 	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
-		return fmt.Errorf("%w, load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
+		return fmt.Errorf("%w, load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, currentAvailableMemCount = %v MB, currentTotalMem = %v MB, thresholdFactor = %f",
 			ErrInsufficientMemory,
 			collectionID,
 			toMB(maxSegmentSize),
 			concurrency,
 			toMB(usedMemAfterLoad),
+			toMB(currentAvailableMemCount),
 			toMB(totalMem),
 			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
 	}

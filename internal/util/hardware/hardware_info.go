@@ -104,6 +104,48 @@ func GetMemoryCount() uint64 {
 	return stats.Total
 }
 
+func GetAvailableMemoryCount() uint64 {
+	icOnce.Do(func() {
+		ic, icErr = inContainer()
+	})
+	if icErr != nil {
+		log.Error(icErr.Error())
+		return 0
+	}
+
+	// get host memory by `gopsutil`
+	stats, err := mem.VirtualMemory()
+	if err != nil {
+		log.Warn("failed to get memory count", zap.Error(err))
+		return 0
+	}
+
+	// not in container, return host available memory
+	if !ic {
+		return stats.Available
+	}
+
+	// get container memory by `cgroups`
+	limit, err := getContainerMemLimit()
+	if err != nil {
+		log.Error(err.Error())
+		return 0
+	}
+
+	used, err := getContainerMemUsed()
+	if err != nil {
+		log.Error(err.Error())
+		return 0
+	}
+
+	containerMaxAvailable := limit - used
+	// in container, return min(hostFreeMem, containerMaxAvailable)
+	if containerMaxAvailable < stats.Available {
+		return containerMaxAvailable
+	}
+	return stats.Available
+}
+
 // GetUsedMemoryCount returns the memory usage in bytes.
 func GetUsedMemoryCount() uint64 {
 	icOnce.Do(func() {
