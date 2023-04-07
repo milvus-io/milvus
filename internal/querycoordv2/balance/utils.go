@@ -37,7 +37,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			action := task.NewSegmentAction(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID())
 			actions = append(actions, action)
 		}
-		task, err := task.NewSegmentTask(
+		t, err := task.NewSegmentTask(
 			ctx,
 			timeout,
 			checkerID,
@@ -62,8 +62,14 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			)
 			continue
 		}
-		task.SetPriority(GetTaskPriorityFromWeight(p.Weight))
-		ret = append(ret, task)
+		if task.GetTaskType(t) == task.TaskTypeMove {
+			// from balance checker
+			task.SetPriority(task.TaskPriorityLow)
+		} else {
+			//from segment checker
+			task.SetPriority(task.TaskPriorityNormal)
+		}
+		ret = append(ret, t)
 	}
 	return ret
 }
@@ -80,7 +86,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
 			actions = append(actions, action)
 		}
-		task, err := task.NewChannelTask(ctx, timeout, checkerID, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
+		t, err := task.NewChannelTask(ctx, timeout, checkerID, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
 		log.Info("Create Channel task",
 			zap.Int64("collection", p.Channel.GetCollectionID()),
 			zap.Int64("replica", p.ReplicaID),
@@ -98,8 +104,8 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			)
 			continue
 		}
-		task.SetPriority(GetTaskPriorityFromWeight(p.Weight))
-		ret = append(ret, task)
+		task.SetPriority(task.TaskPriorityHigh)
+		ret = append(ret, t)
 	}
 	return ret
 }

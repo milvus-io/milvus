@@ -24,40 +24,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
 
-type Weight = int
-
-const (
-	weightLow int = iota - 1
-	weightNormal
-	weightHigh
-)
-
-func GetWeight(w int) Weight {
-	if w > 0 {
-		return weightHigh
-	} else if w < 0 {
-		return weightLow
-	}
-	return weightNormal
-}
-
-func GetTaskPriorityFromWeight(w Weight) task.Priority {
-	switch w {
-	case weightHigh:
-		return task.TaskPriorityHigh
-	case weightLow:
-		return task.TaskPriorityLow
-	default:
-		return task.TaskPriorityNormal
-	}
-}
-
 type SegmentAssignPlan struct {
 	Segment   *meta.Segment
 	ReplicaID int64
 	From      int64 // -1 if empty
 	To        int64
-	Weight    Weight
 }
 
 type ChannelAssignPlan struct {
@@ -65,7 +36,6 @@ type ChannelAssignPlan struct {
 	ReplicaID int64
 	From      int64
 	To        int64
-	Weight    Weight
 }
 
 type Balance interface {

@@ -146,7 +146,7 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, part
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
 	for _, partitionID := range partitionIDs {
-		log.Debug("get recovery info...",
+		log.RatedDebug(10, "get recovery info...",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID))
 		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(context.TODO(), collectionID, partitionID)
