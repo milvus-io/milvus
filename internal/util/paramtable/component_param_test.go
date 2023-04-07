@@ -326,6 +326,21 @@ func TestComponentParam(t *testing.T) {
 		Params.initGracefulStopTimeout()
 		gracefulStopTimeout := Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout)
+
+		Params.Base.Save("queryNode.segcore.knowhereThreadPoolNumRatio", "16")
+		Params.Base.Save("queryNode.enableDisk", "true")
+		Params.initEnableDisk()
+		Params.initKnowhereThreadPoolSize()
+		threadPoolSize := Params.KnowhereThreadPoolSize
+		expectedThreadPoolSize := uint32(16 * runtime.GOMAXPROCS(0))
+		assert.Equal(t, expectedThreadPoolSize, threadPoolSize)
+
+		Params.Base.Save("queryNode.enableDisk", "false")
+		Params.initEnableDisk()
+		Params.initKnowhereThreadPoolSize()
+		threadPoolSize = Params.KnowhereThreadPoolSize
+		expectedThreadPoolSize = uint32(runtime.GOMAXPROCS(0))
+		assert.Equal(t, expectedThreadPoolSize, threadPoolSize)
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

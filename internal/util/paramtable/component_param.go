@@ -1002,9 +1002,10 @@ type queryNodeConfig struct {
 	SliceIndex int
 
 	// segcore
-	ChunkRows        int64
-	SmallIndexNlist  int64
-	SmallIndexNProbe int64
+	ChunkRows              int64
+	SmallIndexNlist        int64
+	SmallIndexNProbe       int64
+	KnowhereThreadPoolSize uint32
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1072,6 +1073,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initGracefulStopTimeout()
 	p.initMaxTimestampLag()
+	p.initKnowhereThreadPoolSize()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -1174,6 +1176,16 @@ func (p *queryNodeConfig) initMaxUnsolvedQueueSize() {
 
 func (p *queryNodeConfig) initCPURatio() {
 	p.CPURatio = p.Base.ParseFloatWithDefault("queryNode.scheduler.cpuRatio", 10.0)
+}
+
+func (p *queryNodeConfig) initKnowhereThreadPoolSize() {
+	cpuNum := uint32(runtime.GOMAXPROCS(0))
+	if p.EnableDisk {
+		threadRate := p.Base.ParseFloatWithDefault("queryNode.segcore.knowhereThreadPoolNumRatio", 1)
+		p.KnowhereThreadPoolSize = uint32(threadRate * float64(cpuNum))
+	} else {
+		p.KnowhereThreadPoolSize = cpuNum
+	}
 }
 
 func (p *queryNodeConfig) initMaxReadConcurrency() {
