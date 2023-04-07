@@ -227,15 +227,19 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	// This statsLock has two functions:
 	//	1) Protect member pChanStatisticsInfos
 	//	2) Serialize the timestamp allocation for dml tasks
-	queue.statsLock.Lock()
-	defer queue.statsLock.Unlock()
+
 	//1. preAdd will check whether provided task is valid or addable
 	//and get the current pChannels for this dmTask
-	pChannels, dmt, err := queue.preAddPChanStats(t)
+	dmt := t.(dmlTask)
+	pChannels, err := dmt.getChannels()
 	if err != nil {
+		log.Warn("getChannels failed when Enqueue", zap.Any("tID", t.ID()), zap.Error(err))
 		return err
 	}
+
 	//2. enqueue dml task
+	queue.statsLock.Lock()
+	defer queue.statsLock.Unlock()
 	err = queue.baseTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
@@ -263,19 +267,6 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 		log.Warn("Proxy task not in active task list!", zap.Any("taskID", taskID))
 	}
 	return t
-}
-
-func (queue *dmTaskQueue) preAddPChanStats(t task) ([]pChan, dmlTask, error) {
-	if dmT, ok := t.(dmlTask); ok {
-		channels, err := dmT.getChannels()
-		if err != nil {
-			log.Warn("Proxy dmTaskQueue preAddPChanStats getChannels failed", zap.Any("tID", t.ID()),
-				zap.Error(err))
-			return nil, nil, err
-		}
-		return channels, dmT, nil
-	}
-	return nil, nil, fmt.Errorf("proxy preAddPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 }
 
 func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
@@ -312,34 +303,31 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 	}
 }
 
-func (queue *dmTaskQueue) popPChanStats(t task) error {
-	if dmT, ok := t.(dmlTask); ok {
-		channels, err := dmT.getChannels()
-		if err != nil {
-			return err
-		}
-		taskTs := t.BeginTs()
-		for _, cName := range channels {
-			info, ok := queue.pChanStatisticsInfos[cName]
-			if ok {
-				delete(info.tsSet, taskTs)
-				if len(info.tsSet) <= 0 {
-					delete(queue.pChanStatisticsInfos, cName)
-				} else {
-					newMinTs := info.maxTs
-					for ts := range info.tsSet {
-						if newMinTs > ts {
-							newMinTs = ts
-						}
+func (queue *dmTaskQueue) popPChanStats(t task) {
+	channels, err := t.(dmlTask).getChannels()
+	if err != nil {
+		err = fmt.Errorf("get channels failed when popPChanStats, err=%w", err)
+		log.Error(err.Error())
+		panic(err)
+	}
+	taskTs := t.BeginTs()
+	for _, cName := range channels {
+		info, ok := queue.pChanStatisticsInfos[cName]
+		if ok {
+			delete(info.tsSet, taskTs)
+			if len(info.tsSet) <= 0 {
+				delete(queue.pChanStatisticsInfos, cName)
+			} else {
+				newMinTs := info.maxTs
+				for ts := range info.tsSet {
+					if newMinTs > ts {
+						newMinTs = ts
 					}
-					info.minTs = newMinTs
 				}
+				info.minTs = newMinTs
 			}
 		}
-	} else {
-		return fmt.Errorf("proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
-	return nil
 }
 
 func (queue *dmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error) {
