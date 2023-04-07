@@ -3,7 +3,7 @@ package grpcclient
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/util"
+	// "github.com/milvus-io/milvus/pkg/util"
 )
 
 type Token struct {
@@ -11,7 +11,8 @@ type Token struct {
 }
 
 func (t *Token) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	return map[string]string{util.HeaderSourceID: t.Value}, nil
+	// return map[string]string{util.HeaderSourceID: t.Value}, nil
+	 return map[string]string{}, nil
 }
 
 func (t *Token) RequireTransportSecurity() bool {

@@ -24,6 +24,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -41,17 +47,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Server struct {
@@ -75,17 +78,17 @@ type Server struct {
 
 // NewServer new DataNode grpc server
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
-	s := &Server{
-		ctx:         ctx1,
+	ctx, cancel := context.WithCancel(ctx)
+	var s = &Server{
+		ctx:         ctx,
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
 		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoordClient, error) {
-			return rcc.NewClient(ctx1, etcdMetaRoot, client)
+			return rcc.NewClient(ctx, grpcclient.NewRawEntryProvider(client, etcdMetaRoot, typeutil.RootCoordRole))
 		},
 		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoordClient, error) {
-			return dcc.NewClient(ctx1, etcdMetaRoot, client)
+			return dcc.NewClient(ctx, grpcclient.NewRawEntryProvider(client, etcdMetaRoot, typeutil.DataCoordRole))
 		},
 	}
 

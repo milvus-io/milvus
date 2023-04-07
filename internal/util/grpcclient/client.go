@@ -50,13 +50,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
+// ServiceProvider service info provider
+type ServiceProvider interface {
+	GetServiceEntry(ctx context.Context) (string, int64, error)
+}
+
 // GrpcClient abstracts client of grpc
 type GrpcClient[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }] interface {
 	SetRole(string)
 	GetRole() string
-	SetGetAddrFunc(func() (string, error))
+	SetGetAddrFunc(func(context.Context) (string, error))
 	EnableEncryption()
 	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) T)
 	GetGrpcClient(ctx context.Context) (T, error)
@@ -65,14 +70,13 @@ type GrpcClient[T interface {
 	Close() error
 	SetNodeID(int64)
 	GetNodeID() int64
-	SetSession(sess *sessionutil.Session)
 }
 
 // ClientBase is a base of grpc client
 type ClientBase[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }] struct {
-	getAddrFunc   func() (string, error)
+	getAddrFunc   func(context.Context) (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
 	grpcClient             T
@@ -144,7 +148,7 @@ func (c *ClientBase[T]) GetAddr() string {
 }
 
 // SetGetAddrFunc sets getAddrFunc of client
-func (c *ClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
+func (c *ClientBase[T]) SetGetAddrFunc(f func(context.Context) (string, error)) {
 	c.getAddrFunc = f
 }
 
@@ -207,7 +211,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 }
 
 func (c *ClientBase[T]) connect(ctx context.Context) error {
-	addr, err := c.getAddrFunc()
+	addr, err := c.getAddrFunc(ctx)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to get client address", zap.Error(err))
 		return err
@@ -517,11 +521,6 @@ func (c *ClientBase[T]) SetNodeID(nodeID int64) {
 // GetNodeID returns ID of client
 func (c *ClientBase[T]) GetNodeID() int64 {
 	return c.NodeID.Load()
-}
-
-// SetSession set session role of client
-func (c *ClientBase[T]) SetSession(sess *sessionutil.Session) {
-	c.sess = sess
 }
 
 func IsCrossClusterRoutingErr(err error) bool {

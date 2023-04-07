@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -236,7 +237,7 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoordClient, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, client)
+	return rootcoordclient.NewClient(ctx, grpcclient.NewRawEntryProvider(client, metaRootPath, typeutil.RootCoordRole))
 }
 
 // QuitSignal returns signal when server quits

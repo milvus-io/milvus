@@ -18,9 +18,7 @@ package grpcrootcoordclient
 
 import (
 	"context"
-	"fmt"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
@@ -32,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -45,30 +42,22 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 // Client grpc client
 type Client struct {
 	grpcClient grpcclient.GrpcClient[rootcoordpb.RootCoordClient]
-	sess       *sessionutil.Session
+	sp         grpcclient.ServiceProvider
 }
 
 // NewClient create root coordinator client with specified etcd info and timeout
 // ctx execution control context
-// metaRoot is the path in etcd for root coordinator registration
-// etcdEndpoints are the address list for etcd end points
+// sp is the service entry information provider
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
+func NewClient(ctx context.Context, sp grpcclient.ServiceProvider) (*Client, error) {
 	config := &Params.RootCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[rootcoordpb.RootCoordClient](config, "milvus.proto.rootcoord.RootCoord"),
-		sess:       sess,
+		sp:         sp,
 	}
 	client.grpcClient.SetRole(typeutil.RootCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
-	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }
@@ -78,24 +67,14 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) rootcoordpb.RootCoordClient 
 	return rootcoordpb.NewRootCoordClient(cc)
 }
 
-func (c *Client) getRootCoordAddr() (string, error) {
-	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+func (c *Client) getRootCoordAddr(ctx context.Context) (string, error) {
+	addr, serverID, err := c.sp.GetServiceEntry(ctx)
 	if err != nil {
-		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
+		log.Warn("RootCoordClient get service entry failed", zap.Error(err))
 		return "", err
 	}
-	ms, ok := msess[key]
-	if !ok {
-		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
-	}
-	log.Debug("RootCoordClient GetSessions success",
-		zap.String("address", ms.Address),
-		zap.Int64("serverID", ms.ServerID),
-	)
-	c.grpcClient.SetNodeID(ms.ServerID)
-	return ms.Address, nil
+	c.grpcClient.SetNodeID(serverID)
+	return addr, nil
 }
 
 // Close terminate grpc connection
@@ -600,7 +579,7 @@ func (c *Client) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabase
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -619,7 +598,7 @@ func (c *Client) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequ
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -638,7 +617,7 @@ func (c *Client) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRe
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {

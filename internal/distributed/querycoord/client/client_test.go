@@ -25,16 +25,18 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/mock"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"google.golang.org/grpc"
+
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 func TestMain(m *testing.M) {
@@ -67,7 +69,7 @@ func Test_NewClient(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
-	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+	client, err := NewClient(ctx, grpcclient.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.QueryCoordRole))
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 

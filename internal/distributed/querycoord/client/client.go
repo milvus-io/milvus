@@ -18,9 +18,7 @@ package grpcquerycoordclient
 
 import (
 	"context"
-	"fmt"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -29,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -42,44 +39,36 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 // Client is the grpc client of QueryCoord.
 type Client struct {
 	grpcClient grpcclient.GrpcClient[querypb.QueryCoordClient]
-	sess       *sessionutil.Session
+	sp         grpcclient.ServiceProvider
 }
 
 // NewClient creates a client for QueryCoord grpc call.
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
+func NewClient(ctx context.Context, sp grpcclient.ServiceProvider) (*Client, error) {
 	config := &Params.QueryCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[querypb.QueryCoordClient](config, "milvus.proto.query.QueryCoord"),
-		sess:       sess,
+		sp:         sp,
 	}
 	client.grpcClient.SetRole(typeutil.QueryCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getQueryCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
-	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }
 
-func (c *Client) getQueryCoordAddr() (string, error) {
-	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+// Init initializes QueryCoord's grpc client.
+func (c *Client) Init() error {
+	return nil
+}
+
+func (c *Client) getQueryCoordAddr(ctx context.Context) (string, error) {
+	addr, serverID, err := c.sp.GetServiceEntry(ctx)
 	if err != nil {
-		log.Debug("QueryCoordClient GetSessions failed", zap.Error(err))
+		log.Warn("QueryCoordClient get service entry failed", zap.Error(err))
 		return "", err
 	}
-	ms, ok := msess[key]
-	if !ok {
-		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("find no available querycoord, check querycoord state")
-	}
-	c.grpcClient.SetNodeID(ms.ServerID)
-	return ms.Address, nil
+	c.grpcClient.SetNodeID(serverID)
+	return addr, nil
 }
 
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) querypb.QueryCoordClient {
@@ -202,7 +191,7 @@ func (c *Client) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.SyncNewCreatedPartition(ctx, req)

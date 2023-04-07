@@ -18,9 +18,7 @@ package grpcdatacoordclient
 
 import (
 	"context"
-	"fmt"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -31,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -46,28 +43,20 @@ var _ types.DataCoordClient = (*Client)(nil)
 // Client is the datacoord grpc client
 type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataCoordClient]
-	sess       *sessionutil.Session
+	sp         grpcclient.ServiceProvider
 	sourceID   int64
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
-
+func NewClient(ctx context.Context, sp grpcclient.ServiceProvider) (*Client, error) {
 	config := &Params.DataCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[datapb.DataCoordClient](config, "milvus.proto.data.DataCoord"),
-		sess:       sess,
+		sp:         sp,
 	}
 	client.grpcClient.SetRole(typeutil.DataCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
-	client.grpcClient.SetSession(sess)
 
 	return client, nil
 }
@@ -76,21 +65,14 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) datapb.DataCoordClient {
 	return datapb.NewDataCoordClient(cc)
 }
 
-func (c *Client) getDataCoordAddr() (string, error) {
-	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+func (c *Client) getDataCoordAddr(ctx context.Context) (string, error) {
+	addr, serverID, err := c.sp.GetServiceEntry(ctx)
 	if err != nil {
-		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Warn("DataCoordClient get service entry failed", zap.Error(err))
 		return "", err
 	}
-	ms, ok := msess[key]
-	if !ok {
-		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("find no available datacoord, check datacoord state")
-	}
-
-	c.grpcClient.SetNodeID(ms.ServerID)
-	return ms.Address, nil
+	c.grpcClient.SetNodeID(serverID)
+	return addr, nil
 }
 
 // Stop stops the client
@@ -329,7 +311,7 @@ func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.GetRecoveryInfoResponseV2, error) {
 		return client.GetRecoveryInfoV2(ctx, req)

@@ -24,6 +24,10 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -41,10 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Server is the grpc server of QueryCoord.
@@ -153,7 +155,7 @@ func (s *Server) init() error {
 
 	// --- Master Server Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		s.rootCoord, err = rcc.NewClient(s.loopCtx, grpcclient.NewRawEntryProvider(s.etcdCli, qc.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.RootCoordRole))
 		if err != nil {
 			log.Error("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
@@ -175,7 +177,7 @@ func (s *Server) init() error {
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
-		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		s.dataCoord, err = dcc.NewClient(s.loopCtx, grpcclient.NewRawEntryProvider(s.etcdCli, qc.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.DataCoordRole))
 		if err != nil {
 			log.Error("QueryCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)

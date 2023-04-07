@@ -30,17 +30,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/merr"
+
+	"google.golang.org/grpc/credentials"
+
+	management "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/soheilhy/cmux"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
-	"github.com/soheilhy/cmux"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
@@ -53,22 +66,14 @@ import (
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
-	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -509,7 +514,7 @@ func (s *Server) init() error {
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.rootCoordClient, err = rcc.NewClient(s.ctx, grpcclient.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.RootCoordRole))
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err
@@ -531,7 +536,7 @@ func (s *Server) init() error {
 	if s.dataCoordClient == nil {
 		var err error
 		log.Debug("create DataCoord client for Proxy")
-		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.dataCoordClient, err = dcc.NewClient(s.ctx, grpcclient.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.DataCoordRole))
 		if err != nil {
 			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
 			return err
@@ -553,7 +558,7 @@ func (s *Server) init() error {
 	if s.queryCoordClient == nil {
 		var err error
 		log.Debug("create QueryCoord client for Proxy")
-		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.queryCoordClient, err = qcc.NewClient(s.ctx, grpcclient.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.QueryCoordRole))
 		if err != nil {
 			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
 			return err

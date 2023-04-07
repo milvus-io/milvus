@@ -24,6 +24,12 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -42,16 +48,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Server grpc wrapper
@@ -126,7 +128,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 func (s *Server) setClient() {
 	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoordClient {
-		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
+		dsClient, err := dcc.NewClient(s.ctx, grpcclient.NewRawEntryProvider(etcdCli, etcdMetaRoot, typeutil.DataCoordRole))
 		if err != nil {
 			panic(err)
 		}
@@ -134,7 +136,7 @@ func (s *Server) setClient() {
 	}
 
 	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoordClient {
-		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
+		qsClient, err := qcc.NewClient(s.ctx, grpcclient.NewRawEntryProvider(etcdCli, metaRootPath, typeutil.QueryCoordRole))
 		if err != nil {
 			panic(err)
 		}
