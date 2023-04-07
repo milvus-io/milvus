@@ -362,7 +362,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	})
 	removed := sd.distribution.AddDistributions(entries...)
 
-	// call worker release async
+	// release possible matched growing segments async
 	if len(removed) > 0 {
 		go func() {
 			worker, err := sd.workerManager.GetWorker(paramtable.GetNodeID())
@@ -537,7 +537,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	return result, nil
 }
 
-// ReleaseSegments releases segments local or remotely depends ont the target node.
+// ReleaseSegments releases segments local or remotely depending on the target node.
 func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	log := sd.getLogger(ctx)
 
