@@ -30,6 +30,10 @@ func rpcDone(method string) string {
 	return fmt.Sprintf("%s done", method)
 }
 
+func rpcSlow(method string) string {
+	return fmt.Sprintf("%s slow", method)
+}
+
 func rpcFailedToEnqueue(method string) string {
 	return fmt.Sprintf("%s failed to enqueue", method)
 }
