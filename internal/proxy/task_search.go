@@ -234,15 +234,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// check if collection/partitions are loaded into query node
-	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.SearchRequest.GetPartitionIDs())
-	if err != nil {
-		return fmt.Errorf("checkIfLoaded failed when search, collection:%v, partitions:%v, err = %s", collectionName, t.request.GetPartitionNames(), err)
-	}
-	if !loaded {
-		return fmt.Errorf("collection:%v or partition:%v not loaded into memory when search", collectionName, t.request.GetPartitionNames())
-	}
-
 	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		return err
@@ -637,43 +628,6 @@ func (t *searchTask) collectSearchResults(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// checkIfLoaded check if collection was loaded into QueryNode
-func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName string, searchPartitionIDs []UniqueID) (bool, error) {
-	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
-	if err != nil {
-		return false, fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", collectionName, err)
-	}
-	if info.isLoaded {
-		return true, nil
-	}
-	if len(searchPartitionIDs) == 0 {
-		return false, nil
-	}
-
-	// If request to search partitions
-	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionID: info.collID,
-		PartitionIDs: searchPartitionIDs,
-	})
-	if err != nil {
-		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, err = %s", collectionName, searchPartitionIDs, err)
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, reason = %s", collectionName, searchPartitionIDs, resp.GetStatus().GetReason())
-	}
-
-	for _, persent := range resp.InMemoryPercentages {
-		if persent < 100 {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 func decodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
