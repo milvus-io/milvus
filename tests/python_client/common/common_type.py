@@ -16,8 +16,8 @@ default_search_ip_params = {"metric_type": "IP", "params": {"nprobe": 10}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
 default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
-default_diskann_index ={"index_type": "DISKANN", "metric_type":"L2", "params": {}}
-default_diskann_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
+default_diskann_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+default_diskann_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
@@ -62,6 +62,7 @@ max_compaction_interval = 60  # the max time interval (s) from the last compacti
 max_field_num = 64  # Maximum number of fields in a collection
 max_name_length = 255  # Maximum length of name for a collection or alias
 default_replica_num = 1
+default_graceful_time = 5  #
 IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
 NAMESPACE_CHAOS_TESTING = "chaos-testing"
 
@@ -77,6 +78,7 @@ in_cluster_env = "IN_CLUSTER"
 
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
+default_count_output = "count(*)"
 
 """" List of parameters used to pass """
 get_invalid_strs = [
