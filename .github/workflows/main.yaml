@@ -93,7 +93,6 @@ jobs:
           name: code
           path: |
             ./
-            !.git
             !.docker
   UT-Cpp:
     name: UT for Cpp
@@ -172,6 +171,7 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
+            .git
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go]
