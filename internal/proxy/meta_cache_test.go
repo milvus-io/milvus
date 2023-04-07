@@ -785,15 +785,15 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 }
 
 func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.ProxyCfg.ShardLeaderCacheInterval.Key, "1")
+
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &types.MockQueryCoord{}
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
-
-	paramtable.Init()
-	paramtable.Get().Save(Params.ProxyCfg.ShardLeaderCacheInterval.Key, "1")
 
 	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
