@@ -60,12 +60,6 @@ func SetPriority(priority Priority, tasks ...Task) {
 	}
 }
 
-func SetPriorityWithFunc(f func(t Task) Priority, tasks ...Task) {
-	for i := range tasks {
-		tasks[i].SetPriority(f(tasks[i]))
-	}
-}
-
 func SetReason(reason string, tasks ...Task) {
 	for i := range tasks {
 		tasks[i].SetReason(reason)

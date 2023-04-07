@@ -25,45 +25,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
 
-type Weight = int
-
-const (
-	weightLow int = iota - 1
-	weightNormal
-	weightHigh
-)
-
-func GetWeight(w int) Weight {
-	if w > 0 {
-		return weightHigh
-	} else if w < 0 {
-		return weightLow
-	}
-	return weightNormal
-}
-
-func GetTaskPriorityFromWeight(w Weight) task.Priority {
-	switch w {
-	case weightHigh:
-		return task.TaskPriorityHigh
-	case weightLow:
-		return task.TaskPriorityLow
-	default:
-		return task.TaskPriorityNormal
-	}
-}
-
 type SegmentAssignPlan struct {
 	Segment   *meta.Segment
 	ReplicaID int64
 	From      int64 // -1 if empty
 	To        int64
-	Weight    Weight
 }
 
 func (segPlan SegmentAssignPlan) ToString() string {
-	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, weight: %d]\n",
-		segPlan.Segment.CollectionID, segPlan.ReplicaID, segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.Weight)
+	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d]\n",
+		segPlan.Segment.CollectionID, segPlan.ReplicaID, segPlan.Segment.ID, segPlan.From, segPlan.To)
 }
 
 type ChannelAssignPlan struct {
@@ -71,12 +42,11 @@ type ChannelAssignPlan struct {
 	ReplicaID int64
 	From      int64
 	To        int64
-	Weight    Weight
 }
 
 func (chanPlan ChannelAssignPlan) ToString() string {
-	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d, weight: %d]\n",
-		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.ReplicaID, chanPlan.From, chanPlan.To, chanPlan.Weight)
+	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d]\n",
+		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.ReplicaID, chanPlan.From, chanPlan.To)
 }
 
 var (

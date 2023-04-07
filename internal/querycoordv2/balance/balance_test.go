@@ -158,20 +158,6 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 	}
 }
 
-func (suite *BalanceTestSuite) TestWeight() {
-	suite.Run("GetWeight", func() {
-		suite.Equal(weightHigh, GetWeight(10))
-		suite.Equal(weightNormal, GetWeight(0))
-		suite.Equal(weightLow, GetWeight(-10))
-	})
-
-	suite.Run("GetTaskPriorityFromWeight", func() {
-		suite.Equal(task.TaskPriorityHigh, GetTaskPriorityFromWeight(weightHigh))
-		suite.Equal(task.TaskPriorityNormal, GetTaskPriorityFromWeight(weightNormal))
-		suite.Equal(task.TaskPriorityLow, GetTaskPriorityFromWeight(weightLow))
-	})
-}
-
 func TestBalanceSuite(t *testing.T) {
 	suite.Run(t, new(BalanceTestSuite))
 }
