@@ -64,10 +64,10 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 		}
 		if task.GetTaskType(t) == task.TaskTypeMove {
 			// from balance checker
-			task.SetPriority(task.TaskPriorityLow)
+			t.SetPriority(task.TaskPriorityLow)
 		} else {
 			//from segment checker
-			task.SetPriority(task.TaskPriorityNormal)
+			t.SetPriority(task.TaskPriorityNormal)
 		}
 		ret = append(ret, t)
 	}
@@ -104,7 +104,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			)
 			continue
 		}
-		task.SetPriority(task.TaskPriorityHigh)
+		t.SetPriority(task.TaskPriorityHigh)
 		ret = append(ret, t)
 	}
 	return ret
