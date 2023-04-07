@@ -487,3 +487,51 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 	})
 }
+
+func TestProxy_GetReplicas(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	mockQC := types.NewMockQueryCoord(t)
+	mockRC := mocks.NewRootCoord(t)
+	node.queryCoord = mockQC
+	node.rootCoord = mockRC
+
+	// set expectations
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	t.Run("success", func(t *testing.T) {
+		mockQC.EXPECT().GetReplicas(mock.Anything, mock.AnythingOfType("*milvuspb.GetReplicasRequest")).Return(&milvuspb.GetReplicasResponse{Status: successStatus}, nil)
+		resp, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			CollectionID: 1000,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	})
+
+	t.Run("proxy_not_healthy", func(t *testing.T) {
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			CollectionID: 1000,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+	})
+
+	t.Run("QueryCoordClient_returnsError", func(t *testing.T) {
+		mockQC.ExpectedCalls = nil
+		mockQC.EXPECT().GetReplicas(mock.Anything, mock.AnythingOfType("*milvuspb.GetReplicasRequest")).Return(nil, errors.New("mocked"))
+
+		resp, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			CollectionID: 1000,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+}

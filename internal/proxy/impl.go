@@ -3531,18 +3531,15 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		req.CollectionID, _ = globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
 	}
 
-	resp, err := node.queryCoord.GetReplicas(ctx, req)
+	r, err := node.queryCoord.GetReplicas(ctx, req)
 	if err != nil {
-		log.Error("Failed to get replicas from Query Coordinator",
+		log.Warn("Failed to get replicas from Query Coordinator",
 			zap.Error(err))
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Debug("received get replicas response",
-		zap.Any("resp", resp),
-		zap.Error(err))
-	return resp, nil
+	log.Debug("received get replicas response", zap.String("resp", r.String()))
+	return r, nil
 }
 
 // GetCompactionState gets the compaction state of multiple segments
