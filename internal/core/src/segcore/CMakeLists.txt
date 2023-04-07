@@ -26,6 +26,7 @@ set(SEGCORE_FILES
         FieldIndexing.cpp
         InsertRecord.cpp
         Reduce.cpp
+        metrics_c.cpp
         plan_c.cpp
         reduce_c.cpp
         load_index_c.cpp
