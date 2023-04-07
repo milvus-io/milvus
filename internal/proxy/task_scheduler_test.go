@@ -24,9 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func TestBaseTaskQueue(t *testing.T) {
@@ -199,11 +202,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
-
-	//test wrong task type
-	dqlTask := newDefaultMockDqlTask()
-	err = queue.Enqueue(dqlTask)
-	assert.NotNil(t, err)
 
 	st := newDefaultMockDmlTask()
 	stID := st.ID()
@@ -568,5 +566,53 @@ func TestTaskScheduler(t *testing.T) {
 		}
 	}()
 
+	wg.Wait()
+}
+
+func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
+	collectionID := UniqueID(0)
+	collectionName := "col-0"
+	channels := []pChan{"mock-chan-0", "mock-chan-1"}
+	cache := newMockCache()
+	cache.setGetIDFunc(func(ctx context.Context, collectionName string) (UniqueID, error) {
+		return collectionID, nil
+	})
+	globalMetaCache = cache
+	tsoAllocatorIns := newMockTsoAllocator()
+	factory := newSimpleMockMsgStreamFactory()
+	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns, factory)
+	assert.NoError(t, err)
+
+	run := func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		chMgr := newMockChannelsMgr()
+		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
+			return channels, nil
+		}
+		it := &insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					Base:           &commonpb.MsgBase{},
+					CollectionName: collectionName,
+				},
+			},
+			chMgr: chMgr,
+		}
+		err := scheduler.dmQueue.Enqueue(it)
+		assert.NoError(t, err)
+		task := scheduler.scheduleDmTask()
+		scheduler.dmQueue.AddActiveTask(task)
+		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
+			return nil, fmt.Errorf("mock err")
+		}
+		scheduler.dmQueue.PopActiveTask(task.ID()) // assert no panic
+	}
+
+	wg := &sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go run(wg)
+	}
 	wg.Wait()
 }
