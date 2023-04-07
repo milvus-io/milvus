@@ -1156,6 +1156,7 @@ class TestCollectionSearch(TestcaseBase):
         # 3. delete partitions
         log.info("test_search_before_after_delete: deleting a partition")
         par = collection_w.partitions
+        collection_w.release()
         deleted_entity_num = par[partition_num].num_entities
         print(deleted_entity_num)
         entity_num = nb - deleted_entity_num
@@ -2977,6 +2978,27 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #23187")
+    def test_search_partition_empty(self):
+        """
+        target: test search on an empty partition
+        method: 1. Connect milvus
+                2. Create a collection
+                3. Create index and load
+                4. Create a partition
+                6. Search on this empty partition
+        expected: search successfully
+        """
+        partition_name = 'par'
+        collection_w = self.init_collection_general(prefix)[0]
+        collection_w.load()
+        collection_w.create_partition(partition_name)
+        vector = [[float(0.1) for _ in range(default_dim)]]
+        res = collection_w.search(vector, default_search_field, default_search_params,
+                                  default_limit, default_search_exp, [partition_name])[0]
+        assert len(res) == 0
 
 
 class TestSearchBase(TestcaseBase):
