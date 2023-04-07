@@ -1807,6 +1807,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, des_node_ids, sealed_segment_ids)
         # get segments distribution after load balance
+        time.sleep(0.5)
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         sealed_segment_ids_after_load_banalce = segment_distribution[src_node_id]["sealed"]
