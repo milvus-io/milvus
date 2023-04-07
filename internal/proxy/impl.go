@@ -23,6 +23,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -52,6 +53,7 @@ import (
 )
 
 const moduleName = "Proxy"
+const SlowReadSpan = time.Second * 5
 
 // UpdateStateCode updates the state code of Proxy.
 func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
@@ -2781,6 +2783,25 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	travelTs := request.TravelTimestamp
 	guaranteeTs := request.GuaranteeTimestamp
 
+	defer func() {
+		span := tr.ElapseSpan()
+		if span >= SlowReadSpan {
+			log.Ctx(ctx).Info(
+				rpcSlow(method),
+				zap.String("role", typeutil.ProxyRole),
+				zap.String("db", request.DbName),
+				zap.String("collection", request.CollectionName),
+				zap.Any("partitions", request.PartitionNames),
+				zap.Any("dsl", request.Dsl),
+				zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+				zap.Any("OutputFields", request.OutputFields),
+				zap.Any("search_params", request.SearchParams),
+				zap.Uint64("travel_timestamp", travelTs),
+				zap.Uint64("guarantee_timestamp", guaranteeTs),
+				zap.Duration("duration", span))
+		}
+	}()
+
 	log.Ctx(ctx).Debug(
 		rpcReceived(method),
 		zap.String("role", typeutil.ProxyRole),
@@ -3028,6 +3049,23 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
+
+	defer func() {
+		span := tr.ElapseSpan()
+		if span >= SlowReadSpan {
+			log.Ctx(ctx).Info(
+				rpcSlow(method),
+				zap.String("role", typeutil.ProxyRole),
+				zap.String("db", request.DbName),
+				zap.String("collection", request.CollectionName),
+				zap.Strings("partitions", request.PartitionNames),
+				zap.String("expr", request.Expr),
+				zap.Strings("OutputFields", request.OutputFields),
+				zap.Uint64("travel_timestamp", request.TravelTimestamp),
+				zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
+				zap.Duration("duration", span))
+		}
+	}()
 
 	log.Ctx(ctx).Debug(
 		rpcReceived(method),
