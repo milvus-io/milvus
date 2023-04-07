@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/tracer"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Server struct {
@@ -71,17 +73,17 @@ type Server struct {
 
 // NewServer new DataNode grpc server
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	var s = &Server{
-		ctx:         ctx1,
+		ctx:         ctx,
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
 		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoord, error) {
-			return rcc.NewClient(ctx1, etcdMetaRoot, client)
+			return rcc.NewClient(ctx, sessionutil.NewRawEntryProvider(client, etcdMetaRoot, typeutil.RootCoordRole))
 		},
 		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoord, error) {
-			return dcc.NewClient(ctx1, etcdMetaRoot, client)
+			return dcc.NewClient(ctx, sessionutil.NewRawEntryProvider(client, etcdMetaRoot, typeutil.DataCoordRole))
 		},
 	}
 

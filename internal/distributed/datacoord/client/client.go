@@ -18,12 +18,9 @@ package grpcdatacoordclient
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -47,19 +44,12 @@ var _ types.DataCoord = (*Client)(nil)
 // Client is the datacoord grpc client
 type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataCoordClient]
-	sess       *sessionutil.Session
+	sp         grpcclient.ServiceProvider
 	sourceID   int64
 }
 
 // NewClient creates a new client instance
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
-
+func NewClient(ctx context.Context, sp grpcclient.ServiceProvider) (*Client, error) {
 	clientParams := &Params.DataCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase[datapb.DataCoordClient]{
@@ -75,7 +65,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
 			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
 		},
-		sess: sess,
+		sp: sp,
 	}
 	client.grpcClient.SetRole(typeutil.DataCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
@@ -88,21 +78,14 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) datapb.DataCoordClient {
 	return datapb.NewDataCoordClient(cc)
 }
 
-func (c *Client) getDataCoordAddr() (string, error) {
-	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+func (c *Client) getDataCoordAddr(ctx context.Context) (string, error) {
+	addr, serverID, err := c.sp.GetServiceEntry(ctx)
 	if err != nil {
-		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Warn("DataCoordClient get service entry failed", zap.Error(err))
 		return "", err
 	}
-	ms, ok := msess[key]
-	if !ok {
-		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("find no available datacoord, check datacoord state")
-	}
-
-	c.grpcClient.SetNodeID(ms.ServerID)
-	return ms.Address, nil
+	c.grpcClient.SetNodeID(serverID)
+	return addr, nil
 }
 
 // Init initializes the client

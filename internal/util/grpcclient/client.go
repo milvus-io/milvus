@@ -42,13 +42,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
+// ServiceProvider service info provider
+type ServiceProvider interface {
+	GetServiceEntry(ctx context.Context) (string, int64, error)
+}
+
 // GrpcClient abstracts client of grpc
 type GrpcClient[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }] interface {
 	SetRole(string)
 	GetRole() string
-	SetGetAddrFunc(func() (string, error))
+	SetGetAddrFunc(func(context.Context) (string, error))
 	EnableEncryption()
 	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) T)
 	GetGrpcClient(ctx context.Context) (T, error)
@@ -63,7 +68,7 @@ type GrpcClient[T interface {
 type ClientBase[T interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 }] struct {
-	getAddrFunc   func() (string, error)
+	getAddrFunc   func(context.Context) (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
 	grpcClient             T
@@ -100,7 +105,7 @@ func (c *ClientBase[T]) GetRole() string {
 }
 
 // SetGetAddrFunc sets getAddrFunc of client
-func (c *ClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
+func (c *ClientBase[T]) SetGetAddrFunc(f func(context.Context) (string, error)) {
 	c.getAddrFunc = f
 }
 
@@ -155,7 +160,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 }
 
 func (c *ClientBase[T]) connect(ctx context.Context) error {
-	addr, err := c.getAddrFunc()
+	addr, err := c.getAddrFunc(ctx)
 	if err != nil {
 		log.Warn("failed to get client address", zap.Error(err))
 		return err

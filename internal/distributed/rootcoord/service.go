@@ -25,6 +25,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
@@ -106,7 +108,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 func (s *Server) setClient() {
 	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoord {
-		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
+		dsClient, err := dcc.NewClient(s.ctx, sessionutil.NewRawEntryProvider(etcdCli, etcdMetaRoot, typeutil.DataCoordRole))
 		if err != nil {
 			panic(err)
 		}
@@ -114,7 +116,7 @@ func (s *Server) setClient() {
 	}
 
 	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoord {
-		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
+		qsClient, err := qcc.NewClient(s.ctx, sessionutil.NewRawEntryProvider(etcdCli, metaRootPath, typeutil.QueryCoordRole))
 		if err != nil {
 			panic(err)
 		}

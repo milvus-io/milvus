@@ -32,7 +32,7 @@ import (
 )
 
 type GRPCClientBase[T any] struct {
-	getAddrFunc   func() (string, error)
+	getAddrFunc   func(context.Context) (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
 	grpcClient       T
@@ -43,7 +43,7 @@ type GRPCClientBase[T any] struct {
 	nodeID           int64
 }
 
-func (c *GRPCClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
+func (c *GRPCClientBase[T]) SetGetAddrFunc(f func(context.Context) (string, error)) {
 	c.getAddrFunc = f
 }
 

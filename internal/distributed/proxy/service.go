@@ -33,8 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 
 	"github.com/gin-gonic/gin"
@@ -358,7 +360,7 @@ func (s *Server) init() error {
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.rootCoordClient, err = rcc.NewClient(s.ctx, sessionutil.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.RootCoordRole))
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err
@@ -387,7 +389,7 @@ func (s *Server) init() error {
 	if s.dataCoordClient == nil {
 		var err error
 		log.Debug("create DataCoord client for Proxy")
-		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.dataCoordClient, err = dcc.NewClient(s.ctx, sessionutil.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.DataCoordRole))
 		if err != nil {
 			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
 			return err
@@ -416,7 +418,7 @@ func (s *Server) init() error {
 	if s.queryCoordClient == nil {
 		var err error
 		log.Debug("create QueryCoord client for Proxy")
-		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.queryCoordClient, err = qcc.NewClient(s.ctx, sessionutil.NewRawEntryProvider(etcdCli, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), typeutil.QueryCoordRole))
 		if err != nil {
 			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
 			return err

@@ -75,6 +75,14 @@ const (
 	SegmentIndexPath = `index_files`
 )
 
+// Session
+const (
+	// DefaultServiceRoot default root path used in kv by Session
+	DefaultServiceRoot = "session/"
+	// DefaultIDKey default id key for Session
+	DefaultIDKey = "id"
+)
+
 // Search, Index parameter keys
 const (
 	TopKKey        = "topk"

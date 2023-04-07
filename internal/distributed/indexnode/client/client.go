@@ -97,7 +97,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) indexpb.IndexNodeClient {
 	return indexpb.NewIndexNodeClient(cc)
 }
 
-func (c *Client) getAddr() (string, error) {
+func (c *Client) getAddr(_ context.Context) (string, error) {
 	return c.addr, nil
 }
 

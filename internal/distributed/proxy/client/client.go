@@ -78,7 +78,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) proxypb.ProxyClient {
 	return proxypb.NewProxyClient(cc)
 }
 
-func (c *Client) getAddr() (string, error) {
+func (c *Client) getAddr(_ context.Context) (string, error) {
 	return c.addr, nil
 }
 

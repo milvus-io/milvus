@@ -226,7 +226,7 @@ func defaultIndexNodeCreatorFunc(ctx context.Context, addr string) (types.IndexN
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, client)
+	return rootcoordclient.NewClient(ctx, sessionutil.NewRawEntryProvider(client, metaRootPath, typeutil.RootCoordRole))
 }
 
 // QuitSignal returns signal when server quits

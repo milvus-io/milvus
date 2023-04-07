@@ -70,7 +70,7 @@ func TestClientBase_GetRole(t *testing.T) {
 func TestClientBase_connect(t *testing.T) {
 	t.Run("failed to connect", func(t *testing.T) {
 		base := ClientBase[*mockClient]{
-			getAddrFunc: func() (string, error) {
+			getAddrFunc: func(_ context.Context) (string, error) {
 				return "", nil
 			},
 			DialTimeout: time.Millisecond,
@@ -83,7 +83,7 @@ func TestClientBase_connect(t *testing.T) {
 	t.Run("failed to get addr", func(t *testing.T) {
 		errMock := errors.New("mocked")
 		base := ClientBase[*mockClient]{
-			getAddrFunc: func() (string, error) {
+			getAddrFunc: func(_ context.Context) (string, error) {
 				return "", errMock
 			},
 			DialTimeout: time.Millisecond,
@@ -195,7 +195,7 @@ func testCall(t *testing.T, compressed bool) {
 	base.grpcClientMtx.Lock()
 	base.grpcClient = nil
 	base.grpcClientMtx.Unlock()
-	base.SetGetAddrFunc(func() (string, error) { return "", nil })
+	base.SetGetAddrFunc(func(context.Context) (string, error) { return "", nil })
 
 	t.Run("Call with connect failure", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -268,7 +268,7 @@ func TestClientBase_Recall(t *testing.T) {
 	base.grpcClientMtx.Lock()
 	base.grpcClient = nil
 	base.grpcClientMtx.Unlock()
-	base.SetGetAddrFunc(func() (string, error) { return "", nil })
+	base.SetGetAddrFunc(func(_ context.Context) (string, error) { return "", nil })
 
 	t.Run("ReCall with connect failure", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -341,7 +341,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		BackoffMultiplier:      2.0,
 	}
 	clientBase.SetRole(typeutil.DataCoordRole)
-	clientBase.SetGetAddrFunc(func() (string, error) {
+	clientBase.SetGetAddrFunc(func(_ context.Context) (string, error) {
 		return address.String(), nil
 	})
 	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
@@ -403,7 +403,7 @@ func TestClientBase_Compression(t *testing.T) {
 		CompressionEnabled:     true,
 	}
 	clientBase.SetRole(typeutil.DataCoordRole)
-	clientBase.SetGetAddrFunc(func() (string, error) {
+	clientBase.SetGetAddrFunc(func(_ context.Context) (string, error) {
 		return address.String(), nil
 	})
 	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {

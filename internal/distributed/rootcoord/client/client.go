@@ -18,7 +18,6 @@ package grpcrootcoordclient
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -27,13 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
@@ -45,21 +42,14 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 // Client grpc client
 type Client struct {
 	grpcClient grpcclient.GrpcClient[rootcoordpb.RootCoordClient]
-	sess       *sessionutil.Session
+	sp         grpcclient.ServiceProvider
 }
 
 // NewClient create root coordinator client with specified etcd info and timeout
 // ctx execution control context
-// metaRoot is the path in etcd for root coordinator registration
-// etcdEndpoints are the address list for etcd end points
+// sp is the service entry information provider
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
-	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
-		return nil, err
-	}
+func NewClient(ctx context.Context, sp grpcclient.ServiceProvider) (*Client, error) {
 	clientParams := &Params.RootCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase[rootcoordpb.RootCoordClient]{
@@ -75,7 +65,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
 			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
 		},
-		sess: sess,
+		sp: sp,
 	}
 	client.grpcClient.SetRole(typeutil.RootCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
@@ -93,24 +83,14 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) rootcoordpb.RootCoordClient 
 	return rootcoordpb.NewRootCoordClient(cc)
 }
 
-func (c *Client) getRootCoordAddr() (string, error) {
-	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+func (c *Client) getRootCoordAddr(ctx context.Context) (string, error) {
+	addr, serverID, err := c.sp.GetServiceEntry(ctx)
 	if err != nil {
-		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
+		log.Warn("RootCoordClient get service entry failed", zap.Error(err))
 		return "", err
 	}
-	ms, ok := msess[key]
-	if !ok {
-		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
-	}
-	log.Debug("RootCoordClient GetSessions success",
-		zap.String("address", ms.Address),
-		zap.Int64("serverID", ms.ServerID),
-	)
-	c.grpcClient.SetNodeID(ms.ServerID)
-	return ms.Address, nil
+	c.grpcClient.SetNodeID(serverID)
+	return addr, nil
 }
 
 // Start dummy
