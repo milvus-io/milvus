@@ -175,7 +175,7 @@ queryCoord:
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
-  checkInterval: 1000
+  checkInterval: 10000
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500

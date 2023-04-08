@@ -1242,7 +1242,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.CheckInterval = ParamItem{
 		Key:          "queryCoord.checkInterval",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "10000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}

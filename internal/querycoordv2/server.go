@@ -623,6 +623,7 @@ func (s *Server) watchNodes(revision int64) {
 				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
 				s.handleNodeUp(nodeID)
 				s.metricsCacheManager.InvalidateSystemInfoMetrics()
+				s.checkerController.Check()
 
 			case sessionutil.SessionUpdateEvent:
 				nodeID := event.Session.ServerID
