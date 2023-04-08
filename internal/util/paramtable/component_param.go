@@ -878,7 +878,7 @@ func (p *queryCoordConfig) initEnableActiveStandby() {
 }
 
 func (p *queryCoordConfig) initCheckInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkInterval", "1000")
+	interval := p.Base.LoadWithDefault("queryCoord.checkInterval", "10000")
 	checkInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
 		panic(err)
