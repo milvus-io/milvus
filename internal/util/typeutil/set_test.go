@@ -36,3 +36,18 @@ func TestUniqueSet(t *testing.T) {
 	assert.True(t, set.Contain(9))
 	assert.False(t, set.Contain(5, 7, 9))
 }
+
+func TestUniqueSetClear(t *testing.T) {
+	set := make(UniqueSet)
+	set.Insert(5, 7, 9)
+	assert.True(t, set.Contain(5))
+	assert.True(t, set.Contain(7))
+	assert.True(t, set.Contain(9))
+	assert.Equal(t, 3, set.Len())
+
+	set.Clear()
+	assert.False(t, set.Contain(5))
+	assert.False(t, set.Contain(7))
+	assert.False(t, set.Contain(9))
+	assert.Equal(t, 0, set.Len())
+}

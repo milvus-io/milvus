@@ -54,13 +54,14 @@ func NewCheckerController(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler) *CheckerController {
 
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	checkers := []Checker{
 		NewChannelChecker(meta, dist, targetMgr, balancer),
-		NewSegmentChecker(meta, dist, targetMgr, balancer),
+		NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
 		NewBalanceChecker(balancer),
 	}
 	for i, checker := range checkers {

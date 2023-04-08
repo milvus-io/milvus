@@ -91,6 +91,10 @@ func (set Set[T]) Remove(elements ...T) {
 	}
 }
 
+func (set Set[T]) Clear() {
+	set.Remove(set.Collect()...)
+}
+
 // Get all elements in the set
 func (set Set[T]) Collect() []T {
 	elements := make([]T, 0, len(set))
