@@ -760,6 +760,9 @@ type queryCoordConfig struct {
 
 	//---- Balance ---
 	AutoBalance                         bool
+	Balancer                            string
+	GlobalRowCountFactor                float64
+	ScoreUnbalanceTolerationFactor      float64
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
@@ -806,6 +809,9 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initNextTargetSurviveTime()
 	p.initUpdateNextTargetInterval()
 	p.initCheckNodeInReplicaInterval()
+	p.initBalancer()
+	p.initGlobalRowCountFactor()
+	p.initScoreUnbalanceTolerationFactor()
 	p.initCheckResourceGroupInterval()
 	p.initEnableRGAutoRecover()
 }
@@ -968,6 +974,29 @@ func (p *queryCoordConfig) initCheckNodeInReplicaInterval() {
 		panic(err)
 	}
 	p.CheckNodeInReplicaInterval = time.Duration(checkNodeInReplicaInterval) * time.Second
+}
+
+func (p *queryCoordConfig) initBalancer() {
+	balancer := p.Base.LoadWithDefault("queryCoord.balancer", "RowCountBasedBalancer")
+	p.Balancer = balancer
+}
+
+func (p *queryCoordConfig) initGlobalRowCountFactor() {
+	factorStr := p.Base.LoadWithDefault("queryCoord.globalRowCountFactor", "0.1")
+	globalRowCountFactor, err := strconv.ParseFloat(factorStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.GlobalRowCountFactor = globalRowCountFactor
+}
+
+func (p *queryCoordConfig) initScoreUnbalanceTolerationFactor() {
+	factorStr := p.Base.LoadWithDefault("queryCoord.scoreUnbalanceTolerationFactor", "1.3")
+	scoreUnbalanceTolerationFactor, err := strconv.ParseFloat(factorStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.ScoreUnbalanceTolerationFactor = scoreUnbalanceTolerationFactor
 }
 
 func (p *queryCoordConfig) initCheckResourceGroupInterval() {
