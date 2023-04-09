@@ -425,6 +425,8 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 					zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
 				continue
 			}
+			log.Info("garbageCollector recycleUnusedIndexFiles remove index files success",
+				zap.Int64("buildID", buildID), zap.String("prefix", key))
 			continue
 		}
 		filesMap := make(map[string]struct{})
