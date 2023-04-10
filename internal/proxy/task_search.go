@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -457,15 +456,10 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		zap.Int64("nodeID", nodeID),
 		zap.Strings("channels", channelIDs))
 
-	queryNode := querynode.GetQueryNode()
 	var result *internalpb.SearchResults
 	var err error
 
-	if queryNode != nil && queryNode.IsStandAlone {
-		result, err = queryNode.Search(ctx, req)
-	} else {
-		result, err = qn.Search(ctx, req)
-	}
+	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode search return error", zap.Error(err))
 		globalMetaCache.DeprecateShardCache(t.collectionName)

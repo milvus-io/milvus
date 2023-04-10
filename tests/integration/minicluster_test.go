@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode"
 	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/querynode"
+	"github.com/milvus-io/milvus/internal/querynodev2"
 )
 
 func TestMiniClusterStartAndStop(t *testing.T) {
@@ -85,7 +85,7 @@ func TestAddRemoveQueryNode(t *testing.T) {
 	defer c.Stop()
 	assert.NoError(t, err)
 
-	queryNode := querynode.NewQueryNode(ctx, c.factory)
+	queryNode := querynodev2.NewQueryNode(ctx, c.factory)
 	queryNode.SetEtcdClient(c.etcdCli)
 	//queryNode := c.CreateDefaultQueryNode()
 
