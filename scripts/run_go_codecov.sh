@@ -26,7 +26,7 @@ BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
 
 # run unittest
-echo "Running unittest under ./internal"
+echo "Running unittest under ./internal & ./pkg"
 
 # starting the timer
 beginTime=`date +%s`
@@ -40,6 +40,15 @@ for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/g
         rm profile.out
     fi
 done
+pushd pkg 
+for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
+    go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    if [ -f profile.out ]; then
+        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
+        rm profile.out
+    fi
+done
+popd
 endTime=`date +%s`
 
 echo "Total time for go unittest:" $(($endTime-$beginTime)) "s"

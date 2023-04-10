@@ -61,7 +61,7 @@ func TestManager(t *testing.T) {
 
 	t.Run("test merge and split", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
-		c := NewDispatcherManager(prefix + "_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
 		_, err := c.Add("mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)
@@ -85,7 +85,7 @@ func TestManager(t *testing.T) {
 
 	t.Run("test run and close", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
-		c := NewDispatcherManager(prefix + "_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
 		_, err := c.Add("mock_vchannel_0", nil, mqwrapper.SubscriptionPositionUnknown)
 		assert.NoError(t, err)

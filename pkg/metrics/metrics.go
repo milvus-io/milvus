@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	// #nosec
 	_ "net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus"
