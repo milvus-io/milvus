@@ -306,6 +306,13 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 // SendTimeTickToChannel send each channel's min timetick to msg stream
 func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Timestamp) error {
+	func() {
+		sub := tsoutil.SubByNow(ts)
+		for _, chanName := range chanNames {
+			metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(sub))
+		}
+	}()
+
 	msgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: ts,
@@ -329,10 +336,6 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 		return err
 	}
 
-	sub := tsoutil.SubByNow(ts)
-	for _, chanName := range chanNames {
-		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(sub))
-	}
 	return nil
 }
 
