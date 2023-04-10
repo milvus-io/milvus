@@ -199,10 +199,14 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, nodesWithL
 
 	// allocate segments to those nodes with row cnt less than average
 	for _, s := range segmentsToMove {
-		node := nodesWithLessRowCount.pop().(*nodeItem)
+		if nodesWithLessRowCount.Len() <= 0 {
+			break
+		}
 
+		node := nodesWithLessRowCount.pop().(*nodeItem)
 		newPriority := node.getPriority() + int(s.GetNumOfRows())
 		if newPriority > average {
+			nodesWithLessRowCount.push(node)
 			continue
 		}
 

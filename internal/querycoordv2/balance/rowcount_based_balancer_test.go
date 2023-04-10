@@ -161,6 +161,25 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{
+			name:        "balance won't trigger",
+			nodes:       []int64{1, 2, 3},
+			segmentCnts: []int{1, 2, 2},
+			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 40}, Node: 1}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 10}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 40}, Node: 2},
+				},
+				3: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 10}, Node: 3},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 40}, Node: 3},
+				},
+			},
+			expectPlans:        []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{},
+		},
+		{
 			name:        "all stopping balance",
 			nodes:       []int64{1, 2},
 			segmentCnts: []int{1, 2},
