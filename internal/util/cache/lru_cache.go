@@ -112,8 +112,8 @@ func (c *LRU[K, V]) Add(key K, value V) {
 	defer c.m.Unlock()
 
 	if c.closed() {
-		// evict since cache closed
-		c.onEvicted(key, value)
+		// evict since cache closed asyncly
+		go c.onEvicted(key, value)
 		return
 	}
 
