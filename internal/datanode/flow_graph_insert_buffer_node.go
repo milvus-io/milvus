@@ -49,7 +49,7 @@ type insertBufferNode struct {
 
 	ctx              context.Context
 	channelName      string
-	delBufferManager *DelBufferManager // manager of delete msg
+	delBufferManager *DeltaBufferManager // manager of delete msg
 	channel          Channel
 	idAllocator      allocator.Allocator
 
@@ -661,7 +661,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.channel.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DelBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
+func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DeltaBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
 	fm flushManager, flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}

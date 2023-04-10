@@ -387,6 +387,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		partitionID:  partID,
 		segmentID:    req.GetCompactedTo(),
 		numRows:      req.GetNumOfRows(),
+		lastSyncTs:   tsoutil.GetCurrentTime(),
 	}
 
 	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())

@@ -57,7 +57,7 @@ type dataSyncService struct {
 	dataCoord    types.DataCoord // DataCoord instance to interact with
 	clearSignal  chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
 
-	delBufferManager *DelBufferManager
+	delBufferManager *DeltaBufferManager
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
 	chunkManager     storage.ChunkManager
@@ -91,10 +91,9 @@ func newDataSyncService(ctx context.Context,
 
 	ctx1, cancel := context.WithCancel(ctx)
 
-	delBufferManager := &DelBufferManager{
-		channel:       channel,
-		delMemorySize: 0,
-		delBufHeap:    &PriorityQueue{},
+	delBufferManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
 	}
 
 	service := &dataSyncService{

@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
@@ -36,160 +37,164 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// DelBufferManager is in charge of managing insertBuf and delBuf from an overall prospect
+// DeltaBufferManager is in charge of managing insertBuf and delBuf from an overall prospect
 // not only controlling buffered data size based on every segment size, but also triggering
 // insert/delete flush when the memory usage of the whole manager reach a certain level.
 // but at the first stage, this struct is only used for delete buff
-type DelBufferManager struct {
-	channel       Channel
-	mu            sync.Mutex // guards delMemorySize and delBufHeap
-	delMemorySize int64
-	delBufHeap    *PriorityQueue
+//
+// DeltaBufferManager manages channel, usedMemory and delBufHeap.
+type DeltaBufferManager struct {
+	channel    Channel
+	usedMemory atomic.Int64
+
+	heapGuard  sync.Mutex // guards delBufHeap
+	delBufHeap *PriorityQueue
 }
 
-func (bm *DelBufferManager) GetSegDelBufMemSize(segID UniqueID) int64 {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
-		return delDataBuf.item.memorySize
+func (m *DeltaBufferManager) GetEntriesNum(segID UniqueID) int64 {
+	if buffer, ok := m.Load(segID); ok {
+		return buffer.GetEntriesNum()
 	}
+
 	return 0
 }
 
-func (bm *DelBufferManager) GetEntriesNum(segID UniqueID) int64 {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
-		return delDataBuf.GetEntriesNum()
+func (m *DeltaBufferManager) UpdateCompactedSegments() {
+	compactedTo2From := m.channel.listCompactedSegmentIDs()
+	for compactedTo, compactedFrom := range compactedTo2From {
+
+		// if the compactedTo segment has 0 numRows, there'll be no segments
+		// in the channel meta, so remove all compacted from segments related
+		if !m.channel.hasSegment(compactedTo, true) {
+			for _, segID := range compactedFrom {
+				m.Delete(segID)
+			}
+			m.channel.removeSegments(compactedFrom...)
+			continue
+		}
+
+		compactToDelBuff, loaded := m.Load(compactedTo)
+		if !loaded {
+			compactToDelBuff = newDelDataBuf(compactedTo)
+		}
+
+		for _, segID := range compactedFrom {
+			if delDataBuf, loaded := m.Load(segID); loaded {
+				compactToDelBuff.MergeDelDataBuf(delDataBuf)
+				m.Delete(segID)
+			}
+		}
+
+		// only store delBuf if EntriesNum > 0
+		if compactToDelBuff.EntriesNum > 0 {
+
+			m.pushOrFixHeap(compactedTo, compactToDelBuff)
+			// We need to re-add the memorySize because m.Delete(segID) sub them all.
+			m.usedMemory.Add(compactToDelBuff.GetMemorySize())
+			m.updateMeta(compactedTo, compactToDelBuff)
+		}
+
+		log.Info("update delBuf for compacted segments",
+			zap.Int64("compactedTo segmentID", compactedTo),
+			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
+			zap.Int64("usedMemory", m.usedMemory.Load()),
+		)
+		m.channel.removeSegments(compactedFrom...)
 	}
-	return 0
 }
 
-// Store :the method only for unit test
-func (bm *DelBufferManager) Store(segID UniqueID, delDataBuf *DelDataBuf) {
-	bm.channel.setCurDeleteBuffer(segID, delDataBuf)
+func (m *DeltaBufferManager) updateMeta(segID UniqueID, delDataBuf *DelDataBuf) {
+	m.channel.setCurDeleteBuffer(segID, delDataBuf)
 }
 
-func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
+// pushOrFixHeap updates and sync memory size with priority queue
+func (m *DeltaBufferManager) pushOrFixHeap(segID UniqueID, buffer *DelDataBuf) {
+	m.heapGuard.Lock()
+	defer m.heapGuard.Unlock()
+	if _, loaded := m.Load(segID); loaded {
+		heap.Fix(m.delBufHeap, buffer.item.index)
+	} else {
+		heap.Push(m.delBufHeap, buffer.item)
+	}
+}
+
+// deleteFromHeap deletes an item from the heap
+func (m *DeltaBufferManager) deleteFromHeap(buffer *DelDataBuf) {
+	m.heapGuard.Lock()
+	defer m.heapGuard.Unlock()
+
+	if itemIdx, ok := buffer.GetItemIndex(); ok {
+		heap.Remove(m.delBufHeap, itemIdx)
+	}
+}
+
+func (m *DeltaBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 	tss []Timestamp, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
-	//1. load or create delDataBuf
-	var delDataBuf *DelDataBuf
-	buffer, loaded := bm.channel.getCurDeleteBuffer(segID)
-	if loaded {
-		delDataBuf = buffer
-	} else {
-		delDataBuf = newDelDataBuf()
-	}
-
-	//2. fill in new delta
-	delData := delDataBuf.delData
-	rowCount := len(pks)
-	var bufSize int64
-	for i := 0; i < rowCount; i++ {
-		delData.Pks = append(delData.Pks, pks[i])
-		delData.Tss = append(delData.Tss, tss[i])
-		switch pks[i].Type() {
-		case schemapb.DataType_Int64:
-			bufSize += 8
-		case schemapb.DataType_VarChar:
-			varCharPk := pks[i].(*varCharPrimaryKey)
-			bufSize += int64(len(varCharPk.Value))
-		}
-		//accumulate buf size for timestamp, which is 8 bytes
-		bufSize += 8
-	}
-	//3. update statistics of del data
-	delDataBuf.accumulateEntriesNum(int64(rowCount))
-	delDataBuf.updateTimeRange(tr)
-	delDataBuf.updateStartAndEndPosition(startPos, endPos)
-
-	//4. update and sync memory size with priority queue
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
+	buffer, loaded := m.Load(segID)
 	if !loaded {
-		delDataBuf.item.segmentID = segID
-		delDataBuf.item.memorySize = bufSize
-		heap.Push(bm.delBufHeap, delDataBuf.item)
-	} else {
-		bm.delBufHeap.update(delDataBuf.item, delDataBuf.item.memorySize+bufSize)
+		buffer = newDelDataBuf(segID)
 	}
-	bm.channel.setCurDeleteBuffer(segID, delDataBuf)
-	bm.delMemorySize += bufSize
-	//4. sync metrics
+
+	size := buffer.Buffer(pks, tss, tr, startPos, endPos)
+
+	m.pushOrFixHeap(segID, buffer)
+	m.updateMeta(segID, buffer)
+	m.usedMemory.Add(size)
+
 	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(rowCount))
+		fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(len(pks)))
 }
 
-func (bm *DelBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok bool) {
-	return bm.channel.getCurDeleteBuffer(segID)
+func (m *DeltaBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok bool) {
+	return m.channel.getCurDeleteBuffer(segID)
 }
 
-func (bm *DelBufferManager) Delete(segID UniqueID) {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	if buf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
-		item := buf.item
-		bm.delMemorySize -= item.memorySize
-		heap.Remove(bm.delBufHeap, item.index)
-		bm.channel.rollDeleteBuffer(segID)
-	}
-}
+func (m *DeltaBufferManager) Delete(segID UniqueID) {
+	if buffer, loaded := m.Load(segID); loaded {
+		m.usedMemory.Sub(buffer.GetMemorySize())
+		m.deleteFromHeap(buffer)
+		m.channel.rollDeleteBuffer(segID)
 
-func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFromSegIDs []UniqueID) {
-	var compactToDelBuff *DelDataBuf
-	compactToDelBuff, loaded := bm.Load(compactedToSegID)
-	if !loaded {
-		compactToDelBuff = newDelDataBuf()
-		compactToDelBuff.item.segmentID = compactedToSegID
-	}
-
-	for _, segID := range compactedFromSegIDs {
-		if delDataBuf, loaded := bm.Load(segID); loaded {
-			compactToDelBuff.mergeDelDataBuf(delDataBuf)
-			bm.Delete(segID)
-		}
-	}
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	// only store delBuf if EntriesNum > 0
-	if compactToDelBuff.EntriesNum > 0 {
-		if loaded {
-			bm.delBufHeap.update(compactToDelBuff.item, compactToDelBuff.item.memorySize)
-		} else {
-			heap.Push(bm.delBufHeap, compactToDelBuff.item)
-		}
-
-		// We need to re-add the memorySize because bm.Delete(segID) sub them all.
-		bm.delMemorySize += compactToDelBuff.item.memorySize
-		bm.channel.setCurDeleteBuffer(compactedToSegID, compactToDelBuff)
 	}
 }
 
-func (bm *DelBufferManager) ShouldFlushSegments() []UniqueID {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	var shouldFlushSegments []UniqueID
-	if bm.delMemorySize < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
-		return shouldFlushSegments
+func (m *DeltaBufferManager) popHeapItem() *Item {
+	m.heapGuard.Lock()
+	defer m.heapGuard.Unlock()
+	return heap.Pop(m.delBufHeap).(*Item)
+}
+
+func (m *DeltaBufferManager) ShouldFlushSegments() []UniqueID {
+	var memUsage = m.usedMemory.Load()
+	if memUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
+		return nil
 	}
-	mmUsage := bm.delMemorySize
-	var poppedSegMem []*Item
+
+	var (
+		poppedSegmentIDs []UniqueID
+		poppedItems      []*Item
+	)
 	for {
-		segMem := heap.Pop(bm.delBufHeap).(*Item)
-		poppedSegMem = append(poppedSegMem, segMem)
-		shouldFlushSegments = append(shouldFlushSegments, segMem.segmentID)
-		log.Debug("add segment for delete buf flush", zap.Int64("segmentID", segMem.segmentID))
-		mmUsage -= segMem.memorySize
-		if mmUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
+		segItem := m.popHeapItem()
+		poppedItems = append(poppedItems, segItem)
+		poppedSegmentIDs = append(poppedSegmentIDs, segItem.segmentID)
+		memUsage -= segItem.memorySize
+		if memUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 			break
+
 		}
 	}
+
 	//here we push all selected segment back into the heap
 	//in order to keep the heap semantically correct
-	for _, segMem := range poppedSegMem {
-		heap.Push(bm.delBufHeap, segMem)
+	m.heapGuard.Lock()
+	for _, segMem := range poppedItems {
+		heap.Push(m.delBufHeap, segMem)
 	}
-	return shouldFlushSegments
+	m.heapGuard.Unlock()
+
+	log.Info("Add segments to sync delete buffer for stressfull memory", zap.Any("segments", poppedItems))
+	return poppedSegmentIDs
 }
 
 // An Item is something we manage in a memorySize priority queue.
@@ -313,6 +318,49 @@ type DelDataBuf struct {
 	endPos   *msgpb.MsgPosition
 }
 
+// Buffer returns the memory size buffered
+func (ddb *DelDataBuf) Buffer(pks []primaryKey, tss []Timestamp, tr TimeRange, startPos, endPos *msgpb.MsgPosition) int64 {
+	var (
+		rowCount = len(pks)
+		bufSize  int64
+	)
+	for i := 0; i < rowCount; i++ {
+		ddb.delData.Append(pks[i], tss[i])
+
+		switch pks[i].Type() {
+		case schemapb.DataType_Int64:
+			bufSize += 8
+		case schemapb.DataType_VarChar:
+			varCharPk := pks[i].(*varCharPrimaryKey)
+			bufSize += int64(len(varCharPk.Value))
+		}
+		//accumulate buf size for timestamp, which is 8 bytes
+		bufSize += 8
+	}
+
+	ddb.accumulateEntriesNum(int64(rowCount))
+	ddb.updateTimeRange(tr)
+	ddb.updateStartAndEndPosition(startPos, endPos)
+	// update memorysize
+	ddb.item.memorySize += bufSize
+
+	return bufSize
+}
+
+func (ddb *DelDataBuf) GetMemorySize() int64 {
+	if ddb.item != nil {
+		return ddb.item.memorySize
+	}
+	return 0
+}
+
+func (ddb *DelDataBuf) GetItemIndex() (int, bool) {
+	if ddb.item != nil {
+		return ddb.item.index, true
+	}
+	return 0, false
+}
+
 func (ddb *DelDataBuf) accumulateEntriesNum(entryNum int64) {
 	ddb.EntriesNum += entryNum
 }
@@ -326,7 +374,7 @@ func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
 	}
 }
 
-func (ddb *DelDataBuf) mergeDelDataBuf(buf *DelDataBuf) {
+func (ddb *DelDataBuf) MergeDelDataBuf(buf *DelDataBuf) {
 	ddb.accumulateEntriesNum(buf.EntriesNum)
 
 	tr := TimeRange{timestampMax: buf.TimestampTo, timestampMin: buf.TimestampFrom}
@@ -391,7 +439,7 @@ func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 		tsTo:   0}, nil
 }
 
-func newDelDataBuf() *DelDataBuf {
+func newDelDataBuf(segmentID UniqueID) *DelDataBuf {
 	return &DelDataBuf{
 		delData: &DeleteData{},
 		Binlog: datapb.Binlog{
@@ -400,7 +448,7 @@ func newDelDataBuf() *DelDataBuf {
 			TimestampTo:   0,
 		},
 		item: &Item{
-			memorySize: 0,
+			segmentID: segmentID,
 		},
 	}
 }
