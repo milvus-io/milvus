@@ -200,6 +200,9 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		return err
 	}
 
+	//tickler will update addSegment progress to watchInfo
+	tickler.watch()
+	defer tickler.stop()
 	futures := make([]*conc.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
 
 	for _, us := range unflushedSegmentInfos {
@@ -275,10 +278,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		})
 		futures = append(futures, future)
 	}
-
-	//tickler will update addSegment progress to watchInfo
-	tickler.watch()
-	defer tickler.stop()
 
 	err = conc.AwaitAll(futures...)
 	if err != nil {
