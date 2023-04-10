@@ -21,7 +21,7 @@
 #include "log/Log.h"
 
 #include "knowhere/factory.h"
-#include "knowhere/comp/Timer.h"
+#include "knowhere/comp/time_recorder.h"
 #define RAW_DATA "RAW_DATA"
 
 namespace milvus::index {
