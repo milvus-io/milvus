@@ -93,7 +93,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
 			}
 			log.Warn("failed to watch Delta channel while load segment", zap.Int64("collectionID", l.req.CollectionID),
-				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err), zap.Int64("msgID", l.req.Base.MsgID))
 			return err
 		}
 

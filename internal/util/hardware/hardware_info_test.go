@@ -57,3 +57,9 @@ func Test_GetMemoryUsageRatio(t *testing.T) {
 		zap.Float64("Memory usage ratio", GetMemoryUseRatio()))
 	assert.True(t, GetMemoryUseRatio() > 0)
 }
+
+func Test_GetAvailableMemoryCount(t *testing.T) {
+	log.Info("TestGetAvailableMemoryCount",
+		zap.Uint64("Available memory count", GetAvailableMemoryCount()))
+	assert.True(t, GetAvailableMemoryCount() > 0)
+}
