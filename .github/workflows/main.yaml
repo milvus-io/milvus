@@ -87,18 +87,18 @@ jobs:
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage generated-proto-go-without-cpp"
+      - run: |
+          zip -r code.zip . -x "./.docker/*"
       - name: Archive code
         uses: actions/upload-artifact@v3
         with:
           name: code
-          path: |
-            ./
-            !.docker
+          path: code.zip
   UT-Cpp:
     name: UT for Cpp
     needs: Build
     runs-on: ubuntu-${{ matrix.ubuntu }}
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +110,9 @@ jobs:
         uses: actions/download-artifact@v3.0.1
         with:
           name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: Cache Conan Packages
         uses: pat-s/always-upload-cache@v3
         with:
@@ -135,7 +138,7 @@ jobs:
     name: UT for Go
     needs: Build
     runs-on: ubuntu-${{ matrix.ubuntu }}
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -147,6 +150,9 @@ jobs:
         uses: actions/download-artifact@v3.0.1
         with:
           name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
