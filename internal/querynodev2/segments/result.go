@@ -352,7 +352,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	return ret, nil
 }
 
-func MergeInternalRetrieveResultsAndFillIfEmpty(
+func mergeInternalRetrieveResultsAndFillIfEmpty(
 	ctx context.Context,
 	retrieveResults []*internalpb.RetrieveResults,
 	limit int64,
@@ -372,7 +372,7 @@ func MergeInternalRetrieveResultsAndFillIfEmpty(
 	return mergedResult, nil
 }
 
-func MergeSegcoreRetrieveResultsAndFillIfEmpty(
+func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	ctx context.Context,
 	retrieveResults []*segcorepb.RetrieveResults,
 	limit int64,

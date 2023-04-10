@@ -678,6 +678,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("travelTimestamp", req.GetReq().GetTravelTimestamp()),
+		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
@@ -725,7 +726,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	if err := runningGp.Wait(); err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
-	ret, err := segments.MergeInternalRetrieveResult(ctx, toMergeResults, req.GetReq().GetLimit())
+
+	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
+
+	ret, err := reducer.Reduce(ctx, toMergeResults)
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
