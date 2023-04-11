@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestInsertTask_CheckAligned(t *testing.T) {
@@ -218,4 +222,42 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	case2.insertMsg.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
 	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
+}
+
+func TestInsertTask(t *testing.T) {
+	t.Run("test getChannels", func(t *testing.T) {
+		collectionID := UniqueID(0)
+		collectionName := "col-0"
+		channels := []pChan{"mock-chan-0", "mock-chan-1"}
+		cache := newMockCache()
+		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return collectionID, nil
+		})
+		globalMetaCache = cache
+		chMgr := newMockChannelsMgr()
+		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
+			return channels, nil
+		}
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: msgpb.InsertRequest{
+					CollectionName: collectionName,
+				},
+			},
+			chMgr: chMgr,
+		}
+		resChannels, err := it.getChannels()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, channels, resChannels)
+		assert.ElementsMatch(t, channels, it.pChannels)
+
+		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {
+			return nil, fmt.Errorf("mock err")
+		}
+		// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
+		resChannels, err = it.getChannels()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, channels, resChannels)
+	})
 }

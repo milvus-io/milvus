@@ -116,11 +116,19 @@ func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 }
 
 func (it *upsertTask) getChannels() ([]pChan, error) {
+	if len(it.pChannels) != 0 {
+		return it.pChannels, nil
+	}
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.req.CollectionName)
 	if err != nil {
 		return nil, err
 	}
-	return it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.getChannels(collID)
+	if err != nil {
+		return nil, err
+	}
+	it.pChannels = channels
+	return channels, nil
 }
 
 func (it *upsertTask) OnEnqueue() error {

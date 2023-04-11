@@ -82,11 +82,19 @@ func (dt *deleteTask) OnEnqueue() error {
 }
 
 func (dt *deleteTask) getChannels() ([]pChan, error) {
+	if len(dt.pChannels) != 0 {
+		return dt.pChannels, nil
+	}
 	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.deleteMsg.CollectionName)
 	if err != nil {
 		return nil, err
 	}
-	return dt.chMgr.getChannels(collID)
+	channels, err := dt.chMgr.getChannels(collID)
+	if err != nil {
+		return nil, err
+	}
+	dt.pChannels = channels
+	return channels, nil
 }
 
 func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res *schemapb.IDs, rowNum int64, err error) {
