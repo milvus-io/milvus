@@ -70,7 +70,6 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 		plan := SegmentAssignPlan{
 			From:    -1,
 			To:      ni.nodeID,
-			Weight:  GetWeight(1),
 			Segment: s,
 		}
 		plans = append(plans, plan)
@@ -257,7 +256,6 @@ func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesS
 			ReplicaID: replica.GetID(),
 			From:      nodeIndex[s.GetID()],
 			To:        ni.nodeID,
-			Weight:    GetWeight(1),
 			Segment:   s,
 		}
 		segmentPlans = append(segmentPlans, plan)
@@ -279,7 +277,6 @@ func (b *ScoreBasedBalancer) getStoppedChannelPlan(replica *meta.Replica, online
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].ReplicaID = replica.ID
-			plans[i].Weight = GetWeight(1)
 		}
 		channelPlans = append(channelPlans, plans...)
 	}
@@ -340,7 +337,6 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 				From:      fromNode.nodeID,
 				To:        toNode.nodeID,
 				Segment:   targetSegmentToMove,
-				Weight:    GetWeight(0),
 			}
 			segmentPlans = append(segmentPlans, plan)
 		} else {
@@ -354,7 +350,6 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 					From:      fromNode.nodeID,
 					To:        toNode.nodeID,
 					Segment:   targetSegmentToMove,
-					Weight:    GetWeight(0),
 				}
 				segmentPlans = append(segmentPlans, plan)
 			} else {

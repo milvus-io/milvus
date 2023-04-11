@@ -106,11 +106,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 					//as assign segments is used while loading collection,
 					//all assignPlan should have weight equal to 1(HIGH PRIORITY)
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 15,
-						CollectionID: 1}}, From: -1, To: 1, Weight: 1},
+						CollectionID: 1}}, From: -1, To: 1},
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 10,
-						CollectionID: 1}}, From: -1, To: 3, Weight: 1},
+						CollectionID: 1}}, From: -1, To: 3},
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 5,
-						CollectionID: 1}}, From: -1, To: 2, Weight: 1},
+						CollectionID: 1}}, From: -1, To: 2},
 				},
 			},
 		},
@@ -151,9 +151,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			segmentCnts:   []int{0, 0, 0},
 			expectPlans: [][]SegmentAssignPlan{
 				{
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 9, NumOfRows: 15, CollectionID: 1}}, From: -1, To: 3, Weight: 1},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 8, NumOfRows: 10, CollectionID: 1}}, From: -1, To: 2, Weight: 1},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 7, NumOfRows: 5, CollectionID: 1}}, From: -1, To: 1, Weight: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 9, NumOfRows: 15, CollectionID: 1}}, From: -1, To: 3},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 8, NumOfRows: 10, CollectionID: 1}}, From: -1, To: 2},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 7, NumOfRows: 5, CollectionID: 1}}, From: -1, To: 1},
 				},
 			},
 		},
@@ -192,12 +192,12 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				//much more than node3, but following assignment will still assign segment based on [10,20,40]
 				//rather than [70,70,40], this flaw will be mitigated by balance process and maybe fixed in the later versions
 				{
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 60, CollectionID: 1}}, From: -1, To: 1, Weight: 1},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 50, CollectionID: 1}}, From: -1, To: 2, Weight: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 60, CollectionID: 1}}, From: -1, To: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, NumOfRows: 50, CollectionID: 1}}, From: -1, To: 2},
 				},
 				{
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 6, NumOfRows: 15, CollectionID: 2}}, From: -1, To: 1, Weight: 1},
-					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 7, NumOfRows: 10, CollectionID: 2}}, From: -1, To: 2, Weight: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 6, NumOfRows: 15, CollectionID: 2}}, From: -1, To: 1},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 7, NumOfRows: 10, CollectionID: 2}}, From: -1, To: 2},
 				},
 			},
 		},
@@ -489,9 +489,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			},
 			expectPlans: []SegmentAssignPlan{
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20},
-					Node: 1}, From: 1, To: 3, ReplicaID: 1, Weight: 1},
+					Node: 1}, From: 1, To: 3, ReplicaID: 1},
 				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10},
-					Node: 1}, From: 1, To: 3, ReplicaID: 1, Weight: 1},
+					Node: 1}, From: 1, To: 3, ReplicaID: 1},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
