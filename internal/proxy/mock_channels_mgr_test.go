@@ -5,8 +5,16 @@ type removeDMLStreamFuncType = func(collectionID UniqueID) error
 
 type mockChannelsMgr struct {
 	channelsMgr
+	getChannelsFunc func(collectionID UniqueID) ([]pChan, error)
 	getVChannelsFuncType
 	removeDMLStreamFuncType
+}
+
+func (m *mockChannelsMgr) getChannels(collectionID UniqueID) ([]pChan, error) {
+	if m.getChannelsFunc != nil {
+		return m.getChannelsFunc(collectionID)
+	}
+	return nil, nil
 }
 
 func (m *mockChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, error) {
