@@ -3,7 +3,7 @@ import os.path
 import time
 import threading
 import requests
-import etcd3
+import pyetcd
 from pymilvus import connections
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -337,7 +337,7 @@ def find_activate_standby_coord_pod(namespace, release_name, coord_type):
     service = api_instance.read_namespaced_service(name=etcd_service_name, namespace=namespace)
     etcd_cluster_ip = service.spec.cluster_ip
     etcd_port = service.spec.ports[0].port
-    etcd = etcd3.client(host=etcd_cluster_ip, port=etcd_port)
+    etcd = pyetcd.client(host=etcd_cluster_ip, port=etcd_port)
     v = etcd.get(f'by-dev/meta/session/{coord_type}')
     log.info(f"coord_type: {coord_type}, etcd session value: {v}")
     activated_pod_ip = json.loads(v[0])["Address"].split(":")[0]
