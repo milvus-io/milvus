@@ -7,6 +7,7 @@ on:
     paths:
       - 'scripts/**'
       - 'internal/**'
+      - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
       - '.github/workflows/main.yaml'
@@ -21,6 +22,7 @@ on:
     paths:
       - 'scripts/**'
       - 'internal/**'
+      - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
       - '.github/workflows/main.yaml'

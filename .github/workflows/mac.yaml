@@ -10,6 +10,7 @@ on:
     paths:
       - 'scripts/**'
       - 'internal/**'
+      - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
       - '.github/workflows/mac.yaml'

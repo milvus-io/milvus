@@ -11,6 +11,7 @@ on:
     paths:
       - 'scripts/**'
       - 'internal/**'
+      - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
       - '.github/workflows/code-checker.yaml'

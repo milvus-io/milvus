@@ -30,9 +30,10 @@ if [[ "$(uname -m)" == "arm64" ]]; then
   APPLE_SILICON_FLAG="-tags dynamic"
 fi
 
-# ignore MinIO,S3 unittes
+# ignore MinIO,S3 unittests
 MILVUS_DIR="${ROOT_DIR}/internal/"
-echo "Running go unittest under $MILVUS_DIR"
+PKG_DIR="${ROOT_DIR}/pkg/"
+echo "Running go unittest under $MILVUS_DIR & $PKG_DIR"
 
 TEST_ALL=1
 TEST_TAG="ALL"
@@ -70,7 +71,7 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..."
 function test_querynode()
 {
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast -count=1
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynodev2/..." -failfast -count=1
 }
 
 
@@ -112,6 +113,16 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failf
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast -count=1
+}
+
+function test_pkg()
+{
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/common/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/config/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/log/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/mq/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/tracer/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${PKG_DIR}/util/..." -failfast -count=1
 }
 
 function test_datanode
@@ -172,6 +183,7 @@ test_allocator
 test_tso
 test_config
 test_util
+test_pkg
 test_metastore
 }
 
@@ -222,6 +234,9 @@ case "${TEST_TAG}" in
         ;;
     util)
 	test_util
+        ;;
+    pkg)
+    test_pkg
         ;;
     metastore)
 	test_metastore
