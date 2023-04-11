@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -62,7 +63,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
 
-	log.Info("start to update current target for collection")
+	log.Debug("start to update current target for collection")
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
@@ -72,7 +73,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
 	mgr.next.removeCollectionTarget(collectionID)
 
-	log.Info("finish to update current target for collection",
+	log.Debug("finish to update current target for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 }
@@ -99,29 +100,22 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	defer mgr.rwMutex.Unlock()
 
 	partitionIDs := make([]int64, 0)
-	collection := mgr.meta.GetCollection(collectionID)
-	if collection != nil {
-		var err error
-		partitionIDs, err = mgr.broker.GetPartitions(context.Background(), collectionID)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitions := mgr.meta.GetPartitionsByCollection(collectionID)
-		if partitions != nil {
-			partitionIDs = lo.Map(partitions, func(partition *Partition, i int) int64 {
-				return partition.PartitionID
-			})
-		}
+	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
+	// if no partition id specified, will pull collection
+	if len(partitions) > 0 {
+		partitionIDs = lo.Map(partitions, func(partition *Partition, i int) int64 {
+			return partition.PartitionID
+		})
 	}
 
 	return mgr.updateCollectionNextTarget(collectionID, partitionIDs...)
 }
 
 func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partitionIDs ...int64) error {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := log.With(zap.Int64("collectionID", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs))
 
-	log.Info("start to update next targets for collection")
+	log.Debug("start to update next targets for collection")
 	newTarget, err := mgr.PullNextTarget(mgr.broker, collectionID, partitionIDs...)
 	if err != nil {
 		log.Error("failed to get next targets for collection",
@@ -131,20 +125,30 @@ func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partiti
 
 	mgr.next.updateCollectionTarget(collectionID, newTarget)
 
-	log.Info("finish to update next targets for collection",
+	log.Debug("finish to update next targets for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 
 	return nil
 }
 
-func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
-	log.Info("start to pull next targets for partition",
+func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
+	log.Debug("start to pull next targets for partition",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
 
-	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
+	dmChannels := make(map[string]*DmChannel)
+	if len(partitionIDs) == 0 {
+		var err error
+		partitionIDs, err = mgr.broker.GetPartitions(context.Background(), collectionID)
+		if err != nil {
+			log.Error("failed to get partitions during pull next target", zap.Int64("collectionID", collectionID))
+			return nil, err
+		}
+	}
+
+	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	for _, partitionID := range partitionIDs {
 		log.RatedDebug(10, "get recovery info...",
 			zap.Int64("collectionID", collectionID),
@@ -172,13 +176,48 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, part
 		}
 	}
 
-	dmChannels := make(map[string]*DmChannel)
 	for _, infos := range channelInfos {
 		merged := mgr.mergeDmChannelInfo(infos)
 		dmChannels[merged.GetChannelName()] = merged
 	}
 
 	return NewCollectionTarget(segments, dmChannels), nil
+}
+
+func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
+	log.Debug("start to pull next targets for partition",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs))
+
+	tryPullNextTargetV1 := func() (*CollectionTarget, error) {
+		// for rolling  upgrade, when call GetRecoveryInfoV2 failed, back to retry GetRecoveryInfo
+		target, err := mgr.PullNextTargetV1(broker, collectionID, partitionIDs...)
+		if err != nil {
+			return nil, err
+		}
+
+		return target, nil
+	}
+
+	channels := make(map[string]*DmChannel)
+	segments := make(map[int64]*datapb.SegmentInfo, 0)
+	vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID, partitionIDs...)
+	if err != nil {
+		if funcutil.IsGrpcErr(err) {
+			return tryPullNextTargetV1()
+		}
+		return nil, err
+	}
+
+	for _, segmentInfo := range segmentInfos {
+		segments[segmentInfo.GetID()] = segmentInfo
+	}
+
+	for _, info := range vChannelInfos {
+		channels[info.GetChannelName()] = DmChannelFromVChannel(info)
+	}
+
+	return NewCollectionTarget(segments, channels), nil
 }
 
 func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {

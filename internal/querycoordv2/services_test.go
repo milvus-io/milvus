@@ -1740,19 +1740,20 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 		})
 	}
 
+	segmentBinlogs := []*datapb.SegmentInfo{}
 	for partition, segments := range suite.segments[collection] {
-		segmentBinlogs := []*datapb.SegmentBinlogs{}
 		for _, segment := range segments {
-			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-				SegmentID:     segment,
+			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentInfo{
+				ID:            segment,
 				InsertChannel: suite.channels[collection][segment%2],
+				PartitionID:   partition,
+				CollectionID:  collection,
 			})
 		}
-
-		suite.broker.EXPECT().
-			GetRecoveryInfo(mock.Anything, collection, partition).
-			Return(vChannels, segmentBinlogs, nil)
 	}
+	suite.broker.EXPECT().
+		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
+		Return(vChannels, segmentBinlogs, nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

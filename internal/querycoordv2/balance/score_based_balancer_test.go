@@ -231,7 +231,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 		notExistedNodes      []int64
 		collectionIDs        []int64
 		replicaIDs           []int64
-		collectionsSegments  [][]*datapb.SegmentBinlogs
+		collectionsSegments  [][]*datapb.SegmentInfo
 		states               []session.State
 		shouldMock           bool
 		distributions        map[int64][]*meta.Segment
@@ -244,9 +244,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			nodes:         []int64{1, 2},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
@@ -267,9 +267,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			nodes:         []int64{1, 2},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
@@ -298,7 +298,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			for i := range c.collectionIDs {
 				collection := utils.CreateTestCollection(c.collectionIDs[i], int32(c.replicaIDs[i]))
 				collections = append(collections, collection)
-				suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
+				suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
 					nil, c.collectionsSegments[i], nil)
 				suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionIDs[i]).Return([]int64{c.collectionIDs[i]}, nil).Maybe()
 				balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionIDs[i], c.collectionIDs[i])
@@ -343,7 +343,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		notExistedNodes     []int64
 		collectionIDs       []int64
 		replicaIDs          []int64
-		collectionsSegments [][]*datapb.SegmentBinlogs
+		collectionsSegments [][]*datapb.SegmentInfo
 		states              []session.State
 		shouldMock          bool
 		distributions       []map[int64][]*meta.Segment
@@ -353,12 +353,12 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		nodes:         []int64{1, 2, 3},
 		collectionIDs: []int64{1, 2},
 		replicaIDs:    []int64{1, 2},
-		collectionsSegments: [][]*datapb.SegmentBinlogs{
+		collectionsSegments: [][]*datapb.SegmentInfo{
 			{
-				{SegmentID: 1}, {SegmentID: 3},
+				{ID: 1}, {ID: 3},
 			},
 			{
-				{SegmentID: 2}, {SegmentID: 4},
+				{ID: 2}, {ID: 4},
 			},
 		},
 		states: []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
@@ -405,7 +405,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
 		collections = append(collections, collection)
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, balanceCase.collectionIDs[i], balanceCase.replicaIDs[i]).Return(
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i], balanceCase.replicaIDs[i]).Return(
 			nil, balanceCase.collectionsSegments[i], nil)
 		suite.broker.EXPECT().GetPartitions(mock.Anything, balanceCase.collectionIDs[i]).Return([]int64{balanceCase.collectionIDs[i]}, nil).Maybe()
 		balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i])
@@ -458,7 +458,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 		notExistedNodes      []int64
 		collectionIDs        []int64
 		replicaIDs           []int64
-		collectionsSegments  [][]*datapb.SegmentBinlogs
+		collectionsSegments  [][]*datapb.SegmentInfo
 		states               []session.State
 		shouldMock           bool
 		distributions        map[int64][]*meta.Segment
@@ -472,9 +472,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateStopping, session.NodeStateNormal, session.NodeStateNormal},
@@ -501,9 +501,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateStopping, session.NodeStateStopping, session.NodeStateStopping},
@@ -525,9 +525,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{1, 2, 3},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
@@ -558,7 +558,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			for i := range c.collectionIDs {
 				collection := utils.CreateTestCollection(c.collectionIDs[i], int32(c.replicaIDs[i]))
 				collections = append(collections, collection)
-				suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
+				suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
 					nil, c.collectionsSegments[i], nil)
 				suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionIDs[i]).Return([]int64{c.collectionIDs[i]}, nil).Maybe()
 				balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionIDs[i], c.collectionIDs[i])

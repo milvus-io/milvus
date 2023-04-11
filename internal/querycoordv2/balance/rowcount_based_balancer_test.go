@@ -298,24 +298,24 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
-			segments := []*datapb.SegmentBinlogs{
+			segments := []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 				{
-					SegmentID: 3,
+					ID: 3,
 				},
 				{
-					SegmentID: 4,
+					ID: 4,
 				},
 				{
-					SegmentID: 5,
+					ID: 5,
 				},
 			}
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
@@ -323,7 +323,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0)
 			for node, s := range c.distributions {
@@ -358,8 +358,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 		shouldMock           bool
 		distributions        map[int64][]*meta.Segment
 		distributionChannels map[int64][]*meta.DmChannel
-		segmentInCurrent     []*datapb.SegmentBinlogs
-		segmentInNext        []*datapb.SegmentBinlogs
+		segmentInCurrent     []*datapb.SegmentInfo
+		segmentInNext        []*datapb.SegmentInfo
 		expectPlans          []SegmentAssignPlan
 		expectChannelPlans   []ChannelAssignPlan
 	}{
@@ -380,39 +380,39 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3},
 				},
 			},
-			segmentInCurrent: []*datapb.SegmentBinlogs{
+			segmentInCurrent: []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 				{
-					SegmentID: 3,
+					ID: 3,
 				},
 				{
-					SegmentID: 4,
+					ID: 4,
 				},
 				{
-					SegmentID: 5,
+					ID: 5,
 				},
 			},
 
-			segmentInNext: []*datapb.SegmentBinlogs{
+			segmentInNext: []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 				{
-					SegmentID: 3,
+					ID: 3,
 				},
 				{
-					SegmentID: 4,
+					ID: 4,
 				},
 				{
-					SegmentID: 5,
+					ID: 5,
 				},
 			},
 			distributionChannels: map[int64][]*meta.DmChannel{
@@ -431,7 +431,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
 			},
 		},
-
 		{
 			name:        "not exist in next target",
 			nodes:       []int64{1, 2, 3},
@@ -449,29 +448,29 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3},
 				},
 			},
-			segmentInCurrent: []*datapb.SegmentBinlogs{
+			segmentInCurrent: []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 				{
-					SegmentID: 3,
+					ID: 3,
 				},
 				{
-					SegmentID: 4,
+					ID: 4,
 				},
 				{
-					SegmentID: 5,
+					ID: 5,
 				},
 			},
-			segmentInNext: []*datapb.SegmentBinlogs{
+			segmentInNext: []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 			},
 			distributionChannels: map[int64][]*meta.DmChannel{
@@ -497,7 +496,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
 
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(nil, c.segmentInCurrent, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(nil, c.segmentInCurrent, nil)
 			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
@@ -505,7 +504,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(nil, c.segmentInNext, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(nil, c.segmentInNext, nil)
 			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
@@ -584,24 +583,24 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
-			segments := []*datapb.SegmentBinlogs{
+			segments := []*datapb.SegmentInfo{
 				{
-					SegmentID: 1,
+					ID: 1,
 				},
 				{
-					SegmentID: 2,
+					ID: 2,
 				},
 				{
-					SegmentID: 3,
+					ID: 3,
 				},
 				{
-					SegmentID: 4,
+					ID: 4,
 				},
 				{
-					SegmentID: 5,
+					ID: 5,
 				},
 			}
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
