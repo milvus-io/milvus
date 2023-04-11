@@ -243,7 +243,6 @@ func (s *Session) Register() {
 		panic(err)
 	}
 	s.liveCh = s.processKeepAliveResponse(ch)
-	s.initWatchSessionCh()
 	s.UpdateRegistered(true)
 }
 
@@ -676,6 +675,7 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
+	s.initWatchSessionCh()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
