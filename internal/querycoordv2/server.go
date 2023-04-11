@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -573,7 +574,9 @@ func (s *Server) recover() error {
 }
 
 func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
-	err := s.targetMgr.UpdateCollectionNextTarget(collection)
+	err := retry.Do(ctx, func() error {
+		return s.targetMgr.UpdateCollectionNextTarget(collection)
+	})
 	if err != nil {
 		msg := fmt.Sprintf("failed to update next target for collection %d", collection)
 		log.Error(msg, zap.Error(err))
