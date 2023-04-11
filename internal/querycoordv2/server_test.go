@@ -165,7 +165,7 @@ func (suite *ServerSuite) TestRecoverFailed() {
 	}
 	suite.server.targetMgr = meta.NewTargetManager(broker, suite.server.meta)
 	err = suite.server.Start()
-	suite.NoError(err)
+	suite.Error(err)
 
 	for _, collection := range suite.collections {
 		suite.Nil(suite.server.targetMgr.GetDmChannelsByCollection(collection, meta.NextTarget))

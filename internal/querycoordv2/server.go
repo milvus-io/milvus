@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -577,7 +578,9 @@ func (s *Server) recover() error {
 }
 
 func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
-	err := s.targetMgr.UpdateCollectionNextTarget(collection)
+	err := retry.Do(ctx, func() error {
+		return s.targetMgr.UpdateCollectionNextTarget(collection)
+	})
 	if err != nil {
 		s.meta.CollectionManager.RemoveCollection(collection)
 		s.meta.ReplicaManager.RemoveCollection(collection)
@@ -585,6 +588,7 @@ func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64)
 			zap.Int64("collectionID", collection),
 			zap.Error(err),
 		)
+		return err
 	}
 	return nil
 }
