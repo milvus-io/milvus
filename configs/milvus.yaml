@@ -180,6 +180,9 @@ queryCoord:
   port: 19531
   autoHandoff: true # Enable auto handoff
   autoBalance: true # Enable auto balance
+  balancer: RowCountBasedBalancer # Balancer to use
+  globalRowCountFactor: 0.1 # Only used by scoreBasedBalancer
+  scoreUnbalanceTolerationFactor: 1.3 # Only used by scoreBasedBalancer
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
