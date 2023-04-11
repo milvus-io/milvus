@@ -197,7 +197,9 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		return failRet, nil
 	}
 
-	ret, err := segments.MergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), collection.Schema())
+	reducer := segments.CreateInternalReducer(req, collection.Schema())
+
+	ret, err := reducer.Reduce(ctx, results)
 	if err != nil {
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
@@ -243,7 +245,9 @@ func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequ
 		return nil, err
 	}
 
-	reducedResult, err := segments.MergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.Req.GetOutputFieldsId(), collection.Schema())
+	reducer := segments.CreateSegCoreReducer(req, collection.Schema())
+
+	reducedResult, err := reducer.Reduce(ctx, results)
 	if err != nil {
 		return nil, err
 	}
