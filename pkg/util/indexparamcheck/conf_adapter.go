@@ -70,10 +70,6 @@ const (
 	HNSWMinM              = 4
 	HNSWMaxM              = 64
 
-	MinNTrees = 1
-	// too large of n_trees takes much time, if there is real requirement, change this threshold.
-	MaxNTrees = 1024
-
 	// DIM is a constant used to represent dimension
 	DIM = "dim"
 	// Metric is a constant used to metric type
@@ -85,9 +81,6 @@ const (
 
 	EFConstruction = "efConstruction"
 	HNSWM          = "M"
-
-	PQM    = "PQM"
-	NTREES = "n_trees"
 )
 
 // METRICS is a set of all metrics types supported for float vector.
