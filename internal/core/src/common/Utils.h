@@ -133,8 +133,16 @@ IsMetricType(const std::string_view str,
 }
 
 inline bool
+IsFloatMetricType(const knowhere::MetricType& metric_type) {
+    return IsMetricType(metric_type, knowhere::metric::L2) ||
+           IsMetricType(metric_type, knowhere::metric::IP) ||
+           IsMetricType(metric_type, knowhere::metric::COSINE);
+}
+
+inline bool
 PositivelyRelated(const knowhere::MetricType& metric_type) {
-    return IsMetricType(metric_type, knowhere::metric::IP);
+    return IsMetricType(metric_type, knowhere::metric::IP) ||
+           IsMetricType(metric_type, knowhere::metric::COSINE);
 }
 
 inline std::string
