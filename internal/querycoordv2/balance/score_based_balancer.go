@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -34,7 +33,6 @@ import (
 
 type ScoreBasedBalancer struct {
 	*RowCountBasedBalancer
-	balancedCollectionsCurrentRound typeutil.UniqueSet
 }
 
 func NewScoreBasedBalancer(scheduler task.Scheduler,
@@ -43,8 +41,7 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager) *ScoreBasedBalancer {
 	return &ScoreBasedBalancer{
-		RowCountBasedBalancer:           NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
-		balancedCollectionsCurrentRound: typeutil.NewUniqueSet(),
+		RowCountBasedBalancer: NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
 	}
 }
 
@@ -109,50 +106,7 @@ func (b *ScoreBasedBalancer) calculatePriority(collectionID, nodeID int64) int {
 		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 }
 
-func (b *ScoreBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	ids := b.meta.CollectionManager.GetAll()
-
-	// loading collection should skip balance
-	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		return b.meta.GetCollection(cid).Status == querypb.LoadStatus_Loaded
-	})
-
-	sort.Slice(loadedCollections, func(i, j int) bool {
-		return loadedCollections[i] < loadedCollections[j]
-	})
-
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	hasUnBalancedCollections := false
-	for _, cid := range loadedCollections {
-		if b.balancedCollectionsCurrentRound.Contain(cid) {
-			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
-				zap.Int64("collectionID", cid))
-			continue
-		}
-		hasUnBalancedCollections = true
-		replicas := b.meta.ReplicaManager.GetByCollection(cid)
-		for _, replica := range replicas {
-			sPlans, cPlans := b.balanceReplica(replica)
-			PrintNewBalancePlans(cid, replica.GetID(), sPlans, cPlans)
-			segmentPlans = append(segmentPlans, sPlans...)
-			channelPlans = append(channelPlans, cPlans...)
-		}
-		b.balancedCollectionsCurrentRound.Insert(cid)
-		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
-			log.Debug("ScoreBasedBalancer has generated balance plans for", zap.Int64("collectionID", cid))
-			break
-		}
-	}
-	if !hasUnBalancedCollections {
-		b.balancedCollectionsCurrentRound.Clear()
-		log.Debug("ScoreBasedBalancer has balanced all " +
-			"collections in one round, clear collectionIDs for this round")
-	}
-
-	return segmentPlans, channelPlans
-}
-
-func (b *ScoreBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	nodes := replica.GetNodes()
 	if len(nodes) == 0 {
 		return nil, nil
@@ -209,7 +163,7 @@ func (b *ScoreBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAss
 		return nil, nil
 	}
 	//print current distribution before generating plans
-	PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager)
+	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(stoppingNodesSegments) != 0 {
 		log.Info("Handle stopping nodes",
 			zap.Int64("collection", replica.CollectionID),
@@ -219,11 +173,18 @@ func (b *ScoreBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		return b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments), b.getStoppedChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
+		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+	} else {
+		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
+		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
+		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)...)
+	}
+	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
+		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	}
 
-	// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-	return b.getNormalSegmentPlan(replica, nodesSegments), b.getNormalChannelPlan(replica, lo.Keys(nodesSegments))
+	return segmentPlans, channelPlans
 }
 
 func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
@@ -269,25 +230,7 @@ func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesS
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) getStoppedChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
-	channelPlans := make([]ChannelAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
-		plans := b.AssignChannel(dmChannels, onlineNodes)
-		for i := range plans {
-			plans[i].From = nodeID
-			plans[i].ReplicaID = replica.ID
-		}
-		channelPlans = append(channelPlans, plans...)
-	}
-	return channelPlans
-}
-
 func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
-	if b.scheduler.GetSegmentTaskNum() != 0 {
-		// scheduler is handling segment task, skip
-		return nil
-	}
 	segmentPlans := make([]SegmentAssignPlan, 0)
 
 	// generate candidates
@@ -301,6 +244,13 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		})
 		toNode := nodeItems[0]
 		fromNode := nodeItems[lastIdx]
+
+		fromPriority := fromNode.priority
+		toPriority := toNode.priority
+		unbalance := float64(fromPriority - toPriority)
+		if unbalance < float64(toPriority)*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
+			break
+		}
 
 		// sort the segments in asc order, try to mitigate to-from-unbalance
 		// TODO: segment infos inside dist manager may change in the process of making balance plan
@@ -322,9 +272,6 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			break
 		}
 
-		fromPriority := fromNode.priority
-		toPriority := toNode.priority
-		unbalance := fromPriority - toPriority
 		nextFromPriority := fromPriority - int(targetSegmentToMove.GetNumOfRows()) - int(float64(targetSegmentToMove.GetNumOfRows())*
 			params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
 		nextToPriority := toPriority + int(targetSegmentToMove.GetNumOfRows()) + int(float64(targetSegmentToMove.GetNumOfRows())*
@@ -344,7 +291,7 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			//only trigger following balance when the generated reverted balance
 			//is far smaller than the original unbalance
 			nextUnbalance := nextToPriority - nextFromPriority
-			if int(float64(nextUnbalance)*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat()) < unbalance {
+			if float64(nextUnbalance)*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor.GetAsFloat() < unbalance {
 				plan := SegmentAssignPlan{
 					ReplicaID: replica.GetID(),
 					From:      fromNode.nodeID,
@@ -367,9 +314,4 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		// TODO swap segment between toNode and fromNode, see if the cluster becomes more balance
 	}
 	return segmentPlans
-}
-
-func (b *ScoreBasedBalancer) getNormalChannelPlan(replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
-	// TODO
-	return make([]ChannelAssignPlan, 0)
 }

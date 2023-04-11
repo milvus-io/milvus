@@ -201,7 +201,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 
 func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
-		log.Info("excute action done, remove it",
+		log.Info("execute action done, remove it",
 			zap.Int64("taskID", task.ID()),
 			zap.Int("step", step),
 			zap.Error(task.Err()))

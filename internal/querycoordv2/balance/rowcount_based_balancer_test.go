@@ -387,7 +387,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
 			}
-			segmentPlans, channelPlans := balancer.Balance()
+
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
@@ -585,7 +586,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
 			}
-			segmentPlans, channelPlans := balancer.Balance()
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
@@ -697,7 +698,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			suite.NoError(err)
 			err = balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 			suite.NoError(err)
-			segmentPlans, channelPlans := balancer.Balance()
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
@@ -739,12 +740,24 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
-			segmentPlans, channelPlans := balancer.Balance()
+			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.Empty(channelPlans)
 			suite.ElementsMatch(c.expectPlans, segmentPlans)
 		})
 	}
 
+}
+
+func (suite *RowCountBasedBalancerTestSuite) getCollectionBalancePlans(balancer *RowCountBasedBalancer,
+	collectionID int64) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	replicas := balancer.meta.ReplicaManager.GetByCollection(collectionID)
+	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	for _, replica := range replicas {
+		sPlans, cPlans := balancer.BalanceReplica(replica)
+		segmentPlans = append(segmentPlans, sPlans...)
+		channelPlans = append(channelPlans, cPlans...)
+	}
+	return segmentPlans, channelPlans
 }
 
 func TestRowCountBasedBalancerSuite(t *testing.T) {

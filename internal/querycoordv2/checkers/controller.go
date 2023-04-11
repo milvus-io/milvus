@@ -62,7 +62,7 @@ func NewCheckerController(
 	checkers := []Checker{
 		NewChannelChecker(meta, dist, targetMgr, balancer),
 		NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		NewBalanceChecker(balancer),
+		NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
 	}
 	for i, checker := range checkers {
 		checker.SetID(int64(i + 1))

@@ -1329,7 +1329,7 @@ func isFlushState(state commonpb.SegmentState) bool {
 // updateSegStateAndPrepareMetrics updates a segment's in-memory state and prepare for the corresponding metric update.
 func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commonpb.SegmentState, metricMutation *segMetricMutation) {
 	log.Debug("updating segment state and updating metrics",
-		zap.Int64("segment ID", segToUpdate.GetID()),
+		zap.Int64("segmentID", segToUpdate.GetID()),
 		zap.String("old state", segToUpdate.GetState().String()),
 		zap.String("new state", targetState.String()),
 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
