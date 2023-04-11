@@ -67,6 +67,7 @@ func NewDistribution() *distribution {
 		sealedSegments:  make(map[UniqueID]SegmentEntry),
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
+		offlines:        typeutil.NewSet[int64](),
 	}
 
 	dist.genSnapshot()

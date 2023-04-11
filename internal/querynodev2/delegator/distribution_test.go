@@ -485,6 +485,62 @@ func (s *DistributionSuite) TestPeek() {
 	}
 }
 
+func (s *DistributionSuite) TestAddOfflines() {
+	type testCase struct {
+		tag         string
+		input       []SegmentEntry
+		offlines    []int64
+		serviceable bool
+	}
+
+	cases := []testCase{
+		{
+			tag: "offlineHits",
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 2,
+				},
+			},
+			offlines:    []int64{2},
+			serviceable: false,
+		},
+		{
+			tag: "offlineMissed",
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    2,
+					SegmentID: 2,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 3,
+				},
+			},
+			serviceable: true,
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+
+			s.dist.AddDistributions(tc.input...)
+			s.dist.AddOfflines(tc.offlines...)
+			s.Equal(tc.serviceable, s.dist.Serviceable())
+		})
+	}
+}
+
 func TestDistributionSuite(t *testing.T) {
 	suite.Run(t, new(DistributionSuite))
 }
