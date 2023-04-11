@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	proxy2 "github.com/milvus-io/milvus/internal/proxy"
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
-	"github.com/milvus-io/milvus/internal/querynode"
+	"github.com/milvus-io/milvus/internal/querynodev2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -610,7 +610,7 @@ func (cluster *MiniCluster) CreateDefaultDataNode() (types.DataNodeComponent, er
 
 func (cluster *MiniCluster) CreateDefaultQueryNode() (types.QueryNodeComponent, error) {
 	log.Debug("mini cluster CreateDefaultQueryNode")
-	queryNode := querynode.NewQueryNode(cluster.ctx, cluster.factory)
+	queryNode := querynodev2.NewQueryNode(cluster.ctx, cluster.factory)
 	queryNode.SetEtcdClient(cluster.etcdCli)
 	port := funcutil.GetAvailablePort()
 	queryNode.SetAddress(funcutil.GetLocalIP() + ":" + fmt.Sprint(port))
