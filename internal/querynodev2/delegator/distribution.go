@@ -29,6 +29,19 @@ const (
 	wildcardNodeID = int64(-1)
 )
 
+var (
+	closedCh  chan struct{}
+	closeOnce sync.Once
+)
+
+func getClosedCh() chan struct{} {
+	closeOnce.Do(func() {
+		closedCh = make(chan struct{})
+		close(closedCh)
+	})
+	return closedCh
+}
+
 // distribution is the struct to store segment distribution.
 // it contains both growing and sealed segments.
 type distribution struct {
@@ -107,7 +120,7 @@ func (d *distribution) Serviceable() bool {
 }
 
 // AddDistributions add multiple segment entries.
-func (d *distribution) AddDistributions(entries ...SegmentEntry) []int64 {
+func (d *distribution) AddDistributions(entries ...SegmentEntry) ([]int64, chan struct{}) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
@@ -123,8 +136,12 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) []int64 {
 		}
 	}
 
-	d.genSnapshot()
-	return removed
+	ch := d.genSnapshot()
+	// no offline growing, return closed ch to skip wait
+	if len(removed) == 0 {
+		return removed, getClosedCh()
+	}
+	return removed, ch
 }
 
 // AddGrowing adds growing segment distribution.
@@ -192,9 +209,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 
 	if !changed {
 		// no change made, return closed signal channel
-		ch := make(chan struct{})
-		close(ch)
-		return ch
+		return getClosedCh()
 	}
 
 	return d.genSnapshot()

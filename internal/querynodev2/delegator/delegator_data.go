@@ -360,11 +360,12 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			Version:     req.GetVersion(),
 		}
 	})
-	removed := sd.distribution.AddDistributions(entries...)
+	removed, signal := sd.distribution.AddDistributions(entries...)
 
 	// release possible matched growing segments async
 	if len(removed) > 0 {
 		go func() {
+			<-signal
 			worker, err := sd.workerManager.GetWorker(paramtable.GetNodeID())
 			if err != nil {
 				log.Warn("failed to get local worker when try to release related growing", zap.Error(err))

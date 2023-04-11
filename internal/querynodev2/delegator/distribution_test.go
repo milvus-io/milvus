@@ -38,14 +38,16 @@ func (s *DistributionSuite) TearDownTest() {
 
 func (s *DistributionSuite) TestAddDistribution() {
 	type testCase struct {
-		tag      string
-		input    []SegmentEntry
-		expected []SnapshotItem
+		tag                  string
+		input                []SegmentEntry
+		growing              []SegmentEntry
+		expected             []SnapshotItem
+		expectedSignalClosed bool
 	}
 
 	cases := []testCase{
 		{
-			tag: "one node",
+			tag: "one_node",
 			input: []SegmentEntry{
 				{
 					NodeID:    1,
@@ -71,9 +73,10 @@ func (s *DistributionSuite) TestAddDistribution() {
 					},
 				},
 			},
+			expectedSignalClosed: true,
 		},
 		{
-			tag: "multiple nodes",
+			tag: "multiple_nodes",
 			input: []SegmentEntry{
 				{
 					NodeID:    1,
@@ -113,6 +116,27 @@ func (s *DistributionSuite) TestAddDistribution() {
 					},
 				},
 			},
+			expectedSignalClosed: true,
+		},
+		{
+			tag: "remove_growing",
+			growing: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1},
+			},
+			input: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1},
+				{NodeID: 1, SegmentID: 2},
+			},
+			expected: []SnapshotItem{
+				{
+					NodeID: 1,
+					Segments: []SegmentEntry{
+						{NodeID: 1, SegmentID: 1},
+						{NodeID: 1, SegmentID: 2},
+					},
+				},
+			},
+			expectedSignalClosed: false,
 		},
 	}
 
@@ -120,11 +144,21 @@ func (s *DistributionSuite) TestAddDistribution() {
 		s.Run(tc.tag, func() {
 			s.SetupTest()
 			defer s.TearDownTest()
-			s.dist.AddDistributions(tc.input...)
-			sealed, _, version := s.dist.GetCurrent()
-			defer s.dist.FinishUsage(version)
+			s.dist.AddGrowing(tc.growing...)
+			_, signal := s.dist.AddDistributions(tc.input...)
+			sealed, _ := s.dist.Peek()
 			s.compareSnapshotItems(tc.expected, sealed)
+			s.Equal(tc.expectedSignalClosed, s.isClosedCh(signal))
 		})
+	}
+}
+
+func (s *DistributionSuite) isClosedCh(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
 	}
 }
 
