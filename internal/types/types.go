@@ -242,6 +242,15 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
 
+	// GetRecoveryInfoV2 request segment recovery info of collection or batch partitions
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partitions id to query
+	//
+	// response struct `GetRecoveryInfoResponseV2` contains the list of segments info and corresponding vchannel info
+	// error is returned only when some communication issue occurs
+	GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error)
+
 	// SaveBinlogPaths updates segments binlogs(including insert binlogs, stats logs and delta logs)
 	//  and related message stream positions
 	//

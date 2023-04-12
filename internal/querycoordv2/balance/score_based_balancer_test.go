@@ -232,7 +232,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 		notExistedNodes      []int64
 		collectionIDs        []int64
 		replicaIDs           []int64
-		collectionsSegments  [][]*datapb.SegmentBinlogs
+		collectionsSegments  [][]*datapb.SegmentInfo
 		states               []session.State
 		shouldMock           bool
 		distributions        map[int64][]*meta.Segment
@@ -245,9 +245,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			nodes:         []int64{1, 2},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1, PartitionID: 1},
+					{ID: 2, PartitionID: 1},
+					{ID: 3, PartitionID: 1},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
@@ -268,9 +270,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			nodes:         []int64{1, 2},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1, PartitionID: 1},
+					{ID: 2, PartitionID: 1},
+					{ID: 3, PartitionID: 1},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal},
@@ -288,6 +292,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 		},
 	}
 
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum().Return(0)
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupSuite()
@@ -299,9 +304,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			for i := range c.collectionIDs {
 				collection := utils.CreateTestCollection(c.collectionIDs[i], int32(c.replicaIDs[i]))
 				collections = append(collections, collection)
-				suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
+				suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionIDs[i]).Return(
 					nil, c.collectionsSegments[i], nil)
-				suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionIDs[i]).Return([]int64{c.collectionIDs[i]}, nil).Maybe()
 				balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionIDs[i], c.collectionIDs[i])
 				balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionIDs[i], c.collectionIDs[i])
 				collection.LoadPercentage = 100
@@ -344,7 +348,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		notExistedNodes     []int64
 		collectionIDs       []int64
 		replicaIDs          []int64
-		collectionsSegments [][]*datapb.SegmentBinlogs
+		collectionsSegments [][]*datapb.SegmentInfo
 		states              []session.State
 		shouldMock          bool
 		distributions       []map[int64][]*meta.Segment
@@ -354,12 +358,14 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		nodes:         []int64{1, 2, 3},
 		collectionIDs: []int64{1, 2},
 		replicaIDs:    []int64{1, 2},
-		collectionsSegments: [][]*datapb.SegmentBinlogs{
+		collectionsSegments: [][]*datapb.SegmentInfo{
 			{
-				{SegmentID: 1}, {SegmentID: 3},
+				{ID: 1, PartitionID: 1},
+				{ID: 3, PartitionID: 1},
 			},
 			{
-				{SegmentID: 2}, {SegmentID: 4},
+				{ID: 2, PartitionID: 2},
+				{ID: 4, PartitionID: 2},
 			},
 		},
 		states: []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
@@ -401,14 +407,14 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 	defer suite.TearDownTest()
 	balancer := suite.balancer
 
+	suite.mockScheduler.EXPECT().GetSegmentTaskNum().Return(0)
 	//1. set up target for multi collections
 	collections := make([]*meta.Collection, 0, len(balanceCase.collectionIDs))
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
 		collections = append(collections, collection)
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, balanceCase.collectionIDs[i], balanceCase.replicaIDs[i]).Return(
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
 			nil, balanceCase.collectionsSegments[i], nil)
-		suite.broker.EXPECT().GetPartitions(mock.Anything, balanceCase.collectionIDs[i]).Return([]int64{balanceCase.collectionIDs[i]}, nil).Maybe()
 		balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i])
 		collection.LoadPercentage = 100
@@ -458,7 +464,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 		notExistedNodes      []int64
 		collectionIDs        []int64
 		replicaIDs           []int64
-		collectionsSegments  [][]*datapb.SegmentBinlogs
+		collectionsSegments  [][]*datapb.SegmentInfo
 		states               []session.State
 		shouldMock           bool
 		distributions        map[int64][]*meta.Segment
@@ -472,9 +478,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1, PartitionID: 1},
+					{ID: 2, PartitionID: 1},
+					{ID: 3, PartitionID: 1},
 				},
 			},
 			states: []session.State{session.NodeStateStopping, session.NodeStateNormal, session.NodeStateNormal},
@@ -501,9 +509,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateStopping, session.NodeStateStopping, session.NodeStateStopping},
@@ -525,9 +533,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			outBoundNodes: []int64{1, 2, 3},
 			collectionIDs: []int64{1},
 			replicaIDs:    []int64{1},
-			collectionsSegments: [][]*datapb.SegmentBinlogs{
+			collectionsSegments: [][]*datapb.SegmentInfo{
 				{
-					{SegmentID: 1}, {SegmentID: 2}, {SegmentID: 3},
+					{ID: 1}, {ID: 2}, {ID: 3},
 				},
 			},
 			states: []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
@@ -558,9 +566,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 			for i := range c.collectionIDs {
 				collection := utils.CreateTestCollection(c.collectionIDs[i], int32(c.replicaIDs[i]))
 				collections = append(collections, collection)
-				suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, c.collectionIDs[i], c.replicaIDs[i]).Return(
+				suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionIDs[i]).Return(
 					nil, c.collectionsSegments[i], nil)
-				suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionIDs[i]).Return([]int64{c.collectionIDs[i]}, nil).Maybe()
 				balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(c.collectionIDs[i], c.collectionIDs[i])
 				balancer.targetMgr.UpdateCollectionCurrentTarget(c.collectionIDs[i], c.collectionIDs[i])
 				collection.LoadPercentage = 100

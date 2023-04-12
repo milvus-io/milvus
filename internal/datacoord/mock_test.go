@@ -846,7 +846,7 @@ func newMockHandler() *mockHandler {
 	return &mockHandler{}
 }
 
-func (h *mockHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *mockHandler) GetQueryVChanPositions(channel *channel, partitionID ...UniqueID) *datapb.VchannelInfo {
 	return &datapb.VchannelInfo{
 		CollectionID: channel.CollectionID,
 		ChannelName:  channel.Name,

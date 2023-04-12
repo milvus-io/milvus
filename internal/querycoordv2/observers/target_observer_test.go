@@ -49,7 +49,7 @@ type TargetObserverSuite struct {
 
 	collectionID       int64
 	partitionID        int64
-	nextTargetSegments []*datapb.SegmentBinlogs
+	nextTargetSegments []*datapb.SegmentInfo
 	nextTargetChannels []*datapb.VchannelInfo
 }
 
@@ -106,19 +106,20 @@ func (suite *TargetObserverSuite) SetupTest() {
 		},
 	}
 
-	suite.nextTargetSegments = []*datapb.SegmentBinlogs{
+	suite.nextTargetSegments = []*datapb.SegmentInfo{
 		{
-			SegmentID:     11,
+			ID:            11,
+			PartitionID:   suite.partitionID,
 			InsertChannel: "channel-1",
 		},
 		{
-			SegmentID:     12,
+			ID:            12,
+			PartitionID:   suite.partitionID,
 			InsertChannel: "channel-2",
 		},
 	}
 
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partitionID}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
 }
 
 func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
@@ -153,16 +154,16 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.nextTargetSegments = append(suite.nextTargetSegments, &datapb.SegmentBinlogs{
-		SegmentID:     13,
+	suite.nextTargetSegments = append(suite.nextTargetSegments, &datapb.SegmentInfo{
+		ID:            13,
+		PartitionID:   suite.partitionID,
 		InsertChannel: "channel-1",
 	})
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collectionID)
 
 	// Pull next again
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partitionID}, nil)
 	suite.broker.EXPECT().
-		GetRecoveryInfo(mock.Anything, mock.Anything, mock.Anything).
+		GetRecoveryInfoV2(mock.Anything, mock.Anything).
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
