@@ -132,7 +132,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session.Register()
-	go node.session.LivenessCheck(node.ctx, func() {
+	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
@@ -420,7 +420,9 @@ func (node *Proxy) Stop() error {
 		cb()
 	}
 
-	node.session.Revoke(time.Second)
+	if node.session != nil {
+		node.session.Stop()
+	}
 
 	if node.shardMgr != nil {
 		node.shardMgr.Close()

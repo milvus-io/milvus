@@ -249,8 +249,9 @@ func (s *Server) Register() error {
 			return err
 		}
 	}
-	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", paramtable.GetNodeID()))
+
+	s.session.LivenessCheck(s.serverLoopCtx, func() {
+		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
@@ -928,13 +929,17 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
-	s.session.Revoke(time.Second)
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
 	s.indexBuilder.Stop()
+
+	if s.session != nil {
+		s.session.Stop()
+	}
+
 	return nil
 }
 

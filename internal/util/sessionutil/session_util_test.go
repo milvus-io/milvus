@@ -183,7 +183,19 @@ func TestUpdateSessions(t *testing.T) {
 }
 
 func TestSessionLivenessCheck(t *testing.T) {
-	s := &Session{}
+	paramtable.Init()
+	params := paramtable.Get()
+
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	s := &Session{
+		etcdCli:  etcdCli,
+		metaRoot: metaRoot,
+	}
 	ctx := context.Background()
 	ch := make(chan bool)
 	s.liveCh = ch
@@ -191,7 +203,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	flag := false
 
-	go s.LivenessCheck(ctx, func() {
+	s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})
@@ -211,7 +223,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	s.liveCh = ch
 	flag = false
 
-	go s.LivenessCheck(ctx, func() {
+	s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})
@@ -648,7 +660,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		wg.Done()
 		return nil
 	})
-	go s1.LivenessCheck(ctx1, func() {
+	s1.LivenessCheck(ctx1, func() {
 		flag = true
 		signal <- struct{}{}
 		s1.keepAliveCancel()
