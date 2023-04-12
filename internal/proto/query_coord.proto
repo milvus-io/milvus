@@ -88,6 +88,7 @@ message ShowCollectionsResponse {
   repeated int64 collectionIDs = 2;
   repeated int64 inMemory_percentages = 3;
   repeated bool query_service_available = 4;
+  repeated int64 refresh_progress = 5;
 }
 
 message ShowPartitionsRequest {
@@ -101,6 +102,7 @@ message ShowPartitionsResponse {
   common.Status status = 1;
   repeated int64 partitionIDs = 2;
   repeated int64 inMemory_percentages = 3;
+  repeated int64 refresh_progress = 4;
 }
 
 message LoadCollectionRequest {

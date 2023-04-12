@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -85,7 +86,7 @@ type ServiceSuite struct {
 }
 
 func (suite *ServiceSuite) SetupSuite() {
-	Params.Init()
+	paramtable.Init()
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{
@@ -949,146 +950,56 @@ func (suite *ServiceSuite) TestReleasePartition() {
 }
 
 func (suite *ServiceSuite) TestRefreshCollection() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5000*time.Millisecond)
-	defer cancel()
 	server := suite.server
 
-	suite.server.collectionObserver.Start(context.Background())
+	server.collectionObserver.Start(context.Background())
 
 	// Test refresh all collections.
 	for _, collection := range suite.collections {
-		resp, err := server.refreshCollection(ctx, collection)
-		suite.NoError(err)
+		err := server.refreshCollection(collection)
 		// Collection not loaded error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.ErrorIs(err, merr.ErrCollectionNotLoaded)
 	}
 
 	// Test load all collections
-	for _, collection := range suite.collections {
-		suite.expectGetRecoverInfo(collection)
-
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-		suite.assertLoaded(collection)
-
-		// Load and explicitly mark load percentage to 100%.
-		collObj := utils.CreateTestCollection(collection, 1)
-		collObj.LoadPercentage = 40
-		err = suite.server.meta.CollectionManager.PutCollectionWithoutSave(collObj)
-		suite.NoError(err)
-	}
+	suite.loadAll()
 
 	// Test refresh all collections again when collections are loaded. This time should fail with collection not 100% loaded.
 	for _, collection := range suite.collections {
-		resp, err := server.refreshCollection(ctx, collection)
-		suite.NoError(err)
-		// Context canceled error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loading)
+		err := server.refreshCollection(collection)
+		suite.ErrorIs(err, merr.ErrCollectionNotLoaded)
 	}
 
-	// Test load all collections
-	for _, collection := range suite.collections {
+	// Test refresh all collections
+	for _, id := range suite.collections {
 		// Load and explicitly mark load percentage to 100%.
-		collObj := utils.CreateTestCollection(collection, 1)
-		collObj.LoadPercentage = 100
-		err := suite.server.meta.CollectionManager.PutCollectionWithoutSave(collObj)
+		suite.updateChannelDist(id)
+		suite.updateSegmentDist(id, suite.nodes[0])
+		suite.updateCollectionStatus(id, querypb.LoadStatus_Loaded)
+
+		err := server.refreshCollection(id)
 		suite.NoError(err)
-	}
 
-	// Test refresh all collections again when collections are loaded. This time should fail with context canceled.
-	for _, collection := range suite.collections {
-		resp, err := server.refreshCollection(ctx, collection)
+		readyCh, err := server.targetObserver.UpdateNextTarget(id)
 		suite.NoError(err)
-		// Context canceled error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		<-readyCh
+
+		// Now the refresh must be done
+		collection := server.meta.CollectionManager.GetCollection(id)
+		suite.True(collection.IsRefreshed())
 	}
 
-	// Test when server is not healthy
-	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	resp, err := server.refreshCollection(ctx, suite.collections[0])
-	suite.NoError(err)
-	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
-}
-
-func (suite *ServiceSuite) TestRefreshPartitions() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5000*time.Millisecond)
-	defer cancel()
-	server := suite.server
-
-	suite.server.collectionObserver.Start(context.Background())
-
-	// Test refresh all partitions.
-	for _, collection := range suite.collections {
-		resp, err := server.refreshPartitions(ctx, collection, suite.partitions[collection])
+	// Test refresh not ready
+	for _, id := range suite.collections {
+		suite.updateChannelDistWithoutSegment(id)
+		err := server.refreshCollection(id)
 		suite.NoError(err)
-		// partition not loaded error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+
+		// Now the refresh must be not done
+		collection := server.meta.CollectionManager.GetCollection(id)
+		suite.False(collection.IsRefreshed())
 	}
-
-	// Test load all partitions
-	for _, collection := range suite.collections {
-		suite.expectGetRecoverInfo(collection)
-
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-		}
-		resp, err := server.LoadPartitions(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-		suite.assertLoaded(collection)
-
-		collObj := utils.CreateTestCollection(collection, 1)
-		suite.NoError(suite.server.meta.CollectionManager.PutCollection(collObj))
-
-		// Load and explicitly mark load percentage to 100%.
-		for _, partition := range suite.partitions[collection] {
-			partObj := utils.CreateTestPartition(collection, partition)
-			partObj.LoadPercentage = 40
-			err := suite.server.meta.CollectionManager.PutPartitionWithoutSave(partObj)
-			suite.NoError(err)
-		}
-	}
-
-	// Test refresh all collections again. This time should fail with partitions not 100% loaded.
-	for _, collection := range suite.collections {
-		resp, err := server.refreshPartitions(ctx, collection, suite.partitions[collection])
-		suite.NoError(err)
-		// Context canceled error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-	}
-
-	// Test load all partitions
-	for _, collection := range suite.collections {
-		collObj := utils.CreateTestCollection(collection, 1)
-		suite.NoError(suite.server.meta.CollectionManager.PutCollection(collObj))
-
-		// Load and explicitly mark load percentage to 100%.
-		for _, partition := range suite.partitions[collection] {
-			partObj := utils.CreateTestPartition(collection, partition)
-			partObj.LoadPercentage = 100
-			err := suite.server.meta.CollectionManager.PutPartitionWithoutSave(partObj)
-			suite.NoError(err)
-		}
-	}
-
-	// Test refresh all collections again. This time should fail with context canceled.
-	for _, collection := range suite.collections {
-		resp, err := server.refreshPartitions(ctx, collection, suite.partitions[collection])
-		suite.NoError(err)
-		// Context canceled error.
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-	}
-
-	// Test when server is not healthy
-	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	resp, err := server.refreshPartitions(ctx, suite.collections[0], []int64{})
-	suite.NoError(err)
-	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
 func (suite *ServiceSuite) TestGetPartitionStates() {

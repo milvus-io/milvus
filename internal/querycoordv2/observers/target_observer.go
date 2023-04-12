@@ -119,6 +119,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			}
 
 			req.Notifier <- err
+
+			// Manually trigger the observer,
+			// to avoid waiting for a long time (10s)
+			ob.clean()
+			ob.tryUpdateTarget()
 		}
 	}
 }

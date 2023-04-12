@@ -38,12 +38,50 @@ type Collection struct {
 	LoadPercentage int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+
+	mut             sync.RWMutex
+	refreshNotifier chan struct{}
+}
+
+func (collection *Collection) SetRefreshNotifier(notifer chan struct{}) {
+	collection.mut.Lock()
+	defer collection.mut.Unlock()
+
+	collection.refreshNotifier = notifer
+}
+
+func (collection *Collection) IsRefreshed() bool {
+	collection.mut.RLock()
+	notifier := collection.refreshNotifier
+	collection.mut.RUnlock()
+
+	if notifier == nil {
+		return true
+	}
+
+	select {
+	case <-notifier:
+		collection.mut.Lock()
+		defer collection.mut.Unlock()
+		// Only clear the notifier if the current notifier is which we got
+		if collection.refreshNotifier == notifier {
+			collection.refreshNotifier = nil
+		}
+		return true
+
+	default:
+	}
+	return false
 }
 
 func (collection *Collection) Clone() *Collection {
-	new := *collection
-	new.CollectionLoadInfo = proto.Clone(collection.CollectionLoadInfo).(*querypb.CollectionLoadInfo)
-	return &new
+	return &Collection{
+		CollectionLoadInfo: proto.Clone(collection.CollectionLoadInfo).(*querypb.CollectionLoadInfo),
+		LoadPercentage:     collection.LoadPercentage,
+		CreatedAt:          collection.CreatedAt,
+		UpdatedAt:          collection.UpdatedAt,
+		refreshNotifier:    collection.refreshNotifier,
+	}
 }
 
 type Partition struct {
