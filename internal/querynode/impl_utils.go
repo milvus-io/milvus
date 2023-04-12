@@ -28,6 +28,17 @@ func (node *QueryNode) TransferLoad(ctx context.Context, req *querypb.LoadSegmen
 	)
 
 	log.Info("LoadSegment start to transfer load with shard cluster")
+	_, err := node.queryShardService.getQueryShard(shard)
+	if err != nil {
+		log.Warn("TransferLoad failed, failed to get query shard",
+			zap.String("vChannel", shard),
+			zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+			Reason:    err.Error(),
+		}, nil
+	}
+
 	shardCluster, ok := node.ShardClusterService.getShardCluster(shard)
 	if !ok {
 		log.Warn("TransferLoad failed to find shard cluster")
@@ -38,7 +49,7 @@ func (node *QueryNode) TransferLoad(ctx context.Context, req *querypb.LoadSegmen
 	}
 
 	req.NeedTransfer = false
-	err := shardCluster.LoadSegments(ctx, req)
+	err = shardCluster.LoadSegments(ctx, req)
 	if err != nil {
 		if errors.Is(err, ErrInsufficientMemory) {
 			log.Warn("insufficient memory when shard cluster load segments", zap.Error(err))
@@ -71,6 +82,18 @@ func (node *QueryNode) TransferRelease(ctx context.Context, req *querypb.Release
 
 	log.Info("ReleaseSegments start to transfer release with shard cluster")
 
+	shard := req.GetShard()
+	_, err := node.queryShardService.getQueryShard(shard)
+	if err != nil {
+		log.Warn("TransferRelease failed, failed to get query shard",
+			zap.String("vChannel", shard),
+			zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+			Reason:    err.Error(),
+		}, nil
+	}
+
 	shardCluster, ok := node.ShardClusterService.getShardCluster(req.GetShard())
 	if !ok {
 		log.Warn("TransferLoad failed to find shard cluster")
@@ -81,7 +104,7 @@ func (node *QueryNode) TransferRelease(ctx context.Context, req *querypb.Release
 	}
 
 	req.NeedTransfer = false
-	err := shardCluster.ReleaseSegments(ctx, req, false)
+	err = shardCluster.ReleaseSegments(ctx, req, false)
 	if err != nil {
 		log.Warn("shard cluster failed to release segments", zap.Error(err))
 		return &commonpb.Status{
