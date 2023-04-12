@@ -42,6 +42,10 @@ func (s *ImplUtilsSuite) SetupSuite() {
 	s.querynode.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	s.querynode.ShardClusterService = newShardClusterService(client, s.querynode.session, s.querynode)
+	s.querynode.queryShardService = &queryShardService{
+		cancel:      func() {},
+		queryShards: make(map[string]*queryShard),
+	}
 }
 
 func (s *ImplUtilsSuite) TearDownSuite() {
@@ -62,6 +66,7 @@ func (s *ImplUtilsSuite) SetupTest() {
 	}, &mockSegmentDetector{}, buildMockQueryNode)
 
 	s.querynode.ShardClusterService.clusters.Store(defaultChannelName, cs)
+	s.querynode.queryShardService.queryShards[defaultChannelName] = &queryShard{}
 	cs.SetupFirstVersion()
 
 }
