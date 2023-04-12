@@ -62,7 +62,7 @@ spec:
             toolset: false
             pulsar_manager: false
           monitoring:
-            prometheus: true
+            prometheus: false
             grafana: false
             node_exporter: false
             alert_manager: false
