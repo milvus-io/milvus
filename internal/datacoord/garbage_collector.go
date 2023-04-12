@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,8 +43,6 @@ const (
 	deltaLogPrefix  = `delta_log`
 )
 
-type collectionValidator func(int64) bool
-
 // GcOption garbage collection options
 type GcOption struct {
 	cli              storage.ChunkManager // client
@@ -53,7 +50,6 @@ type GcOption struct {
 	checkInterval    time.Duration        // each interval
 	missingTolerance time.Duration        // key missing in meta tolerance time
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
-	collValidator    collectionValidator  // validates collection id
 }
 
 // garbageCollector handles garbage files in object storage
@@ -115,24 +111,6 @@ func (gc *garbageCollector) work() {
 	}
 }
 
-func (gc *garbageCollector) isCollectionPrefixValid(p string, prefix string) bool {
-	if gc.option.collValidator == nil {
-		return true
-	}
-
-	if !strings.HasPrefix(p, prefix) {
-		return false
-	}
-
-	p = strings.Trim(p[len(prefix):], "/")
-	collectionID, err := strconv.ParseInt(p, 10, 64)
-	if err != nil {
-		return false
-	}
-
-	return gc.option.collValidator(collectionID)
-}
-
 func (gc *garbageCollector) close() {
 	gc.stopOnce.Do(func() {
 		close(gc.closeCh)
@@ -170,64 +148,46 @@ func (gc *garbageCollector) scan() {
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
-		// list first level prefix, then perform collection id validation
-		collectionPrefixes, _, err := gc.option.cli.ListWithPrefix(ctx, prefix+"/", false)
+		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
-			log.Warn("failed to list collection prefix",
+			log.Error("failed to list files with prefix",
 				zap.String("prefix", prefix),
-				zap.Error(err),
+				zap.String("error", err.Error()),
 			)
 		}
-		for _, collPrefix := range collectionPrefixes {
-			if !gc.isCollectionPrefixValid(collPrefix, prefix) {
-				log.Warn("garbage collector meet invalid collection prefix, ignore it",
-					zap.String("collPrefix", collPrefix),
-					zap.String("prefix", prefix),
-				)
+		for i, infoKey := range infoKeys {
+			total++
+			_, has := filesMap[infoKey]
+			if has {
+				valid++
 				continue
 			}
-			infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, collPrefix, true)
-			if err != nil {
-				log.Error("failed to list files with collPrefix",
-					zap.String("collPrefix", collPrefix),
-					zap.String("error", err.Error()),
-				)
-				continue
-			}
-			for i, infoKey := range infoKeys {
-				total++
-				_, has := filesMap[infoKey]
-				if has {
-					valid++
-					continue
-				}
 
-				segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), infoKey)
+			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), infoKey)
+			if err != nil {
+				missing++
+				log.Warn("parse segment id error",
+					zap.String("infoKey", infoKey),
+					zap.Error(err))
+				continue
+			}
+
+			if strings.Contains(prefix, statsLogPrefix) &&
+				segmentMap.Contain(segmentID) {
+				valid++
+				continue
+			}
+
+			// not found in meta, check last modified time exceeds tolerance duration
+			if time.Since(modTimes[i]) > gc.option.missingTolerance {
+				// ignore error since it could be cleaned up next time
+				removedKeys = append(removedKeys, infoKey)
+				err = gc.option.cli.Remove(ctx, infoKey)
 				if err != nil {
 					missing++
-					log.Warn("parse segment id error",
+					log.Error("failed to remove object",
 						zap.String("infoKey", infoKey),
 						zap.Error(err))
-					continue
-				}
-
-				if strings.Contains(prefix, statsLogPrefix) &&
-					segmentMap.Contain(segmentID) {
-					valid++
-					continue
-				}
-
-				// not found in meta, check last modified time exceeds tolerance duration
-				if time.Since(modTimes[i]) > gc.option.missingTolerance {
-					// ignore error since it could be cleaned up next time
-					removedKeys = append(removedKeys, infoKey)
-					err = gc.option.cli.Remove(ctx, infoKey)
-					if err != nil {
-						missing++
-						log.Error("failed to remove object",
-							zap.String("infoKey", infoKey),
-							zap.Error(err))
-					}
 				}
 			}
 		}
