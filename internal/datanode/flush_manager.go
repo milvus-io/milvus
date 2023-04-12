@@ -854,7 +854,9 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			// TODO change to graceful stop
 			panic(err)
 		}
-		if pack.flushed || pack.dropped {
+		if pack.dropped {
+			dsService.channel.removeSegments(pack.segmentID)
+		} else if pack.flushed {
 			dsService.channel.segmentFlushed(pack.segmentID)
 		}
 
