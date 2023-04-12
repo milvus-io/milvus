@@ -119,7 +119,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 
 func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
 	channelPlans []ChannelAssignPlan) {
-	balanceInfo := fmt.Sprintf("%s{collectionID:%d, replicaID:%d, ", InfoPrefix, collectionID, replicaID)
+	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", InfoPrefix, collectionID, replicaID)
 	for _, segmentPlan := range segmentPlans {
 		balanceInfo += segmentPlan.ToString()
 	}
