@@ -27,6 +27,8 @@ uid_drop = "drop_collection"
 uid_has = "has_collection"
 uid_list = "list_collections"
 uid_load = "load_collection"
+partition1 = 'partition1'
+partition2 = 'partition2'
 field_name = default_float_vec_field_name
 default_single_query = {
     "data": gen_vectors(1, default_dim),
@@ -2147,6 +2149,246 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         collection_w.load()
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_partitions_after_load_collection(self):
+        """
+        target: test load partitions after load collection
+        method: 1. load collection
+                2. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        self.init_partition_wrap(collection_w, partition1)
+        self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        collection_w.load(partition_names=[partition1, partition2])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_load_release_collection(self):
+        """
+        target: test load partitions after load release collection
+        method: 1. load collection
+                2. release collection
+                3. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        self.init_partition_wrap(collection_w, partition1)
+        self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        collection_w.release()
+        collection_w.load(partition_names=[partition1, partition2])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_release_collection_partition(self):
+        """
+        target: test load collection after release collection and partition
+        method: 1. load collection
+                2. release collection
+                3. release partition
+                4. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w = self.init_partition_wrap(collection_w, partition1)
+        self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        collection_w.release()
+        partition_w.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_release_collection_partition(self):
+        """
+        target: test load partitions after release collection and partition
+        method: 1. load collection
+                2. release collection
+                3. release partition
+                4. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        collection_w.release()
+        partition_w1.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_release_partition(self):
+        """
+        target: test load collection after load collection and release partition
+        method: 1. load collection
+                2. release partition
+                3. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w = self.init_partition_wrap(collection_w, partition1)
+        self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_release_partition(self):
+        """
+        target: test load collection after release partition and load partitions
+        method: 1. load collection
+                2. release partition
+                3. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_release_partition_collection(self):
+        """
+        target: test load collection after release partition and collection
+        method: 1. load collection
+                2. release partition
+                3. release collection
+                4. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w = self.init_partition_wrap(collection_w, partition1)
+        self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w.release()
+        collection_w.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_release_partition_collection(self):
+        """
+        target: test load partitions after release partition and collection
+        method: 1. load collection
+                2. release partition
+                3. release collection
+                4. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.release()
+        collection_w.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_release_partitions(self):
+        """
+        target: test load collection after release partitions
+        method: 1. load collection
+                2. release partitions
+                3. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.release()
+        partition_w2.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_release_partitions(self):
+        """
+        target: test load partitions after release partitions
+        method: 1. load collection
+                2. release partitions
+                3. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.release()
+        partition_w2.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_drop_partition_and_release_another(self):
+        """
+        target: test load collection after drop a partition and release another
+        method: 1. load collection
+                2. drop a partition
+                3. release left partition
+                4. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.drop()
+        partition_w2.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partition_after_drop_partition_and_release_another(self):
+        """
+        target: test load partition after drop a partition and release another
+        method: 1. load collection
+                2. drop a partition
+                3. release left partition
+                4. load partition
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.drop()
+        partition_w2.release()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_another_partition_after_drop_one_partition(self):
+        """
+        target: test load another partition after drop a partition
+        method: 1. load collection
+                2. drop a partition
+                3. load another partition
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.drop()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_drop_one_partition(self):
+        """
+        target: test load collection after drop a partition
+        method: 1. load collection
+                2. drop a partition
+                3. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.drop()
+        collection_w.load()
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection(self):
         """
@@ -2210,23 +2452,6 @@ class TestLoadCollection(TestcaseBase):
         # load
         error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
         collection_w.load(partition_names=[], check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_load_partitions_release_collection(self):
-        """
-        target: test release collection after load partitions
-        method: insert entities into partitions, load partitions and release collection
-        expected: search result empty
-        """
-        self._connect()
-        collection_w = self.init_collection_wrap()
-        patition_w = self.init_partition_wrap(collection_wrap=collection_w, name=ct.default_tag)
-        data = cf.gen_default_list_data()
-        collection_w.insert(data=data, partition_name=ct.default_tag)
-        assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        patition_w.load()
-        collection_w.release()
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_non_number_replicas(self, request):
@@ -2915,6 +3140,276 @@ class TestLoadPartition(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "can\'t find collection"}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_loaded_partition(self):
+        """
+        target: test load partition after load partition
+        method: 1. load partition
+                2. load the partition again
+                3. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.load()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_unloaded_partition(self):
+        """
+        target: test load partition after load a unloaded partition
+        method: 1. load partition
+                2. load another partition
+                3. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w2.load()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_one_partition(self):
+        """
+        target: test load partition after load partition
+        method: 1. load partition
+                2. load collection
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_load_partitions_release_collection(self):
+        """
+        target: test release collection after load partitions
+        method: 1. load partition
+                2. release collection
+                3. load partitions
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        collection_w.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_release_collection(self):
+        """
+        target: test load collection after load partitions
+        method: 1. load partition
+                2. release collection
+                3. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        collection_w.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_load_release_partition(self):
+        """
+        target: test load partitions after load and release partition
+        method: 1. load partition
+                2. release partition
+                3. load partitions(include  released partition and non-released partition)
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_release_partition(self):
+        """
+        target: test load collection after load and release partition
+        method: 1. load partition
+                2. release partition
+                3. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitions_after_load_partition_release_partitions(self):
+        """
+        target: test load partitions after load partition and release partitions
+        method: 1. load partition
+                2. release partitions
+                3. load partitions
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.release()
+        partition_w2.release()
+        partition_w1.load()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_partition_release_partitions(self):
+        """
+        target: test load collection after load partition and release partitions
+        method: 1. load partition
+                2. release partitions
+                3. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.release()
+        partition_w2.release()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partition_after_load_drop_partition(self):
+        """
+        target: test load partition after load and drop partition
+        method: 1. load partition
+                2. drop the loaded partition
+                3. load the left partition
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.drop()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_drop_partition(self):
+        """
+        target: test load collection after load and drop partition
+        method: 1. load partition
+                2. drop the loaded partition
+                3. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.drop()
+        partition_w2.drop()
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23048")
+    def test_release_load_partition_after_load_drop_partition(self):
+        """
+        target: test release load partition after load and drop partition
+        method: 1. load partition
+                2. drop the loaded partition
+                3. release another partition
+                4. load the partition
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.drop()
+        partition_w2.release()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23048")
+    def test_release_load_collection_after_load_drop_partition(self):
+        """
+        target: test release load partition after load and drop partition
+        method: 1. load partition
+                2. drop the loaded partition
+                3. release another partition
+                4. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w1.drop()
+        partition_w2.release()
+        partition_w2.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_another_partition_after_load_drop_partition(self):
+        """
+        target: test load another collection after load and drop one partition
+        method: 1. load partition
+                2. drop the unloaded partition
+                3. load the partition again
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w2.drop()
+        partition_w1.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_release_load_partition_after_load_partition_drop_another(self):
+        """
+        target: test release load partition after load and drop partition
+        method: 1. load partition
+                2. drop the unloaded partition
+                3. release the loaded partition
+                4. reload the partition
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w2.drop()
+        partition_w1.release()
+        partition_w1.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_release_load_collection_after_load_partition_drop_another(self):
+        """
+        target: test release load partition after load and drop partition
+        method: 1. load partition
+                2. drop the unloaded partition
+                3. release the loaded partition
+                4. load collection
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w2.drop()
+        partition_w1.release()
+        collection_w.load()
 
 
 class TestCollectionString(TestcaseBase):
