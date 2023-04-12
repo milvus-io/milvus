@@ -1407,7 +1407,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 }
 
 func (p *dataCoordConfig) initWatchTimeoutInterval() {
-	p.WatchTimeoutInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.watchTimeoutInterval", 30)) * time.Second
+	p.WatchTimeoutInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.watchTimeoutInterval", 120)) * time.Second
 }
 
 func (p *dataCoordConfig) initChannelBalanceSilentDuration() {
