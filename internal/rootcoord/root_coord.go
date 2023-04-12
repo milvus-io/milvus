@@ -1125,7 +1125,6 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection", zap.String("role", typeutil.RootCoordRole),
@@ -1178,6 +1177,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 
 	log.Ctx(ctx).Info("done to create partition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
@@ -1228,6 +1228,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 
 	log.Ctx(ctx).Info("done to drop partition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),

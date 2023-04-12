@@ -189,10 +189,8 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 
 	switch state {
 	case pb.CollectionState_CollectionCreated:
-		metrics.RootCoordNumOfCollections.Inc()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(coll.GetPartitionNum(true)))
 	default:
-		metrics.RootCoordNumOfCollections.Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
 	}
 
@@ -515,8 +513,6 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
 
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
-
 	log.Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
@@ -542,13 +538,10 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 			}
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
 
-			switch state {
-			case pb.PartitionState_PartitionCreated:
+			if state == pb.PartitionState_PartitionCreated {
 				log.Warn("[should not happen] change partition to created",
 					zap.String("collection", coll.Name), zap.Int64("collection id", coll.CollectionID),
 					zap.String("partition", clone.PartitionName), zap.Int64("partition id", clone.PartitionID))
-			default:
-				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			}
 
 			log.Info("change partition state", zap.Int64("collection", collectionID),
