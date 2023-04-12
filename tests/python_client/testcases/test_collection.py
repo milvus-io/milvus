@@ -2806,6 +2806,29 @@ class TestLoadCollection(TestcaseBase):
                                   check_items={"err_code": 15,
                                                "err_msg": "collection not found, maybe not loaded"})
 
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_count_multi_replicas(self):
+        """
+        target: test count multi replicas
+        method: 1. load data with multi replicas
+                2. count
+        expected: verify count
+        """
+        # create -> insert -> flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        collection_w.flush()
+
+        # index -> load replicas
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load(replica_number=2)
+
+        # count
+        collection_w.query(expr=f'{ct.default_int64_field_name} >= 0', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{"count(*)": ct.default_nb}]})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_without_creating_index(self):
         """
