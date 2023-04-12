@@ -332,6 +332,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// count with pagination
+	if t.plan.GetQuery().GetIsCount() && t.queryParams.limit != typeutil.Unlimited {
+		return fmt.Errorf("count entities with pagination is not allowed")
+	}
+
 	if t.plan.GetQuery().GetIsCount() {
 		t.RetrieveRequest.IsCount = true
 	}
