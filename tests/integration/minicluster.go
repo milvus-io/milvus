@@ -437,14 +437,16 @@ func (cluster *MiniCluster) Stop() error {
 		dataNode.Stop()
 	}
 	log.Info("mini cluster datanodes stopped")
+
 	for _, queryNode := range cluster.queryNodes {
 		queryNode.Stop()
 	}
-	log.Info("mini cluster indexnodes stopped")
+	log.Info("mini cluster querynodes stopped")
+
 	for _, indexNode := range cluster.indexNodes {
 		indexNode.Stop()
 	}
-	log.Info("mini cluster querynodes stopped")
+	log.Info("mini cluster indexnodes stopped")
 
 	cluster.etcdCli.KV.Delete(cluster.ctx, Params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.etcdCli.Close()
