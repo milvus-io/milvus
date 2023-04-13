@@ -70,10 +70,42 @@ type Loader interface {
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 }
 
+func NewLoader(
+	manager CollectionManager,
+	cm storage.ChunkManager,
+) *segmentLoader {
+	cpuNum := runtime.GOMAXPROCS(0)
+	ioPoolSize := cpuNum * 8
+	// make sure small machines could load faster
+	if ioPoolSize < 32 {
+		ioPoolSize = 32
+	}
+	// limit the number of concurrency
+	if ioPoolSize > 256 {
+		ioPoolSize = 256
+	}
+
+	if configPoolSize := paramtable.Get().QueryNodeCfg.IoPoolSize.GetAsInt(); configPoolSize > 0 {
+		ioPoolSize = configPoolSize
+	}
+
+	ioPool := conc.NewPool(ioPoolSize, ants.WithPreAlloc(true))
+
+	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
+
+	loader := &segmentLoader{
+		manager: manager,
+		cm:      cm,
+		ioPool:  ioPool,
+	}
+
+	return loader
+}
+
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	manager CollectionManager
-	cm      storage.ChunkManager // minio cm
+	cm      storage.ChunkManager
 	ioPool  *conc.Pool
 }
 
@@ -124,8 +156,17 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 	}
 	if err != nil {
-		log.Error("load failed, OOM if loaded", zap.Error(err))
+		log.Warn("load failed, OOM if loaded", zap.Error(err))
 		return nil, err
+	}
+
+	logNum := 0
+	for _, field := range infos[0].GetBinlogPaths() {
+		logNum += len(field.GetBinlogs())
+	}
+	if logNum > 0 {
+		// IO pool will be run out even with the new smaller level
+		concurrencyLevel = funcutil.Min(concurrencyLevel, loader.ioPool.Free()/logNum)
 	}
 
 	newSegments := make(map[UniqueID]*LocalSegment, len(infos))
@@ -867,32 +908,4 @@ func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
-}
-
-func NewLoader(
-	manager CollectionManager,
-	cm storage.ChunkManager,
-	pool *conc.Pool) *segmentLoader {
-
-	cpuNum := runtime.GOMAXPROCS(0)
-	ioPoolSize := cpuNum * 8
-	// make sure small machines could load faster
-	if ioPoolSize < 32 {
-		ioPoolSize = 32
-	}
-	// limit the number of concurrency
-	if ioPoolSize > 256 {
-		ioPoolSize = 256
-	}
-	ioPool := conc.NewPool(ioPoolSize, ants.WithPreAlloc(true))
-
-	log.Info("SegmentLoader created", zap.Int("io-pool-size", ioPoolSize))
-
-	loader := &segmentLoader{
-		manager: manager,
-		cm:      cm,
-		ioPool:  ioPool,
-	}
-
-	return loader
 }

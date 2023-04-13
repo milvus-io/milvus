@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -38,7 +37,6 @@ type SegmentLoaderSuite struct {
 	// Dependencies
 	collectionManager CollectionManager
 	chunkManager      storage.ChunkManager
-	pool              *conc.Pool
 
 	// Data
 	collectionID int64
@@ -60,9 +58,8 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.collectionManager = NewCollectionManager()
 	suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 		fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-	suite.pool = conc.NewPool(10)
 
-	suite.loader = NewLoader(suite.collectionManager, suite.chunkManager, suite.pool)
+	suite.loader = NewLoader(suite.collectionManager, suite.chunkManager)
 
 	// Data
 	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)

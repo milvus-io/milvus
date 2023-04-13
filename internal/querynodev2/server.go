@@ -118,8 +118,6 @@ type QueryNode struct {
 	vectorStorage     storage.ChunkManager
 	etcdKV            *etcdkv.EtcdKV
 
-	// Pool for load segments
-	loadPool *conc.Pool
 	// Pool for search/query
 	taskPool *conc.Pool
 
@@ -269,7 +267,6 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
-		node.loadPool = conc.NewDefaultPool()
 		node.taskPool = conc.NewDefaultPool()
 		node.scheduler = tasks.NewScheduler()
 
@@ -301,7 +298,7 @@ func (node *QueryNode) Init() error {
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
-		node.loader = segments.NewLoader(node.manager.Collection, node.vectorStorage, node.loadPool)
+		node.loader = segments.NewLoader(node.manager.Collection, node.vectorStorage)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)

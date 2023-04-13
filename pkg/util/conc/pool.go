@@ -80,6 +80,11 @@ func (pool *Pool) Running() int {
 	return pool.inner.Running()
 }
 
+// Free returns the number of free workers
+func (pool *Pool) Free() int {
+	return pool.inner.Free()
+}
+
 func (pool *Pool) Release() {
 	pool.inner.Release()
 }
