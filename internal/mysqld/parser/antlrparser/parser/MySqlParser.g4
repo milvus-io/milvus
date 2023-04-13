@@ -1070,7 +1070,7 @@ tableSource
 
 querySpecification
     : SELECT selectSpec* selectElements
-      fromClause? limitClause?
+      fromClause? annsClause? limitClause?
     ;
 
 // querySpecificationNointo
@@ -1180,6 +1180,34 @@ selectElement
 fromClause
     : (FROM tableSources)
       (WHERE whereExpr=expression)?
+    ;
+
+annsClause
+    : ANNS BY fullColumnName ANNS_OP annsVectors annsParamsClause?
+    ;
+
+annsVectors
+    : '(' (annsVector (',' annsVector)* )? ')'
+    ;
+
+annsVector
+    : (floatArray | BIT_STRING)
+    ;
+
+annsParamsClause
+    : ANNS_PARAMS '=' kvPairs
+    ;
+
+kvPairs
+    : '(' (kvPair (',' kvPair)*)? ')'
+    ;
+
+kvPair
+    : ID '=' value
+    ;
+
+value
+    : (ID|constant)
     ;
 
 // groupByClause
@@ -2212,7 +2240,7 @@ constant
     | '-' decimalLiteral
     | hexadecimalLiteral | booleanLiteral
     | REAL_LITERAL
-//    | BIT_STRING
+    | BIT_STRING
 //    | NOT? nullLiteral=(NULL_LITERAL | NULL_SPEC_LITERAL)
     ;
 
@@ -2640,6 +2668,15 @@ expressionAtom
     | unaryOperator expressionAtom                                  #unaryExpressionAtom
 //    | BINARY expressionAtom                                         #binaryExpressionAtom
     | '(' expression (',' expression)* ')'                          #nestedExpressionAtom
+    | array                                                         #arrayExpressionAtom
+    ;
+
+array
+    : '[' ( expression ( ',' expression )* )? ']'
+    ;
+
+floatArray
+    : '[' ( decimalLiteral ( ',' decimalLiteral )* )? ']'
     ;
 
 unaryOperator
