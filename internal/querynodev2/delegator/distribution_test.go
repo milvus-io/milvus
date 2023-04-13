@@ -145,10 +145,12 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.SetupTest()
 			defer s.TearDownTest()
 			s.dist.AddGrowing(tc.growing...)
+			_, _, version := s.dist.GetCurrent()
 			_, signal := s.dist.AddDistributions(tc.input...)
 			sealed, _ := s.dist.Peek()
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.Equal(tc.expectedSignalClosed, s.isClosedCh(signal))
+			s.dist.FinishUsage(version)
 		})
 	}
 }
