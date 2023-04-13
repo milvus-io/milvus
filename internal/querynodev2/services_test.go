@@ -39,8 +39,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -889,6 +891,39 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 	rsp, err := suite.node.Search(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestSearch_Concurrent() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+
+	concurrency := 8
+	futures := make([]*conc.Future[*internalpb.SearchResults], 0, concurrency)
+	for i := 0; i < concurrency; i++ {
+		future := conc.Go(func() (*internalpb.SearchResults, error) {
+			creq, err := suite.genCSearchRequest(1, IndexFaissIDMap, schema)
+			req := &querypb.SearchRequest{
+				Req:             creq,
+				FromShardLeader: false,
+				DmlChannels:     []string{suite.vchannel},
+			}
+			suite.NoError(err)
+			return suite.node.Search(ctx, req)
+		})
+		futures = append(futures, future)
+	}
+
+	err := conc.AwaitAll(futures...)
+	suite.NoError(err)
+
+	for i := range futures {
+		suite.True(merr.Ok(futures[i].Value().GetStatus()))
+	}
 }
 
 func (suite *ServiceSuite) TestSearch_Failed() {

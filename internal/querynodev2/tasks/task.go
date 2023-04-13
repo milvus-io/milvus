@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -27,15 +28,18 @@ type Task interface {
 }
 
 type SearchTask struct {
-	ctx            context.Context
-	collection     *segments.Collection
-	segmentManager *segments.Manager
-	req            *querypb.SearchRequest
-	result         *internalpb.SearchResults
-	originTopks    []int64
-	originNqs      []int64
-	others         []*SearchTask
-	notifier       chan error
+	ctx              context.Context
+	collection       *segments.Collection
+	segmentManager   *segments.Manager
+	req              *querypb.SearchRequest
+	result           *internalpb.SearchResults
+	topk             int64
+	nq               int64
+	placeholderGroup []byte
+	originTopks      []int64
+	originNqs        []int64
+	others           []*SearchTask
+	notifier         chan error
 
 	tr *timerecord.TimeRecorder
 }
@@ -46,13 +50,16 @@ func NewSearchTask(ctx context.Context,
 	req *querypb.SearchRequest,
 ) *SearchTask {
 	return &SearchTask{
-		ctx:            ctx,
-		collection:     collection,
-		segmentManager: manager,
-		req:            req,
-		originTopks:    []int64{req.GetReq().GetTopk()},
-		originNqs:      []int64{req.GetReq().GetNq()},
-		notifier:       make(chan error, 1),
+		ctx:              ctx,
+		collection:       collection,
+		segmentManager:   manager,
+		req:              req,
+		topk:             req.GetReq().GetTopk(),
+		nq:               req.GetReq().GetNq(),
+		placeholderGroup: req.GetReq().GetPlaceholderGroup(),
+		originTopks:      []int64{req.GetReq().GetTopk()},
+		originNqs:        []int64{req.GetReq().GetNq()},
+		notifier:         make(chan error, 1),
 
 		tr: timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 	}
@@ -63,8 +70,10 @@ func (t *SearchTask) Execute() error {
 		zap.Int64("collectionID", t.collection.ID()),
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
+
 	req := t.req
-	searchReq, err := segments.NewSearchRequest(t.collection, req, req.GetReq().GetPlaceholderGroup())
+	t.combinePlaceHolderGroups()
+	searchReq, err := segments.NewSearchRequest(t.collection, req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
@@ -96,14 +105,22 @@ func (t *SearchTask) Execute() error {
 	defer segments.DeleteSearchResults(results)
 
 	if len(results) == 0 {
-		t.result = &internalpb.SearchResults{
-			Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			MetricType:     req.GetReq().GetMetricType(),
-			NumQueries:     req.GetReq().GetNq(),
-			TopK:           req.GetReq().GetTopk(),
-			SlicedBlob:     nil,
-			SlicedOffset:   1,
-			SlicedNumCount: 1,
+		for i := range t.originNqs {
+			var task *SearchTask
+			if i == 0 {
+				task = t
+			} else {
+				task = t.others[i-1]
+			}
+
+			task.result = &internalpb.SearchResults{
+				Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				MetricType:     req.GetReq().GetMetricType(),
+				NumQueries:     t.originNqs[i],
+				TopK:           t.originTopks[i],
+				SlicedOffset:   1,
+				SlicedNumCount: 1,
+			}
 		}
 		return nil
 	}
@@ -113,8 +130,8 @@ func (t *SearchTask) Execute() error {
 		searchReq.Plan(),
 		results,
 		int64(len(results)),
-		[]int64{req.GetReq().GetNq()},
-		[]int64{req.GetReq().GetTopk()},
+		t.originNqs,
+		t.originTopks,
 	)
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
@@ -122,36 +139,45 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResultDataBlobs(blobs)
 
-	blob, err := segments.GetSearchResultDataBlob(blobs, 0)
-	if err != nil {
-		return err
-	}
+	for i := range t.originNqs {
+		blob, err := segments.GetSearchResultDataBlob(blobs, i)
+		if err != nil {
+			return err
+		}
 
-	// Note: blob is unsafe because get from C
-	bs := make([]byte, len(blob))
-	copy(bs, blob)
+		var task *SearchTask
+		if i == 0 {
+			task = t
+		} else {
+			task = t.others[i-1]
+		}
 
-	metrics.QueryNodeReduceLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		metrics.SearchLabel).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+		// Note: blob is unsafe because get from C
+		bs := make([]byte, len(blob))
+		copy(bs, blob)
 
-	t.result = &internalpb.SearchResults{
-		Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
-		MetricType:     req.GetReq().GetMetricType(),
-		NumQueries:     req.GetReq().GetNq(),
-		TopK:           req.GetReq().GetTopk(),
-		SlicedBlob:     bs,
-		SlicedOffset:   1,
-		SlicedNumCount: 1,
+		metrics.QueryNodeReduceLatency.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel).
+			Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		task.result = &internalpb.SearchResults{
+			Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
+			MetricType:     req.GetReq().GetMetricType(),
+			NumQueries:     t.originNqs[i],
+			TopK:           t.originTopks[i],
+			SlicedBlob:     bs,
+			SlicedOffset:   1,
+			SlicedNumCount: 1,
+		}
 	}
 	return nil
 }
 
 func (t *SearchTask) Merge(other *SearchTask) bool {
 	var (
-		nq        = t.req.GetReq().GetNq()
-		topk      = t.req.GetReq().GetTopk()
+		nq        = t.nq
+		topk      = t.topk
 		otherNq   = other.req.GetReq().GetNq()
 		otherTopk = other.req.GetReq().GetTopk()
 	)
@@ -176,8 +202,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	}
 
 	// Merge
-	t.req.GetReq().Topk = maxTopk
-	t.req.GetReq().Nq += otherNq
+	t.topk = maxTopk
+	t.nq += otherNq
 	t.originTopks = append(t.originTopks, other.originTopks...)
 	t.originNqs = append(t.originNqs, other.originNqs...)
 	t.others = append(t.others, other)
@@ -208,6 +234,20 @@ func (t *SearchTask) Wait() error {
 
 func (t *SearchTask) Result() *internalpb.SearchResults {
 	return t.result
+}
+
+// combinePlaceHolderGroups combine all the placeholder groups.
+func (t *SearchTask) combinePlaceHolderGroups() {
+	if len(t.others) > 0 {
+		ret := &commonpb.PlaceholderGroup{}
+		_ = proto.Unmarshal(t.placeholderGroup, ret)
+		for _, t := range t.others {
+			x := &commonpb.PlaceholderGroup{}
+			_ = proto.Unmarshal(t.placeholderGroup, x)
+			ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
+		}
+		t.placeholderGroup, _ = proto.Marshal(ret)
+	}
 }
 
 type QueryTask struct {
