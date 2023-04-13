@@ -18,11 +18,13 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -103,14 +105,16 @@ func (sd *etcdShardSegmentDetector) watchSegments(collectionID int64, replicaID 
 		}
 	}
 
+	revision := resp.Header.GetRevision() + 1
 	sd.wg.Add(1)
-	watchCh := sd.client.Watch(sd.getCtx(), sd.path, clientv3.WithRev(resp.Header.GetRevision()+1), clientv3.WithPrefix(), clientv3.WithPrevKV())
-	go sd.watch(watchCh, collectionID, replicaID, vchannelName)
+	watchCh := sd.client.Watch(sd.getCtx(), sd.path, clientv3.WithRev(revision), clientv3.WithPrefix(), clientv3.WithPrevKV())
+
+	go sd.watch(watchCh, collectionID, replicaID, vchannelName, revision)
 
 	return events, sd.evtCh
 }
 
-func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID int64, replicaID int64, vchannel string) {
+func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID int64, replicaID int64, vchannel string, revision int64) {
 	defer sd.wg.Done()
 	for {
 		select {
@@ -119,29 +123,84 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 			return
 		case evt, ok := <-ch:
 			if !ok {
-				log.Warn("SegmentDetector event channel closed")
+				log.Warn("SegmentDetector event channel closed, retry...")
+				watchCh, ok := sd.rewatch(collectionID, replicaID, vchannel, revision)
+				if !ok {
+					return
+				}
+				sd.wg.Add(1)
+				go sd.watch(watchCh, collectionID, replicaID, vchannel, revision)
 				return
 			}
 			if err := evt.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
+					watchCh, ok := sd.rewatch(collectionID, replicaID, vchannel, evt.CompactRevision)
+					if !ok {
+						return
+					}
 					sd.wg.Add(1)
-					watchCh := sd.client.Watch(sd.getCtx(), sd.path, clientv3.WithPrefix())
-					go sd.watch(watchCh, collectionID, replicaID, vchannel)
+					go sd.watch(watchCh, collectionID, replicaID, vchannel, revision)
 					return
 				}
 				log.Error("failed to handle watch segment error, panic", zap.Error(err))
 				panic(err)
 			}
-			for _, e := range evt.Events {
-				switch e.Type {
-				case mvccpb.PUT:
-					sd.handlePutEvent(e, collectionID, replicaID, vchannel)
-				case mvccpb.DELETE:
-					sd.handleDelEvent(e, collectionID, replicaID, vchannel)
-				}
-			}
+			revision = evt.Header.GetRevision() + 1
+			sd.handleEvt(evt, collectionID, replicaID, vchannel)
 		}
 	}
+}
+
+func (sd *etcdShardSegmentDetector) rewatch(collectionID int64, replicaID int64, vchannel string, revision int64) (ch clientv3.WatchChan, ok bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := retry.Do(ctx, func() error {
+		ch = sd.client.Watch(ctx, sd.path, clientv3.WithPrefix(), clientv3.WithRev(revision))
+		select {
+		case <-sd.closeCh:
+			return retry.Unrecoverable(errors.New("detector closed"))
+		case evt, ok := <-ch:
+			if !ok {
+				return errors.New("rewatch got closed ch")
+			}
+			if err := evt.Err(); err != nil {
+				if err == v3rpc.ErrCompacted {
+					revision = evt.CompactRevision
+					return err
+				}
+				log.Error("failed to handle watch segment error", zap.Error(err))
+				panic(err)
+			}
+			revision = evt.Header.GetRevision() + 1
+			sd.handleEvt(evt, collectionID, replicaID, vchannel)
+		default:
+			// blocked, fine
+		}
+		return nil
+	})
+	// check detector closed
+	if err != nil {
+		select {
+		case <-sd.closeCh:
+			return nil, false
+		default:
+			panic(err)
+		}
+	}
+
+	return ch, true
+}
+
+func (sd *etcdShardSegmentDetector) handleEvt(evt clientv3.WatchResponse, collectionID int64, replicaID int64, vchannel string) {
+	for _, e := range evt.Events {
+		switch e.Type {
+		case mvccpb.PUT:
+			sd.handlePutEvent(e, collectionID, replicaID, vchannel)
+		case mvccpb.DELETE:
+			sd.handleDelEvent(e, collectionID, replicaID, vchannel)
+		}
+	}
+
 }
 
 func (sd *etcdShardSegmentDetector) handlePutEvent(e *clientv3.Event, collectionID int64, replicaID int64, vchannel string) {

@@ -24,6 +24,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -110,10 +111,11 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go nd.cancelClose(cancel)
-	watchCh := nd.client.Watch(ctx, nd.path, clientv3.WithRev(resp.Header.Revision+1), clientv3.WithPrefix(), clientv3.WithPrevKV())
+	revision := resp.Header.GetRevision() + 1
+	watchCh := nd.client.Watch(ctx, nd.path, clientv3.WithRev(revision), clientv3.WithPrefix(), clientv3.WithPrevKV())
 
 	nd.wg.Add(1)
-	go nd.watch(watchCh, collectionID, replicaID)
+	go nd.watch(watchCh, collectionID, replicaID, revision)
 
 	return nodes, nd.evtCh
 }
@@ -123,7 +125,7 @@ func (nd *etcdShardNodeDetector) cancelClose(cancel func()) {
 	cancel()
 }
 
-func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, replicaID int64) {
+func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, replicaID, revision int64) {
 	defer nd.wg.Done()
 	for {
 		select {
@@ -132,31 +134,89 @@ func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, repl
 			return
 		case evt, ok := <-ch:
 			if !ok {
-				log.Warn("event ch closed")
+				log.Warn("watch channel closed, retry...")
+				var watchCh clientv3.WatchChan
+				var ok bool
+				watchCh, ok, revision = nd.rewatch(collectionID, replicaID, revision)
+				if !ok {
+					// detector closed
+					return
+				}
+				nd.wg.Add(1)
+				go nd.watch(watchCh, collectionID, replicaID, revision)
 				return
 			}
 			if err := evt.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
-					ctx, cancel := context.WithCancel(context.Background())
-					watchCh := nd.client.Watch(ctx, nd.path, clientv3.WithPrefix())
-					go nd.cancelClose(cancel)
+					watchCh, ok, revision := nd.rewatch(collectionID, replicaID, evt.CompactRevision)
+					if !ok {
+						// detector closed
+						return
+					}
 					nd.wg.Add(1)
-					go nd.watch(watchCh, collectionID, replicaID)
+					go nd.watch(watchCh, collectionID, replicaID, revision)
 					return
 				}
 				log.Error("failed to handle watch node error", zap.Error(err))
 				panic(err)
 			}
-			for _, e := range evt.Events {
-				switch e.Type {
-				case mvccpb.PUT:
-					nd.handlePutEvent(e, collectionID, replicaID)
-				case mvccpb.DELETE:
-					nd.handleDelEvent(e, collectionID, replicaID)
-				}
-			}
+			revision = evt.Header.GetRevision() + 1
+			nd.handleEvt(evt, collectionID, replicaID)
 		}
 	}
+}
+
+func (nd *etcdShardNodeDetector) handleEvt(evt clientv3.WatchResponse, collectionID, replicaID int64) {
+	for _, e := range evt.Events {
+		switch e.Type {
+		case mvccpb.PUT:
+			nd.handlePutEvent(e, collectionID, replicaID)
+		case mvccpb.DELETE:
+			nd.handleDelEvent(e, collectionID, replicaID)
+		}
+	}
+}
+
+func (nd *etcdShardNodeDetector) rewatch(collectionID, replicaID, rev int64) (ch clientv3.WatchChan, ok bool, revision int64) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	revision = rev
+	err := retry.Do(ctx, func() error {
+		ch = nd.client.Watch(ctx, nd.path, clientv3.WithPrefix(), clientv3.WithRev(revision))
+		select {
+		case <-nd.closeCh:
+			return retry.Unrecoverable(errors.New("detector closed"))
+
+		case evt, ok := <-ch:
+			if !ok {
+				return errors.New("rewatch got closed ch")
+			}
+			if err := evt.Err(); err != nil {
+				if err == v3rpc.ErrCompacted {
+					revision = evt.CompactRevision
+					return err
+				}
+				log.Error("failed to handle watch node error", zap.Error(err))
+				panic(err)
+			}
+			revision = evt.Header.GetRevision() + 1
+			nd.handleEvt(evt, collectionID, replicaID)
+		default:
+			// blocked, fine
+		}
+		return nil
+	})
+	// check detector closed
+	if err != nil {
+		select {
+		case <-nd.closeCh:
+			return nil, false, revision
+		default:
+			panic(err)
+		}
+	}
+
+	return ch, true, revision
 }
 
 func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID, replicaID int64) {
