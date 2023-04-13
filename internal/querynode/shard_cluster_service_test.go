@@ -43,6 +43,7 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 	defer client.Close()
 	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
 	clusterService := newShardClusterService(client, session, qn)
+	defer clusterService.close()
 
 	t.Run("sync non-exist shard cluster", func(t *testing.T) {
 		err := clusterService.SyncReplicaSegments(defaultDMLChannel, nil)

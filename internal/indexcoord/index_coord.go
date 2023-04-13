@@ -1236,7 +1236,7 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 	log.Info("IndexCoord start watching flushed segments...")
 	defer i.loopWg.Done()
 
-	watchChan := i.etcdKV.WatchWithRevision(util.FlushedSegmentPrefix, i.flushedSegmentWatcher.etcdRevision+1)
+	watchChan := i.etcdKV.WatchWithRevision(util.FlushedSegmentPrefix, i.flushedSegmentWatcher.etcdRevision)
 	for {
 		select {
 		case <-i.loopCtx.Done():
@@ -1244,7 +1244,8 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 			return
 		case resp, ok := <-watchChan:
 			if !ok {
-				log.Warn("IndexCoord watch flush segments loop failed because watch channel closed")
+				log.Warn("IndexCoord watch flush segments loop failed because watch channel closed, retry...")
+				go i.watchFlushedSegmentLoop()
 				return
 			}
 			if err := resp.Err(); err != nil {
@@ -1264,6 +1265,7 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 					zap.String("prefix", util.FlushedSegmentPrefix), zap.Error(err))
 				panic("failed to handle etcd request, exit..")
 			}
+			i.flushedSegmentWatcher.etcdRevision = resp.Header.GetRevision() + 1
 			events := resp.Events
 			for _, event := range events {
 				switch event.Type {
