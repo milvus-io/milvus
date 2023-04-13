@@ -663,6 +663,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
 	}
+
+	if ret.SlicedBlob == nil {
+		log.Info("search result is empty", zap.String("dsl", req.Req.Dsl))
+	}
 	return ret, nil
 }
 
