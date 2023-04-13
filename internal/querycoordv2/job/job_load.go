@@ -178,9 +178,11 @@ func (job *LoadCollectionJob) Execute() error {
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID: req.GetCollectionID(),
-				PartitionID:  partID,
-				Status:       querypb.LoadStatus_Loading,
+				CollectionID:  req.GetCollectionID(),
+				PartitionID:   partID,
+				ReplicaNumber: req.GetReplicaNumber(),
+				Status:        querypb.LoadStatus_Loading,
+				FieldIndexID:  req.GetFieldIndexID(),
 			},
 			CreatedAt: time.Now(),
 		}
@@ -352,9 +354,11 @@ func (job *LoadPartitionJob) Execute() error {
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID: req.GetCollectionID(),
-				PartitionID:  partID,
-				Status:       querypb.LoadStatus_Loading,
+				CollectionID:  req.GetCollectionID(),
+				PartitionID:   partID,
+				ReplicaNumber: req.GetReplicaNumber(),
+				Status:        querypb.LoadStatus_Loading,
+				FieldIndexID:  req.GetFieldIndexID(),
 			},
 			CreatedAt: time.Now(),
 		}
