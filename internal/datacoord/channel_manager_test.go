@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // waitAndStore simulates DataNode's action
@@ -114,7 +115,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -144,7 +145,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -175,7 +176,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -213,7 +214,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -256,7 +257,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -302,7 +303,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -348,7 +349,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			chManager.watchChannelStatesLoop(ctx)
+			chManager.watchChannelStatesLoop(ctx, common.LatestRevision)
 			wg.Done()
 		}()
 
@@ -967,7 +968,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		chManager.stopChecker = cancel
 		defer cancel()
-		go chManager.stateChecker(ctx)
+		go chManager.stateChecker(ctx, common.LatestRevision)
 
 		chManager.store = &ChannelStore{
 			store: metakv,

@@ -331,10 +331,10 @@ func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
 func (c *ChannelStore) Delete(nodeID int64) ([]*channel, error) {
 	for id, info := range c.channelsInfo {
 		if id == nodeID {
-			delete(c.channelsInfo, id)
 			if err := c.remove(nodeID); err != nil {
 				return nil, err
 			}
+			delete(c.channelsInfo, id)
 			return info.Channels, nil
 		}
 	}

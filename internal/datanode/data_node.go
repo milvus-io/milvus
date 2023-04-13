@@ -293,6 +293,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 		case event, ok := <-evtChan:
 			if !ok {
 				log.Warn("datanode failed to watch channel, return")
+				go node.StartWatchChannels(ctx)
 				return
 			}
 
