@@ -293,6 +293,14 @@ func TestComponentParam(t *testing.T) {
 		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "1.4")
 		Params.initScoreUnbalanceTolerationFactor()
 		assert.Equal(t, 1.4, Params.ScoreUnbalanceTolerationFactor)
+
+		Params.Base.Save("queryCoord.CheckHealthInterval", "10")
+		Params.initCheckHealthInterval()
+		assert.Equal(t, time.Duration(10)*time.Millisecond, Params.CheckHealthInterval)
+
+		Params.Base.Save("queryCoord.CheckHealthRPCTimeout", "10")
+		Params.initCheckHealthRPCTimeout()
+		assert.Equal(t, time.Duration(10)*time.Millisecond, Params.CheckHealthRPCTimeout)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

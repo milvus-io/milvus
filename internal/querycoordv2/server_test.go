@@ -109,6 +109,7 @@ func (suite *ServerSuite) SetupTest() {
 
 	for i := range suite.nodes {
 		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
+		suite.nodes[i].EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
 		err := suite.nodes[i].Start()
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
@@ -150,24 +151,56 @@ func (suite *ServerSuite) TestRecover() {
 }
 
 func (suite *ServerSuite) TestNodeUp() {
-	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
-	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{}, nil)
-	err := newNode.Start()
+	// clear old nodes
+	oldNodes := suite.server.nodeMgr.GetAll()
+	for _, oldNode := range oldNodes {
+		suite.server.nodeMgr.Remove(oldNode.ID())
+	}
+	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
+
+	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: successStatus}, nil).Maybe()
+	err := node1.Start()
 	suite.NoError(err)
-	defer newNode.Stop()
+	defer node1.Stop()
 
 	suite.Eventually(func() bool {
-		node := suite.server.nodeMgr.Get(newNode.ID)
+		node := suite.server.nodeMgr.Get(node1.ID)
 		if node == nil {
 			return false
 		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, newNode.ID)
-			if replica == nil {
-				return false
-			}
+		return suite.server.meta.ResourceManager.ContainsNode(meta.DefaultResourceGroupName, node1.ID)
+	}, 5*time.Second, time.Second)
+
+	// mock node lost connection
+	suite.server.nodeMgr.Add(session.NewNodeInfo(101, "localhost"))
+
+	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
+	node2.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{}, nil).Maybe()
+	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: successStatus}, nil).Maybe()
+	err = node2.Start()
+	suite.NoError(err)
+	defer node2.Stop()
+
+	// expect node2 won't be add to qc, due to unhealthy nodes exist
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
 		}
-		return true
+		return !suite.server.meta.ResourceManager.ContainsNode(meta.DefaultResourceGroupName, node2.ID)
+	}, 5*time.Second, time.Second)
+
+	// mock 101 down, so no unhealthy nodes exist
+	suite.server.nodeMgr.Remove(101)
+
+	// expect node2 will be add to qc
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
+		}
+		return suite.server.meta.ResourceManager.ContainsNode(meta.DefaultResourceGroupName, node2.ID)
 	}, 5*time.Second, time.Second)
 }
 
