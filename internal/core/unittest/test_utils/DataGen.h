@@ -615,6 +615,20 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     return indexing;
 }
 
+inline index::VectorIndexPtr
+GenHNSWIndex(int64_t N, int64_t dim, const float* vec) {
+    auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                                 {knowhere::meta::DIM, std::to_string(dim)},
+                                 {knowhere::indexparam::EF, "200"},
+                                 {knowhere::indexparam::M, "16"},
+                                 {knowhere::meta::DEVICE_ID, 0}};
+    auto database = knowhere::GenDataset(N, dim, vec);
+    auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_HNSW,
+                                                              knowhere::metric::L2, IndexMode::MODE_CPU);
+    indexing->BuildWithDataset(database, conf);
+    return indexing;
+}
+
 template <typename T>
 inline index::IndexBasePtr
 GenScalarIndexing(int64_t N, const T* data) {
@@ -678,6 +692,17 @@ GenPKs(const Iter begin, const Iter end) {
 inline auto
 GenPKs(const std::vector<int64_t>& pks) {
     return GenPKs(pks.begin(), pks.end());
+}
+
+inline std::shared_ptr<knowhere::Dataset>
+GenRandomIds(int rows, int64_t seed = 42) {
+    std::mt19937 g(seed);
+    auto* ids = new int64_t[rows];
+    for (int i = 0; i < rows; ++i) ids[i] = i;
+    std::shuffle(ids, ids + rows, g);
+    // INPUT_IDS will not be free in dataset destructor, please delete it manually.
+    auto ids_ds = GenIdsDataset(rows, ids);
+    return ids_ds;
 }
 
 }  // namespace milvus::segcore

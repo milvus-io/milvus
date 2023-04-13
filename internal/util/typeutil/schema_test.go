@@ -1111,3 +1111,69 @@ func TestMergeFieldData(t *testing.T) {
 
 	MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
 }
+
+func TestGetDataAndGetDataSize(t *testing.T) {
+	const (
+		Dim       = 8
+		fieldName = "filed-0"
+		fieldID   = 0
+	)
+
+	BoolArray := []bool{true, false}
+	Int8Array := []int8{1, 2}
+	Int16Array := []int16{3, 4}
+	Int32Array := []int32{5, 6}
+	Int64Array := []int64{11, 22}
+	FloatArray := []float32{1.0, 2.0}
+	DoubleArray := []float64{11.0, 22.0}
+	VarCharArray := []string{"a", "b"}
+	BinaryVector := []byte{0x12, 0x34}
+	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+
+	boolData := genFieldData(fieldName, fieldID, schemapb.DataType_Bool, BoolArray, 1)
+	int8Data := genFieldData(fieldName, fieldID, schemapb.DataType_Int8, Int8Array, 1)
+	int16Data := genFieldData(fieldName, fieldID, schemapb.DataType_Int16, Int16Array, 1)
+	int32Data := genFieldData(fieldName, fieldID, schemapb.DataType_Int32, Int32Array, 1)
+	int64Data := genFieldData(fieldName, fieldID, schemapb.DataType_Int64, Int64Array, 1)
+	floatData := genFieldData(fieldName, fieldID, schemapb.DataType_Float, FloatArray, 1)
+	doubleData := genFieldData(fieldName, fieldID, schemapb.DataType_Double, DoubleArray, 1)
+	varCharData := genFieldData(fieldName, fieldID, schemapb.DataType_VarChar, VarCharArray, 1)
+	binVecData := genFieldData(fieldName, fieldID, schemapb.DataType_BinaryVector, BinaryVector, Dim)
+	floatVecData := genFieldData(fieldName, fieldID, schemapb.DataType_FloatVector, FloatVector, Dim)
+	invalidData := &schemapb.FieldData{
+		Type: schemapb.DataType_None,
+	}
+
+	t.Run("test GetPKSize", func(t *testing.T) {
+		int64DataRes := GetPKSize(int64Data)
+		varCharDataRes := GetPKSize(varCharData)
+		assert.Equal(t, 2, int64DataRes)
+		assert.Equal(t, 2, varCharDataRes)
+	})
+
+	t.Run("test GetData", func(t *testing.T) {
+		boolDataRes := GetData(boolData, 0)
+		int8DataRes := GetData(int8Data, 0)
+		int16DataRes := GetData(int16Data, 0)
+		int32DataRes := GetData(int32Data, 0)
+		int64DataRes := GetData(int64Data, 0)
+		floatDataRes := GetData(floatData, 0)
+		doubleDataRes := GetData(doubleData, 0)
+		varCharDataRes := GetData(varCharData, 0)
+		binVecDataRes := GetData(binVecData, 0)
+		floatVecDataRes := GetData(floatVecData, 0)
+		invalidDataRes := GetData(invalidData, 0)
+
+		assert.Equal(t, BoolArray[0], boolDataRes)
+		assert.Equal(t, int32(Int8Array[0]), int8DataRes)
+		assert.Equal(t, int32(Int16Array[0]), int16DataRes)
+		assert.Equal(t, Int32Array[0], int32DataRes)
+		assert.Equal(t, Int64Array[0], int64DataRes)
+		assert.Equal(t, FloatArray[0], floatDataRes)
+		assert.Equal(t, DoubleArray[0], doubleDataRes)
+		assert.Equal(t, VarCharArray[0], varCharDataRes)
+		assert.ElementsMatch(t, BinaryVector[:Dim/8], binVecDataRes)
+		assert.ElementsMatch(t, FloatVector[:Dim], floatVecDataRes)
+		assert.Nil(t, invalidDataRes)
+	})
+}
