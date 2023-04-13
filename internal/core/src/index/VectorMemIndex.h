@@ -67,6 +67,12 @@ class VectorMemIndex : public VectorIndex {
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
+    const bool
+    HasRawData() const override;
+
+    std::vector<uint8_t>
+    GetVector(const DatasetPtr dataset, const Config& config = {}) const override;
+
  protected:
     Config config_;
     knowhere::VecIndexPtr index_ = nullptr;

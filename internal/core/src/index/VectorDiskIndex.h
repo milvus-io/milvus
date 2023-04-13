@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -67,6 +68,12 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
+
+    const bool
+    HasRawData() const override;
+
+    std::vector<uint8_t>
+    GetVector(const DatasetPtr dataset, const Config& config = {}) const override;
 
     void
     CleanLocalData() override;

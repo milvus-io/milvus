@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -506,7 +507,10 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	case *schemapb.IDs_IntId:
 		idsStr = strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids.GetIntId().GetData())), ", "), "[]")
 	case *schemapb.IDs_StrId:
-		idsStr = strings.Trim(strings.Join(ids.GetStrId().GetData(), ", "), "[]")
+		strs := lo.Map(ids.GetStrId().GetData(), func(str string, _ int) string {
+			return fmt.Sprintf("\"%s\"", str)
+		})
+		idsStr = strings.Trim(strings.Join(strs, ", "), "[]")
 	}
 
 	return fieldName + " in [ " + idsStr + " ]"
