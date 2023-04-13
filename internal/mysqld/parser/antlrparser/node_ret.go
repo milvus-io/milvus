@@ -77,6 +77,14 @@ func GetFromClause(obj interface{}) *planner.NodeFromClause {
 	return n
 }
 
+func GetANNSClause(obj interface{}) *planner.NodeANNSClause {
+	n, ok := obj.(*planner.NodeANNSClause)
+	if !ok {
+		return nil
+	}
+	return n
+}
+
 func GetLimitClause(obj interface{}) *planner.NodeLimitClause {
 	n, ok := obj.(*planner.NodeLimitClause)
 	if !ok {
@@ -135,6 +143,22 @@ func GetExpressionAtom(obj interface{}) *planner.NodeExpressionAtom {
 
 func GetExpressions(obj interface{}) *planner.NodeExpressions {
 	n, ok := obj.(*planner.NodeExpressions)
+	if !ok {
+		return nil
+	}
+	return n
+}
+
+func GetKVPairs(obj interface{}) *planner.NodeKVPairs {
+	n, ok := obj.(*planner.NodeKVPairs)
+	if !ok {
+		return nil
+	}
+	return n
+}
+
+func GetVector(obj interface{}) *planner.NodeVector {
+	n, ok := obj.(*planner.NodeVector)
 	if !ok {
 		return nil
 	}

@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/milvus-io/milvus/internal/mysqld/parser"
 	"github.com/milvus-io/milvus/internal/mysqld/planner"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 func Test_antlrParser_Parse(t *testing.T) {
@@ -47,4 +48,36 @@ func Test_antlrParser_Parse(t *testing.T) {
 	for _, sql := range sqls {
 		debug(t, sql)
 	}
+}
+
+type ANNSSuite struct {
+	suite.Suite
+
+	p parser.Parser
+}
+
+func (suite *ANNSSuite) SetupTest() {
+	suite.p = NewAntlrParser()
+}
+
+func (suite *ANNSSuite) TearDownTest() {}
+
+func TestANNSSuite(t *testing.T) {
+	suite.Run(t, new(ANNSSuite))
+}
+
+func (suite *ANNSSuite) TestFloatVector() {
+	sql := `
+select query_number, id, distance
+from t
+where id >= 1000 and id <= 10000
+anns by feature -> ([0.23, 0.21], [0.24, 0.26]) PARAMS = (nprobe=1, ef=5)
+limit 100
+`
+
+	plan, warns, err := suite.p.Parse(sql)
+	suite.NoError(err)
+	suite.Nil(warns)
+
+	planner.NewTreeUtils().PrettyPrintHrn(GetSqlStatements(plan.Node))
 }

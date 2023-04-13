@@ -1,6 +1,10 @@
 package planner
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/milvus-io/milvus/internal/mysqld/sqlutil"
+)
 
 type jsonVisitor struct {
 }
@@ -362,8 +366,18 @@ func (v jsonVisitor) VisitConstant(n *NodeConstant) interface{} {
 	}
 
 	if n.RealLiteral.IsSome() {
-		j["real_literal"] = strconv.FormatFloat(n.RealLiteral.Unwrap(), 'f', -1, 64)
+		j["real_literal"] = sqlutil.Float64ToString(n.RealLiteral.Unwrap())
 	}
+
+	return j
+}
+
+func (v jsonVisitor) VisitANNSClause(n *NodeANNSClause) interface{} {
+	// leaf node.
+
+	j := map[string]interface{}{}
+
+	j["anns"] = n.String()
 
 	return j
 }
