@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -77,6 +78,56 @@ func (t *createCollectionTask) validate() error {
 	return nil
 }
 
+func defaultValueTypeMatch(schema *schemapb.CollectionSchema) error {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.GetDefaultValue() != nil {
+			switch fieldSchema.GetDefaultValue().Data.(type) {
+			case *schemapb.ValueField_BoolData:
+				if fieldSchema.GetDataType() != schemapb.DataType_Bool {
+					return merr.WrapErrParameterInvalid("DataType_Bool", "not match", "default value type mismatches field schema type")
+				}
+			case *schemapb.ValueField_IntData:
+				if fieldSchema.GetDataType() != schemapb.DataType_Int32 &&
+					fieldSchema.GetDataType() != schemapb.DataType_Int16 &&
+					fieldSchema.GetDataType() != schemapb.DataType_Int8 {
+					return merr.WrapErrParameterInvalid("DataType_Int", "not match", "default value type mismatches field schema type")
+				}
+				defaultValue := fieldSchema.GetDefaultValue().GetIntData()
+				if fieldSchema.GetDataType() == schemapb.DataType_Int16 {
+					if defaultValue > math.MaxInt16 || defaultValue < math.MinInt16 {
+						return merr.WrapErrParameterInvalidRange(math.MinInt16, math.MaxInt16, defaultValue, "default value out of range")
+					}
+				}
+				if fieldSchema.GetDataType() == schemapb.DataType_Int8 {
+					if defaultValue > math.MaxInt8 || defaultValue < math.MinInt8 {
+						return merr.WrapErrParameterInvalidRange(math.MinInt8, math.MaxInt8, defaultValue, "default value out of range")
+					}
+				}
+			case *schemapb.ValueField_LongData:
+				if fieldSchema.GetDataType() != schemapb.DataType_Int64 {
+					return merr.WrapErrParameterInvalid("DataType_Int64", "not match", "default value type mismatches field schema type")
+				}
+			case *schemapb.ValueField_FloatData:
+				if fieldSchema.GetDataType() != schemapb.DataType_Float {
+					return merr.WrapErrParameterInvalid("DataType_Float", "not match", "default value type mismatches field schema type")
+				}
+			case *schemapb.ValueField_DoubleData:
+				if fieldSchema.GetDataType() != schemapb.DataType_Double {
+					return merr.WrapErrParameterInvalid("DataType_Double", "not match", "default value type mismatches field schema type")
+				}
+			case *schemapb.ValueField_StringData:
+				if fieldSchema.GetDataType() != schemapb.DataType_VarChar {
+					return merr.WrapErrParameterInvalid("DataType_VarChar", "not match", "default value type mismatches field schema type")
+				}
+			default:
+				panic("default value unsupport data type")
+			}
+		}
+	}
+
+	return nil
+}
+
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
@@ -87,11 +138,23 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 }
 
 func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema) error {
+	log.With(zap.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
-		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
+		log.Error("collection name not matches schema name", zap.String("SchemaName", schema.Name))
+		msg := fmt.Sprintf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
+		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
+
+	err := defaultValueTypeMatch(schema)
+	if err != nil {
+		log.Error("default value type mismatch field schema type")
+		return err
+	}
+
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}) {
-		return fmt.Errorf("schema contains system field: %s, %s", RowIDFieldName, TimeStampFieldName)
+		log.Error("schema contains system field", zap.String("RowIDFieldName", RowIDFieldName), zap.String("TimeStampFieldName", TimeStampFieldName))
+		msg := fmt.Sprintf("schema contains system field: %s, %s", RowIDFieldName, TimeStampFieldName)
+		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
 	return nil
 }

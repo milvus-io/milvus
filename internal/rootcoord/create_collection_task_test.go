@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -126,6 +127,143 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(schema)
 		assert.Error(t, err)
+	})
+
+	t.Run("default value type mismatch", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema1 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BoolData{
+							BoolData: false,
+						},
+					},
+				},
+			},
+		}
+		err1 := task.validateSchema(schema1)
+		assert.ErrorIs(t, err1, merr.ErrParameterInvalid)
+
+		schema2 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: 1,
+						},
+					},
+				},
+			},
+		}
+		err2 := task.validateSchema(schema2)
+		assert.ErrorIs(t, err2, merr.ErrParameterInvalid)
+
+		schema3 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_LongData{
+							LongData: 1,
+						},
+					},
+				},
+			},
+		}
+		err3 := task.validateSchema(schema3)
+		assert.ErrorIs(t, err3, merr.ErrParameterInvalid)
+
+		schema4 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_FloatData{
+							FloatData: 1,
+						},
+					},
+				},
+			},
+		}
+		err4 := task.validateSchema(schema4)
+		assert.ErrorIs(t, err4, merr.ErrParameterInvalid)
+
+		schema5 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_DoubleData{
+							DoubleData: 1,
+						},
+					},
+				},
+			},
+		}
+		err5 := task.validateSchema(schema5)
+		assert.ErrorIs(t, err5, merr.ErrParameterInvalid)
+
+		schema6 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_BinaryVector,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "a",
+						},
+					},
+				},
+			},
+		}
+		err6 := task.validateSchema(schema6)
+		assert.ErrorIs(t, err6, merr.ErrParameterInvalid)
+
+		schema7 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_Int16,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: math.MaxInt32,
+						},
+					},
+				},
+			},
+		}
+		err7 := task.validateSchema(schema7)
+		assert.ErrorIs(t, err7, merr.ErrParameterInvalid)
+
+		schema8 := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_Int8,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: math.MaxInt32,
+						},
+					},
+				},
+			},
+		}
+		err8 := task.validateSchema(schema8)
+		assert.ErrorIs(t, err8, merr.ErrParameterInvalid)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
