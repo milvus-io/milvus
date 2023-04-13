@@ -87,6 +87,9 @@ class SegmentInterface {
 
     virtual int64_t
     get_segment_id() const = 0;
+
+    virtual bool
+    HasRawData(int64_t field_id) const = 0;
 };
 
 // internal API for DSL calculation
