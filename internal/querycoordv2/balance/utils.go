@@ -28,7 +28,8 @@ import (
 )
 
 const (
-	InfoPrefix = "Balance-Info:"
+	PlanInfoPrefix = "Balance-Plans:"
+	DistInfoPrefix = "Balance-Dists:"
 )
 
 func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
@@ -119,7 +120,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 
 func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
 	channelPlans []ChannelAssignPlan) {
-	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", InfoPrefix, collectionID, replicaID)
+	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", PlanInfoPrefix, collectionID, replicaID)
 	for _, segmentPlan := range segmentPlans {
 		balanceInfo += segmentPlan.ToString()
 	}
@@ -133,7 +134,7 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []Se
 func PrintCurrentReplicaDist(replica *meta.Replica,
 	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
 	channelManager *meta.ChannelDistManager) {
-	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", InfoPrefix, replica.CollectionID, replica.GetID())
+	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", DistInfoPrefix, replica.CollectionID, replica.GetID())
 	//1. print stopping nodes segment distribution
 	distInfo += "[stoppingNodesSegmentDist:"
 	for stoppingNodeID, stoppedSegments := range stoppingNodesSegments {

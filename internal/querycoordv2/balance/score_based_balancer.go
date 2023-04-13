@@ -24,7 +24,6 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -34,7 +33,6 @@ import (
 
 type ScoreBasedBalancer struct {
 	*RowCountBasedBalancer
-	balancedCollectionsCurrentRound typeutil.UniqueSet
 }
 
 func NewScoreBasedBalancer(scheduler task.Scheduler,
@@ -43,8 +41,7 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager) *ScoreBasedBalancer {
 	return &ScoreBasedBalancer{
-		RowCountBasedBalancer:           NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
-		balancedCollectionsCurrentRound: typeutil.NewUniqueSet(),
+		RowCountBasedBalancer: NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
 	}
 }
 
@@ -109,50 +106,7 @@ func (b *ScoreBasedBalancer) calculatePriority(collectionID, nodeID int64) int {
 		params.Params.QueryCoordCfg.GlobalRowCountFactor)
 }
 
-func (b *ScoreBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	ids := b.meta.CollectionManager.GetAll()
-
-	// loading collection should skip balance
-	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		return b.meta.GetCollection(cid).Status == querypb.LoadStatus_Loaded
-	})
-
-	sort.Slice(loadedCollections, func(i, j int) bool {
-		return loadedCollections[i] < loadedCollections[j]
-	})
-
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	hasUnBalancedCollections := false
-	for _, cid := range loadedCollections {
-		if b.balancedCollectionsCurrentRound.Contain(cid) {
-			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
-				zap.Int64("collectionID", cid))
-			continue
-		}
-		hasUnBalancedCollections = true
-		replicas := b.meta.ReplicaManager.GetByCollection(cid)
-		for _, replica := range replicas {
-			sPlans, cPlans := b.balanceReplica(replica)
-			PrintNewBalancePlans(cid, replica.GetID(), sPlans, cPlans)
-			segmentPlans = append(segmentPlans, sPlans...)
-			channelPlans = append(channelPlans, cPlans...)
-		}
-		b.balancedCollectionsCurrentRound.Insert(cid)
-		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
-			log.Debug("ScoreBasedBalancer has generated balance plans for", zap.Int64("collectionID", cid))
-			break
-		}
-	}
-	if !hasUnBalancedCollections {
-		b.balancedCollectionsCurrentRound.Clear()
-		log.Debug("ScoreBasedBalancer has balanced all " +
-			"collections in one round, clear collectionIDs for this round")
-	}
-
-	return segmentPlans, channelPlans
-}
-
-func (b *ScoreBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	nodes := replica.GetNodes()
 	if len(nodes) == 0 {
 		return nil, nil
@@ -284,10 +238,6 @@ func (b *ScoreBasedBalancer) getStoppedChannelPlan(replica *meta.Replica, online
 }
 
 func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
-	if b.scheduler.GetSegmentTaskNum() != 0 {
-		// scheduler is handling segment task, skip
-		return nil
-	}
 	segmentPlans := make([]SegmentAssignPlan, 0)
 
 	// generate candidates
