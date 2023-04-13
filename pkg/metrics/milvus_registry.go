@@ -39,14 +39,15 @@ type MilvusRegistry struct {
 // Gather implements Gatherer.
 func (r *MilvusRegistry) Gather() ([]*dto.MetricFamily, error) {
 	var res []*dto.MetricFamily
-	res1, err := r.GoRegistry.Gather()
+	resGo, err := r.GoRegistry.Gather()
 	if err != nil {
 		return res, err
 	}
-	res2, err := r.CRegistry.Gather()
+	resC, err := r.CRegistry.Gather()
 	if err != nil {
-		return res, err
+		// if gather c metrics fail, ignore the error and return go metrics
+		return resGo, nil
 	}
-	res = append(res1, res2...)
+	res = append(resGo, resC...)
 	return res, nil
 }
