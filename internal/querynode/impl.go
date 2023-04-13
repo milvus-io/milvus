@@ -792,6 +792,16 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		rateCol.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
 	}
+
+	if ret.SlicedBlob == nil {
+		log.Ctx(ctx).Info("search result is empty",
+			zap.Strings("vChannels", req.GetDmlChannels()),
+			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+			zap.Int64("collection", req.Req.CollectionID),
+			zap.Strings("shard", req.DmlChannels),
+			zap.Bool("from shard leader", req.FromShardLeader),
+			zap.String("dsl", req.Req.Dsl))
+	}
 	return ret, nil
 }
 
