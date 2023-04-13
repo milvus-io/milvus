@@ -1127,6 +1127,8 @@ type queryCoordConfig struct {
 	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
 	CheckResourceGroupInterval ParamItem `refreshable:"false"`
 	EnableRGAutoRecover        ParamItem `refreshable:"true"`
+	CheckHealthInterval        ParamItem `refreshable:"false"`
+	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1352,6 +1354,26 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.EnableRGAutoRecover.Init(base.mgr)
+
+	p.CheckHealthInterval = ParamItem{
+		Key:          "queryCoord.checkHealthInterval",
+		Version:      "2.2.7",
+		DefaultValue: "3000",
+		PanicIfEmpty: true,
+		Doc:          "3s, the interval when query coord try to check health of query node",
+		Export:       true,
+	}
+	p.CheckHealthInterval.Init(base.mgr)
+
+	p.CheckHealthRPCTimeout = ParamItem{
+		Key:          "queryCoord.checkHealthRPCTimeout",
+		Version:      "2.2.7",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "100ms, the timeout of check health rpc to query node",
+		Export:       true,
+	}
+	p.CheckHealthRPCTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
