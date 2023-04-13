@@ -842,11 +842,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=output_fields,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "Search doesn't support "
-                                                    "vector field as output_fields"})
+                            default_search_exp, output_fields=output_fields)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])

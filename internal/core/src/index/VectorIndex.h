@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 #include <boost/dynamic_bitset.hpp>
 
 #include "knowhere/factory.h"
@@ -49,6 +50,12 @@ class VectorIndex : public IndexBase {
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset) = 0;
+
+    virtual const bool
+    HasRawData() const = 0;
+
+    virtual const std::vector<uint8_t>
+    GetVector(const DatasetPtr dataset, const Config& config = {}) const = 0;
 
     IndexType
     GetIndexType() const {

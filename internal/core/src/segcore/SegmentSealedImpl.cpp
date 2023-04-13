@@ -29,6 +29,7 @@
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
+#include "index/Utils.h"
 
 namespace milvus::segcore {
 
@@ -475,6 +476,35 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     }
 }
 
+std::unique_ptr<DataArray>
+SegmentSealedImpl::get_vector(FieldId field_id,
+                              const int64_t* ids,
+                              int64_t count) const {
+    auto& filed_meta = schema_->operator[](field_id);
+    AssertInfo(filed_meta.is_vector(), "vector field is not vector type");
+
+    if (get_bit(index_ready_bitset_, field_id)) {
+        AssertInfo(vector_indexings_.is_ready(field_id),
+                   "vector index is not ready");
+        auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+        auto vec_index =
+            dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+
+        auto index_type = vec_index->GetIndexType();
+        auto metric_type = vec_index->GetMetricType();
+        auto has_raw_data = vec_index->HasRawData();
+
+        if (has_raw_data) {
+            auto ids_ds = GenIdsDataset(count, ids);
+            auto& vector = vec_index->GetVector(ids_ds);
+            return segcore::CreateVectorDataArrayFrom(
+                vector.data(), count, filed_meta);
+        }
+    }
+
+    return fill_with_empty(field_id, count);
+}
+
 void
 SegmentSealedImpl::DropFieldData(const FieldId field_id) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -666,9 +696,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             return ReverseDataFromIndex(index, seg_offsets, count, field_meta);
         }
 
-        // TODO: knowhere support reverse data from vector index
-        // Now, real data will be filled in data array using chunk manager
-        return fill_with_empty(field_id, count);
+        return get_vector(field_id, seg_offsets, count);
     }
 
     Assert(get_bit(field_data_ready_bitset_, field_id));
@@ -781,6 +809,24 @@ SegmentSealedImpl::HasFieldData(FieldId field_id) const {
     } else {
         return get_bit(field_data_ready_bitset_, field_id);
     }
+}
+
+bool
+SegmentSealedImpl::HasRawData(int64_t field_id) const {
+    std::shared_lock lck(mutex_);
+    auto fieldID = FieldId(field_id);
+    const auto& field_meta = schema_->operator[](fieldID);
+    if (datatype_is_vector(field_meta.get_data_type())) {
+        if (get_bit(index_ready_bitset_, fieldID)) {
+            AssertInfo(vector_indexings_.is_ready(fieldID),
+                       "vector index is not ready");
+            auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
+            auto vec_index = dynamic_cast<index::VectorIndex*>(
+                field_indexing->indexing_.get());
+            return vec_index->HasRawData();
+        }
+    }
+    return true;
 }
 
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>

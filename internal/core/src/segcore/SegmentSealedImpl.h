@@ -61,6 +61,9 @@ class SegmentSealedImpl : public SegmentSealed {
         return id_;
     }
 
+    bool
+    HasRawData(int64_t field_id) const override;
+
  public:
     int64_t
     GetMemoryUsageInBytes() const override;
@@ -73,6 +76,9 @@ class SegmentSealedImpl : public SegmentSealed {
 
     const Schema&
     get_schema() const override;
+
+    std::unique_ptr<DataArray>
+    get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
 
  public:
     int64_t
