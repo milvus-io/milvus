@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -59,6 +60,7 @@ import (
 )
 
 const moduleName = "Proxy"
+const SlowReadSpan = time.Second * 5
 
 // UpdateStateCode updates the state code of Proxy.
 func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
@@ -2431,6 +2433,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Uint64("travel_timestamp", travelTs),
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
+	defer func() {
+		span := tr.ElapseSpan()
+		if span >= SlowReadSpan {
+			log.Info(rpcSlow(method), zap.Duration("duration", span))
+		}
+	}()
+
 	log.Debug(
 		rpcReceived(method))
 
@@ -2609,6 +2618,19 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames))
+
+	defer func() {
+		span := tr.ElapseSpan()
+		if span >= SlowReadSpan {
+			log.Info(
+				rpcSlow(method),
+				zap.String("expr", request.Expr),
+				zap.Strings("OutputFields", request.OutputFields),
+				zap.Uint64("travel_timestamp", request.TravelTimestamp),
+				zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
+				zap.Duration("duration", span))
+		}
+	}()
 
 	log.Debug(
 		rpcReceived(method),
