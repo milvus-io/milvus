@@ -188,6 +188,7 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
+	delete(mt.collName2ID, coll.Name)
 
 	switch state {
 	case pb.CollectionState_CollectionCreated:
@@ -597,8 +598,11 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, alias string, collectionNa
 	// It's ok that we don't read from catalog when cache missed.
 	// Since cache always keep the latest version, and the ts should always be the latest.
 
-	if _, ok := mt.collName2ID[alias]; ok {
-		return fmt.Errorf("cannot create alias, collection already exists with same name: %s", alias)
+	if collID, ok := mt.collName2ID[alias]; ok {
+		coll, ok := mt.collID2Meta[collID]
+		if ok && coll.Available() {
+			return fmt.Errorf("cannot create alias, collection already exists with same name: %s", alias)
+		}
 	}
 
 	collectionID, ok := mt.collName2ID[collectionName]
