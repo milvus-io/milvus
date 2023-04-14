@@ -76,7 +76,7 @@ func newServerBroker(s *Core) *ServerBroker {
 }
 
 func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID) error {
-	log.Info("releasing collection", zap.Int64("collection", collectionID))
+	log.Ctx(ctx).Info("releasing collection", zap.Int64("collection", collectionID))
 
 	resp, err := b.s.queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection)),
@@ -91,7 +91,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 		return fmt.Errorf("failed to release collection, code: %s, reason: %s", resp.GetErrorCode(), resp.GetReason())
 	}
 
-	log.Info("done to release collection", zap.Int64("collection", collectionID))
+	log.Ctx(ctx).Info("done to release collection", zap.Int64("collection", collectionID))
 	return nil
 }
 
@@ -162,7 +162,7 @@ func toKeyDataPairs(m map[string][]byte) []*commonpb.KeyDataPair {
 }
 
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
-	log.Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
+	log.Ctx(ctx).Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
 
 	resp, err := b.s.dataCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:   info.collectionID,
@@ -178,7 +178,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		return fmt.Errorf("failed to watch channels, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
 	}
 
-	log.Info("done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
+	log.Ctx(ctx).Info("done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
 	return nil
 }
 
@@ -221,6 +221,8 @@ func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegm
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+	log.Ctx(ctx).Info("dropping collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
+
 	rsp, err := b.s.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
 		PartitionIDs: partIDs,
@@ -233,6 +235,9 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 	if rsp.ErrorCode != commonpb.ErrorCode_Success {
 		return fmt.Errorf(rsp.Reason)
 	}
+
+	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
+
 	return nil
 }
 
