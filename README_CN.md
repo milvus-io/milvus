@@ -1,7 +1,7 @@
 <img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="Milvus banner">
 
 <div class="column" align="middle">
-  <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
+  <a href="https://milvusio.slack.com/join/shared_invite/zt-1slimkif6-8uWK0XPL8adve6vSD4jSwg">
     <img src="https://img.shields.io/badge/Join-Slack-orange" alt="join-slack"/>
   </a>
   <img src="https://img.shields.io/github/license/milvus-io/milvus" alt="license"/>
@@ -459,7 +459,7 @@ Attu 提供了好用的图形化界面，帮助您更好的管理数据和Milvus
 
 ## 社区
 
-欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/performance_faq.md) 页面，查看常见问题及解答。
+欢迎加入 [Slack](https://milvusio.slack.com/join/shared_invite/zt-1slimkif6-8uWK0XPL8adve6vSD4jSwg) 频道分享你的建议与问题。你也可以通过 [FAQ](https://milvus.io/cn/docs/performance_faq.md) 页面，查看常见问题及解答。
 
 订阅 Milvus 邮件：
 
