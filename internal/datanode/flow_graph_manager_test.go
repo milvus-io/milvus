@@ -192,6 +192,7 @@ func TestFlowGraphManager(t *testing.T) {
 		assert.Nil(t, fg)
 	})
 
+	Params.DataNodeCfg.MemoryForceSyncEnable = true
 	t.Run("test execute", func(t *testing.T) {
 		tests := []struct {
 			testName         string
@@ -207,7 +208,6 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 
 		fm.dropAll()
-		Params.DataNodeCfg.MemoryForceSyncEnable = true
 		const channelPrefix = "by-dev-rootcoord-dml-test-fg-mgr-execute-"
 		for _, test := range tests {
 			Params.DataNodeCfg.MemoryWatermark = test.watermark
