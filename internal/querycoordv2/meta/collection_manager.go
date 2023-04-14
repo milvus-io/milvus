@@ -21,10 +21,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 type Collection struct {
@@ -83,7 +85,12 @@ func (m *CollectionManager) Recover() error {
 
 	for _, collection := range collections {
 		// Collections not loaded done should be deprecated
-		if collection.GetStatus() != querypb.LoadStatus_Loaded {
+		if collection.GetStatus() != querypb.LoadStatus_Loaded || collection.GetReplicaNumber() <= 0 {
+			log.Info("skip recovery and release collection",
+				zap.Int64("collectionID", collection.GetCollectionID()),
+				zap.String("status", collection.GetStatus().String()),
+				zap.Int32("replicaNumber", collection.GetReplicaNumber()),
+			)
 			m.store.ReleaseCollection(collection.GetCollectionID())
 			continue
 		}
@@ -94,19 +101,32 @@ func (m *CollectionManager) Recover() error {
 	}
 
 	for collection, partitions := range partitions {
+		sawLoaded := false
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
-			if partition.GetStatus() != querypb.LoadStatus_Loaded {
-				partitionIDs := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) int64 {
-					return partition.GetPartitionID()
-				})
-				m.store.ReleasePartition(collection, partitionIDs...)
+			if partition.GetStatus() != querypb.LoadStatus_Loaded || partition.GetReplicaNumber() <= 0 {
+				log.Info("skip recovery and release partition",
+					zap.Int64("collectionID", collection),
+					zap.Int64("partitionID", partition.GetPartitionID()),
+					zap.String("status", partition.GetStatus().String()),
+					zap.Int32("replicaNumber", partition.GetReplicaNumber()),
+				)
+
+				m.store.ReleasePartition(collection, partition.GetPartitionID())
 				break
 			}
 
+			sawLoaded = true
 			m.partitions[partition.PartitionID] = &Partition{
 				PartitionLoadInfo: partition,
 			}
+		}
+
+		if !sawLoaded {
+			partitionIDs := lo.Map(partitions, func(partition *querypb.PartitionLoadInfo, _ int) int64 {
+				return partition.GetPartitionID()
+			})
+			m.store.ReleasePartition(collection, partitionIDs...)
 		}
 	}
 
