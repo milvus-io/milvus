@@ -1367,9 +1367,10 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	ChunkRows        ParamItem `refreshable:"false"`
-	SmallIndexNlist  ParamItem `refreshable:"false"`
-	SmallIndexNProbe ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize ParamItem `refreshable:"false"`
+	ChunkRows              ParamItem `refreshable:"false"`
+	SmallIndexNlist        ParamItem `refreshable:"false"`
+	SmallIndexNProbe       ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1441,6 +1442,25 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.StatsPublishInterval.Init(base.mgr)
+
+	p.KnowhereThreadPoolSize = ParamItem{
+		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
+		Version:      "2.0.0",
+		DefaultValue: "4",
+		Formatter: func(v string) string {
+			factor := getAsInt64(v)
+			if factor <= 0 || !p.EnableDisk.GetAsBool() {
+				factor = 1
+			} else if factor > 32 {
+				factor = 32
+			}
+			knowhereThreadPoolSize := uint32(runtime.GOMAXPROCS(0)) * uint32(factor)
+			return strconv.FormatUint(uint64(knowhereThreadPoolSize), 10)
+		},
+		Doc:    "The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).",
+		Export: true,
+	}
+	p.KnowhereThreadPoolSize.Init(base.mgr)
 
 	p.ChunkRows = ParamItem{
 		Key:          "queryNode.segcore.chunkRows",
