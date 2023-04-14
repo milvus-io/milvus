@@ -59,6 +59,11 @@ func (c *channelStateTimer) getWatchers(prefix string) (clientv3.WatchChan, chan
 	return c.etcdWatcher, c.timeoutWatcher
 }
 
+func (c *channelStateTimer) getWatchersWithRevision(prefix string, revision int64) (clientv3.WatchChan, chan *ackEvent) {
+	c.etcdWatcher = c.watchkv.WatchWithRevision(prefix, revision)
+	return c.etcdWatcher, c.timeoutWatcher
+}
+
 func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
 	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), strconv.FormatInt(nodeID, 10))
 
@@ -113,7 +118,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		case <-ticker.C:
 			// check tickle at path as :tickle/[prefix]/{channel_name}
 			c.removeTimers([]string{channelName})
-			log.Info("timeout and stop timer: wait for channel ACK timeout",
+			log.Warn("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),

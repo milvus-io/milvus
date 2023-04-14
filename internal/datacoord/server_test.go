@@ -2483,7 +2483,7 @@ func TestShouldDropChannel(t *testing.T) {
 		})
 	*/
 	t.Run("channel name not in kv", func(t *testing.T) {
-		assert.False(t, svr.handler.CheckShouldDropChannel("ch99"))
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch99"))
 	})
 
 	t.Run("channel in remove flag", func(t *testing.T) {
@@ -2491,10 +2491,6 @@ func TestShouldDropChannel(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
-	})
-
-	t.Run("channel name not matched", func(t *testing.T) {
-		assert.False(t, svr.handler.CheckShouldDropChannel("ch2"))
 	})
 }
 

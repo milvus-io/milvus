@@ -333,22 +333,8 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
-	/*
-		segments := h.s.meta.GetSegmentsByChannel(channel)
-		for _, segment := range segments {
-			if segment.GetStartPosition() != nil && // filter empty segment
-				// FIXME: we filter compaction generated segments
-				// because datanode may not know the segment due to the network lag or
-				// datacoord crash when handling CompleteCompaction.
-				// FIXME: cancel this limitation for #12265
-				// need to change a unified DropAndFlush to solve the root problem
-				//len(segment.CompactionFrom) == 0 &&
-				segment.GetState() != commonpb.SegmentState_Dropped {
-				return false
-			}
-		}
-		return false*/
-	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
+	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel) ||
+		!h.s.meta.catalog.ChannelExists(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels

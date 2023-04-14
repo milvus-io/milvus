@@ -101,3 +101,8 @@ const (
 func IsSystemField(fieldID int64) bool {
 	return fieldID < StartOfUserFieldID
 }
+
+const (
+	// LatestVerision is the magic number for watch latest revision
+	LatestRevision = int64(-1)
+)
