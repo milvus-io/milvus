@@ -205,8 +205,9 @@ case "${unameOut}" in
     fi
     llvm_prefix="$(brew --prefix llvm@${llvm_version})"
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-    export CC="${llvm_prefix}/bin/clang"
-    export CXX="${llvm_prefix}/bin/clang++"
+    export CC="ccache ${llvm_prefix}/bin/clang"
+    export CXX="ccache ${llvm_prefix}/bin/clang++"
+    export ASM="${llvm_prefix}/bin/clang"
     export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
     export CXXFLAGS=${CFLAGS}
     export LDFLAGS="-L$(brew --prefix libomp)/lib"
@@ -219,11 +220,11 @@ case "${unameOut}" in
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
       conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} || { echo 'conan install failed'; exit 1; }
-    else 
+    else
       conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
-    fi 
+    fi
     ;;
-  *)   
+  *)
     echo "Cannot build on windows"
     ;;
 esac

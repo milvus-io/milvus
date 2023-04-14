@@ -9,7 +9,7 @@ class MilvusConan(ConanFile):
         "boost/1.81.0",
         "onetbb/2021.7.0",
         "nlohmann_json/3.11.2",
-        "zstd/1.5.2",
+        "zstd/1.5.5",
         "lz4/1.9.4",
         "snappy/1.1.9",
         "lzo/2.10",
@@ -32,13 +32,10 @@ class MilvusConan(ConanFile):
         "libdwarf/20191104",
         "libiberty/9.1.0",
         "libsodium/cci.20220430",
-        "bison/3.5.3",
-        "flex/2.6.4",
         "xsimd/9.0.1",
         "xz_utils/5.4.0",
         "prometheus-cpp/1.1.0",
         "folly/2023.02.24@milvus/dev",
-        "velox/2023.02.24@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
@@ -54,6 +51,7 @@ class MilvusConan(ConanFile):
         "gtest:build_gmock": False,
         "boost:without_locale": False,
         "glog:with_gflags": False,
+        "prometheus-cpp:with_pull": False,
     }
 
     def configure(self):
