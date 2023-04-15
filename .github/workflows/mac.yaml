@@ -19,7 +19,6 @@ on:
       - Makefile
       - '!**.md'
       - '!build/ci/jenkins/**'
-      # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
       - go.mod
       - go.sum
 
@@ -31,18 +30,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: 'Generate CCache Hash'
-        env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
-        run: |
-          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-          echo "Set CCache hash to ${CORE_HASH}"
-      - name: Mac Cache CCache Volumes
-        uses: pat-s/always-upload-cache@v3
-        with:
-          path: /var/tmp/ccache
-          key: macos-ccache-${{ env.corehash }}
-          restore-keys: macos-ccache-
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         with:
@@ -56,22 +43,18 @@ jobs:
       - name: Mac Cache Conan Packages
         uses: pat-s/always-upload-cache@v3
         with:
-          path: ~/.conan
-          key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
-          restore-keys: macos-conan-
+          path: ~/.conan/data
+          key: macos-conan
+
       - name: Code Check
         env:
-          CCACHE_DIR: /var/tmp/ccache
-          CCACHE_COMPILERCHECK: content
-          CCACHE_COMPRESS: 1
-          CCACHE_COMPRESSLEVEL: 5
-          CCACHE_MAXSIZE: 2G
+          BUILD_CACHE: sccache
+          AWS_ACCESS_KEY_ID: ${{ secrets.BUILD_CACHE_S3_AK }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BUILD_CACHE_S3_SK }}
+          SCCACHE_BUCKET: milvus-github-action-build-cache
+          SCCACHE_REGION: us-west-2
         run: |
-          if [[ ! -d "/var/tmp/ccache" ]];then
-            mkdir -p /var/tmp/ccache
-          fi
-          ls -alh /var/tmp/ccache
-          brew install libomp ninja openblas ccache pkg-config
+          brew install libomp ninja openblas sccache pkg-config
           pip3 install conan==1.58.0
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm

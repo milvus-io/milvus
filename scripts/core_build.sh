@@ -188,8 +188,12 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+CACHE="${BUILD_CACHE:-ccache}"
+
 export CONAN_REVISIONS_ENABLED=1
-conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
+if [[ ! `conan remote list` == *default-conan-local* ]]; then
+  conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
+fi
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
@@ -205,8 +209,8 @@ case "${unameOut}" in
     fi
     llvm_prefix="$(brew --prefix llvm@${llvm_version})"
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-    export CC="ccache ${llvm_prefix}/bin/clang"
-    export CXX="ccache ${llvm_prefix}/bin/clang++"
+    export CC="${CACHE} ${llvm_prefix}/bin/clang"
+    export CXX="${CACHE} ${llvm_prefix}/bin/clang++"
     export ASM="${llvm_prefix}/bin/clang"
     export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
     export CXXFLAGS=${CFLAGS}
@@ -276,9 +280,9 @@ else
   make -j ${jobs} install || exit 1
 fi
 
-if command -v ccache &> /dev/null
+if command -v ${CACHE} &> /dev/null
 then
-	ccache -s
+	${CACHE} -s
 fi
 
 popd
