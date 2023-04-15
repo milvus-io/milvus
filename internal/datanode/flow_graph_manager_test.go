@@ -208,9 +208,9 @@ func TestFlowGraphManager(t *testing.T) {
 
 		fm.dropAll()
 		const channelPrefix = "by-dev-rootcoord-dml-test-fg-mgr-execute-"
+		Params.DataNodeCfg.MemoryForceSyncEnable = true
 		for _, test := range tests {
 			Params.DataNodeCfg.MemoryWatermark = test.watermark
-			Params.DataNodeCfg.MemoryForceSyncEnable = true
 			for i, memorySize := range test.memorySizes {
 				vchannel := fmt.Sprintf("%s%d", channelPrefix, i)
 				vchan := &datapb.VchannelInfo{
