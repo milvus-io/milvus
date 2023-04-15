@@ -133,7 +133,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("transfer load fail", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
+		cs.nodes.InsertIfNotPresent(100, &shardNode{
 			nodeID:   100,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
@@ -142,7 +142,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 					Reason:    "error",
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -166,7 +166,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("insufficient memory", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
+		cs.nodes.InsertIfNotPresent(100, &shardNode{
 			nodeID:   100,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
@@ -175,7 +175,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 					Reason:    "mock InsufficientMemoryToLoad",
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -232,7 +232,7 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 	s.Run("transfer release fail", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
+		cs.nodes.InsertIfNotPresent(100, &shardNode{
 			nodeID:   100,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
@@ -240,7 +240,7 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferRelease(ctx, &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
