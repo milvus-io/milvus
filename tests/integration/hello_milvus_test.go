@@ -226,9 +226,11 @@ func TestHelloMilvus(t *testing.T) {
 	topk := 10
 	roundDecimal := -1
 	nprobe := 10
+	params := make(map[string]int)
+	params["nprobe"] = nprobe
 
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, nq, dim, nprobe, topk, roundDecimal)
+		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 
@@ -256,10 +258,10 @@ func constructSearchRequest(
 	dbName, collectionName string,
 	expr string,
 	floatVecField string,
-	nq, dim, nprobe, topk, roundDecimal int,
+	metricType string,
+	params map[string]int,
+	nq, dim, topk, roundDecimal int,
 ) *milvuspb.SearchRequest {
-	params := make(map[string]string)
-	params["nprobe"] = strconv.Itoa(nprobe)
 	b, err := json.Marshal(params)
 	if err != nil {
 		panic(err)
@@ -282,7 +284,7 @@ func constructSearchRequest(
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
-				Value: distance.L2,
+				Value: metricType,
 			},
 			{
 				Key:   SearchParamsKey,
