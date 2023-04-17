@@ -1797,7 +1797,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.WatchTimeoutInterval = ParamItem{
 		Key:          "dataCoord.channel.watchTimeoutInterval",
 		Version:      "2.2.3",
-		DefaultValue: "30",
+		DefaultValue: "120",
 		Doc:          "Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.",
 		Export:       true,
 	}
