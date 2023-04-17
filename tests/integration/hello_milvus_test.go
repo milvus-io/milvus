@@ -229,9 +229,6 @@ func TestHelloMilvus(t *testing.T) {
 	params := make(map[string]int)
 	params["nprobe"] = nprobe
 
-	params := make(map[string]int)
-	params["nprobe"] = nprobe
-
 	searchReq := constructSearchRequest("", collectionName, expr,
 		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
 
