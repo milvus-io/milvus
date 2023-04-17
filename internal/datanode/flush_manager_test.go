@@ -579,6 +579,17 @@ func TestFlushNotifyFunc(t *testing.T) {
 		})
 	})
 
+	t.Run("segment drop", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			notifyFunc(&segmentFlushPack{
+				insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
+				statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
+				deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
+				dropped:    true,
+			})
+		})
+	})
+
 	t.Run("pack has error", func(t *testing.T) {
 		assert.Panics(t, func() {
 			notifyFunc(&segmentFlushPack{
