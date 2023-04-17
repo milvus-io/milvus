@@ -409,7 +409,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
 		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
-			log.Warn("failed to do search", zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)), zap.Error(err))
+			log.Warn("failed to do search", zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)), zap.Int64("msgId", t.ID()), zap.Error(err))
 			return err
 		}
 		return nil
@@ -422,8 +422,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 			cancel()
 		}
 		if searchErr != nil {
-			log.Warn("first search failed, updating shardleader caches and retry search",
-				zap.Error(searchErr))
+			log.Warn("first search failed, updating shardleader caches and retry search", zap.Int64("msgId", t.ID()), zap.Error(searchErr))
 			globalMetaCache.DeprecateShardCache(t.collectionName)
 		}
 		return searchErr
@@ -466,7 +465,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	if len(validSearchResults) <= 0 {
-		log.Ctx(ctx).Warn("search result is empty", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Warn("search result is empty", zap.String("collection", t.collectionName), zap.String("DSL", t.Dsl), zap.Int64("msgID", t.ID()))
 
 		t.fillInEmptyResult(Nq)
 		return nil
