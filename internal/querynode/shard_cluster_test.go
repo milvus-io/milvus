@@ -2040,7 +2040,7 @@ func TestShardCluster_Version(t *testing.T) {
 		defer sc.Close()
 
 		_, v := sc.segmentAllocations(nil)
-		assert.Equal(t, int64(0), v)
+		assert.Equal(t, int64(-1), v)
 	})
 
 	t.Run("normal alloc & finish", func(t *testing.T) {

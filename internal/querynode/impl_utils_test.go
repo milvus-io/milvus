@@ -128,7 +128,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("transfer load fail", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
+		cs.nodes.InsertIfNotPresent(100, &shardNode{
 			nodeID:   100,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
@@ -137,7 +137,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 					Reason:    "error",
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -161,8 +161,8 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("insufficient memory", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
-			nodeID:   100,
+		cs.nodes.InsertIfNotPresent(101, &shardNode{
+			nodeID:   101,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
 				loadSegmentsResults: &commonpb.Status{
@@ -170,13 +170,13 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 					Reason:    "mock InsufficientMemoryToLoad",
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				TargetID: s.querynode.session.ServerID,
 			},
-			DstNodeID: 100,
+			DstNodeID: 101,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     defaultSegmentID,
@@ -227,7 +227,7 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 	s.Run("transfer release fail", func() {
 		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
 		s.Require().True(ok)
-		cs.nodes[100] = &shardNode{
+		cs.nodes.InsertIfNotPresent(100, &shardNode{
 			nodeID:   100,
 			nodeAddr: "test",
 			client: &mockShardQueryNode{
@@ -235,7 +235,7 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				},
 			},
-		}
+		})
 
 		status, err := s.querynode.TransferRelease(ctx, &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{

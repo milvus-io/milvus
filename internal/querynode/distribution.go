@@ -19,6 +19,7 @@ package querynode
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -41,9 +42,6 @@ type distribution struct {
 
 	// version indicator
 	version int64
-
-	// offline is the quick healthy check indicator for offline segments
-	offlines *atomic.Int32
 
 	snapshots *typeutil.ConcurrentMap[int64, *snapshot]
 	// current is the snapshot for quick usage for search/query
@@ -77,7 +75,6 @@ func NewDistribution(replicaID int64) *distribution {
 		replicaID:      replicaID,
 		sealedSegments: make(map[UniqueID]SegmentEntry),
 		snapshots:      typeutil.NewConcurrentMap[int64, *snapshot](),
-		offlines:       atomic.NewInt32(0),
 		current:        atomic.NewPointer[snapshot](nil),
 	}
 
@@ -89,16 +86,29 @@ func (d *distribution) getLogger() *log.MLogger {
 	return log.Ctx(context.Background()).With(zap.Int64("replicaID", d.replicaID))
 }
 
-// Serviceable returns whether all segment recorded is in loaded state.
 func (d *distribution) Serviceable() bool {
-	return d.offlines.Load() == 0
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+	return d.serviceableImpl()
+}
+
+// Serviceable returns whether all segment recorded is in loaded state, hold d.mut before call it
+func (d *distribution) serviceableImpl() bool {
+	for _, entry := range d.sealedSegments {
+		if entry.State != segmentStateLoaded {
+			return false
+		}
+	}
+	return true
 }
 
 // GetCurrent returns current snapshot.
 func (d *distribution) GetCurrent(partitions ...int64) (sealed []SnapshotItem, version int64) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
-
+	if !d.serviceableImpl() {
+		return nil, -1
+	}
 	current := d.current.Load()
 	sealed = current.Get(partitions...)
 	version = current.version
@@ -142,14 +152,15 @@ func (d *distribution) UpdateDistribution(entries ...SegmentEntry) {
 
 	for _, entry := range entries {
 		old, ok := d.sealedSegments[entry.SegmentID]
+		d.getLogger().Info("Update distribution", zap.Int64("segmentID", entry.SegmentID),
+			zap.Int64("node", entry.NodeID),
+			zap.Bool("segment exist", ok))
 		if !ok {
 			d.sealedSegments[entry.SegmentID] = entry
-			if entry.State == segmentStateOffline {
-				d.offlines.Add(1)
-			}
 			continue
 		}
-		d.updateSegment(old, entry)
+		old.Update(entry)
+		d.sealedSegments[old.SegmentID] = old
 	}
 
 	d.genSnapshot()
@@ -160,42 +171,13 @@ func (d *distribution) NodeDown(nodeID int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	var delta int32
-
+	d.getLogger().Info("handle node down", zap.Int64("node", nodeID))
 	for _, entry := range d.sealedSegments {
 		if entry.NodeID == nodeID && entry.State != segmentStateOffline {
 			entry.State = segmentStateOffline
 			d.sealedSegments[entry.SegmentID] = entry
-			delta++
+			d.getLogger().Info("update the segment to offline since nodeDown", zap.Int64("nodeID", nodeID), zap.Int64("segmentID", entry.SegmentID))
 		}
-	}
-
-	if delta != 0 {
-		d.offlines.Add(delta)
-		d.getLogger().Info("distribution updated since nodeDown", zap.Int32("delta", delta), zap.Int32("offlines", d.offlines.Load()), zap.Int64("nodeID", nodeID))
-	}
-}
-
-// updateSegment update segment entry value and offline segment number based on old/new state.
-func (d *distribution) updateSegment(old, new SegmentEntry) {
-	delta := int32(0)
-	switch {
-	case old.State != segmentStateLoaded && new.State == segmentStateLoaded:
-		delta = -1
-	case old.State == segmentStateLoaded && new.State != segmentStateLoaded:
-		delta = 1
-	}
-
-	old.Update(new)
-	d.sealedSegments[old.SegmentID] = old
-	if delta != 0 {
-		d.offlines.Add(delta)
-		d.getLogger().Info("distribution updated since segment update",
-			zap.Int32("delta", delta),
-			zap.Int32("offlines", d.offlines.Load()),
-			zap.Int64("segmentID", new.SegmentID),
-			zap.Int32("state", int32(new.State)),
-		)
 	}
 }
 
@@ -204,32 +186,28 @@ func (d *distribution) updateSegment(old, new SegmentEntry) {
 func (d *distribution) RemoveDistributions(releaseFn func(), sealedSegments ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
-
-	var delta int32
 	for _, sealed := range sealedSegments {
 		entry, ok := d.sealedSegments[sealed.SegmentID]
+		d.getLogger().Info("Remove distribution", zap.Int64("segmentID", sealed.SegmentID),
+			zap.Int64("node", sealed.NodeID),
+			zap.Bool("segment exist", ok))
 		if !ok {
 			continue
 		}
 		if entry.NodeID == sealed.NodeID || sealed.NodeID == wildcardNodeID {
-			if entry.State == segmentStateOffline {
-				delta--
-			}
 			delete(d.sealedSegments, sealed.SegmentID)
 		}
 	}
-
-	d.offlines.Add(delta)
-
+	ts := time.Now()
 	<-d.genSnapshot()
 	releaseFn()
+	d.getLogger().Info("successfully remove distribution", zap.Any("segments", sealedSegments), zap.Duration("time", time.Since(ts)))
 }
 
 // getSnapshot converts current distribution to snapshot format.
 // in which, user could juse found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
 func (d *distribution) genSnapshot() chan struct{} {
-
 	nodeSegments := make(map[int64][]SegmentEntry)
 	for _, entry := range d.sealedSegments {
 		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
@@ -260,6 +238,7 @@ func (d *distribution) genSnapshot() chan struct{} {
 		return ch
 	}
 
+	d.getLogger().Info("gen snapshot for version", zap.Any("version", d.version), zap.Any("is serviceable", d.serviceableImpl()))
 	last.Expire(d.getCleanup(last.version))
 
 	return last.cleared
