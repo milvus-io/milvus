@@ -239,6 +239,7 @@ func (d *distribution) genSnapshot() chan struct{} {
 	}
 
 	d.getLogger().Info("gen snapshot for version", zap.Any("version", d.version), zap.Any("is serviceable", d.serviceableImpl()))
+
 	last.Expire(d.getCleanup(last.version))
 
 	return last.cleared
