@@ -28,7 +28,7 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
-#include "VariableField.h"
+#include "common/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
 
@@ -37,18 +37,7 @@ namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
-    ~SegmentSealedImpl() {
-        for (auto& [field_id, data] : fixed_fields_) {
-            auto field_meta = schema_->operator[](field_id);
-            auto data_type = field_meta.get_data_type();
-            if (munmap(data, field_meta.get_sizeof() * get_row_count())) {
-                AssertInfo(true,
-                           "failed to unmap field " +
-                               std::to_string(field_id.get()) +
-                               " err=" + strerror(errno));
-            }
-        }
-    }
+    ~SegmentSealedImpl() override = default;
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -151,7 +140,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     template <typename T>
     static void
-    bulk_subscript_impl(const VariableField& field,
+    bulk_subscript_impl(const ColumnBase* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* dst_raw);
@@ -240,8 +229,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, void*> fixed_fields_;
-    std::unordered_map<FieldId, VariableField> variable_fields_;
+    std::unordered_map<FieldId, FixedColumn> fixed_fields_;
+    std::unordered_map<FieldId, std::unique_ptr<ColumnBase>> variable_fields_;
 };
 
 inline SegmentSealedPtr

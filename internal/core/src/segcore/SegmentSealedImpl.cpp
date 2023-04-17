@@ -15,10 +15,15 @@
 #include <fmt/core.h>
 
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <string_view>
 
 #include "Utils.h"
+#include "common/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -225,19 +230,27 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         AssertInfo(!get_bit(index_ready_bitset_, field_id),
                    "field data can't be loaded when indexing exists");
 
-        void* field_data = nullptr;
         size_t size = 0;
         if (datatype_is_variable(data_type)) {
-            VariableField field(get_segment_id(), field_meta, info);
-            size = field.size();
-            field_data = reinterpret_cast<void*>(field.data());
+            std::unique_ptr<ColumnBase> column{};
+            switch (data_type) {
+                case milvus::DataType::STRING:
+                case milvus::DataType::VARCHAR: {
+                    column = std::make_unique<VariableColumn<std::string>>(
+                        get_segment_id(), field_meta, info);
+                    break;
+                }
+                default: {
+                }
+            }
+            size = column->size();
             std::unique_lock lck(mutex_);
-            variable_fields_.emplace(field_id, std::move(field));
+            variable_fields_.emplace(field_id, std::move(column));
         } else {
-            field_data = CreateMap(get_segment_id(), field_meta, info);
-            size = field_meta.get_sizeof() * info.row_count;
+            auto column = FixedColumn(get_segment_id(), field_meta, info);
+            size = column.size();
             std::unique_lock lck(mutex_);
-            fixed_fields_[field_id] = field_data;
+            fixed_fields_.emplace(field_id, std::move(column));
         }
 
         // set pks to offset
@@ -333,15 +346,13 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto& field_meta = schema_->operator[](field_id);
     auto element_sizeof = field_meta.get_sizeof();
     if (auto it = fixed_fields_.find(field_id); it != fixed_fields_.end()) {
-        auto field_data = it->second;
-        return SpanBase(field_data, get_row_count(), element_sizeof);
+        auto& field_data = it->second;
+        return field_data.span();
     }
     if (auto it = variable_fields_.find(field_id);
         it != variable_fields_.end()) {
         auto& field = it->second;
-        return SpanBase(field.views().data(),
-                        field.views().size(),
-                        sizeof(std::string_view));
+        return field->span();
     }
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
@@ -432,9 +443,9 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
             "Field Data is not loaded: " + std::to_string(field_id.get()));
         AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
         auto row_count = row_count_opt_.value();
-        auto vec_data = fixed_fields_.at(field_id);
+        auto& vec_data = fixed_fields_.at(field_id);
         query::SearchOnSealed(*schema_,
-                              vec_data,
+                              vec_data.data(),
                               search_info,
                               query_data,
                               query_count,
@@ -571,16 +582,16 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
 
 template <typename T>
 void
-SegmentSealedImpl::bulk_subscript_impl(const VariableField& field,
+SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
                                        const int64_t* seg_offsets,
                                        int64_t count,
                                        void* dst_raw) {
+    auto field = reinterpret_cast<const VariableColumn<T>*>(column);
     auto dst = reinterpret_cast<T*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            auto entry = field[offset];
-            dst[i] = std::move(T(entry.data(), entry.row_count()));
+            dst[i] = std::move(T((*field)[offset]));
         }
     }
 }
@@ -647,10 +658,11 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             case DataType::VARCHAR:
             case DataType::STRING: {
                 FixedVector<std::string> output(count);
-                bulk_subscript_impl<std::string>(variable_fields_.at(field_id),
-                                                 seg_offsets,
-                                                 count,
-                                                 output.data());
+                bulk_subscript_impl<std::string>(
+                    variable_fields_.at(field_id).get(),
+                    seg_offsets,
+                    count,
+                    output.data());
                 return CreateScalarDataArrayFrom(
                     output.data(), count, field_meta);
             }
@@ -662,7 +674,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         }
     }
 
-    auto src_vec = fixed_fields_.at(field_id);
+    auto src_vec = fixed_fields_.at(field_id).data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);

@@ -18,6 +18,7 @@
 
 #include <cassert>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #include "Types.h"
@@ -66,6 +67,10 @@ class Span<
     using embedded_type = T;
     explicit Span(const T* data, int64_t row_count)
         : data_(data), row_count_(row_count) {
+    }
+
+    explicit Span(std::string_view data) {
+        Span(data.data(), data.size());
     }
 
     operator SpanBase() const {
