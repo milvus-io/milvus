@@ -17,21 +17,14 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -39,9 +32,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
-func TestHelloMilvus(t *testing.T) {
+func TestUpsert(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
 	assert.NoError(t, err)
@@ -50,7 +46,7 @@ func TestHelloMilvus(t *testing.T) {
 	defer c.Stop()
 	assert.NoError(t, err)
 
-	prefix := "TestHelloMilvus"
+	prefix := "TestUpsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	int64Field := "int64"
@@ -67,7 +63,7 @@ func TestHelloMilvus(t *testing.T) {
 			DataType:     schemapb.DataType_Int64,
 			TypeParams:   nil,
 			IndexParams:  nil,
-			AutoID:       true,
+			AutoID:       false,
 		}
 		fVec := &schemapb.FieldSchema{
 			FieldID:      0,
@@ -105,28 +101,30 @@ func TestHelloMilvus(t *testing.T) {
 		ShardsNum:      2,
 	})
 	assert.NoError(t, err)
-	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+
+	err = merr.Error(createCollectionStatus)
+	if err != nil {
+		log.Warn("createCollectionStatus fail reason", zap.Error(err))
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	assert.True(t, merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
+	pkFieldData := newInt64PrimaryKey(int64Field, rowNum)
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := generateHashKeys(rowNum)
-	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	upsertResult, err := c.proxy.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
+		FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	assert.True(t, merr.Ok(upsertResult.GetStatus()))
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
@@ -191,11 +189,11 @@ func TestHelloMilvus(t *testing.T) {
 			},
 		},
 	})
-	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
-	}
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	err = merr.Error(createIndexStatus)
+	if err != nil {
+		log.Warn("createIndexStatus fail reason", zap.Error(err))
+	}
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -203,10 +201,10 @@ func TestHelloMilvus(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	assert.NoError(t, err)
-	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+	err = merr.Error(loadStatus)
+	if err != nil {
+		log.Warn("LoadCollection fail reason", zap.Error(err))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
 		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
@@ -219,181 +217,30 @@ func TestHelloMilvus(t *testing.T) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-
 	// search
 	expr := fmt.Sprintf("%s > 0", "int64")
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 	nprobe := 10
-	params := make(map[string]int)
-	params["nprobe"] = nprobe
 
 	params := make(map[string]int)
 	params["nprobe"] = nprobe
 
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
+		floatVecField, distance.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
+	err = merr.Error(searchResult.GetStatus())
+	if err != nil {
+		log.Warn("searchResult fail reason", zap.Error(err))
 	}
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
-	log.Info("TestHelloMilvus succeed")
-}
-
-const (
-	AnnsFieldKey    = "anns_field"
-	TopKKey         = "topk"
-	NQKey           = "nq"
-	MetricTypeKey   = "metric_type"
-	SearchParamsKey = "params"
-	RoundDecimalKey = "round_decimal"
-	OffsetKey       = "offset"
-	LimitKey        = "limit"
-)
-
-func constructSearchRequest(
-	dbName, collectionName string,
-	expr string,
-	floatVecField string,
-	metricType string,
-	params map[string]int,
-	nq, dim, topk, roundDecimal int,
-) *milvuspb.SearchRequest {
-	b, err := json.Marshal(params)
-	if err != nil {
-		panic(err)
-	}
-	plg := constructPlaceholderGroup(nq, dim)
-	plgBs, err := proto.Marshal(plg)
-	if err != nil {
-		panic(err)
-	}
-
-	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
-		SearchParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.MetricTypeKey,
-				Value: metricType,
-			},
-			{
-				Key:   SearchParamsKey,
-				Value: string(b),
-			},
-			{
-				Key:   AnnsFieldKey,
-				Value: floatVecField,
-			},
-			{
-				Key:   TopKKey,
-				Value: strconv.Itoa(topk),
-			},
-			{
-				Key:   RoundDecimalKey,
-				Value: strconv.Itoa(roundDecimal),
-			},
-		},
-		TravelTimestamp:    0,
-		GuaranteeTimestamp: 0,
-	}
-}
-
-func constructPlaceholderGroup(
-	nq, dim int,
-) *commonpb.PlaceholderGroup {
-	values := make([][]byte, 0, nq)
-	for i := 0; i < nq; i++ {
-		bs := make([]byte, 0, dim*4)
-		for j := 0; j < dim; j++ {
-			var buffer bytes.Buffer
-			f := rand.Float32()
-			err := binary.Write(&buffer, common.Endian, f)
-			if err != nil {
-				panic(err)
-			}
-			bs = append(bs, buffer.Bytes()...)
-		}
-		values = append(values, bs)
-	}
-
-	return &commonpb.PlaceholderGroup{
-		Placeholders: []*commonpb.PlaceholderValue{
-			{
-				Tag:    "$0",
-				Type:   commonpb.PlaceholderType_FloatVector,
-				Values: values,
-			},
-		},
-	}
-}
-
-func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      schemapb.DataType_FloatVector,
-		FieldName: fieldName,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(numRows, dim),
-					},
-				},
-			},
-		},
-	}
-}
-
-func newInt64PrimaryKey(fieldName string, numRows int) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      schemapb.DataType_Int64,
-		FieldName: fieldName,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(numRows),
-					},
-				},
-			},
-		},
-	}
-}
-
-func generateFloatVectors(numRows, dim int) []float32 {
-	total := numRows * dim
-	ret := make([]float32, 0, total)
-	for i := 0; i < total; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateInt64Array(numRows int) []int64 {
-	ret := make([]int64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int64(rand.Int()))
-	}
-	return ret
-}
-
-func generateHashKeys(numRows int) []uint32 {
-	ret := make([]uint32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Uint32())
-	}
-	return ret
+	log.Info("==================")
+	log.Info("==================")
+	log.Info("TestUpsert succeed")
+	log.Info("==================")
+	log.Info("==================")
 }
