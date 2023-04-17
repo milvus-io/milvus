@@ -561,10 +561,13 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	workers := make(map[int64]*cluster.MockWorker)
 	worker1 := &cluster.MockWorker{}
 	workers[1] = worker1
+	worker2 := &cluster.MockWorker{}
+	workers[2] = worker2
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		Return(nil)
 	worker1.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil)
+	worker2.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil)
 	s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
 		return workers[nodeID]
 	}, nil)
@@ -645,6 +648,18 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		SegmentIDs: []int64{1000},
 		Scope:      querypb.DataScope_All,
 	}, true)
+	s.NoError(err)
+
+	// test transfer
+	req := &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       2,
+		SegmentIDs:   []int64{1000},
+		Scope:        querypb.DataScope_All,
+		NeedTransfer: true,
+	}
+	req.Base.TargetID = 1
+	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
 }
 

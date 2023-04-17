@@ -230,7 +230,7 @@ func TestUpsert(t *testing.T) {
 	searchReq := constructSearchRequest("", collectionName, expr,
 		floatVecField, distance.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.proxy.Search(ctx, searchReq)
+	searchResult, _ := c.proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
