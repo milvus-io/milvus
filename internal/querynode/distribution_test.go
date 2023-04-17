@@ -50,10 +50,12 @@ func (s *DistributionSuite) TestAddDistribution() {
 				{
 					NodeID:    1,
 					SegmentID: 1,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    1,
 					SegmentID: 2,
+					State:     segmentStateLoaded,
 				},
 			},
 			expected: []SnapshotItem{
@@ -63,10 +65,12 @@ func (s *DistributionSuite) TestAddDistribution() {
 						{
 							NodeID:    1,
 							SegmentID: 1,
+							State:     segmentStateLoaded,
 						},
 						{
 							NodeID:    1,
 							SegmentID: 2,
+							State:     segmentStateLoaded,
 						},
 					},
 				},
@@ -78,14 +82,17 @@ func (s *DistributionSuite) TestAddDistribution() {
 				{
 					NodeID:    1,
 					SegmentID: 1,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    2,
 					SegmentID: 2,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    1,
 					SegmentID: 3,
+					State:     segmentStateLoaded,
 				},
 			},
 			expected: []SnapshotItem{
@@ -95,11 +102,13 @@ func (s *DistributionSuite) TestAddDistribution() {
 						{
 							NodeID:    1,
 							SegmentID: 1,
+							State:     segmentStateLoaded,
 						},
 
 						{
 							NodeID:    1,
 							SegmentID: 3,
+							State:     segmentStateLoaded,
 						},
 					},
 				},
@@ -109,6 +118,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 						{
 							NodeID:    2,
 							SegmentID: 2,
+							State:     segmentStateLoaded,
 						},
 					},
 				},
@@ -161,13 +171,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 		{
 			tag: "remove with no read",
 			presetSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
-				{NodeID: 2, SegmentID: 2},
-				{NodeID: 1, SegmentID: 3},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 			},
 
 			removalSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
 			},
 
 			withMockRead: false,
@@ -176,13 +186,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
 					},
 				},
 			},
@@ -190,13 +200,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 		{
 			tag: "remove with wrong nodeID",
 			presetSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
-				{NodeID: 2, SegmentID: 2},
-				{NodeID: 1, SegmentID: 3},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 			},
 
 			removalSealed: []SegmentEntry{
-				{NodeID: 2, SegmentID: 1},
+				{NodeID: 2, SegmentID: 1, State: segmentStateLoaded},
 			},
 
 			withMockRead: false,
@@ -205,14 +215,14 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 1},
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+						{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
 					},
 				},
 			},
@@ -220,13 +230,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 		{
 			tag: "remove with wildcardNodeID",
 			presetSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
-				{NodeID: 2, SegmentID: 2},
-				{NodeID: 1, SegmentID: 3},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 			},
 
 			removalSealed: []SegmentEntry{
-				{NodeID: wildcardNodeID, SegmentID: 1},
+				{NodeID: wildcardNodeID, SegmentID: 1, State: segmentStateLoaded},
 			},
 
 			withMockRead: false,
@@ -235,13 +245,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
 					},
 				},
 			},
@@ -249,13 +259,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 		{
 			tag: "remove with read",
 			presetSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
-				{NodeID: 2, SegmentID: 2},
-				{NodeID: 1, SegmentID: 3},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 			},
 
 			removalSealed: []SegmentEntry{
-				{NodeID: 1, SegmentID: 1},
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
 			},
 
 			withMockRead: true,
@@ -264,13 +274,13 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{
 					NodeID: 1,
 					Segments: []SegmentEntry{
-						{NodeID: 1, SegmentID: 3},
+						{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
 					},
 				},
 				{
 					NodeID: 2,
 					Segments: []SegmentEntry{
-						{NodeID: 2, SegmentID: 2},
+						{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
 					},
 				},
 			},
@@ -407,10 +417,12 @@ func (s *DistributionSuite) TestPeek() {
 				{
 					NodeID:    1,
 					SegmentID: 1,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    1,
 					SegmentID: 2,
+					State:     segmentStateLoaded,
 				},
 			},
 			expected: []SnapshotItem{
@@ -420,10 +432,12 @@ func (s *DistributionSuite) TestPeek() {
 						{
 							NodeID:    1,
 							SegmentID: 1,
+							State:     segmentStateLoaded,
 						},
 						{
 							NodeID:    1,
 							SegmentID: 2,
+							State:     segmentStateLoaded,
 						},
 					},
 				},
@@ -435,14 +449,17 @@ func (s *DistributionSuite) TestPeek() {
 				{
 					NodeID:    1,
 					SegmentID: 1,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    2,
 					SegmentID: 2,
+					State:     segmentStateLoaded,
 				},
 				{
 					NodeID:    1,
 					SegmentID: 3,
+					State:     segmentStateLoaded,
 				},
 			},
 			expected: []SnapshotItem{
@@ -452,11 +469,13 @@ func (s *DistributionSuite) TestPeek() {
 						{
 							NodeID:    1,
 							SegmentID: 1,
+							State:     segmentStateLoaded,
 						},
 
 						{
 							NodeID:    1,
 							SegmentID: 3,
+							State:     segmentStateLoaded,
 						},
 					},
 				},
@@ -466,6 +485,7 @@ func (s *DistributionSuite) TestPeek() {
 						{
 							NodeID:    2,
 							SegmentID: 2,
+							State:     segmentStateLoaded,
 						},
 					},
 				},

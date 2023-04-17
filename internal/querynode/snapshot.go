@@ -73,7 +73,6 @@ func (s *snapshot) Expire(cleanup snapshotCleanup) {
 // Get returns segment distributions with provided partition ids.
 func (s *snapshot) Get(partitions ...int64) []SnapshotItem {
 	s.inUse.Inc()
-
 	return s.filter(partitions...)
 }
 
@@ -120,8 +119,8 @@ func (s *snapshot) checkCleared(cleanup snapshotCleanup) {
 			go func() {
 				<-s.last.cleared
 				s.last = nil
-				cleanup()
 				close(s.cleared)
+				cleanup()
 			}()
 		})
 	}
