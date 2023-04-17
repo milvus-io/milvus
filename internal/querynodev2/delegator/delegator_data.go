@@ -599,7 +599,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			)
 			return err
 		}
-
+		req.Base.TargetID = targetNodeID
 		err = worker.ReleaseSegments(ctx, req)
 		if err != nil {
 			log.Warn("worker failed to release segments",
