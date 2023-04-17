@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -2352,7 +2353,30 @@ func TestGetQueryVChanPositions(t *testing.T) {
 }
 
 func TestShouldDropChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
+	type myRootCoord struct {
+		mocks.RootCoord
+	}
+	myRoot := &myRootCoord{}
+	myRoot.EXPECT().Init().Return(nil)
+	myRoot.EXPECT().Start().Return(nil)
+	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+		Count:     1,
+	}, nil)
+
+	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ID:     int64(tsoutil.ComposeTSByTime(time.Now(), 0)),
+		Count:  1,
+	}, nil)
+
+	var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
+		return myRoot, nil
+	}
+
+	opt := WithRootCoordCreator(crt)
+	svr := newTestServer(t, nil, opt)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
@@ -2375,122 +2399,53 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
-	/*
-		s1 := &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  0,
-			PartitionID:   0,
-			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Dropped,
-			StartPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{8, 9, 10},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{1, 2, 3},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-		}
-		s2 := &datapb.SegmentInfo{
-			ID:             2,
-			CollectionID:   0,
-			PartitionID:    0,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Flushed,
-			CompactionFrom: []int64{4, 5},
-			StartPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{8, 9, 10},
-				MsgGroup:    "",
-			},
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{1, 2, 3},
-				MsgGroup:    "",
-				Timestamp:   1,
-			},
-		}
-		s3 := &datapb.SegmentInfo{
-			ID:            3,
-			CollectionID:  0,
-			PartitionID:   1,
-			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Growing,
-			StartPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{8, 9, 10},
-				MsgGroup:    "",
-			},
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{11, 12, 13},
-				MsgGroup:    "",
-				Timestamp:   2,
-			},
-		}
-		s4 := &datapb.SegmentInfo{
-			ID:            4,
-			CollectionID:  0,
-			PartitionID:   1,
-			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Growing,
-		}*/
-	/*
-		t.Run("channel without segments", func(t *testing.T) {
-			r := svr.handler.CheckShouldDropChannel("ch1")
-			assert.True(t, r)
 
-		})
-
-		t.Run("channel with all dropped segments", func(t *testing.T) {
-			err := svr.meta.AddSegment(NewSegmentInfo(s1))
-			require.NoError(t, err)
-
-			r := svr.handler.CheckShouldDropChannel("ch1")
-			assert.True(t, r)
-		})
-
-		t.Run("channel with all dropped segments and flushed compacted segments", func(t *testing.T) {
-			err := svr.meta.AddSegment(NewSegmentInfo(s2))
-			require.Nil(t, err)
-
-			r := svr.handler.CheckShouldDropChannel("ch1")
-			assert.False(t, r)
-		})
-
-		t.Run("channel with other state segments", func(t *testing.T) {
-			err := svr.meta.DropSegment(2)
-			require.Nil(t, err)
-			err = svr.meta.AddSegment(NewSegmentInfo(s3))
-			require.Nil(t, err)
-
-			r := svr.handler.CheckShouldDropChannel("ch1")
-			assert.False(t, r)
-		})
-
-		t.Run("channel with dropped segment and with segment without start position", func(t *testing.T) {
-			err := svr.meta.DropSegment(3)
-			require.Nil(t, err)
-			err = svr.meta.AddSegment(NewSegmentInfo(s4))
-			require.Nil(t, err)
-
-			r := svr.handler.CheckShouldDropChannel("ch1")
-			assert.True(t, r)
-		})
-	*/
-	t.Run("channel name not in kv", func(t *testing.T) {
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch99"))
+	t.Run("channel name not in kv, collection not exist", func(t *testing.T) {
+		//myRoot.code = commonpb.ErrorCode_CollectionNotExists
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				CollectionID: -1,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch99", -1))
 	})
 
-	t.Run("channel in remove flag", func(t *testing.T) {
+	t.Run("channel name not in kv, collection exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch99", 0))
+	})
+
+	t.Run("collection name in kv, collection exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch1", 0))
+	})
+
+	t.Run("collection name in kv, collection not exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				CollectionID: -1,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", -1))
+	})
+
+	t.Run("channel in remove flag, collection exist", func(t *testing.T) {
 		err := svr.meta.catalog.MarkChannelDeleted(context.TODO(), "ch1")
 		require.NoError(t, err)
-
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", 0))
 	})
 }
 
@@ -3956,13 +3911,17 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr := CreateServer(context.TODO(), factory, opts...)
+	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
+	}
+
+	for _, opt := range opts {
+		opt(svr)
 	}
 
 	err = svr.Init()

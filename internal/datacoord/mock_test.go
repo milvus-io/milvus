@@ -860,7 +860,7 @@ func (h *mockHandler) GetDataVChanPositions(channel *channel, partitionID Unique
 	}
 }
 
-func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
+func (h *mockHandler) CheckShouldDropChannel(channel string, collectionID UniqueID) bool {
 	return false
 }
 

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -36,7 +38,7 @@ type Handler interface {
 	GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
-	CheckShouldDropChannel(channel string) bool
+	CheckShouldDropChannel(channel string, collectionID UniqueID) bool
 	FinishDropChannel(channel string) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
@@ -316,6 +318,26 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 	}
 }
 
+// HasCollection returns whether the collection exist from user's perspective.
+func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID) (bool, error) {
+	var hasCollection bool
+	ctx2, cancel := context.WithTimeout(ctx, time.Minute*30)
+	defer cancel()
+	if err := retry.Do(ctx2, func() error {
+		has, err := h.s.hasCollection(ctx2, collectionID)
+		if err != nil {
+			log.RatedInfo(60, "datacoord ServerHandler HasCollection retry failed", zap.Error(err))
+			return err
+		}
+		hasCollection = has
+		return nil
+	}, retry.Attempts(100000)); err != nil {
+		log.Error("datacoord ServerHandler HasCollection finally failed")
+		panic("datacoord ServerHandler HasCollection finally failed")
+	}
+	return hasCollection, nil
+}
+
 // GetCollection returns collection info with specified collection id
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
@@ -332,9 +354,20 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
-func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
-	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel) ||
-		!h.s.meta.catalog.ChannelExists(h.s.ctx, channel)
+func (h *ServerHandler) CheckShouldDropChannel(channel string, collectionID UniqueID) bool {
+	if h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel) {
+		return true
+	}
+	// collectionID parse from channelName
+	has, err := h.HasCollection(h.s.ctx, collectionID)
+	if err != nil {
+		log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection failed", zap.Error(err))
+		return false
+	}
+	log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection", zap.Bool("shouldDropChannel", !has),
+		zap.String("channel", channel))
+
+	return !has
 }
 
 // FinishDropChannel cleans up the remove flag for channels

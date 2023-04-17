@@ -243,7 +243,7 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 	nodeChannels := c.store.GetNodesChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
-			if !c.h.CheckShouldDropChannel(ch.Name) {
+			if !c.h.CheckShouldDropChannel(ch.Name, ch.CollectionID) {
 				continue
 			}
 			err := c.remove(nodeChannel.NodeID, ch)
@@ -766,7 +766,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 
 	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
 
-	if c.isMarkedDrop(channelName) {
+	if c.isMarkedDrop(channelName, ch.CollectionID) {
 		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
@@ -813,7 +813,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 
 	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
 
-	if c.isMarkedDrop(channelName) {
+	if c.isMarkedDrop(channelName, chToCleanUp.CollectionID) {
 		if err := c.remove(nodeID, chToCleanUp); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
 		}
@@ -871,8 +871,8 @@ func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) 
 	return false, 0
 }
 
-func (c *ChannelManager) isMarkedDrop(channelName string) bool {
-	return c.h.CheckShouldDropChannel(channelName)
+func (c *ChannelManager) isMarkedDrop(channelName string, collectionID UniqueID) bool {
+	return c.h.CheckShouldDropChannel(channelName, collectionID)
 }
 
 func getReleaseOp(nodeID UniqueID, ch *channel) ChannelOpSet {

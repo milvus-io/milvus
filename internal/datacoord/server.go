@@ -1016,6 +1016,54 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	return nil
 }
 
+// hasCollection communicates with RootCoord and check whether this collection exist from the user's perspective.
+func (s *Server) hasCollection(ctx context.Context, collectionID int64) (bool, error) {
+	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName:       "",
+		CollectionID: collectionID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if resp == nil {
+		return false, errNilResponse
+	}
+	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
+		return true, nil
+	}
+
+	if resp.Status.ErrorCode == commonpb.ErrorCode_CollectionNotExists {
+		return false, nil
+	}
+	return false, fmt.Errorf("code:%s, reason:%s", resp.Status.GetErrorCode().String(), resp.Status.GetReason())
+}
+
+// hasCollectionInternal communicates with RootCoord and check whether this collection's meta exist in rootcoord.
+func (s *Server) hasCollectionInternal(ctx context.Context, collectionID int64) (bool, error) {
+	resp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName:       "",
+		CollectionID: collectionID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if resp == nil {
+		return false, errNilResponse
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (s *Server) reCollectSegmentStats(ctx context.Context) {
 	if s.channelManager == nil {
 		log.Error("null channel manager found, which should NOT happen in non-testing environment")
