@@ -201,6 +201,10 @@ queryNode:
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
+    knowhereThreadPoolNumRatio: 4 
+    # Use more threads to make better use of SSD throughput in disk index.
+    # This parameter is only useful when enable-disk = true.
+    # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
     smallIndex:
       nlist: 128 # small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8

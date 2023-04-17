@@ -182,6 +182,9 @@ func (node *QueryNode) InitSegcore() {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
+	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
+
 	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.SmallIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
 
