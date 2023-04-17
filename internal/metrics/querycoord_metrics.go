@@ -23,8 +23,13 @@ import (
 )
 
 const (
-	LoadSegmentLabel     = "load_segment"
-	WatchDmlChannelLabel = "watch_dml_channel"
+	SegmentGrowTaskLabel   = "segment_grow"
+	SegmentReduceTaskLabel = "segment_reduce"
+	SegmentMoveTaskLabel   = "segment_move"
+
+	ChannelGrowTaskLabel   = "channel_grow"
+	ChannelReduceTaskLabel = "channel_reduce"
+	ChannelMoveTaskLabel   = "channel_move"
 
 	QueryCoordTaskType = "querycoord_task_type"
 )
@@ -101,7 +106,7 @@ var (
 		}, []string{})
 )
 
-//RegisterQueryCoord registers QueryCoord metrics
+// RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordNumCollections)
 	registry.MustRegister(QueryCoordNumEntities)

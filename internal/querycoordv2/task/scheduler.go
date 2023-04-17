@@ -253,16 +253,48 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks[index] = task
-		metrics.QueryCoordTaskNum.WithLabelValues(metrics.LoadSegmentLabel).Set(float64(len(scheduler.segmentTasks)))
-
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks[index] = task
-		metrics.QueryCoordTaskNum.WithLabelValues(metrics.WatchDmlChannelLabel).Set(float64(len(scheduler.channelTasks)))
 	}
-
+	scheduler.upgradeTaskMetrics()
 	log.Info("task added", zap.String("task", task.String()))
 	return nil
+}
+
+func (scheduler *taskScheduler) upgradeTaskMetrics() {
+	segmentGrowNum, segmentReduceNum, segmentMoveNum := 0, 0, 0
+	channelGrowNum, channelReduceNum, channelMoveNum := 0, 0, 0
+	for _, task := range scheduler.segmentTasks {
+		taskType := GetTaskType(task)
+		switch taskType {
+		case TaskTypeGrow:
+			segmentGrowNum++
+		case TaskTypeReduce:
+			segmentReduceNum++
+		case TaskTypeMove:
+			segmentMoveNum++
+		}
+	}
+
+	for _, task := range scheduler.channelTasks {
+		taskType := GetTaskType(task)
+		switch taskType {
+		case TaskTypeGrow:
+			channelGrowNum++
+		case TaskTypeReduce:
+			channelReduceNum++
+		case TaskTypeMove:
+			channelMoveNum++
+		}
+	}
+
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Set(float64(segmentGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Set(float64(segmentReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Set(float64(segmentMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Set(float64(channelGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
 }
 
 // check checks whether the task is valid to add,
@@ -693,16 +725,14 @@ func (scheduler *taskScheduler) remove(task Task) {
 		if task.Err() != nil {
 			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.Err()))
 			scheduler.recordSegmentTaskError(task)
-			metrics.QueryCoordTaskNum.WithLabelValues(metrics.LoadSegmentLabel).Set(float64(len(scheduler.segmentTasks)))
 		}
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		delete(scheduler.channelTasks, index)
 		log = log.With(zap.String("channel", task.Channel()))
-		metrics.QueryCoordTaskNum.WithLabelValues(metrics.WatchDmlChannelLabel).Set(float64(len(scheduler.channelTasks)))
 	}
-
+	scheduler.upgradeTaskMetrics()
 	log.Info("task removed")
 }
 
