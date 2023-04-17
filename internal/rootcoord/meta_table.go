@@ -166,7 +166,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	}
 	mt.collName2ID[coll.Name] = coll.CollectionID
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
-	log.Info("add collection to meta table", zap.String("collection", coll.Name),
+	log.Ctx(ctx).Info("add collection to meta table", zap.String("collection", coll.Name),
 		zap.Int64("id", coll.CollectionID), zap.Uint64("ts", coll.CreateTime))
 	return nil
 }
@@ -194,7 +194,7 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
 	}
 
-	log.Info("change collection state", zap.Int64("collection", collectionID),
+	log.Ctx(ctx).Info("change collection state", zap.Int64("collection", collectionID),
 		zap.String("state", state.String()), zap.Uint64("ts", ts))
 
 	return nil
@@ -255,7 +255,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
 	mt.removeCollectionByIDInternal(collectionID)
 
-	log.Info("remove collection", zap.String("name", name), zap.Int64("id", collectionID), zap.Strings("aliases", aliases))
+	log.Ctx(ctx).Info("remove collection", zap.String("name", name), zap.Int64("id", collectionID), zap.Strings("aliases", aliases))
 	return nil
 }
 
@@ -513,7 +513,7 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
 
-	log.Info("add partition to meta table",
+	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
 
@@ -539,12 +539,12 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
 
 			if state == pb.PartitionState_PartitionCreated {
-				log.Warn("[should not happen] change partition to created",
+				log.Ctx(ctx).Warn("[should not happen] change partition to created",
 					zap.String("collection", coll.Name), zap.Int64("collection id", coll.CollectionID),
 					zap.String("partition", clone.PartitionName), zap.Int64("partition id", clone.PartitionID))
 			}
 
-			log.Info("change partition state", zap.Int64("collection", collectionID),
+			log.Ctx(ctx).Info("change partition state", zap.Int64("collection", collectionID),
 				zap.Int64("partition", partitionID), zap.String("state", state.String()),
 				zap.Uint64("ts", ts))
 
