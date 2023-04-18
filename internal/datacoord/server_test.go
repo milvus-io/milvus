@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -2465,8 +2466,32 @@ func TestGetQueryVChanPositions(t *testing.T) {
 }
 
 func TestShouldDropChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
+	type myRootCoord struct {
+		mocks.RootCoord
+	}
+	myRoot := &myRootCoord{}
+	myRoot.EXPECT().Init().Return(nil)
+	myRoot.EXPECT().Start().Return(nil)
+	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+		Count:     1,
+	}, nil)
+
+	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ID:     int64(tsoutil.ComposeTSByTime(time.Now(), 0)),
+		Count:  1,
+	}, nil)
+
+	var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
+		return myRoot, nil
+	}
+
+	opt := SetRootCoordCreator(crt)
+	svr := newTestServer(t, nil, opt)
 	defer closeTestServer(t, svr)
+
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
 		ID:     0,
@@ -2595,15 +2620,53 @@ func TestShouldDropChannel(t *testing.T) {
 			assert.True(t, r)
 		})
 	*/
-	t.Run("channel name not in kv", func(t *testing.T) {
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch99"))
+
+	t.Run("channel name not in kv, collection not exist", func(t *testing.T) {
+		//myRoot.code = commonpb.ErrorCode_CollectionNotExists
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				CollectionID: -1,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch99", -1))
 	})
 
-	t.Run("channel in remove flag", func(t *testing.T) {
+	t.Run("channel name not in kv, collection exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch99", 0))
+	})
+
+	t.Run("collection name in kv, collection exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.False(t, svr.handler.CheckShouldDropChannel("ch1", 0))
+	})
+
+	t.Run("collection name in kv, collection not exist", func(t *testing.T) {
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists},
+				CollectionID: -1,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", -1))
+	})
+
+	t.Run("channel in remove flag, collection exist", func(t *testing.T) {
 		err := svr.meta.catalog.MarkChannelDeleted(context.TODO(), "ch1")
 		require.NoError(t, err)
-
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
+		myRoot.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 0,
+			}, nil).Once()
+		assert.True(t, svr.handler.CheckShouldDropChannel("ch1", 0))
 	})
 }
 
@@ -3977,14 +4040,21 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr := CreateServer(context.TODO(), factory, opts...)
+	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
+
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
+
+	for _, opt := range opts {
+		opt(svr)
+	}
+
 	indexCoord := mocks.NewMockIndexCoord(t)
 	indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	svr.indexCoord = indexCoord
