@@ -184,6 +184,13 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 	return nil
 }
 
+// Close notifies the running checker.
+func (c *ChannelManager) Close() {
+	if c.stopChecker != nil {
+		c.stopChecker()
+	}
+}
+
 // checkOldNodes processes the existing watch channels when starting up.
 // ToWatch         get startTs and timeoutTs, start timer
 // WatchSuccess    ignore
