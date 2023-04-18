@@ -89,6 +89,7 @@ type QueryNode struct {
 
 	// call once
 	initOnce sync.Once
+	stopOnce sync.Once
 
 	// internal components
 	manager             *segments.Manager
@@ -344,12 +345,21 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
-
-	log.Warn("Query node stop..")
-	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	node.lifetime.Wait()
-	node.session.Revoke(time.Second)
-	node.pipelineManager.Close()
+	node.stopOnce.Do(func() {
+		log.Info("Query node stop...")
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		node.lifetime.Wait()
+		node.cancel()
+		if node.pipelineManager != nil {
+			node.pipelineManager.Close()
+		}
+		if node.session != nil {
+			node.session.Stop()
+		}
+		if node.dispClient != nil {
+			node.dispClient.Close()
+		}
+	})
 	return nil
 }
 
