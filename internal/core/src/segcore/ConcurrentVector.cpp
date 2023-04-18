@@ -76,8 +76,15 @@ VectorBase::set_data_raw(ssize_t element_offset,
             std::vector<std::string> data_raw(begin, end);
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
+        case DataType::JSON: {
+            auto begin = data->scalars().json_data().data().begin();
+            auto end = data->scalars().json_data().data().end();
+            std::vector<std::string> data_raw(begin, end);
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
         default: {
-            PanicInfo("unsupported");
+            PanicInfo(fmt::format("unsupported datatype {}",
+                                  field_meta.get_data_type()));
         }
     }
 }

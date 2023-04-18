@@ -24,6 +24,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "nlohmann/json.hpp"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -221,7 +222,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         ++system_ready_count_;
     } else {
         // prepare data
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = (*schema_)[field_id];
         auto data_type = field_meta.get_data_type();
         AssertInfo(data_type == DataType(info.field_data->type()),
                    "field type of load data is inconsistent with the schema");
@@ -237,8 +238,25 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
                 case milvus::DataType::STRING:
                 case milvus::DataType::VARCHAR: {
                     column = std::make_unique<VariableColumn<std::string>>(
-                        get_segment_id(), field_meta, info);
+                        get_segment_id(),
+                        field_meta,
+                        info,
+                        [](const char* data, size_t len) {
+                            return std::string_view(data, len);
+                        });
                     break;
+                }
+                case milvus::DataType::JSON: {
+                    column = std::make_unique<VariableColumn<nlohmann::json>>(
+                        get_segment_id(),
+                        field_meta,
+                        info,
+                        [](const char* data, size_t len) {
+                            if (len > 0) {
+                                return nlohmann::json::parse(data, data + len);
+                            }
+                            return nlohmann::json{};
+                        });
                 }
                 default: {
                 }

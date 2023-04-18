@@ -331,6 +331,122 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		w.ReleasePayloadWriter()
 	})
 
+	t.Run("TestAddArray", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Array)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneArrayToPayload(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{1, 2},
+				},
+			},
+		})
+		assert.Nil(t, err)
+		err = w.AddOneArrayToPayload(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{3, 4},
+				},
+			},
+		})
+		assert.Nil(t, err)
+		err = w.AddOneArrayToPayload(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{5, 6},
+				},
+			},
+		})
+		assert.Nil(t, err)
+		err = w.AddDataToPayload(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{7, 8},
+				},
+			},
+		})
+		assert.Nil(t, err)
+		err = w.FinishPayloadWriter()
+		assert.Nil(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.Nil(t, err)
+		assert.Equal(t, length, 4)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.Nil(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Array, buffer)
+		assert.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.Nil(t, err)
+		assert.Equal(t, length, 4)
+
+		arrayList, err := r.GetArrayFromPayload()
+		assert.Nil(t, err)
+
+		assert.EqualValues(t, []int32{1, 2}, arrayList[0].GetIntData().GetData())
+		assert.EqualValues(t, []int32{3, 4}, arrayList[1].GetIntData().GetData())
+		assert.EqualValues(t, []int32{5, 6}, arrayList[2].GetIntData().GetData())
+		assert.EqualValues(t, []int32{7, 8}, arrayList[3].GetIntData().GetData())
+
+		iArrayList, _, err := r.GetDataFromPayload()
+		arrayList = iArrayList.([]*schemapb.ScalarField)
+		assert.Nil(t, err)
+		assert.EqualValues(t, []int32{1, 2}, arrayList[0].GetIntData().GetData())
+		assert.EqualValues(t, []int32{3, 4}, arrayList[1].GetIntData().GetData())
+		assert.EqualValues(t, []int32{5, 6}, arrayList[2].GetIntData().GetData())
+		assert.EqualValues(t, []int32{7, 8}, arrayList[3].GetIntData().GetData())
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddJSON", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_JSON)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneJSONToPayload([]byte(`{"1":"1"}`))
+		assert.Nil(t, err)
+		err = w.AddOneJSONToPayload([]byte(`{"2":"2"}`))
+		assert.Nil(t, err)
+		err = w.AddOneJSONToPayload([]byte(`{"3":"3"}`))
+		assert.Nil(t, err)
+		err = w.AddDataToPayload([]byte(`{"4":"4"}`))
+		assert.Nil(t, err)
+		err = w.FinishPayloadWriter()
+		assert.Nil(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.Nil(t, err)
+		assert.Equal(t, length, 4)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.Nil(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_JSON, buffer)
+		assert.Nil(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.Nil(t, err)
+		assert.Equal(t, length, 4)
+
+		json, err := r.GetJSONFromPayload()
+		assert.Nil(t, err)
+
+		assert.EqualValues(t, []byte(`{"1":"1"}`), json[0])
+		assert.EqualValues(t, []byte(`{"2":"2"}`), json[1])
+		assert.EqualValues(t, []byte(`{"3":"3"}`), json[2])
+		assert.EqualValues(t, []byte(`{"4":"4"}`), json[3])
+
+		iJSON, _, err := r.GetDataFromPayload()
+		json = iJSON.([][]byte)
+		assert.Nil(t, err)
+		assert.EqualValues(t, []byte(`{"1":"1"}`), json[0])
+		assert.EqualValues(t, []byte(`{"2":"2"}`), json[1])
+		assert.EqualValues(t, []byte(`{"3":"3"}`), json[2])
+		assert.EqualValues(t, []byte(`{"4":"4"}`), json[3])
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
 	t.Run("TestBinaryVector", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, 8)
 		require.Nil(t, err)

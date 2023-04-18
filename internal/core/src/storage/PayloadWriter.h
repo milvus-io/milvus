@@ -36,6 +36,9 @@ class PayloadWriter {
     add_one_string_payload(const char* str, int str_size);
 
     void
+    add_one_binary_payload(const uint8_t* data, int length);
+
+    void
     finish();
 
     bool

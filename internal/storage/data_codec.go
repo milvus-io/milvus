@@ -133,6 +133,13 @@ type DoubleFieldData struct {
 type StringFieldData struct {
 	Data []string
 }
+type ArrayFieldData struct {
+	ElementType schemapb.DataType
+	Data        []*schemapb.ScalarField
+}
+type JSONFieldData struct {
+	Data [][]byte
+}
 type BinaryVectorFieldData struct {
 	Data []byte
 	Dim  int
@@ -153,20 +160,24 @@ func (data *DoubleFieldData) RowNum() int       { return len(data.Data) }
 func (data *StringFieldData) RowNum() int       { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int { return len(data.Data) * 8 / data.Dim }
 func (data *FloatVectorFieldData) RowNum() int  { return len(data.Data) / data.Dim }
+func (data *ArrayFieldData) RowNum() int        { return len(data.Data) }
+func (data *JSONFieldData) RowNum() int         { return len(data.Data) }
 
 // GetRow implements FieldData.GetRow
-func (data *BoolFieldData) GetRow(i int) interface{}   { return data.Data[i] }
-func (data *Int8FieldData) GetRow(i int) interface{}   { return data.Data[i] }
-func (data *Int16FieldData) GetRow(i int) interface{}  { return data.Data[i] }
-func (data *Int32FieldData) GetRow(i int) interface{}  { return data.Data[i] }
-func (data *Int64FieldData) GetRow(i int) interface{}  { return data.Data[i] }
-func (data *FloatFieldData) GetRow(i int) interface{}  { return data.Data[i] }
-func (data *DoubleFieldData) GetRow(i int) interface{} { return data.Data[i] }
-func (data *StringFieldData) GetRow(i int) interface{} { return data.Data[i] }
-func (data *BinaryVectorFieldData) GetRow(i int) interface{} {
+func (data *BoolFieldData) GetRow(i int) any   { return data.Data[i] }
+func (data *Int8FieldData) GetRow(i int) any   { return data.Data[i] }
+func (data *Int16FieldData) GetRow(i int) any  { return data.Data[i] }
+func (data *Int32FieldData) GetRow(i int) any  { return data.Data[i] }
+func (data *Int64FieldData) GetRow(i int) any  { return data.Data[i] }
+func (data *FloatFieldData) GetRow(i int) any  { return data.Data[i] }
+func (data *DoubleFieldData) GetRow(i int) any { return data.Data[i] }
+func (data *StringFieldData) GetRow(i int) any { return data.Data[i] }
+func (data *ArrayFieldData) GetRow(i int) any  { return data.Data[i] }
+func (data *JSONFieldData) GetRow(i int) any   { return data.Data[i] }
+func (data *BinaryVectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim/8 : (i+1)*data.Dim/8]
 }
-func (data *FloatVectorFieldData) GetRow(i int) interface{} {
+func (data *FloatVectorFieldData) GetRow(i int) any {
 	return data.Data[i*data.Dim : (i+1)*data.Dim]
 }
 
@@ -209,6 +220,37 @@ func (data *DoubleFieldData) GetMemorySize() int {
 }
 
 func (data *StringFieldData) GetMemorySize() int {
+	var size int
+	for _, val := range data.Data {
+		size += len(val) + 16
+	}
+	return size
+}
+
+func (data *ArrayFieldData) GetMemorySize() int {
+	var size int
+	for _, val := range data.Data {
+		switch data.ElementType {
+		case schemapb.DataType_Bool:
+			size += binary.Size(val.GetBoolData().GetData())
+		case schemapb.DataType_Int8:
+			size += binary.Size(val.GetIntData().GetData()) / 4
+		case schemapb.DataType_Int16:
+			size += binary.Size(val.GetIntData().GetData()) / 2
+		case schemapb.DataType_Int32:
+			size += binary.Size(val.GetIntData().GetData())
+		case schemapb.DataType_Float:
+			size += binary.Size(val.GetFloatData().GetData())
+		case schemapb.DataType_Double:
+			size += binary.Size(val.GetDoubleData().GetData())
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			size += (&StringFieldData{Data: val.GetStringData().GetData()}).GetMemorySize()
+		}
+	}
+	return size
+}
+
+func (data *JSONFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += len(val) + 16
@@ -382,6 +424,26 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
+		case schemapb.DataType_Array:
+			for _, singleArray := range singleData.(*ArrayFieldData).Data {
+				err = eventWriter.AddOneArrayToPayload(singleArray)
+				if err != nil {
+					eventWriter.Close()
+					writer.Close()
+					return nil, nil, err
+				}
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*ArrayFieldData).GetMemorySize()))
+		case schemapb.DataType_JSON:
+			for _, singleJSON := range singleData.(*JSONFieldData).Data {
+				err = eventWriter.AddOneJSONToPayload(singleJSON)
+				if err != nil {
+					eventWriter.Close()
+					writer.Close()
+					return nil, nil, err
+				}
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*JSONFieldData).GetMemorySize()))
 		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
 			if err != nil {
@@ -652,6 +714,44 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				totalLength += len(stringPayload)
 				insertData.Data[fieldID] = stringFieldData
 
+			case schemapb.DataType_Array:
+				arrayPayload, err := eventReader.GetArrayFromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &ArrayFieldData{
+						Data: make([]*schemapb.ScalarField, 0, rowNum),
+					}
+				}
+				arrayFieldData := insertData.Data[fieldID].(*ArrayFieldData)
+
+				arrayFieldData.Data = append(arrayFieldData.Data, arrayPayload...)
+				totalLength += len(arrayPayload)
+				insertData.Data[fieldID] = arrayFieldData
+
+			case schemapb.DataType_JSON:
+				jsonPayload, err := eventReader.GetJSONFromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &JSONFieldData{
+						Data: make([][]byte, 0, rowNum),
+					}
+				}
+				jsonFieldData := insertData.Data[fieldID].(*JSONFieldData)
+
+				jsonFieldData.Data = append(jsonFieldData.Data, jsonPayload...)
+				totalLength += len(jsonPayload)
+				insertData.Data[fieldID] = jsonFieldData
+
 			case schemapb.DataType_BinaryVector:
 				var singleData []byte
 				singleData, dim, err = eventReader.GetBinaryVectorFromPayload()
@@ -729,6 +829,31 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 	return collectionID, partitionID, segmentID, nil
 }
+
+// func deserializeEntity[T any, U any](
+// 	eventReader *EventReader,
+// 	binlogReader *BinlogReader,
+// 	insertData *InsertData,
+// 	getPayloadFunc func() (U, error),
+// 	fillDataFunc func() FieldData,
+// ) error {
+// 	fieldID := binlogReader.FieldID
+// 	stringPayload, err := getPayloadFunc()
+// 	if err != nil {
+// 		eventReader.Close()
+// 		binlogReader.Close()
+// 		return err
+// 	}
+//
+// 	if insertData.Data[fieldID] == nil {
+// 		insertData.Data[fieldID] = fillDataFunc()
+// 	}
+// 	stringFieldData := insertData.Data[fieldID].(*T)
+//
+// 	stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
+// 	totalLength += len(stringPayload)
+// 	insertData.Data[fieldID] = stringFieldData
+// }
 
 // Deserialize transfer blob back to insert data.
 // From schema, it get all fields.

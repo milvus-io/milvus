@@ -139,6 +139,11 @@ class IndexingRecord {
                     continue;
                 }
             }
+            if (field_meta.get_data_type() == DataType::ARRAY ||
+                field_meta.get_data_type() == DataType::JSON) {
+                // not supported yet
+                continue;
+            }
 
             field_indexings_.try_emplace(
                 field_id, CreateIndex(field_meta, segcore_config_));
