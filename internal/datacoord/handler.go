@@ -28,13 +28,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
 // Handler handles some channel method for ChannelManager
 type Handler interface {
 	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
-	GetQueryVChanPositions(channel *channel, partitionID UniqueID) (*datapb.VchannelInfo, error)
+	GetQueryVChanPositions(channel *channel, partitionID ...UniqueID) (*datapb.VchannelInfo, error)
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string, collectionID UniqueID) bool
@@ -100,7 +101,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 // GetQueryVChanPositions gets vchannel latest postitions with provided dml channel names for QueryCoord,
 // we expect QueryCoord gets the indexed segments to load, so the flushed segments below are actually the indexed segments,
 // the unflushed segments are actually the segments without index, even they are flushed.
-func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) (*datapb.VchannelInfo, error) {
+func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ...UniqueID) (*datapb.VchannelInfo, error) {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name
@@ -125,8 +126,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		unIndexedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
 	)
+
+	validPartitionIDs := lo.Filter(partitionIDs, func(partition int64, _ int) bool { return partition > allPartitionID })
+	partitionSet := typeutil.NewUniqueSet(validPartitionIDs...)
 	for _, s := range segments {
-		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
+		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID)) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
@@ -167,7 +171,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
-		SeekPosition:        h.GetChannelSeekPosition(channel, partitionID),
+		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
 		FlushedSegmentIds:   indexedIDs.Collect(),
 		UnflushedSegmentIds: unIndexedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
@@ -176,15 +180,17 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 
 // getEarliestSegmentDMLPos returns the earliest dml position of segments,
 // this is mainly for COMPATIBILITY with old version <=2.1.x
-func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
+func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionIDs ...UniqueID) *internalpb.MsgPosition {
 	var minPos *internalpb.MsgPosition
 	var minPosSegID int64
 	var minPosTs uint64
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name
 	})
+
+	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 	for _, s := range segments {
-		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
+		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID)) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
@@ -248,7 +254,7 @@ func (h *ServerHandler) getCollectionStartPos(channel *channel) *internalpb.MsgP
 //  2. Segments earliest dml position;
 //  3. Collection start position;
 //     And would return if any position is valid.
-func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
+func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionIDs ...UniqueID) *internalpb.MsgPosition {
 	var seekPosition *internalpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.Name)
 	if seekPosition != nil {
@@ -259,7 +265,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID Uni
 		return seekPosition
 	}
 
-	seekPosition = h.getEarliestSegmentDMLPos(channel, partitionID)
+	seekPosition = h.getEarliestSegmentDMLPos(channel, partitionIDs...)
 	if seekPosition != nil {
 		log.Info("channel seek position set from earliest segment dml position",
 			zap.String("channel", channel.Name),

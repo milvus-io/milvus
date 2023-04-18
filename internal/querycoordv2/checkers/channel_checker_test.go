@@ -112,7 +112,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(
 		channels, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
@@ -151,9 +151,9 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	err = checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.NoError(err)
 
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -164,7 +164,7 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))

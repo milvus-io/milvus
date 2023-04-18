@@ -110,13 +110,13 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 
 	// set target
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(
 		nil, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
@@ -165,13 +165,13 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(
 		nil, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
@@ -205,9 +205,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     3,
+			ID:            3,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -218,7 +218,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 			SeekPosition: &internalpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), int64(1)).Return(
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1), int64(1))

@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -329,78 +328,67 @@ func (suite *ServerSuite) assertLoaded(collection int64) {
 }
 
 func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
-	var (
-		mu             sync.Mutex
-		vChannels      []*datapb.VchannelInfo
-		segmentBinlogs []*datapb.SegmentBinlogs
-	)
-
-	for partition, segments := range suite.segments[collection] {
-		segments := segments
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Maybe().Return(func(ctx context.Context, collectionID, partitionID int64) []*datapb.VchannelInfo {
-			mu.Lock()
-			vChannels = []*datapb.VchannelInfo{}
-			for _, channel := range suite.channels[collection] {
-				vChannels = append(vChannels, &datapb.VchannelInfo{
-					CollectionID: collection,
-					ChannelName:  channel,
-				})
-			}
-			segmentBinlogs = []*datapb.SegmentBinlogs{}
-			for _, segment := range segments {
-				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-					SegmentID:     segment,
-					InsertChannel: suite.channels[collection][segment%2],
-				})
-			}
-			return vChannels
-		},
-			func(ctx context.Context, collectionID, partitionID int64) []*datapb.SegmentBinlogs {
-				return segmentBinlogs
-			},
-			func(ctx context.Context, collectionID, partitionID int64) error {
-				mu.Unlock()
-				return nil
-			},
-		)
+	vChannels := []*datapb.VchannelInfo{}
+	for _, channel := range suite.channels[collection] {
+		vChannels = append(vChannels, &datapb.VchannelInfo{
+			CollectionID: collection,
+			ChannelName:  channel,
+		})
 	}
+
+	segmentInfos := []*datapb.SegmentInfo{}
+	for _, segments := range suite.segments[collection] {
+		for _, segment := range segments {
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID:            segment,
+				InsertChannel: suite.channels[collection][segment%2],
+			})
+		}
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil)
 }
 
 func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.DataCoord) {
 	var (
-		vChannels      []*datapb.VchannelInfo
-		segmentBinlogs []*datapb.SegmentBinlogs
+		vChannels    []*datapb.VchannelInfo
+		segmentInfos []*datapb.SegmentInfo
 	)
 
-	for partition, segments := range suite.segments[collection] {
-		segments := segments
-		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
-			),
+	partitions := make([]int64, 0)
+	if suite.loadTypes[collection] == querypb.LoadType_LoadPartition {
+		partitions = suite.partitions[collection]
+	}
+
+	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequestV2{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+		),
+		CollectionID: collection,
+		PartitionIDs: partitions,
+	}
+
+	vChannels = []*datapb.VchannelInfo{}
+	for _, channel := range suite.channels[collection] {
+		vChannels = append(vChannels, &datapb.VchannelInfo{
 			CollectionID: collection,
-			PartitionID:  partition,
-		}
-		vChannels = []*datapb.VchannelInfo{}
-		for _, channel := range suite.channels[collection] {
-			vChannels = append(vChannels, &datapb.VchannelInfo{
-				CollectionID: collection,
-				ChannelName:  channel,
-			})
-		}
-		segmentBinlogs = []*datapb.SegmentBinlogs{}
+			ChannelName:  channel,
+		})
+	}
+
+	segmentInfos = []*datapb.SegmentInfo{}
+	for _, segments := range suite.segments[collection] {
 		for _, segment := range segments {
-			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-				SegmentID:     segment,
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID:            segment,
 				InsertChannel: suite.channels[collection][segment%2],
 			})
 		}
-		dataCoord.EXPECT().GetRecoveryInfo(mock.Anything, getRecoveryInfoRequest).Maybe().Return(&datapb.GetRecoveryInfoResponse{
-			Status:   successStatus,
-			Channels: vChannels,
-			Binlogs:  segmentBinlogs,
-		}, nil)
 	}
+	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, getRecoveryInfoRequest).Return(&datapb.GetRecoveryInfoResponseV2{
+		Status:   successStatus,
+		Channels: vChannels,
+		Segments: segmentInfos,
+	}, nil).Maybe()
 }
 
 func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status querypb.LoadStatus) {

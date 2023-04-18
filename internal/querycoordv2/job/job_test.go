@@ -100,19 +100,19 @@ func (suite *JobSuite) SetupSuite() {
 				ChannelName:  channel,
 			})
 		}
-		for partition, segments := range partitions {
-			segmentBinlogs := []*datapb.SegmentBinlogs{}
+
+		segmentBinlogs := []*datapb.SegmentInfo{}
+		for _, segments := range partitions {
 			for _, segment := range segments {
-				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-					SegmentID:     segment,
+				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentInfo{
+					ID:            segment,
 					InsertChannel: suite.channels[collection][segment%2],
 				})
 			}
-
-			suite.broker.EXPECT().
-				GetRecoveryInfo(mock.Anything, collection, partition).
-				Return(vChannels, segmentBinlogs, nil)
 		}
+		suite.broker.EXPECT().
+			GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
+			Return(vChannels, segmentBinlogs, nil)
 	}
 }
 
