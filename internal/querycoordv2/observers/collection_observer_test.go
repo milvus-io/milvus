@@ -407,7 +407,6 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 	}
 
-	allSegments := make(map[int64][]*datapb.SegmentBinlogs, 0) // partitionID -> segments
 	dmChannels := make([]*datapb.VchannelInfo, 0)
 	for _, channel := range suite.channels[collection] {
 		dmChannels = append(dmChannels, &datapb.VchannelInfo{
@@ -416,17 +415,17 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 	}
 
+	allSegments := make([]*datapb.SegmentInfo, 0) // partitionID -> segments
 	for _, segment := range suite.segments[collection] {
-		allSegments[segment.PartitionID] = append(allSegments[segment.PartitionID], &datapb.SegmentBinlogs{
-			SegmentID:     segment.GetID(),
+		allSegments = append(allSegments, &datapb.SegmentInfo{
+			ID:            segment.GetID(),
+			PartitionID:   segment.PartitionID,
 			InsertChannel: segment.GetInsertChannel(),
 		})
 	}
 
 	partitions := suite.partitions[collection]
-	for _, partition := range partitions {
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments[partition], nil)
-	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, partitions...)
 }
 

@@ -96,6 +96,10 @@ func (m *GrpcDataCoordClient) GetRecoveryInfo(ctx context.Context, in *datapb.Ge
 	return &datapb.GetRecoveryInfoResponse{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) GetRecoveryInfoV2(ctx context.Context, in *datapb.GetRecoveryInfoRequestV2, opts ...grpc.CallOption) (*datapb.GetRecoveryInfoResponseV2, error) {
+	return &datapb.GetRecoveryInfoResponseV2{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) GetFlushedSegments(ctx context.Context, in *datapb.GetFlushedSegmentsRequest, opts ...grpc.CallOption) (*datapb.GetFlushedSegmentsResponse, error) {
 	return &datapb.GetFlushedSegmentsResponse{}, m.Err
 }

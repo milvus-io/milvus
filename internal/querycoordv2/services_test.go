@@ -775,10 +775,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).
-			Return(append(suite.partitions[collection], 999), nil)
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, int64(999)).
-			Return(nil, nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -1651,7 +1647,7 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 }
 
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	vChannels := []*datapb.VchannelInfo{}
 	for _, channel := range suite.channels[collection] {
 		vChannels = append(vChannels, &datapb.VchannelInfo{
@@ -1660,19 +1656,20 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 		})
 	}
 
+	segmentBinlogs := []*datapb.SegmentInfo{}
 	for partition, segments := range suite.segments[collection] {
-		segmentBinlogs := []*datapb.SegmentBinlogs{}
 		for _, segment := range segments {
-			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-				SegmentID:     segment,
+			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentInfo{
+				ID:            segment,
 				InsertChannel: suite.channels[collection][segment%2],
+				PartitionID:   partition,
+				CollectionID:  collection,
 			})
 		}
-
-		suite.broker.EXPECT().
-			GetRecoveryInfo(mock.Anything, collection, partition).
-			Return(vChannels, segmentBinlogs, nil)
 	}
+	suite.broker.EXPECT().
+		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
+		Return(vChannels, segmentBinlogs, nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

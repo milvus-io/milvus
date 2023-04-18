@@ -42,8 +42,8 @@ type MockBalancer_AssignChannel_Call struct {
 }
 
 // AssignChannel is a helper method to define mock.On call
-//  - channels []*meta.DmChannel
-//  - nodes []int64
+//   - channels []*meta.DmChannel
+//   - nodes []int64
 func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}) *MockBalancer_AssignChannel_Call {
 	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes)}
 }

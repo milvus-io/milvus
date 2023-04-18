@@ -86,9 +86,10 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
+			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -98,7 +99,6 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	info := &datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  1,
@@ -110,7 +110,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -171,9 +171,10 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
+			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -185,7 +186,6 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	}
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	info := &datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  1,
@@ -195,7 +195,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	loadInfo := utils.PackSegmentLoadInfo(info, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -255,9 +255,10 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
+			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -268,8 +269,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 		},
 	}
 
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -295,9 +295,10 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(2, 1, []int64{3, 4}))
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     1,
+			ID:            1,
+			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -307,7 +308,6 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
 	info := &datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  1,
@@ -318,7 +318,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
@@ -436,9 +436,10 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
-	segments := []*datapb.SegmentBinlogs{
+	segments := []*datapb.SegmentInfo{
 		{
-			SegmentID:     2,
+			ID:            2,
+			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
 		},
 	}
@@ -450,8 +451,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	}
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 

@@ -196,10 +196,6 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				}},
 			}, nil)
 	}
-	// for _, partition := range partitions {
-	// 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
-	// 		Return(channels, nil, nil)
-	// }
 	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test subscribe channel task
@@ -224,8 +220,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(dmChannels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	suite.AssertTaskNum(0, len(suite.subChannels), len(suite.subChannels), 0)
 
@@ -320,8 +315,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(dmChannels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 
 	// Only first channel exists
@@ -372,8 +366,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	// suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
-	// 	Return([]*datapb.VchannelInfo{channel}, nil, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -382,11 +374,12 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segments := make([]*datapb.SegmentBinlogs, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segments = append(segments, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segments = append(segments, &datapb.SegmentInfo{
+			ID:            segment,
 			InsertChannel: channel.ChannelName,
+			PartitionID:   1,
 		})
 		task, err := NewSegmentTask(
 			ctx,
@@ -401,8 +394,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -463,10 +455,11 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segmentInfos := make([]*datapb.SegmentBinlogs, 0)
+	segmentInfos := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segmentInfos = append(segmentInfos, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   1,
 			InsertChannel: channel.ChannelName,
 		})
 		task, err := NewSegmentTask(
@@ -482,8 +475,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -649,8 +641,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	// suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
-	// 	Return([]*datapb.VchannelInfo{channel}, nil, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
@@ -668,12 +658,13 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	}
 	tasks := []Task{}
 	segments := make([]*meta.Segment, 0)
-	segmentInfos := make([]*datapb.SegmentBinlogs, 0)
+	segmentInfos := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.moveSegments {
 		segments = append(segments,
 			utils.CreateTestSegment(suite.collection, partition, segment, sourceNode, 1, channel.ChannelName))
-		segmentInfos = append(segmentInfos, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   1,
 			InsertChannel: channel.ChannelName,
 		})
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: sourceNode, Version: 0}
@@ -692,8 +683,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	suite.target.UpdateCollectionCurrentTarget(suite.collection, int64(1))
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
@@ -748,8 +738,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	// suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
-	// 	Return([]*datapb.VchannelInfo{channel}, nil, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -758,10 +746,11 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segmentInfos := []*datapb.SegmentBinlogs{}
+	segmentInfos := []*datapb.SegmentInfo{}
 	for _, segment := range suite.loadSegments {
-		segmentInfos = append(segmentInfos, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   partition,
 			InsertChannel: channel.GetChannelName(),
 		})
 		task, err := NewSegmentTask(
@@ -779,8 +768,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{partition}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, partition)
 
 	// Process tasks
@@ -826,8 +814,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	// suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
-	// 	Return([]*datapb.VchannelInfo{channel}, nil, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -837,10 +823,11 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segmentInfos := make([]*datapb.SegmentBinlogs, 0)
+	segmentInfos := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segmentInfos = append(segmentInfos, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   1,
 			InsertChannel: channel.GetChannelName(),
 		})
 		task, err := NewSegmentTask(
@@ -856,8 +843,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -877,18 +863,18 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
 	suite.dist.LeaderViewManager.Update(targetNode, view)
-	segmentInfos = make([]*datapb.SegmentBinlogs, 0)
+	segmentInfos = make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments[1:] {
-		segmentInfos = append(segmentInfos, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   2,
 			InsertChannel: channel.GetChannelName(),
 		})
 	}
 	bakExpectations := suite.broker.ExpectedCalls
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{2}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(2)).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(2))
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -1073,10 +1059,11 @@ func (suite *TaskSuite) TestNoExecutor() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
-	segments := make([]*datapb.SegmentBinlogs, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segments = append(segments, &datapb.SegmentBinlogs{
-			SegmentID:     segment,
+		segments = append(segments, &datapb.SegmentInfo{
+			ID:            segment,
+			PartitionID:   1,
 			InsertChannel: channel.ChannelName,
 		})
 		task, err := NewSegmentTask(
@@ -1091,8 +1078,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
