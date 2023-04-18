@@ -560,7 +560,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	posID, err := ds.getChannelLatestMsgID(context.Background(), req.GetChannelName(), req.GetSegmentId())
 	if err != nil {
 		return &datapb.AddImportSegmentResponse{
-			Status: merr.Status(merr.WrapErrChannelNotFound(req.ChannelName, "failed to get channel position")),
+			Status: merr.Status(merr.WrapErrChannelNotFound(
+				req.ChannelName, "failed to get channel position", err.Error())),
 		}, nil
 	}
 	// Add the new segment to the channel.
