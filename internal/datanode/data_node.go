@@ -1132,7 +1132,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	if err != nil {
 		log.Error("channel not found in current DataNode",
 			zap.String("channel name", req.GetChannelName()),
-			zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
+			zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()),
+			zap.Error(err))
 		return &datapb.AddImportSegmentResponse{
 			Status: &commonpb.Status{
 				// TODO: Add specific error code.
@@ -1144,6 +1145,10 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Get the current dml channel position ID, that will be used in segments start positions and end positions.
 	posID, err := ds.getChannelLatestMsgID(context.Background(), req.GetChannelName(), req.GetSegmentId())
 	if err != nil {
+		log.Error("failed to get channel's latest message ID",
+			zap.String("channel name", req.GetChannelName()),
+			zap.Int64("segment ID", req.GetSegmentId()),
+			zap.Error(err))
 		return &datapb.AddImportSegmentResponse{
 			Status: &commonpb.Status{
 				// TODO: Add specific error code.
@@ -1180,6 +1185,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				importing: true,
 			}); err != nil {
 			log.Error("failed to add segment to flow graph",
+				zap.String("channel name", req.GetChannelName()),
+				zap.Int64("segment ID", req.GetSegmentId()),
 				zap.Error(err))
 			return &datapb.AddImportSegmentResponse{
 				Status: &commonpb.Status{
