@@ -263,6 +263,36 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(60), Params.CheckNodeInReplicaInterval.Seconds())
 		assert.Equal(t, float64(10), Params.CheckResourceGroupInterval.Seconds())
 		assert.Equal(t, true, Params.EnableRGAutoRecover)
+
+		//test balance factor legal range
+		Params.Base.Save("queryCoord.globalRowCountFactor", "50")
+		Params.initGlobalRowCountFactor()
+		assert.Equal(t, float64(1), Params.GlobalRowCountFactor)
+
+		Params.Base.Save("queryCoord.globalRowCountFactor", "-1")
+		Params.initGlobalRowCountFactor()
+		assert.Equal(t, 0.1, Params.GlobalRowCountFactor)
+
+		Params.Base.Save("queryCoord.globalRowCountFactor", "0.4")
+		Params.initGlobalRowCountFactor()
+		assert.Equal(t, 0.4, Params.GlobalRowCountFactor)
+
+		//test unbalance factor legal range
+		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "50")
+		Params.initScoreUnbalanceTolerationFactor()
+		assert.Equal(t, float64(2), Params.ScoreUnbalanceTolerationFactor)
+
+		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "-1")
+		Params.initScoreUnbalanceTolerationFactor()
+		assert.Equal(t, 1.1, Params.ScoreUnbalanceTolerationFactor)
+
+		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "1")
+		Params.initScoreUnbalanceTolerationFactor()
+		assert.Equal(t, 1.1, Params.ScoreUnbalanceTolerationFactor)
+
+		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "1.4")
+		Params.initScoreUnbalanceTolerationFactor()
+		assert.Equal(t, 1.4, Params.ScoreUnbalanceTolerationFactor)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
