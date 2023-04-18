@@ -139,4 +139,5 @@ func (c *Cluster) GetSessions() []*Session {
 // Close releases resources opened in Cluster
 func (c *Cluster) Close() {
 	c.sessionManager.Close()
+	c.channelManager.Close()
 }
