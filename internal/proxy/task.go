@@ -42,16 +42,6 @@ import (
 )
 
 const (
-	IgnoreGrowingKey = "ignore_growing"
-	AnnsFieldKey     = "anns_field"
-	TopKKey          = "topk"
-	NQKey            = "nq"
-	MetricTypeKey    = "metric_type"
-	SearchParamsKey  = "params"
-	RoundDecimalKey  = "round_decimal"
-	OffsetKey        = "offset"
-	LimitKey         = "limit"
-
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"

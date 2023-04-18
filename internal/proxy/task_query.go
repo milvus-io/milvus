@@ -134,32 +134,32 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		err    error
 	)
 
-	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
+	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.LimitKey, queryParamsPair)
 	// if limit is not provided
 	if err != nil {
 		return &queryParams{limit: typeutil.Unlimited}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+		return nil, fmt.Errorf("%s [%s] is invalid", common.LimitKey, limitStr)
 	}
 	if limit != 0 {
 		if err := validateLimit(limit); err != nil {
-			return nil, fmt.Errorf("%s [%d] is invalid, %w", LimitKey, limit, err)
+			return nil, fmt.Errorf("%s [%d] is invalid, %w", common.LimitKey, limit, err)
 		}
 	}
 
-	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair)
+	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.OffsetKey, queryParamsPair)
 	// if offset is provided
 	if err == nil {
 		offset, err = strconv.ParseInt(offsetStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			return nil, fmt.Errorf("%s [%s] is invalid", common.OffsetKey, offsetStr)
 		}
 
 		if offset != 0 {
 			if err := validateLimit(offset); err != nil {
-				return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+				return nil, fmt.Errorf("%s [%d] is invalid, %w", common.OffsetKey, offset, err)
 			}
 		}
 	}
@@ -289,7 +289,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	//fetch search_growing from search param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetQueryParams() {
-		if kv.GetKey() == IgnoreGrowingKey {
+		if kv.GetKey() == common.IgnoreGrowingKey {
 			ignoreGrowing, err = strconv.ParseBool(kv.Value)
 			if err != nil {
 				return errors.New("parse search growing failed")

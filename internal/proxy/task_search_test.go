@@ -88,11 +88,11 @@ func createColl(t *testing.T, name string, rc types.RootCoord) {
 func getValidSearchParams() []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
-			Key:   AnnsFieldKey,
+			Key:   common.AnnsFieldKey,
 			Value: testFloatVecField,
 		},
 		{
-			Key:   TopKKey,
+			Key:   common.TopKKey,
 			Value: "10",
 		},
 		{
@@ -100,15 +100,15 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 			Value: distance.L2,
 		},
 		{
-			Key:   SearchParamsKey,
+			Key:   common.SearchParamsKey,
 			Value: `{"nprobe": 10}`,
 		},
 		{
-			Key:   RoundDecimalKey,
+			Key:   common.RoundDecimalKey,
 			Value: "-1",
 		},
 		{
-			Key:   IgnoreGrowingKey,
+			Key:   common.IgnoreGrowingKey,
 			Value: "false",
 		}}
 }
@@ -230,7 +230,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		createColl(t, collName, rc)
 
 		task := getSearchTask(t, collName)
-		task.request.SearchParams = getInvalidSearchParams(IgnoreGrowingKey)
+		task.request.SearchParams = getInvalidSearchParams(common.IgnoreGrowingKey)
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	})
@@ -1852,7 +1852,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		sp := getValidSearchParams()
 		sp = append(sp, &commonpb.KeyValuePair{
-			Key:   OffsetKey,
+			Key:   common.OffsetKey,
 			Value: strconv.FormatInt(targetOffset, 10),
 		})
 
@@ -1864,26 +1864,26 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
 		spNoTopk := []*commonpb.KeyValuePair{{
-			Key:   AnnsFieldKey,
+			Key:   common.AnnsFieldKey,
 			Value: testFloatVecField}}
 
 		spInvalidTopk := append(spNoTopk, &commonpb.KeyValuePair{
-			Key:   TopKKey,
+			Key:   common.TopKKey,
 			Value: "invalid",
 		})
 
 		spInvalidTopk65536 := append(spNoTopk, &commonpb.KeyValuePair{
-			Key:   TopKKey,
+			Key:   common.TopKKey,
 			Value: "65536",
 		})
 
 		spNoMetricType := append(spNoTopk, &commonpb.KeyValuePair{
-			Key:   TopKKey,
+			Key:   common.TopKKey,
 			Value: "10",
 		})
 
 		spInvalidTopkPlusOffset := append(spNoTopk, &commonpb.KeyValuePair{
-			Key:   OffsetKey,
+			Key:   common.OffsetKey,
 			Value: "65535",
 		})
 
@@ -1894,32 +1894,32 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		// no roundDecimal is valid
 		noRoundDecimal := append(spNoSearchParams, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
+			Key:   common.SearchParamsKey,
 			Value: `{"nprobe": 10}`,
 		})
 
 		spInvalidRoundDecimal2 := append(noRoundDecimal, &commonpb.KeyValuePair{
-			Key:   RoundDecimalKey,
+			Key:   common.RoundDecimalKey,
 			Value: "1000",
 		})
 
 		spInvalidRoundDecimal := append(noRoundDecimal, &commonpb.KeyValuePair{
-			Key:   RoundDecimalKey,
+			Key:   common.RoundDecimalKey,
 			Value: "invalid",
 		})
 
 		spInvalidOffsetNoInt := append(noRoundDecimal, &commonpb.KeyValuePair{
-			Key:   OffsetKey,
+			Key:   common.OffsetKey,
 			Value: "invalid",
 		})
 
 		spInvalidOffsetNegative := append(noRoundDecimal, &commonpb.KeyValuePair{
-			Key:   OffsetKey,
+			Key:   common.OffsetKey,
 			Value: "-1",
 		})
 
 		spInvalidOffsetTooLarge := append(noRoundDecimal, &commonpb.KeyValuePair{
-			Key:   OffsetKey,
+			Key:   common.OffsetKey,
 			Value: "16386",
 		})
 
