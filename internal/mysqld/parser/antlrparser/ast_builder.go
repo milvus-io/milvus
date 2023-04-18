@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/mysqld/sqlutil"
+
 	"github.com/milvus-io/milvus/internal/mysqld/planner"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
@@ -172,6 +174,17 @@ func (v *AstBuilder) VisitQuerySpecification(ctx *parsergen.QuerySpecificationCo
 		}
 	}
 
+	annsCtx := ctx.AnnsClause()
+	if annsCtx != nil {
+		r := annsCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		if n := GetANNSClause(r); n != nil {
+			opts = append(opts, planner.WithANNS(n))
+		}
+	}
+
 	limitCtx := ctx.LimitClause()
 	if limitCtx != nil {
 		r := limitCtx.Accept(v)
@@ -288,6 +301,167 @@ func (v *AstBuilder) VisitFromClause(ctx *parsergen.FromClauseContext) interface
 	}
 
 	return planner.NewNodeFromClause(text, tableSources, opts...)
+}
+
+func (v *AstBuilder) VisitAnnsClause(ctx *parsergen.AnnsClauseContext) interface{} {
+	text := GetOriginalText(ctx)
+
+	var column *planner.NodeFullColumnName
+	var vectors []*planner.NodeVector
+
+	columnCtx := ctx.FullColumnName()
+	if columnCtx != nil {
+		r := columnCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		column = planner.NewNodeFullColumnName(GetOriginalText(columnCtx), r.(string))
+	}
+
+	vectorsCtx := ctx.AnnsVectors()
+	if vectorsCtx != nil {
+		r := vectorsCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		vectors = r.([]*planner.NodeVector)
+	}
+
+	var opts []planner.NodeANNSClauseOption
+
+	var paramsCtx parsergen.IAnnsParamsClauseContext
+
+	// Don't use ctx.AnnsParamsClause() directly, especially when the nq is too large.
+	// In fact, ctx.AnnsParamsClause() will iterate all children from the beginning index, which
+	// is not very efficient.
+	children := ctx.GetChildren()
+	lenOfChildren := len(children)
+	for i := lenOfChildren - 1; i >= 0; i-- {
+		if childCtx, ok := children[i].(parsergen.IAnnsParamsClauseContext); ok {
+			paramsCtx = childCtx
+			break
+		}
+	}
+
+	if paramsCtx != nil {
+		r := paramsCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		if n := GetKVPairs(r); n != nil {
+			opts = append(opts, planner.NodeANNSClauseWithParams(n))
+		}
+	}
+
+	return planner.NewNodeANNSClause(text, column, vectors, opts...)
+}
+
+func (v *AstBuilder) VisitAnnsVectors(ctx *parsergen.AnnsVectorsContext) interface{} {
+	var vectors []*planner.NodeVector
+
+	allVectorsCtx := ctx.AllAnnsVector()
+
+	for _, vectorCtx := range allVectorsCtx {
+		r := vectorCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		if n := GetVector(r); n != nil {
+			vectors = append(vectors, n)
+		}
+	}
+
+	return vectors
+}
+
+func (v *AstBuilder) VisitAnnsVector(ctx *parsergen.AnnsVectorContext) interface{} {
+	if ctx.BIT_STRING() != nil {
+		return fmt.Errorf("binary vector is not supported")
+	}
+
+	var floatArray []float32
+
+	floatArrayCtx := ctx.FloatArray()
+	if floatArrayCtx != nil {
+		r := floatArrayCtx.Accept(v)
+		if err := GetError(r); err != nil {
+			return err
+		}
+		floatArray = r.([]float32)
+	}
+
+	return planner.NewNodeVector(planner.WithFloatVector(planner.NewNodeFloatVector(floatArray)))
+}
+
+func (v *AstBuilder) VisitFloatArray(ctx *parsergen.FloatArrayContext) interface{} {
+	var floatArray []float32
+
+	allDecimalCtx := ctx.AllDecimalLiteral()
+	for _, childCtx := range allDecimalCtx {
+		r := childCtx.Accept(v)
+		switch rWithType := r.(type) {
+		case int64:
+			floatArray = append(floatArray, float32(rWithType))
+		case float32:
+			floatArray = append(floatArray, rWithType)
+		case float64:
+			floatArray = append(floatArray, float32(rWithType))
+		case error:
+			return rWithType
+		default:
+			// TODO
+			return fmt.Errorf("failed to parse float vector: %s", GetOriginalText(childCtx))
+		}
+	}
+
+	return floatArray
+}
+
+func (v *AstBuilder) VisitAnnsParamsClause(ctx *parsergen.AnnsParamsClauseContext) interface{} {
+	return ctx.KvPairs().Accept(v)
+}
+
+func (v *AstBuilder) VisitKvPairs(ctx *parsergen.KvPairsContext) interface{} {
+	allKvPairs := ctx.AllKvPair()
+	lenOfPairs := len(allKvPairs)
+
+	if lenOfPairs == 0 {
+		return nil
+	}
+
+	pairs := planner.NewNodeKVPairs()
+
+	for _, child := range allKvPairs {
+		childCtx := child.(*parsergen.KvPairContext)
+		key := childCtx.ID().GetText()
+		value := childCtx.Value().Accept(v)
+		switch tv := value.(type) {
+		case string:
+			pairs.Insert(key, tv)
+		case int:
+			pairs.Insert(key, strconv.Itoa(tv))
+		case int32:
+			pairs.Insert(key, strconv.Itoa(int(tv)))
+		case int64:
+			pairs.Insert(key, strconv.Itoa(int(tv)))
+		case float32:
+			pairs.Insert(key, sqlutil.Float32ToString(tv))
+		case float64:
+			pairs.Insert(key, sqlutil.Float64ToString(tv))
+		default:
+			return fmt.Errorf("invalid type: %s", GetOriginalText(childCtx))
+		}
+	}
+
+	return pairs
+}
+
+func (v *AstBuilder) VisitValue(ctx *parsergen.ValueContext) interface{} {
+	if idCtx := ctx.ID(); idCtx != nil {
+		return idCtx.GetText()
+	}
+
+	return ctx.Constant().Accept(v)
 }
 
 func (v *AstBuilder) VisitTableSources(ctx *parsergen.TableSourcesContext) interface{} {

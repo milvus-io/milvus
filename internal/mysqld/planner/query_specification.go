@@ -7,6 +7,7 @@ type NodeQuerySpecification struct {
 	SelectSpecs    []*NodeSelectSpec
 	SelectElements []*NodeSelectElement
 	From           optional.Option[*NodeFromClause]
+	Anns           optional.Option[*NodeANNSClause]
 	Limit          optional.Option[*NodeLimitClause]
 }
 
@@ -16,18 +17,27 @@ func (n *NodeQuerySpecification) String() string {
 
 func (n *NodeQuerySpecification) GetChildren() []Node {
 	children := make([]Node, 0, len(n.SelectSpecs)+len(n.SelectElements)+2)
+
 	for _, child := range n.SelectSpecs {
 		children = append(children, child)
 	}
+
 	for _, child := range n.SelectElements {
 		children = append(children, child)
 	}
+
 	if n.From.IsSome() {
 		children = append(children, n.From.Unwrap())
 	}
+
+	if n.Anns.IsSome() {
+		children = append(children, n.Anns.Unwrap())
+	}
+
 	if n.Limit.IsSome() {
 		children = append(children, n.Limit.Unwrap())
 	}
+
 	return children
 }
 
@@ -46,6 +56,12 @@ func (n *NodeQuerySpecification) apply(opts ...NodeQuerySpecificationOption) {
 func WithFrom(from *NodeFromClause) NodeQuerySpecificationOption {
 	return func(n *NodeQuerySpecification) {
 		n.From = optional.Some(from)
+	}
+}
+
+func WithANNS(anns *NodeANNSClause) NodeQuerySpecificationOption {
+	return func(n *NodeQuerySpecification) {
+		n.Anns = optional.Some(anns)
 	}
 }
 

@@ -3,6 +3,8 @@ package planner
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/mysqld/sqlutil"
 )
 
 // TODO: remove this after execution engine is ready.
@@ -120,7 +122,7 @@ func (v *exprTextRestorer) VisitConstant(n *NodeConstant) interface{} {
 		return strconv.FormatBool(n.BooleanLiteral.Unwrap())
 	}
 	if n.RealLiteral.IsSome() {
-		return strconv.FormatFloat(n.RealLiteral.Unwrap(), 'g', 10, 14)
+		return sqlutil.Float64ToString(n.RealLiteral.Unwrap())
 	}
 	return ""
 }

@@ -31,4 +31,14 @@ type Visitor interface {
 	VisitUnaryExpressionAtom(n *NodeUnaryExpressionAtom) interface{}
 	VisitNestedExpressionAtom(n *NodeNestedExpressionAtom) interface{}
 	VisitConstant(n *NodeConstant) interface{}
+
+	/*
+		// In fact, these structs are not enough to be a node.
+		// They themselves alone don't make any sense. Just regard them as parameters.
+		VisitFloatVector(n *NodeFloatVector) interface{}
+		VisitVector(n *NodeVector) interface{}
+		VisitKVPairs(n *NodeKVPairs) interface{}
+	*/
+
+	VisitANNSClause(*NodeANNSClause) interface{}
 }
