@@ -426,6 +426,7 @@ func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, cha
 	dmlStream.AsConsumer([]string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
 	id, err := dmlStream.GetLatestMsgID(pChannelName)
 	if err != nil {
+		log.Error("fail to GetLatestMsgID", zap.String("pChannel", pChannelName), zap.Error(err))
 		return nil, err
 	}
 	return id.Serialize(), nil
