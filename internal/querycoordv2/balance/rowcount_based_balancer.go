@@ -152,9 +152,6 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		}
 	}
 
-	log.Info("balance channel xxxxx",
-		zap.Int64s("online nodes", lo.Keys(onlineNodesSegments)),
-		zap.Int64s("offline nodes", lo.Keys(stoppingNodesSegments)))
 	if len(nodes) == len(stoppingNodesSegments) || len(onlineNodesSegments) == 0 {
 		// no available nodes to balance
 		return nil, nil
@@ -188,6 +185,11 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 			nodesWithLessRow.push(&item)
 		}
 	}
+
+	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
+		// if the segment are redundant, skip it's balance for now
+		return len(b.dist.SegmentDistManager.Get(s.GetID())) == 1
+	})
 
 	return b.genSegmentPlan(replica, nodesWithLessRow, segmentsToMove, average), b.genChannelPlan(replica, lo.Keys(onlineNodesSegments), lo.Keys(stoppingNodesSegments))
 }

@@ -163,6 +163,21 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{
+			name:        "skip balance for redundant segment",
+			nodes:       []int64{1, 2},
+			segmentCnts: []int{1, 2},
+			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.Segment{
+				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 20}, Node: 1}},
+				2: {
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 20}, Node: 2},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 40}, Node: 2},
+				},
+			},
+			expectPlans:        []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{},
+		},
+		{
 			name:        "balance won't trigger",
 			nodes:       []int64{1, 2, 3},
 			segmentCnts: []int{1, 2, 2},
