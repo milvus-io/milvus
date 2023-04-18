@@ -14,21 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-#include <string>
+package paramtable
 
-namespace milvus::config {
+// /////////////////////////////////////////////////////////////////////////////
+type gpuConfig struct {
+	InitMemPoolSize ParamItem `refreshable:"false"`
+	MaxMemPoolSize  ParamItem `refreshable:"false"`
+}
 
-void
-KnowhereInitImpl(const char*);
+func (p *gpuConfig) init(base *BaseTable) {
+	p.InitMemPoolSize = ParamItem{
+		Key:          "gpu.initMemPoolSize",
+		Version:      "2.3.0",
+		DefaultValue: "2048",
+		Doc:          "initial gpu memory pool size (MB)",
+		Export:       true,
+	}
+	p.InitMemPoolSize.Init(base.mgr)
 
-std::string
-KnowhereSetSimdType(const char*);
-
-void
-KnowhereInitThreadPool(const uint32_t);
-
-void
-KnowhereInitRaftMemPool(const size_t, const size_t);
-
-}  // namespace milvus::config
+	p.MaxMemPoolSize = ParamItem{
+		Key:          "gpu.maxMemPoolSize",
+		Version:      "2.3.0",
+		DefaultValue: "4096",
+		Doc:          "maximum gpu memory pool size (MB)",
+		Export:       true,
+	}
+	p.MaxMemPoolSize.Init(base.mgr)
+}

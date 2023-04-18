@@ -22,6 +22,9 @@ IndexBuilderInit(const char*);
 char*
 IndexBuilderSetSimdType(const char*);
 
+void
+IndexBuilderInitRaftMemPool(const size_t, const size_t);
+
 #ifdef __cplusplus
 };
 #endif

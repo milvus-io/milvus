@@ -147,6 +147,10 @@ func (i *IndexNode) initKnowhere() {
 	C.IndexBuilderSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
+	cInitSize := C.size_t(Params.GpuCfg.InitMemPoolSize.GetAsInt64())
+	cMaxSize := C.size_t(Params.GpuCfg.MaxMemPoolSize.GetAsInt64())
+	C.IndexBuilderInitRaftMemPool(cInitSize, cMaxSize)
+
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)

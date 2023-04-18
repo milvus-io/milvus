@@ -68,4 +68,9 @@ KnowhereInitThreadPool(const uint32_t num_threads) {
     knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
 }
 
+void
+KnowhereInitRaftMemPool(const size_t init_size, const size_t max_size) {
+    knowhere::KnowhereConfig::SetRaftMemPool(init_size, max_size);
+}
+
 }  // namespace milvus::config

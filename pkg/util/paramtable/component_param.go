@@ -60,6 +60,7 @@ type ComponentParam struct {
 	QuotaConfig     quotaConfig
 	AutoIndexConfig autoIndexConfig
 	TraceCfg        traceConfig
+	GpuCfg          gpuConfig
 
 	RootCoordCfg  rootCoordConfig
 	ProxyCfg      proxyConfig
@@ -107,6 +108,7 @@ func (p *ComponentParam) init() {
 	p.QuotaConfig.init(&p.BaseTable)
 	p.AutoIndexConfig.init(&p.BaseTable)
 	p.TraceCfg.init(&p.BaseTable)
+	p.GpuCfg.init(&p.BaseTable)
 
 	p.RootCoordCfg.init(&p.BaseTable)
 	p.ProxyCfg.init(&p.BaseTable)

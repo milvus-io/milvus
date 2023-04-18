@@ -197,6 +197,10 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
+	cInitSize := C.size_t(paramtable.Get().GpuCfg.InitMemPoolSize.GetAsInt64())
+	cMaxSize := C.size_t(paramtable.Get().GpuCfg.MaxMemPoolSize.GetAsInt64())
+	C.SegcoreInitRaftMemPool(cInitSize, cMaxSize)
+
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)

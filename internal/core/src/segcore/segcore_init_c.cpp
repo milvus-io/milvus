@@ -58,4 +58,9 @@ SegcoreSetSimdType(const char* value) {
     return ret;
 }
 
+extern "C" void
+SegcoreInitRaftMemPool(const size_t init_size, const size_t max_size) {
+    milvus::config::KnowhereInitRaftMemPool(init_size, max_size);
+}
+
 }  // namespace milvus::segcore

@@ -27,3 +27,8 @@ IndexBuilderSetSimdType(const char* value) {
     ret[real_type.length()] = 0;
     return ret;
 }
+
+void
+IndexBuilderInitRaftMemPool(const size_t init_size, const size_t max_size) {
+    milvus::config::KnowhereInitRaftMemPool(init_size, max_size);
+}
