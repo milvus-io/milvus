@@ -2,7 +2,7 @@ version: '3.5'
 
 services:
   etcd:
-    image: quay.io/coreos/etcd:v3.5.0
+    image: quay.io/coreos/etcd:v3.5.5
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -34,7 +34,7 @@ services:
       - "18080:8080"
 
   minio:
-    image: minio/minio:RELEASE.2022-03-17T06-34-49Z
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     ports:
       - "9000:9000"
       - "9001:9001"
