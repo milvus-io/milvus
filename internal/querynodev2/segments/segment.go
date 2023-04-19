@@ -226,7 +226,11 @@ func (s *LocalSegment) InsertCount() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
-	rowCount := C.GetRowCount(s.ptr)
+	var rowCount C.int64_t
+	GetPool().Submit(func() (any, error) {
+		rowCount = C.GetRowCount(s.ptr)
+		return nil, nil
+	}).Await()
 
 	return int64(rowCount)
 }
@@ -235,7 +239,11 @@ func (s *LocalSegment) RowNum() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
-	rowCount := C.GetRealCount(s.ptr)
+	var rowCount C.int64_t
+	GetPool().Submit(func() (any, error) {
+		rowCount = C.GetRealCount(s.ptr)
+		return nil, nil
+	}).Await()
 
 	return int64(rowCount)
 }
@@ -244,7 +252,11 @@ func (s *LocalSegment) MemSize() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
-	memoryUsageInBytes := C.GetMemoryUsageInBytes(s.ptr)
+	var memoryUsageInBytes C.int64_t
+	GetPool().Submit(func() (any, error) {
+		memoryUsageInBytes = C.GetMemoryUsageInBytes(s.ptr)
+		return nil, nil
+	}).Await()
 
 	return int64(memoryUsageInBytes)
 }
@@ -345,15 +357,19 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	log.Debug("search segment...")
 
 	var searchResult SearchResult
-	tr := timerecord.NewTimeRecorder("cgoSearch")
-	status := C.Search(s.ptr,
-		searchReq.plan.cSearchPlan,
-		searchReq.cPlaceholderGroup,
-		traceCtx,
-		C.uint64_t(searchReq.timestamp),
-		&searchResult.cSearchResult,
-	)
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		tr := timerecord.NewTimeRecorder("cgoSearch")
+		status = C.Search(s.ptr,
+			searchReq.plan.cSearchPlan,
+			searchReq.cPlaceholderGroup,
+			traceCtx,
+			C.uint64_t(searchReq.timestamp),
+			&searchResult.cSearchResult,
+		)
+		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
@@ -386,17 +402,21 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	}
 
 	var retrieveResult RetrieveResult
-	ts := C.uint64_t(plan.Timestamp)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		ts := C.uint64_t(plan.Timestamp)
+		tr := timerecord.NewTimeRecorder("cgoRetrieve")
+		status = C.Retrieve(s.ptr,
+			plan.cRetrievePlan,
+			traceCtx,
+			ts,
+			&retrieveResult.cRetrieveResult,
+		)
+		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return nil, nil
+	}).Await()
 
-	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-	status := C.Retrieve(s.ptr,
-		plan.cRetrievePlan,
-		traceCtx,
-		ts,
-		&retrieveResult.cRetrieveResult,
-	)
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("do retrieve on segment",
 		zap.Int64("msgID", plan.msgID),
 		zap.String("segmentType", s.typ.String()),
@@ -405,6 +425,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
 	}
+
 	result := new(segcorepb.RetrieveResults)
 	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
 		return nil, err
@@ -486,7 +507,11 @@ func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
 	var offset int64
 	cOffset := (*C.int64_t)(&offset)
 
-	status := C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.PreInsert(s.ptr, C.int64_t(int64(numOfRecords)), cOffset)
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(&status, "PreInsert failed"); err != nil {
 		return 0, err
 	}
@@ -498,7 +523,11 @@ func (s *LocalSegment) preDelete(numOfRecords int) int64 {
 		long int
 		PreDelete(CSegmentInterface c_segment, long int size);
 	*/
-	offset := C.PreDelete(s.ptr, C.int64_t(int64(numOfRecords)))
+	var offset C.int64_t
+	GetPool().Submit(func() (any, error) {
+		offset = C.PreDelete(s.ptr, C.int64_t(int64(numOfRecords)))
+		return nil, nil
+	}).Await()
 	return int64(offset)
 }
 
@@ -530,14 +559,19 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 	var cEntityIdsPtr = (*C.int64_t)(&(rowIDs)[0])
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 
-	status := C.Insert(s.ptr,
-		cOffset,
-		cNumOfRows,
-		cEntityIdsPtr,
-		cTimestampsPtr,
-		(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
-		(C.uint64_t)(len(insertRecordBlob)),
-	)
+	var status C.CStatus
+
+	GetPool().Submit(func() (any, error) {
+		status = C.Insert(s.ptr,
+			cOffset,
+			cNumOfRows,
+			cEntityIdsPtr,
+			cTimestampsPtr,
+			(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
+			(C.uint64_t)(len(insertRecordBlob)),
+		)
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
@@ -604,13 +638,17 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 	if err != nil {
 		return fmt.Errorf("failed to marshal ids: %s", err)
 	}
-	status := C.Delete(s.ptr,
-		cOffset,
-		cSize,
-		(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		(C.uint64_t)(len(dataBlob)),
-		cTimestampsPtr,
-	)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.Delete(s.ptr,
+			cOffset,
+			cSize,
+			(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
+			(C.uint64_t)(len(dataBlob)),
+			cTimestampsPtr,
+		)
+		return nil, nil
+	}).Await()
 
 	if err := HandleCStatus(&status, "Delete failed"); err != nil {
 		return err
@@ -667,7 +705,11 @@ func (s *LocalSegment) LoadField(rowCount int64, data *schemapb.FieldData) error
 		mmap_dir_path: mmapDirPath,
 	}
 
-	status := C.LoadFieldData(s.ptr, loadInfo)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.LoadFieldData(s.ptr, loadInfo)
+		return nil, nil
+	}).Await()
 	if err := HandleCStatus(&status, "LoadFieldData failed"); err != nil {
 		return err
 	}
@@ -739,7 +781,12 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 		CStatus
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
-	status := C.LoadDeletedRecord(s.ptr, loadInfo)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.LoadDeletedRecord(s.ptr, loadInfo)
+		return nil, nil
+	}).Await()
+
 	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
 		return err
 	}
@@ -783,7 +830,12 @@ func (s *LocalSegment) LoadIndex(bytesIndex [][]byte, indexInfo *querypb.FieldIn
 		zap.Int64("segmentID", s.ID()),
 	)
 
-	status := C.UpdateSealedSegmentIndex(s.ptr, loadIndexInfo.cLoadIndexInfo)
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.UpdateSealedSegmentIndex(s.ptr, loadIndexInfo.cLoadIndexInfo)
+		return nil, nil
+	}).Await()
+
 	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
 		return err
 	}

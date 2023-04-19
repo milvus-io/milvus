@@ -59,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -119,8 +118,9 @@ type QueryNode struct {
 	vectorStorage     storage.ChunkManager
 	etcdKV            *etcdkv.EtcdKV
 
-	// Pool for search/query
-	taskPool *conc.Pool
+	/*
+		// Pool for search/query
+		knnPool *conc.Pool*/
 
 	// parameter turning hook
 	queryHook queryHook
@@ -271,7 +271,6 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
-		node.taskPool = conc.NewDefaultPool()
 		node.scheduler = tasks.NewScheduler()
 
 		node.clusterManager = cluster.NewWorkerManager(func(nodeID int64) (cluster.Worker, error) {

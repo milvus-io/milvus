@@ -24,13 +24,13 @@ import (
 )
 
 func TestPool(t *testing.T) {
-	pool := NewDefaultPool()
+	pool := NewDefaultPool[any]()
 
 	taskNum := pool.Cap() * 2
 	futures := make([]*Future[any], 0, taskNum)
 	for i := 0; i < taskNum; i++ {
 		res := i
-		future := pool.Submit(func() (interface{}, error) {
+		future := pool.Submit(func() (any, error) {
 			time.Sleep(500 * time.Millisecond)
 			return res, nil
 		})
