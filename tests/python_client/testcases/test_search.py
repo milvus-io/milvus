@@ -868,7 +868,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": f"Field {output_fields[-1]} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[:8])
+    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[2:8])
     def test_search_invalid_ignore_growing_param(self, ignore_growing):
         """
         target: test search ignoring growing segment
@@ -877,7 +877,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                 3. search with param ignore_growing invalid
         expected: raise exception
         """
-        if ignore_growing == 1:
+        if ignore_growing is None or ignore_growing == "":
             pytest.skip("number is valid")
         # 1. create a collection
         collection_w = self.init_collection_general(prefix, True)[0]
@@ -3226,6 +3226,38 @@ class TestCollectionSearch(TestcaseBase):
         vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
         res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
                                   default_search_exp, _async=_async,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "limit": default_limit,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        for ids in res[0].ids:
+            assert ids < 10000
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_ignore_growing_two(self, nq, dim, _async):
+        """
+        target: test search ignoring growing segment
+        method: 1. create a collection, insert data, create index and load
+                2. insert data again
+                3. search with param ignore_growing=True(outside search_params)
+        expected: searched successfully
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True, dim=dim)[0]
+
+        # 2. insert data again
+        data = cf.gen_default_dataframe_data(dim=dim, start=10000)
+        collection_w.insert(data)
+
+        # 3. search with param ignore_growing=True
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+        vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
+                                  default_search_exp, _async=_async,
+                                  ignore_growing=True,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "limit": default_limit,
