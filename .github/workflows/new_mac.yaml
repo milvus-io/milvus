@@ -7,13 +7,13 @@ on:
       - master
   pull_request_target:
     # file paths to consider in the event. Optional; defaults to all.
-    # paths:
+    paths:
     #   - 'scripts/**'
     #   - 'internal/**'
     #   - 'pkg/**'
     #   - 'cmd/**'
     #   - 'build/**'
-    #   - '.github/workflows/mac.yaml'
+      - '.github/workflows/*'
     #   - '.env'
     #   - docker-compose.yml
     #   - Makefile
