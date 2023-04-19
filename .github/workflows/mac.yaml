@@ -47,6 +47,7 @@ jobs:
           key: macos-conan
 
       - name: Code Check
+        shell: bash
         env:
           BUILD_CACHE: sccache
           AWS_ACCESS_KEY_ID: ${{ secrets.BUILD_CACHE_S3_AK }}
