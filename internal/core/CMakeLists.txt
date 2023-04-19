@@ -95,6 +95,7 @@ set( CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${CONAN_PROTOBUF_ROOT})
 include( CTest )
 include( BuildUtils )
 include( DefineOptions )
+using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 include( ExternalProject )
 include( GNUInstallDirs )
