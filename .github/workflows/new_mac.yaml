@@ -1,0 +1,70 @@
+name: Mac Code Checker Test
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    branches:
+      - master
+  pull_request_target:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+    #   - 'scripts/**'
+    #   - 'internal/**'
+    #   - 'pkg/**'
+    #   - 'cmd/**'
+    #   - 'build/**'
+      - '.github/workflows/*'
+    #   - '.env'
+    #   - docker-compose.yml
+    #   - Makefile
+    #   - '!**.md'
+    #   - '!build/ci/jenkins/**'
+    #   - go.mod
+    #   - go.sum
+
+jobs:
+  mac:
+    name: Code Checker MacOS 12 for test
+    runs-on: macos-12
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Setup Go environment
+        uses: actions/setup-go@v2.2.0
+        with:
+          go-version: '~1.18.1'
+      - name: Mac Cache Go Mod Volumes
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: macos-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: macos-go-mod-
+      - name: Mac Cache Conan Packages
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: ~/.conan/data
+          key: macos-conan
+
+      - name: Code Check
+        shell: bash
+        env:
+          BUILD_CACHE: sccache
+          AWS_ACCESS_KEY_ID: ${{ secrets.BUILD_CACHE_S3_AK }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BUILD_CACHE_S3_SK }}
+          SCCACHE_BUCKET: milvus-github-action-build-cache
+          SCCACHE_REGION: us-west-2
+        run: |
+          export AWS_ACCESS_KEY=${{ secrets.BUILD_CACHE_S3_AK }}
+          brew install libomp ninja openblas sccache pkg-config
+          pip3 install conan==1.58.0
+          if [[ ! -d "/usr/local/opt/llvm" ]]; then
+            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
+          fi
+          make milvus
+      - name: Upload Cmake log
+        uses: actions/upload-artifact@v3
+        if: ${{ failure() }}
+        with:
+          name: cmake-log
+          path: cmake_build/CMakeFiles/*.log
