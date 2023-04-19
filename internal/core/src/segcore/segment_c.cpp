@@ -63,6 +63,7 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
+
 CStatus
 Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
