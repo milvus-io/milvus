@@ -959,7 +959,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         error_type_shards_num = "2"  # suppose to be int rather than str
-        error = {ct.err_code: -1, ct.err_msg: f"expected one of: int, long"}
+        error = {ct.err_code: 1, ct.err_msg: f"expected one of: int, long"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=error_type_shards_num,
                                              check_task=CheckTasks.err_res,
                                              check_items=error)
