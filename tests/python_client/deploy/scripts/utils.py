@@ -225,8 +225,7 @@ def load_and_search(prefix, replicas=1):
         # show result
         for hits in res:
             for hit in hits:
-                # Get value of the random value field for search result
-                logger.info(str(hits), hit.entity.get("random_value"))
+                logger.info(f"hit: {hit}")
             ids = hits.ids
             assert len(ids) == topK, f"get {len(ids)} results, but topK is {topK}"
             logger.info(ids)
