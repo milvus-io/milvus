@@ -20,7 +20,6 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -83,33 +82,7 @@ func (b *RowCountBasedBalancer) convertToNodeItems(nodeIDs []int64) []*nodeItem 
 	return ret
 }
 
-func (b *RowCountBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	ids := b.meta.CollectionManager.GetAll()
-
-	// loading collection should skip balance
-	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		return b.meta.GetStatus(cid) == querypb.LoadStatus_Loaded
-	})
-
-	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	for _, cid := range loadedCollections {
-		replicas := b.meta.ReplicaManager.GetByCollection(cid)
-		for _, replica := range replicas {
-			splans, cplans := b.balanceReplica(replica)
-			if len(splans) > 0 || len(cplans) > 0 {
-				log.Debug("nodes info in replica",
-					zap.Int64("collection", replica.CollectionID),
-					zap.Int64("replica", replica.ID),
-					zap.Int64s("nodes", replica.GetNodes()))
-			}
-			segmentPlans = append(segmentPlans, splans...)
-			channelPlans = append(channelPlans, cplans...)
-		}
-	}
-	return segmentPlans, channelPlans
-}
-
-func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	nodes := replica.GetNodes()
 	if len(nodes) < 2 {
 		return nil, nil
