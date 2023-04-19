@@ -25,7 +25,7 @@ type Scheduler struct {
 	queryProcessQueue chan *QueryTask
 	queryWaitQueue    chan *QueryTask
 
-	pool *conc.Pool
+	pool *conc.Pool[any]
 }
 
 func NewScheduler() *Scheduler {
@@ -38,7 +38,7 @@ func NewScheduler() *Scheduler {
 		mergedSearchTasks:  make(chan *SearchTask, maxReadConcurrency),
 		// queryProcessQueue: make(chan),
 
-		pool: conc.NewPool(maxReadConcurrency, ants.WithPreAlloc(true)),
+		pool: conc.NewPool[any](maxReadConcurrency, ants.WithPreAlloc(true)),
 	}
 }
 

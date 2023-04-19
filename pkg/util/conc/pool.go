@@ -18,41 +18,43 @@ package conc
 
 import (
 	"runtime"
+	"sync"
 
+	"github.com/milvus-io/milvus/pkg/util/generic"
 	ants "github.com/panjf2000/ants/v2"
 )
 
 // A goroutine pool
-type Pool struct {
+type Pool[T any] struct {
 	inner *ants.Pool
 }
 
 // NewPool returns a goroutine pool.
 // cap: the number of workers.
 // This panic if provide any invalid option.
-func NewPool(cap int, opts ...ants.Option) *Pool {
+func NewPool[T any](cap int, opts ...ants.Option) *Pool[T] {
 	pool, err := ants.NewPool(cap, opts...)
 	if err != nil {
 		panic(err)
 	}
 
-	return &Pool{
+	return &Pool[T]{
 		inner: pool,
 	}
 }
 
 // NewDefaultPool returns a pool with cap of the number of logical CPU,
 // and pre-alloced goroutines.
-func NewDefaultPool() *Pool {
-	return NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
+func NewDefaultPool[T any]() *Pool[T] {
+	return NewPool[T](runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
 }
 
 // Submit a task into the pool,
 // executes it asynchronously.
 // This will block if the pool has finite workers and no idle worker.
 // NOTE: As now golang doesn't support the member method being generic, we use Future[any]
-func (pool *Pool) Submit(method func() (any, error)) *Future[any] {
-	future := newFuture[any]()
+func (pool *Pool[T]) Submit(method func() (T, error)) *Future[T] {
+	future := newFuture[T]()
 	err := pool.inner.Submit(func() {
 		defer close(future.ch)
 		res, err := method()
@@ -71,20 +73,38 @@ func (pool *Pool) Submit(method func() (any, error)) *Future[any] {
 }
 
 // The number of workers
-func (pool *Pool) Cap() int {
+func (pool *Pool[T]) Cap() int {
 	return pool.inner.Cap()
 }
 
 // The number of running workers
-func (pool *Pool) Running() int {
+func (pool *Pool[T]) Running() int {
 	return pool.inner.Running()
 }
 
 // Free returns the number of free workers
-func (pool *Pool) Free() int {
+func (pool *Pool[T]) Free() int {
 	return pool.inner.Free()
 }
 
-func (pool *Pool) Release() {
+func (pool *Pool[T]) Release() {
 	pool.inner.Release()
+}
+
+// WarmupPool do warm up logic for each goroutine in pool
+func WarmupPool[T any](pool *Pool[T], warmup func()) {
+	cap := pool.Cap()
+	ch := make(chan struct{})
+	wg := sync.WaitGroup{}
+	wg.Add(cap)
+	for i := 0; i < cap; i++ {
+		pool.Submit(func() (T, error) {
+			warmup()
+			wg.Done()
+			<-ch
+			return generic.Zero[T](), nil
+		})
+	}
+	wg.Wait()
+	close(ch)
 }
