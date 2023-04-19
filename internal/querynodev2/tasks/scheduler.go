@@ -45,9 +45,9 @@ func NewScheduler() *Scheduler {
 func (s *Scheduler) Add(task Task) bool {
 	switch t := task.(type) {
 	case *SearchTask:
+		t.tr.RecordSpan()
 		select {
 		case s.searchWaitQueue <- t:
-			t.tr.RecordSpan()
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 		default:
 			return false
