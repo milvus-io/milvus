@@ -64,12 +64,13 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 
 	// Data
 	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.collectionManager.Put(suite.collectionID, schema, loadMeta)
+	suite.collectionManager.Put(suite.collectionID, schema, indexMeta, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TestLoad() {

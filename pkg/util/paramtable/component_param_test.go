@@ -290,10 +290,10 @@ func TestComponentParam(t *testing.T) {
 		chunkRows := Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(1024), chunkRows)
 
-		nlist := Params.SmallIndexNlist.GetAsInt64()
+		nlist := Params.GrowingIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 
-		nprobe := Params.SmallIndexNProbe.GetAsInt64()
+		nprobe := Params.GrowingIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
 		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
@@ -312,23 +312,24 @@ func TestComponentParam(t *testing.T) {
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(8192), chunkRows)
 
-		nlist = Params.SmallIndexNlist.GetAsInt64()
+		enableGrowingIndex := Params.EnableGrowingSegmentIndex.GetAsBool()
+		assert.Equal(t, false, enableGrowingIndex)
+
+		params.Save("queryNode.segcore.growing.enableIndex", "true")
+		enableGrowingIndex = Params.EnableGrowingSegmentIndex.GetAsBool()
+		assert.Equal(t, true, enableGrowingIndex)
+
+		nlist = Params.GrowingIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 
-		nprobe = Params.SmallIndexNProbe.GetAsInt64()
-		assert.Equal(t, int64(8), nprobe)
+		nprobe = Params.GrowingIndexNProbe.GetAsInt64()
+		assert.Equal(t, int64(16), nprobe)
 
-		params.Remove("queryNode.segcore.smallIndex.nlist")
-		params.Remove("queryNode.segcore.smallIndex.nprobe")
+		params.Remove("queryNode.segcore.growing.nlist")
+		params.Remove("queryNode.segcore.growing.nprobe")
 		params.Save("queryNode.segcore.chunkRows", "64")
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(1024), chunkRows)
-
-		nlist = Params.SmallIndexNlist.GetAsInt64()
-		assert.Equal(t, int64(64), nlist)
-
-		nprobe = Params.SmallIndexNProbe.GetAsInt64()
-		assert.Equal(t, int64(4), nprobe)
 
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := Params.GracefulStopTimeout

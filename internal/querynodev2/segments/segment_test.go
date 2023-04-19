@@ -35,8 +35,11 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.segmentID = 1
 
 	suite.manager = NewManager()
+	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64)
+	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
 	suite.manager.Collection.Put(suite.collectionID,
-		GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64),
+		schema,
+		indexMeta,
 		&querypb.LoadMetaInfo{
 			LoadType:     querypb.LoadType_LoadCollection,
 			CollectionID: suite.collectionID,

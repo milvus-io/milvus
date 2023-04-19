@@ -186,10 +186,13 @@ func (node *QueryNode) InitSegcore() {
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
 
-	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.SmallIndexNlist.GetAsInt64())
+	enableGrowingIndex := C.bool(paramtable.Get().QueryNodeCfg.EnableGrowingSegmentIndex.GetAsBool())
+	C.SegcoreSetEnableGrowingSegmentIndex(enableGrowingIndex)
+
+	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.GrowingIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
 
-	nprobe := C.int64_t(paramtable.Get().QueryNodeCfg.SmallIndexNProbe.GetAsInt64())
+	nprobe := C.int64_t(paramtable.Get().QueryNodeCfg.GrowingIndexNProbe.GetAsInt64())
 	C.SegcoreSetNprobe(nprobe)
 
 	// override segcore SIMD type

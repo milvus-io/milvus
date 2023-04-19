@@ -46,6 +46,11 @@ class VectorIndex : public IndexBase {
         PanicInfo("vector index don't support build index with raw data");
     };
 
+    virtual void
+    AddWithDataset(const DatasetPtr& dataset, const Config& config) {
+        PanicInfo("vector index don't support add with dataset");
+    }
+
     virtual std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,

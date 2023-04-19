@@ -33,6 +33,7 @@
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
+#include "common/IndexMeta.h"
 
 namespace milvus::segcore {
 
@@ -124,12 +125,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  public:
-    // only for debug
-    void
-    disable_small_index() override {
-        enable_small_index_ = false;
-    }
-
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -153,7 +148,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     template <typename T>
     void
-    bulk_subscript_impl(int64_t element_sizeof,
+    bulk_subscript_impl(FieldId field_id,
+                        int64_t element_sizeof,
                         const VectorBase& vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
@@ -177,12 +173,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
                          int64_t segment_id);
 
     explicit SegmentGrowingImpl(SchemaPtr schema,
+                                IndexMetaPtr indexMeta,
                                 const SegcoreConfig& segcore_config,
                                 int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
+          index_meta_(indexMeta),
           insert_record_(*schema_, segcore_config.get_chunk_rows()),
-          indexing_record_(*schema_, segcore_config_),
+          indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id) {
     }
 
@@ -243,6 +241,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
  private:
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
+    IndexMetaPtr index_meta_;
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;
@@ -255,17 +254,20 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable DeletedRecord deleted_record_;
 
     int64_t id_;
-
- private:
-    bool enable_small_index_ = true;
 };
+
+const static IndexMetaPtr empty_index_meta =
+    std::make_shared<CollectionIndexMeta>(1024,
+                                          std::map<FieldId, FieldIndexMeta>());
 
 inline SegmentGrowingPtr
 CreateGrowingSegment(
     SchemaPtr schema,
+    IndexMetaPtr indexMeta,
     int64_t segment_id = -1,
     const SegcoreConfig& conf = SegcoreConfig::default_config()) {
-    return std::make_unique<SegmentGrowingImpl>(schema, conf, segment_id);
+    return std::make_unique<SegmentGrowingImpl>(
+        schema, indexMeta, conf, segment_id);
 }
 
 }  // namespace milvus::segcore

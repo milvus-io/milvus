@@ -21,22 +21,11 @@
 
 #include "Schema.h"
 #include "SystemProperty.h"
+#include "protobuf_utils.h"
 
 namespace milvus {
 
 using std::string;
-static std::map<string, string>
-RepeatedKeyValToMap(
-    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>&
-        kvs) {
-    std::map<string, string> mapping;
-    for (auto& kv : kvs) {
-        AssertInfo(!mapping.count(kv.key()),
-                   "repeat key(" + kv.key() + ") in protobuf");
-        mapping.emplace(kv.key(), kv.value());
-    }
-    return mapping;
-}
 
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {

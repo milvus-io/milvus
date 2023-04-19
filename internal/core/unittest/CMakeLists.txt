@@ -26,6 +26,7 @@ set(MILVUS_TEST_FILES
         test_c_api.cpp
         test_expr.cpp
         test_growing.cpp
+        test_growing_index.cpp
         test_indexing.cpp
         test_index_c_api.cpp
         test_index_wrapper.cpp

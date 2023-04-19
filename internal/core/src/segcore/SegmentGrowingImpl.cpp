@@ -86,11 +86,21 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(
-            reserved_offset,
-            size,
-            &insert_data->fields_data(data_offset),
-            field_meta);
+        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+            insert_record_.get_field_data_base(field_id)->set_data_raw(
+                reserved_offset,
+                size,
+                &insert_data->fields_data(data_offset),
+                field_meta);
+        }
+        if (segcore_config_.get_enable_growing_segment_index()) {
+            indexing_record_.AppendingIndex(
+                reserved_offset,
+                size,
+                field_id,
+                &insert_data->fields_data(data_offset),
+                insert_record_);
+        }
     }
 
     // step 4: set pks to offset
@@ -106,12 +116,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + size);
-    if (enable_small_index_) {
-        int64_t chunk_rows = segcore_config_.get_chunk_rows();
-        indexing_record_.UpdateResourceAck(
-            insert_record_.ack_responder_.GetAck() / chunk_rows,
-            insert_record_);
-    }
 }
 
 Status
@@ -233,13 +237,15 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     if (field_meta.is_vector()) {
         aligned_vector<char> output(field_meta.get_sizeof() * count);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            bulk_subscript_impl<FloatVector>(field_meta.get_sizeof(),
+            bulk_subscript_impl<FloatVector>(field_id,
+                                             field_meta.get_sizeof(),
                                              *vec_ptr,
                                              seg_offsets,
                                              count,
                                              output.data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-            bulk_subscript_impl<BinaryVector>(field_meta.get_sizeof(),
+            bulk_subscript_impl<BinaryVector>(field_id,
+                                              field_meta.get_sizeof(),
                                               *vec_ptr,
                                               seg_offsets,
                                               count,
@@ -315,7 +321,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
 
 template <typename T>
 void
-SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
+SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
+                                        int64_t element_sizeof,
                                         const VectorBase& vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
@@ -325,14 +332,21 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     std::vector<uint8_t> empty(element_sizeof, 0);
-    auto output_base = reinterpret_cast<char*>(output_raw);
-    for (int i = 0; i < count; ++i) {
-        auto dst = output_base + i * element_sizeof;
-        auto offset = seg_offsets[i];
-        const uint8_t* src = (offset == INVALID_SEG_OFFSET
-                                  ? empty.data()
-                                  : (const uint8_t*)vec.get_element(offset));
-        memcpy(dst, src, element_sizeof);
+
+    if (indexing_record_.SyncDataWithIndex(field_id)) {
+        indexing_record_.GetDataFromIndex(
+            field_id, seg_offsets, count, element_sizeof, output_raw);
+    } else {
+        auto output_base = reinterpret_cast<char*>(output_raw);
+        for (int i = 0; i < count; ++i) {
+            auto dst = output_base + i * element_sizeof;
+            auto offset = seg_offsets[i];
+            const uint8_t* src =
+                (offset == INVALID_SEG_OFFSET
+                     ? empty.data()
+                     : (const uint8_t*)vec.get_element(offset));
+            memcpy(dst, src, element_sizeof);
+        }
     }
 }
 

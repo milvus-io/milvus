@@ -15,29 +15,13 @@
 #include <string>
 
 #include "common/Types.h"
+#include "index/Utils.h"
 #include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 
 namespace milvus::segcore {
 
-struct SmallIndexConf {
-    std::string index_type;
-    nlohmann::json build_params;
-    nlohmann::json search_params;
-};
-
 class SegcoreConfig {
- private:
-    SegcoreConfig() {
-        // hard code configurations for small index
-        SmallIndexConf sub_conf;
-        sub_conf.build_params["nlist"] = std::to_string(nlist_);
-        sub_conf.search_params["nprobe"] = nprobe_;
-        sub_conf.index_type = "IVF";
-        table_[knowhere::metric::L2] = sub_conf;
-        table_[knowhere::metric::IP] = sub_conf;
-    }
-
  public:
     static SegcoreConfig&
     default_config() {
@@ -49,12 +33,6 @@ class SegcoreConfig {
     void
     parse_from(const std::string& string_path);
 
-    const SmallIndexConf&
-    at(const MetricType& metric_type) const {
-        Assert(table_.count(metric_type));
-        return table_.at(metric_type);
-    }
-
     int64_t
     get_chunk_rows() const {
         return chunk_rows_;
@@ -63,6 +41,16 @@ class SegcoreConfig {
     void
     set_chunk_rows(int64_t chunk_rows) {
         chunk_rows_ = chunk_rows;
+    }
+
+    int64_t
+    get_nlist() const {
+        return nlist_;
+    }
+
+    int64_t
+    get_nprobe() const {
+        return nprobe_;
     }
 
     void
@@ -76,16 +64,20 @@ class SegcoreConfig {
     }
 
     void
-    set_small_index_config(const MetricType& metric_type,
-                           const SmallIndexConf& small_index_conf) {
-        table_[metric_type] = small_index_conf;
+    set_enable_growing_segment_index(bool enable_growing_segment_index) {
+        enable_growing_segment_index_ = enable_growing_segment_index;
+    }
+
+    bool
+    get_enable_growing_segment_index() const {
+        return enable_growing_segment_index_;
     }
 
  private:
+    bool enable_growing_segment_index_ = false;
     int64_t chunk_rows_ = 32 * 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
-    std::map<knowhere::MetricType, SmallIndexConf> table_;
 };
 
 }  // namespace milvus::segcore

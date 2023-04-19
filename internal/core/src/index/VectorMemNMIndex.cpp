@@ -53,6 +53,11 @@ VectorMemNMIndex::BuildWithDataset(const DatasetPtr& dataset,
 }
 
 void
+VectorMemNMIndex::AddWithDataset(const DatasetPtr& /*dataset*/,
+                                 const Config& /*config*/) {
+}
+
+void
 VectorMemNMIndex::Load(const BinarySet& binary_set, const Config& config) {
     VectorMemIndex::Load(binary_set, config);
     if (binary_set.Contains(RAW_DATA)) {

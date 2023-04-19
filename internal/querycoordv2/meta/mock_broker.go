@@ -4,6 +4,7 @@ package meta
 
 import (
 	context "context"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
@@ -118,6 +119,53 @@ func (_c *MockBroker_GetIndexInfo_Call) Run(run func(ctx context.Context, collec
 }
 
 func (_c *MockBroker_GetIndexInfo_Call) Return(_a0 []*querypb.FieldIndexInfo, _a1 error) *MockBroker_GetIndexInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// DescribeIndex provides a mock function with given fields: ctx, collectionID, segmentID
+func (_m *MockBroker) DescribeIndex(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	var r0 []*indexpb.IndexInfo
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*indexpb.IndexInfo); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*indexpb.IndexInfo)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_DescribeIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeIndex'
+type MockBroker_DescribeIndex_Call struct {
+	*mock.Call
+}
+
+// DescribeIndex is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+func (_e *MockBroker_Expecter) DescribeIndex(ctx interface{}, collectionID interface{}) *MockBroker_DescribeIndex_Call {
+	return &MockBroker_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", ctx, collectionID)}
+}
+
+func (_c *MockBroker_DescribeIndex_Call) Run(run func(ctx context.Context, collectionID int64)) *MockBroker_DescribeIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroker_DescribeIndex_Call) Return(_a0 []*indexpb.IndexInfo, _a1 error) *MockBroker_DescribeIndex_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

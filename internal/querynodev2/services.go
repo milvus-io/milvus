@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+
 	"strconv"
 	"sync"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -218,7 +220,32 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		log.Info("channel already subscribed")
 		return util.SuccessStatus(), nil
 	}
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta())
+
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	for _, info := range req.GetIndexInfoList() {
+		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
+	maxIndexRecordPerSegment := int64(0)
+	if err != nil || sizePerRecord == 0 {
+		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+	} else {
+		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
+	}
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
+		IndexMetas:       fieldIndexMetas,
+		MaxIndexRowCount: maxIndexRecordPerSegment,
+	}, req.GetLoadMeta())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
 		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
 	if err != nil {
@@ -391,7 +418,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.loadDeltaLogs(ctx, req), nil
 	}
 
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta())
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
 
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
