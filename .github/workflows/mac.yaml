@@ -55,6 +55,7 @@ jobs:
           SCCACHE_REGION: us-west-2
         run: |
           echo ${{ secrets.BUILD_CACHE_S3_SK }}
+          export AWS_ACCESS_KEY=${{ secrets.BUILD_CACHE_S3_AK }}
           brew install libomp ninja openblas sccache pkg-config
           pip3 install conan==1.58.0
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
