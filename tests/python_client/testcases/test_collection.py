@@ -15,6 +15,7 @@ exp_schema = "schema"
 exp_num = "num_entities"
 exp_primary = "primary"
 exp_shards_num = "shards_num"
+default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
 default_shards_num = 2
@@ -2155,6 +2156,7 @@ class TestLoadCollection(TestcaseBase):
         target: test load partitions after load collection
         method: 1. load collection
                 2. load partitions
+                3. search on one partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2162,6 +2164,8 @@ class TestLoadCollection(TestcaseBase):
         self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
         collection_w.load(partition_names=[partition1, partition2])
+        res = collection_w.search(vectors, default_search_field, default_search_params,
+                                  default_limit, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitions_after_load_release_collection(self):
@@ -2170,6 +2174,7 @@ class TestLoadCollection(TestcaseBase):
         method: 1. load collection
                 2. release collection
                 3. load partitions
+                4. search on one partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2178,6 +2183,8 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         collection_w.release()
         collection_w.load(partition_names=[partition1, partition2])
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_release_collection_partition(self):
@@ -2185,8 +2192,9 @@ class TestLoadCollection(TestcaseBase):
         target: test load collection after release collection and partition
         method: 1. load collection
                 2. release collection
-                3. release partition
+                3. release one partition
                 4. load collection
+                5. search on the partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2196,6 +2204,8 @@ class TestLoadCollection(TestcaseBase):
         collection_w.release()
         partition_w.release()
         collection_w.load()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitions_after_release_collection_partition(self):
@@ -2204,7 +2214,9 @@ class TestLoadCollection(TestcaseBase):
         method: 1. load collection
                 2. release collection
                 3. release partition
-                4. load partitions
+                4. search on the partition and report error
+                5. load partitions
+                6. search on the partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2213,32 +2225,26 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         collection_w.release()
         partition_w1.release()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "not loaded"})
         partition_w1.load()
         partition_w2.load()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_release_partition(self):
         """
         target: test load collection after load collection and release partition
         method: 1. load collection
-                2. release partition
+                2. release one partition
+                3. search on the released partition and report error
+                4. search on the non-released partition and raise no exception
                 3. load collection
-        expected: No exception
-        """
-        collection_w = self.init_collection_general(prefix)[0]
-        partition_w = self.init_partition_wrap(collection_w, partition1)
-        self.init_partition_wrap(collection_w, partition2)
-        collection_w.load()
-        partition_w.release()
-        collection_w.load()
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partitions_after_release_partition(self):
-        """
-        target: test load collection after release partition and load partitions
-        method: 1. load collection
-                2. release partition
-                3. load partitions
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2246,15 +2252,47 @@ class TestLoadCollection(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
         partition_w1.release()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "not loaded"})
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition2])
+        collection_w.load()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23499")
+    def test_load_partitions_after_release_partition(self):
+        """
+        target: test load collection after release partition and load partitions
+        method: 1. load collection
+                2. release partition
+                3. search on the released partition and report error
+                4. load partitions
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        collection_w.load()
+        partition_w1.release()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "not loaded"})
         partition_w1.load()
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_release_partition_collection(self):
         """
         target: test load collection after release partition and collection
         method: 1. load collection
                 2. release partition
+                3. query on the released partition and report error
                 3. release collection
                 4. load collection
         expected: No exception
@@ -2264,17 +2302,23 @@ class TestLoadCollection(TestcaseBase):
         self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
         partition_w.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         collection_w.release()
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23532")
     def test_load_partitions_after_release_partition_collection(self):
         """
         target: test load partitions after release partition and collection
         method: 1. load collection
                 2. release partition
                 3. release collection
-                4. load partitions
+                4. load one partition
+                5. query on the other partition and raise error
+                6. load the other partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2284,6 +2328,9 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.release()
         collection_w.release()
         partition_w1.load()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2322,13 +2369,15 @@ class TestLoadCollection(TestcaseBase):
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_drop_partition_and_release_another(self):
         """
         target: test load collection after drop a partition and release another
         method: 1. load collection
                 2. drop a partition
                 3. release left partition
-                4. load collection
+                4. query on the left partition
+                5. load collection
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2337,6 +2386,9 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         partition_w1.drop()
         partition_w2.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2347,6 +2399,7 @@ class TestLoadCollection(TestcaseBase):
                 2. drop a partition
                 3. release left partition
                 4. load partition
+                5. query on the partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2356,6 +2409,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1.drop()
         partition_w2.release()
         partition_w2.load()
+        collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_another_partition_after_drop_one_partition(self):
@@ -2364,6 +2418,7 @@ class TestLoadCollection(TestcaseBase):
         method: 1. load collection
                 2. drop a partition
                 3. load another partition
+                4. query on the partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2372,6 +2427,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         partition_w1.drop()
         partition_w2.load()
+        collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_drop_one_partition(self):
@@ -2380,6 +2436,7 @@ class TestLoadCollection(TestcaseBase):
         method: 1. load collection
                 2. drop a partition
                 3. load collection
+                4. query on the partition
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -2388,6 +2445,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         partition_w1.drop()
         collection_w.load()
+        collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection(self):
@@ -3170,7 +3228,8 @@ class TestLoadPartition(TestcaseBase):
         target: test load partition after load partition
         method: 1. load partition
                 2. load the partition again
-                3. load collection
+                3. query on the non-loaded partition
+                4. load collection
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3178,15 +3237,19 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.load()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_unloaded_partition(self):
         """
-        target: test load partition after load a unloaded partition
+        target: test load partition after load an unloaded partition
         method: 1. load partition
                 2. load another partition
-                3. load collection
+                3. query on the collection
+                4. load collection
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3194,6 +3257,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w2.load()
+        collection_w.query(default_term_expr)
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3202,6 +3266,7 @@ class TestLoadPartition(TestcaseBase):
         target: test load partition after load partition
         method: 1. load partition
                 2. load collection
+                3. query on the partitions
         expected: No exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3209,6 +3274,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         collection_w.load()
+        collection_w.query(default_term_expr, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_partitions_release_collection(self):
@@ -3216,7 +3282,9 @@ class TestLoadPartition(TestcaseBase):
         target: test release collection after load partitions
         method: 1. load partition
                 2. release collection
-                3. load partitions
+                3. query on the partition
+                4. load partitions
+                5. query on the collection
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3224,8 +3292,12 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         collection_w.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition1],
+                           check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
         partition_w2.load()
+        collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_collection(self):
@@ -3249,7 +3321,9 @@ class TestLoadPartition(TestcaseBase):
         target: test load partitions after load and release partition
         method: 1. load partition
                 2. release partition
-                3. load partitions(include  released partition and non-released partition)
+                3. query on the partition
+                4. load partitions(include released partition and non-released partition)
+                5. query on the collection
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3257,16 +3331,22 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition1],
+                           check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
         partition_w2.load()
+        collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23534")
     def test_load_collection_after_load_release_partition(self):
         """
         target: test load collection after load and release partition
         method: 1. load partition
                 2. release partition
                 3. load collection
+                4. search on the collection
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3275,6 +3355,8 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.release()
         collection_w.load()
+        collection_w.search(vectors, default_search_field, default_search_params,
+                            default_limit, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitions_after_load_partition_release_partitions(self):
@@ -3283,6 +3365,7 @@ class TestLoadPartition(TestcaseBase):
         method: 1. load partition
                 2. release partitions
                 3. load partitions
+                4. query on the partitions
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3293,14 +3376,18 @@ class TestLoadPartition(TestcaseBase):
         partition_w2.release()
         partition_w1.load()
         partition_w2.load()
+        collection_w.query(default_term_expr, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23534")
     def test_load_collection_after_load_partition_release_partitions(self):
         """
         target: test load collection after load partition and release partitions
         method: 1. load partition
                 2. release partitions
-                3. load collection
+                3. query on the partitions
+                4. load collection
+                5. query on the partitions
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3309,15 +3396,21 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.release()
         partition_w2.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition1, partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         collection_w.load()
+        collection_w.query(default_term_expr, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23536")
     def test_load_partition_after_load_drop_partition(self):
         """
         target: test load partition after load and drop partition
         method: 1. load partition
                 2. drop the loaded partition
                 3. load the left partition
+                4. query on the partition
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3326,6 +3419,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w1.drop()
         partition_w2.load()
+        collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_drop_partition(self):
@@ -3333,7 +3427,10 @@ class TestLoadPartition(TestcaseBase):
         target: test load collection after load and drop partition
         method: 1. load partition
                 2. drop the loaded partition
-                3. load collection
+                3. query on the partition
+                4. drop another partition
+                5. load collection
+                6. query on the collection
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3341,8 +3438,12 @@ class TestLoadPartition(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
         partition_w1.drop()
+        error = {ct.err_code: 1, ct.err_msg: 'name not found'}
+        collection_w.query(default_term_expr, partition_names=[partition1, partition2],
+                           check_task=CheckTasks.err_res, check_items=error)
         partition_w2.drop()
         collection_w.load()
+        collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23048")
@@ -3389,6 +3490,7 @@ class TestLoadPartition(TestcaseBase):
         method: 1. load partition
                 2. drop the unloaded partition
                 3. load the partition again
+                4. query on the partition
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3397,6 +3499,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w2.drop()
         partition_w1.load()
+        collection_w.query(default_term_expr, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_load_partition_after_load_partition_drop_another(self):
@@ -3405,7 +3508,9 @@ class TestLoadPartition(TestcaseBase):
         method: 1. load partition
                 2. drop the unloaded partition
                 3. release the loaded partition
-                4. reload the partition
+                4. query on the released partition
+                5. reload the partition
+                6. query on the partition
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3414,7 +3519,11 @@ class TestLoadPartition(TestcaseBase):
         partition_w1.load()
         partition_w2.drop()
         partition_w1.release()
+        error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
+        collection_w.query(default_term_expr, partition_names=[partition1],
+                           check_task=CheckTasks.err_res, check_items=error)
         partition_w1.load()
+        collection_w.query(default_term_expr, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_load_collection_after_load_partition_drop_another(self):
@@ -3424,6 +3533,7 @@ class TestLoadPartition(TestcaseBase):
                 2. drop the unloaded partition
                 3. release the loaded partition
                 4. load collection
+                5. query on the collection
         expected: no exception
         """
         collection_w = self.init_collection_general(prefix)[0]
@@ -3433,6 +3543,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w2.drop()
         partition_w1.release()
         collection_w.load()
+        collection_w.query(default_term_expr)
 
 
 class TestCollectionString(TestcaseBase):
