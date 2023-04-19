@@ -329,19 +329,19 @@ func constructSearchRequest(
 				Value: distance.L2,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   common.SearchParamsKey,
 				Value: string(b),
 			},
 			{
-				Key:   AnnsFieldKey,
+				Key:   common.AnnsFieldKey,
 				Value: floatVecField,
 			},
 			{
-				Key:   TopKKey,
+				Key:   common.TopKKey,
 				Value: strconv.Itoa(topk),
 			},
 			{
-				Key:   RoundDecimalKey,
+				Key:   common.RoundDecimalKey,
 				Value: strconv.Itoa(roundDecimal),
 			},
 		},

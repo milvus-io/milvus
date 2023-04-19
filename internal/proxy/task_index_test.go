@@ -21,6 +21,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/common"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -287,7 +289,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "HNSW",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{
@@ -321,7 +323,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "128",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "L2",
 				},
 			}},
@@ -338,7 +340,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "HNSW",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{

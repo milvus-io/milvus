@@ -14,6 +14,13 @@ func (n *NodeVector) apply(opts ...NodeVectorOption) {
 	}
 }
 
+func (n *NodeVector) Serialize() []byte {
+	if n.FloatVector.IsSome() {
+		return n.FloatVector.Unwrap().Serialize()
+	}
+	return nil
+}
+
 func WithFloatVector(v *NodeFloatVector) NodeVectorOption {
 	return func(n *NodeVector) {
 		n.FloatVector = optional.Some(v)

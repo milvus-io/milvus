@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mysqld/parser/antlrparser"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -445,63 +447,6 @@ func Test_defaultExecutor_execSelect(t *testing.T) {
 	})
 }
 
-func Test_getOutputFieldsOrMatchCountRule(t *testing.T) {
-	t.Run("match count rule", func(t *testing.T) {
-		fl := []*planner.NodeSelectElement{
-			planner.NewNodeSelectElement("", planner.WithFunctionCall(
-				planner.NewNodeFunctionCall("", planner.WithAgg(
-					planner.NewNodeAggregateWindowedFunction("", planner.WithAggCount(
-						planner.NewNodeCount(""))))))),
-		}
-		_, match, err := getOutputFieldsOrMatchCountRule(fl)
-		assert.NoError(t, err)
-		assert.True(t, match)
-	})
-
-	t.Run("star *, not supported", func(t *testing.T) {
-		fl := []*planner.NodeSelectElement{
-			planner.NewNodeSelectElement("", planner.WithStar()),
-		}
-		_, _, err := getOutputFieldsOrMatchCountRule(fl)
-		assert.Error(t, err)
-	})
-
-	t.Run("combined", func(t *testing.T) {
-		fl := []*planner.NodeSelectElement{
-			planner.NewNodeSelectElement("", planner.WithFunctionCall(
-				planner.NewNodeFunctionCall("", planner.WithAgg(
-					planner.NewNodeAggregateWindowedFunction("", planner.WithAggCount(
-						planner.NewNodeCount(""))))))),
-			planner.NewNodeSelectElement("", planner.WithFullColumnName(
-				planner.NewNodeFullColumnName("", "field"))),
-		}
-		_, _, err := getOutputFieldsOrMatchCountRule(fl)
-		assert.Error(t, err)
-	})
-
-	t.Run("alias, not supported", func(t *testing.T) {
-		fl := []*planner.NodeSelectElement{
-			planner.NewNodeSelectElement("", planner.WithFullColumnName(
-				planner.NewNodeFullColumnName("", "field", planner.FullColumnNameWithAlias("alias")))),
-		}
-		_, _, err := getOutputFieldsOrMatchCountRule(fl)
-		assert.Error(t, err)
-	})
-
-	t.Run("normal case", func(t *testing.T) {
-		fl := []*planner.NodeSelectElement{
-			planner.NewNodeSelectElement("", planner.WithFullColumnName(
-				planner.NewNodeFullColumnName("", "field1"))),
-			planner.NewNodeSelectElement("", planner.WithFullColumnName(
-				planner.NewNodeFullColumnName("", "field2"))),
-		}
-		outputFields, match, err := getOutputFieldsOrMatchCountRule(fl)
-		assert.NoError(t, err)
-		assert.False(t, match)
-		assert.ElementsMatch(t, []string{"field1", "field2"}, outputFields)
-	})
-}
-
 func Test_defaultExecutor_execCountWithFilter(t *testing.T) {
 	t.Run("failed to query", func(t *testing.T) {
 		s := mocks.NewProxyComponent(t)
@@ -593,129 +538,67 @@ func Test_defaultExecutor_execQuery(t *testing.T) {
 	})
 }
 
-func Test_wrapCountResult(t *testing.T) {
-	sqlRes := wrapCountResult(100, "count(*)")
-	assert.Equal(t, 1, len(sqlRes.Fields))
-	assert.Equal(t, "count(*)", sqlRes.Fields[0].Name)
-	assert.Equal(t, querypb.Type_INT64, sqlRes.Fields[0].Type)
-	assert.Equal(t, 1, len(sqlRes.Rows))
-	assert.Equal(t, 1, len(sqlRes.Rows[0]))
-	assert.Equal(t, querypb.Type_INT64, sqlRes.Rows[0][0].Type())
-}
-
-func Test_wrapQueryResults(t *testing.T) {
-	res := &milvuspb.QueryResults{
-		Status: &commonpb.Status{},
-		FieldsData: []*schemapb.FieldData{
-			{
-				Type:      schemapb.DataType_Int64,
-				FieldName: "field",
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3, 4},
-							},
-						},
+func Test_defaultExecutor_execANNS(t *testing.T) {
+	f1 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "pk",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{6, 5, 4, 3, 2, 1},
 					},
 				},
 			},
 		},
-		CollectionName: "test",
 	}
-	sqlRes := wrapQueryResults(res)
-	assert.Equal(t, 1, len(sqlRes.Fields))
-	assert.Equal(t, 4, len(sqlRes.Rows))
-	assert.Equal(t, "field", sqlRes.Fields[0].Name)
-	assert.Equal(t, querypb.Type_INT64, sqlRes.Fields[0].Type)
-	assert.Equal(t, 1, len(sqlRes.Rows[0]))
-	assert.Equal(t, querypb.Type_INT64, sqlRes.Rows[0][0].Type())
-}
+	f2 := &schemapb.FieldData{
+		Type:      schemapb.DataType_Float,
+		FieldName: "random",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: []float32{6.6, 5.5, 4.4, 3.3, 2.2, 1.1},
+					},
+				},
+			},
+		},
+	}
 
-func Test_getSQLField(t *testing.T) {
-	f := &schemapb.FieldData{
-		FieldName: "a",
-		Type:      schemapb.DataType_Int64,
+	res := &milvuspb.SearchResults{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Results: &schemapb.SearchResultData{
+			NumQueries: 2,
+			TopK:       3,
+			FieldsData: []*schemapb.FieldData{f1, f2},
+			Scores:     []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6},
+			Topks:      []int64{2, 2},
+		},
+		CollectionName: "hello_milvus",
 	}
-	sf := getSQLField("t", f)
-	assert.Equal(t, "a", sf.Name)
-	assert.Equal(t, querypb.Type_INT64, sf.Type)
-	assert.Equal(t, "t", sf.Table)
-}
+	s := mocks.NewProxyComponent(t)
+	s.On("Search",
+		mock.Anything, // context.Context
+		mock.Anything, // *milvuspb.SearchRequest
+	).Return(res, nil)
 
-func Test_toSQLType(t *testing.T) {
-	type args struct {
-		t schemapb.DataType
-	}
-	tests := []struct {
-		name string
-		args args
-		want querypb.Type
-	}{
-		{
-			args: args{
-				t: schemapb.DataType_Bool,
-			},
-			want: querypb.Type_UINT8,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Int8,
-			},
-			want: querypb.Type_INT8,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Int16,
-			},
-			want: querypb.Type_INT16,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Int32,
-			},
-			want: querypb.Type_INT32,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Int64,
-			},
-			want: querypb.Type_INT64,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Float,
-			},
-			want: querypb.Type_FLOAT32,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_Double,
-			},
-			want: querypb.Type_FLOAT64,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_VarChar,
-			},
-			want: querypb.Type_VARCHAR,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_FloatVector,
-			},
-			want: querypb.Type_NULL_TYPE,
-		},
-		{
-			args: args{
-				t: schemapb.DataType_BinaryVector,
-			},
-			want: querypb.Type_NULL_TYPE,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, toSQLType(tt.args.t), "toSQLType(%v)", tt.args.t)
-		})
-	}
+	sql := `
+select 
+$query_number, pk, random, $distance
+from hello_milvus
+where random > 0.5
+anns by embeddings -> ([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], [0.8, 0.7, 0.6, 0.6, 0.4, 0.3, 0.2, 0.1])
+params = (metric_type=L2, nprobe=10)
+limit 3
+`
+	plan, warns, err := antlrparser.NewAntlrParser().Parse(sql)
+	assert.NoError(t, err)
+	assert.Nil(t, warns)
+
+	e := NewDefaultExecutor(s).(*defaultExecutor)
+	_, err = e.execANNS(context.TODO(),
+		antlrparser.GetSqlStatements(plan.Node).Statements[0].DmlStatement.Unwrap().SelectStatement.Unwrap().SimpleSelect.Unwrap().Query.Unwrap(),
+		[]string{"$query_number", "pk", "random", "$distance"})
+	assert.NoError(t, err)
 }

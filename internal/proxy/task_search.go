@@ -96,36 +96,36 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 
 // parseSearchInfo returns QueryInfo and offset
 func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInfo, int64, error) {
-	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
+	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.TopKKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, errors.New(TopKKey + " not found in search_params")
+		return nil, 0, errors.New(common.TopKKey + " not found in search_params")
 	}
 	topK, err := strconv.ParseInt(topKStr, 0, 64)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+		return nil, 0, fmt.Errorf("%s [%s] is invalid", common.TopKKey, topKStr)
 	}
 	if err := validateLimit(topK); err != nil {
-		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", common.TopKKey, topK, err)
 	}
 
 	var offset int64
-	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, searchParamsPair)
+	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.OffsetKey, searchParamsPair)
 	if err == nil {
 		offset, err = strconv.ParseInt(offsetStr, 0, 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			return nil, 0, fmt.Errorf("%s [%s] is invalid", common.OffsetKey, offsetStr)
 		}
 
 		if offset != 0 {
 			if err := validateLimit(offset); err != nil {
-				return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+				return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", common.OffsetKey, offset, err)
 			}
 		}
 	}
 
 	queryTopK := topK + offset
 	if err := validateLimit(queryTopK); err != nil {
-		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
+		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", common.OffsetKey, common.TopKKey, queryTopK, err)
 	}
 
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, searchParamsPair)
@@ -133,20 +133,20 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 		return nil, 0, errors.New(common.MetricTypeKey + " not found in search_params")
 	}
 
-	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, searchParamsPair)
+	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.RoundDecimalKey, searchParamsPair)
 	if err != nil {
 		roundDecimalStr = "-1"
 	}
 
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", common.RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", common.RoundDecimalKey, roundDecimalStr)
 	}
-	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
+	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.SearchParamsKey, searchParamsPair)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -244,7 +244,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	//fetch search_growing from search param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetSearchParams() {
-		if kv.GetKey() == IgnoreGrowingKey {
+		if kv.GetKey() == common.IgnoreGrowingKey {
 			ignoreGrowing, err = strconv.ParseBool(kv.GetValue())
 			if err != nil {
 				return errors.New("parse search growing failed")
@@ -256,9 +256,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.IgnoreGrowing = ignoreGrowing
 
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
-		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
+		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(common.AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil {
-			return errors.New(AnnsFieldKey + " not found in search_params")
+			return errors.New(common.AnnsFieldKey + " not found in search_params")
 		}
 
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams())
@@ -327,7 +327,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// Check if nq is valid:
 	// https://milvus.io/docs/limitations.md
 	if err := validateLimit(nq); err != nil {
-		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
+		return fmt.Errorf("%s [%d] is invalid, %w", common.NQKey, nq, err)
 	}
 	t.SearchRequest.Nq = nq
 

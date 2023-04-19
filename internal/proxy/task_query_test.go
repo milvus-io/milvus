@@ -154,7 +154,7 @@ func TestQueryTask_all(t *testing.T) {
 			Expr:           expr,
 			QueryParams: []*commonpb.KeyValuePair{
 				{
-					Key:   IgnoreGrowingKey,
+					Key:   common.IgnoreGrowingKey,
 					Value: "false",
 				},
 			},
@@ -392,16 +392,16 @@ func TestTaskQuery_functions(t *testing.T) {
 			outOffset int64
 		}{
 			{"empty input", []string{}, []string{}, false, typeutil.Unlimited, 0},
-			{"valid limit=1", []string{LimitKey}, []string{"1"}, false, 1, 0},
-			{"valid limit=1, offset=2", []string{LimitKey, OffsetKey}, []string{"1", "2"}, false, 1, 2},
-			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 0},
-			{"invalid limit str", []string{LimitKey}, []string{"a"}, true, 0, 0},
-			{"invalid limit zero", []string{LimitKey}, []string{"0"}, true, 0, 0},
-			{"invalid limit negative", []string{LimitKey}, []string{"-1"}, true, 0, 0},
-			{"invalid limit 16385", []string{LimitKey}, []string{"16385"}, true, 0, 0},
-			{"invalid offset negative", []string{LimitKey, OffsetKey}, []string{"1", "-1"}, true, 0, 0},
-			{"invalid offset 16385", []string{LimitKey, OffsetKey}, []string{"1", "16385"}, true, 0, 0},
-			{"invalid limit=16384 offset=16384", []string{LimitKey, OffsetKey}, []string{"16384", "16384"}, true, 0, 0},
+			{"valid limit=1", []string{common.LimitKey}, []string{"1"}, false, 1, 0},
+			{"valid limit=1, offset=2", []string{common.LimitKey, common.OffsetKey}, []string{"1", "2"}, false, 1, 2},
+			{"valid no limit, offset=2", []string{common.OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 0},
+			{"invalid limit str", []string{common.LimitKey}, []string{"a"}, true, 0, 0},
+			{"invalid limit zero", []string{common.LimitKey}, []string{"0"}, true, 0, 0},
+			{"invalid limit negative", []string{common.LimitKey}, []string{"-1"}, true, 0, 0},
+			{"invalid limit 16385", []string{common.LimitKey}, []string{"16385"}, true, 0, 0},
+			{"invalid offset negative", []string{common.LimitKey, common.OffsetKey}, []string{"1", "-1"}, true, 0, 0},
+			{"invalid offset 16385", []string{common.LimitKey, common.OffsetKey}, []string{"1", "16385"}, true, 0, 0},
+			{"invalid limit=16384 offset=16384", []string{common.LimitKey, common.OffsetKey}, []string{"16384", "16384"}, true, 0, 0},
 		}
 
 		for _, test := range tests {

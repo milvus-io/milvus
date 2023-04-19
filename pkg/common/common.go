@@ -81,10 +81,21 @@ const (
 	SearchParamKey = "search_param"
 	SegmentNumKey  = "segment_num"
 
+	IgnoreGrowingKey = "ignore_growing"
+	AnnsFieldKey     = "anns_field"
+	NQKey            = "nq"
+	SearchParamsKey  = "params"
+	RoundDecimalKey  = "round_decimal"
+	OffsetKey        = "offset"
+	LimitKey         = "limit"
+
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"
 	DimKey         = "dim"
+
+	QueryNumberKey = "$query_number"
+	DistanceKey    = "$distance"
 )
 
 //  Collection properties key
