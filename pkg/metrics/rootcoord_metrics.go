@@ -43,6 +43,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_req_latency",
 			Help:      "latency of each DDL operations",
+			Buckets:   buckets,
 		}, []string{functionLabelName})
 
 	// RootCoordSyncTimeTickLatency records the latency of sync time tick.
@@ -52,6 +53,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "sync_timetick_latency",
 			Help:      "latency of synchronizing timetick message",
+			Buckets:   buckets,
 		})
 
 	// RootCoordIDAllocCounter records the number of global ID allocations.
