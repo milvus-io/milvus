@@ -476,7 +476,7 @@ func TestCreateCollectionTask(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 	ctx := context.Background()
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -911,7 +911,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	int64Field := "int64"
 	floatVecField := "fvec"
 	dim := 128

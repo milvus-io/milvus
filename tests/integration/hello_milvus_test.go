@@ -102,7 +102,7 @@ func TestHelloMilvus(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {

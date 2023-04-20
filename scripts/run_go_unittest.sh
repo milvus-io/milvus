@@ -64,14 +64,14 @@ done
 
 function test_proxy()
 {
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast -count=1
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast -count=1 -v 
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1 -v 
 }
 
 function test_querynode()
 {
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast -count=1
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynodev2/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynodev2/..." -failfast -count=1
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1
 }
 
 

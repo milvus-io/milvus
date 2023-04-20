@@ -99,7 +99,7 @@ func TestRangeSearchIP(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 
@@ -337,7 +337,7 @@ func TestRangeSearchL2(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 

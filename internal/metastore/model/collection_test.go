@@ -3,11 +3,11 @@ package model
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -40,7 +40,7 @@ var (
 		Fields:               []*Field{fieldModel},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
-		ShardsNum:            1,
+		ShardsNum:            common.DefaultShardsNum,
 		CreateTime:           1,
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
@@ -79,7 +79,7 @@ var (
 		},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
-		ShardsNum:            1,
+		ShardsNum:            common.DefaultShardsNum,
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
 		Properties: []*commonpb.KeyValuePair{

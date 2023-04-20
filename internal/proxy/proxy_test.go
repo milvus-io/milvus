@@ -517,7 +517,7 @@ func TestProxy(t *testing.T) {
 	otherCollectionName := collectionName + "_other_" + funcutil.GenRandomStr()
 	partitionName := partitionPrefix + funcutil.GenRandomStr()
 	otherPartitionName := partitionPrefix + "_other_" + funcutil.GenRandomStr()
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	int64Field := "int64"
 	floatVecField := "fVec"
 	dim := 128

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -289,7 +290,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum.GetAsInt() + 1) // no enough channels.
 		err = task.Prepare(context.Background())
 		assert.Error(t, err)
-		task.Req.ShardsNum = 1
+		task.Req.ShardsNum = common.DefaultShardsNum
 		err = task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
