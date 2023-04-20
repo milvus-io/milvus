@@ -80,7 +80,7 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-	loadedSegments := make([]int64, 0, len(req.GetInfos()))
+
 	var finalErr error
 	for _, info := range req.GetInfos() {
 		segment := node.manager.Segment.GetSealed(info.GetSegmentID())
@@ -96,8 +96,6 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			}
 			continue
 		}
-
-		loadedSegments = append(loadedSegments, info.GetSegmentID())
 	}
 
 	if finalErr != nil {
