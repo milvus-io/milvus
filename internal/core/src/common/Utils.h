@@ -15,6 +15,7 @@
 #include <fmt/core.h>
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include <cstring>
 #include <filesystem>
@@ -420,10 +421,10 @@ CreateMap(int64_t segment_id,
 
 #ifndef MAP_POPULATE
     // Manually access the mapping to populate it
-    const size_t PAGE_SIZE = 4 << 10;  // 4KiB
+    const size_t page_size = getpagesize();
     char* begin = (char*)map;
     char* end = begin + written;
-    for (char* page = begin; page < end; page += PAGE_SIZE) {
+    for (char* page = begin; page < end; page += page_size) {
         char value = page[0];
     }
 #endif
