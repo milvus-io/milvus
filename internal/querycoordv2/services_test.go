@@ -1373,6 +1373,15 @@ func (suite *ServiceSuite) TestGetReplicas() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.EqualValues(suite.replicaNumber[collection], len(resp.Replicas))
+
+		// Test no dup nodeIDs in shardReplica
+		for _, replica := range resp.GetReplicas() {
+			suite.Equal(collection, replica.CollectionID)
+			for _, shardReplica := range replica.GetShardReplicas() {
+				gotNodeIDsSet := typeutil.NewUniqueSet(shardReplica.GetNodeIds()...)
+				suite.Equal(len(shardReplica.GetNodeIds()), gotNodeIDsSet.Len())
+			}
+		}
 	}
 
 	// Test when server is not healthy
