@@ -163,8 +163,7 @@ func (c *ChannelMeta) segmentFlushed(segID UniqueID) {
 // new2NormalSegment transfers a segment from *New* to *Normal*.
 // make sure the segID is in the channel before call this func
 func (c *ChannelMeta) new2NormalSegment(segID UniqueID) {
-	seg := c.segments[segID]
-	if seg.getType() == datapb.SegmentType_New {
+	if seg, ok := c.segments[segID]; ok && seg.getType() == datapb.SegmentType_New {
 		seg.setType(datapb.SegmentType_Normal)
 	}
 }
