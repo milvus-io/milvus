@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -205,6 +206,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 // GetIndexState gets the index state of the index name in the request from Proxy.
+// Deprecated
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	log := log.Ctx(ctx)
 	log.Info("receive GetIndexState request", zap.Int64("collectionID", req.CollectionID),
@@ -256,7 +258,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
-	}))
+	}), false)
 	ret.State = indexInfo.State
 	ret.FailReason = indexInfo.IndexStateFailReason
 
@@ -313,8 +315,10 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	return ret, nil
 }
 
-// completeIndexInfo get the building index row count and index task state
-func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segments []*SegmentInfo) {
+// completeIndexInfo get the index row count and index task state
+// if realTime, calculate current statistics
+// if not realTime, which means get info of the prior `CreateIndex` action, skip segments created after index's create time
+func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segments []*SegmentInfo, realTime bool) {
 	var (
 		cntNone       = 0
 		cntUnissued   = 0
@@ -337,8 +341,9 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 			continue
 		}
 
-		//data before index create time should create complete
-		if seg.GetStartPosition().GetTimestamp() > index.CreateTime {
+		// if realTime, calculate current statistics
+		// if not realTime, skip segments created after index create
+		if seg.GetStartPosition().GetTimestamp() > index.CreateTime && !realTime {
 			continue
 		}
 
@@ -380,6 +385,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 }
 
 // GetIndexBuildProgress get the index building progress by num rows.
+// Deprecated
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	log := log.Ctx(ctx)
 	log.Info("receive GetIndexBuildProgress request", zap.Int64("collID", req.GetCollectionID()),
@@ -425,7 +431,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
-	}))
+	}), false)
 	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexBuildProgressResponse{
@@ -488,12 +494,73 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 			IsAutoIndex:          index.IsAutoIndex,
 			UserIndexParams:      index.UserIndexParams,
 		}
-		s.completeIndexInfo(indexInfo, index, segments)
+		s.completeIndexInfo(indexInfo, index, segments, false)
 		indexInfos = append(indexInfos, indexInfo)
 	}
 	log.Info("DescribeIndex success", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.DescribeIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexInfos: indexInfos,
+	}, nil
+}
+
+// GetIndexStatistics get the statistics of the index. DescribeIndex doesn't contain statistics.
+func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("receive GetIndexStatistics request", zap.Int64("collID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()))
+	if s.isClosed() {
+		log.Warn(msgDataCoordIsUnhealthy(s.session.ServerID))
+		return &indexpb.GetIndexStatisticsResponse{
+			Status: s.UnhealthyStatus(),
+		}, nil
+	}
+
+	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	if len(indexes) == 0 {
+		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
+		log.Error("GetIndexStatistics fail",
+			zap.Int64("collectionID", req.CollectionID),
+			zap.String("indexName", req.IndexName),
+			zap.String("fail reason", errMsg))
+		return &indexpb.GetIndexStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IndexNotExist,
+				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.CollectionID),
+			},
+		}, nil
+	}
+
+	// The total rows of all indexes should be based on the current perspective
+	segments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
+		return isFlush(info) && info.CollectionID == req.GetCollectionID()
+	})
+	indexInfos := make([]*indexpb.IndexInfo, 0)
+	for _, index := range indexes {
+		indexInfo := &indexpb.IndexInfo{
+			CollectionID:         index.CollectionID,
+			FieldID:              index.FieldID,
+			IndexName:            index.IndexName,
+			IndexID:              index.IndexID,
+			TypeParams:           index.TypeParams,
+			IndexParams:          index.IndexParams,
+			IndexedRows:          0,
+			TotalRows:            0,
+			State:                0,
+			IndexStateFailReason: "",
+			IsAutoIndex:          index.IsAutoIndex,
+			UserIndexParams:      index.UserIndexParams,
+		}
+		s.completeIndexInfo(indexInfo, index, segments, true)
+		indexInfos = append(indexInfos, indexInfo)
+	}
+	log.Info("GetIndexStatisticsResponse success",
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()))
+	return &indexpb.GetIndexStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -618,4 +685,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		zap.String("indexName", req.GetIndexName()))
 
 	return ret, nil
+}
+
+func (s *Server) UnhealthyStatus() *commonpb.Status {
+	return merr.Status(merr.WrapErrServiceNotReady(fmt.Sprintf("datacoord %d is unhealthy", s.session.ServerID)))
 }

@@ -885,6 +885,20 @@ func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	return ret.(*indexpb.DescribeIndexResponse), err
 }
 
+// GetIndexStatistics get the statistics of the index.
+func (c *Client) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GetIndexStatistics(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexStatisticsResponse), err
+}
+
 // GetIndexBuildProgress describe the progress of the index.
 func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {

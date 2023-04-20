@@ -343,6 +343,16 @@ func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *indexpb.Desc
 	}, nil
 }
 
+// GetIndexStatistics get the statistics of the index.
+func (coord *DataCoordMock) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return &indexpb.GetIndexStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexInfos: nil,
+	}, nil
+}
+
 // GetIndexBuildProgress get the index building progress by num rows.
 func (coord *DataCoordMock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{

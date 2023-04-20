@@ -74,6 +74,7 @@ type MockDataCoord struct {
 
 	createIndexResp           *commonpb.Status
 	describeIndexResp         *indexpb.DescribeIndexResponse
+	getIndexStatisticsResp    *indexpb.GetIndexStatisticsResponse
 	dropIndexResp             *commonpb.Status
 	getIndexStateResp         *indexpb.GetIndexStateResponse
 	getIndexBuildProgressResp *indexpb.GetIndexBuildProgressResponse
@@ -256,6 +257,10 @@ func (m *MockDataCoord) CreateIndex(ctx context.Context, req *indexpb.CreateInde
 
 func (m *MockDataCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	return m.describeIndexResp, m.err
+}
+
+func (m *MockDataCoord) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return m.getIndexStatisticsResp, m.err
 }
 
 func (m *MockDataCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {

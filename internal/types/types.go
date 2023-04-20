@@ -366,6 +366,9 @@ type DataCoord interface {
 	// DescribeIndex describe the index info of the collection.
 	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 
+	// GetIndexStatistics get the statistics of the index.
+	GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error)
+
 	// GetIndexBuildProgress get the index building progress by num rows.
 	// Deprecated: use DescribeIndex instead
 	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
@@ -1081,6 +1084,16 @@ type ProxyComponent interface {
 	// the `IndexDescriptions` in `DescribeIndexResponse` return index's description.
 	// error is always nil
 	DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+
+	// GetIndexStatistics notifies Proxy to return index's statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `Status` in response struct `GetIndexStatisticsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `IndexDescriptions` in `GetIndexStatisticsResponse` return index's statistics.
+	// error is always nil
+	GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error)
 
 	// GetIndexBuildProgress notifies Proxy to return index build progress
 	//
