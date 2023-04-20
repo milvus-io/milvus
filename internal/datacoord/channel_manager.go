@@ -247,7 +247,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 
 // unwatchDroppedChannels removes drops channel that are marked to drop.
 func (c *ChannelManager) unwatchDroppedChannels() {
-	nodeChannels := c.store.GetNodesChannels()
+	nodeChannels := c.store.GetChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
 			if !c.h.CheckShouldDropChannel(ch.Name, ch.CollectionID) {
