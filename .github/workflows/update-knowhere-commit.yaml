@@ -1,7 +1,6 @@
 name: Update Knowhere Commit
 
 on:
-  # pull_request:
   workflow_dispatch:
   schedule:
     # * is a special character in YAML so you have to quote this string
@@ -20,8 +19,8 @@ jobs:
   update-knowhere-commits:
     name: update-knowhere-commit
     runs-on: ubuntu-latest
-    # env:
-    #   OS_NAME: ubuntu20.04
+    env:
+      OS_NAME: ubuntu20.04
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -59,9 +58,18 @@ jobs:
           title: '[automated] Update Knowhere Commit'
           body: |
             Update Knowhere Commit
-            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
             Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
       - name: Check outputs
         run: |
           echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
           echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
+      - name: Send Message To Feishu
+        env:
+          ACTIONS_FEISHU_TAG: 'v1.3.1'
+          INPUT_WEBHOOK: "${{ secrets.FEISHU_WEBHOOK_KNOWHERE_COMMIT_BOT }}"
+          INPUT_MESSAGE_TYPE: text
+          INPUT_CONTENT: "Pr url by rebot: ${{ steps.cpr.outputs.pull-request-url }}"
+        run: |
+          wget -q https://github.com/xiachufang/actions-feishu/releases/download/${{ env.ACTIONS_FEISHU_TAG }}/linux-amd64-actions-feishu.tar.gz
+          tar zxf linux-amd64-actions-feishu.tar.gz feishu
+          ./feishu
