@@ -149,6 +149,7 @@ done
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
+source ${ROOT_DIR}/scripts/setenv.sh
 
 CMAKE_GENERATOR="Unix Makefiles"
 
@@ -188,47 +189,6 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
-export CONAN_REVISIONS_ENABLED=1
-conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
-unameOut="$(uname -s)"
-case "${unameOut}" in
-  Darwin*)
-    # detect llvm version by valid list
-    for llvm_version in 15 14 NOT_FOUND ; do
-      if brew ls --versions llvm@${llvm_version} > /dev/null; then
-        break
-      fi
-    done
-    if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-      echo "valid llvm(14 or 15) not installed"
-      exit 1
-    fi
-    llvm_prefix="$(brew --prefix llvm@${llvm_version})"
-    export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
-    export CC="ccache ${llvm_prefix}/bin/clang"
-    export CXX="ccache ${llvm_prefix}/bin/clang++"
-    export ASM="${llvm_prefix}/bin/clang"
-    export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
-    export CXXFLAGS=${CFLAGS}
-    export LDFLAGS="-L$(brew --prefix libomp)/lib"
-
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
-    ;;
-  Linux*)
-    echo "Running on ${OS_NAME}"
-    export CPU_TARGET=avx
-    GCC_VERSION=`gcc -dumpversion`
-    if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} || { echo 'conan install failed'; exit 1; }
-    else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
-    fi
-    ;;
-  *)
-    echo "Cannot build on windows"
-    ;;
-esac
-
 arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
@@ -250,6 +210,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 ${CPP_SRC_DIR}"
 
+echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 

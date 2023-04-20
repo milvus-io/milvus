@@ -88,7 +88,7 @@ jobs:
           restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage generated-proto-go-without-cpp"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp-with-coverage"
       - run: |
           zip -r code.zip . -x "./.docker/*"
       - name: Archive code
