@@ -1,0 +1,67 @@
+name: Update Knowhere Commit
+
+on:
+  # pull_request:
+  workflow_dispatch:
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    #         ┌───────────── minute (0 - 59)
+    #         │ ┌───────────── hour (0 - 23)
+    #         │ │  ┌───────────── day of the month (1 - 31)
+    #         │ │  │ ┌───────────── month (1 - 12 or JAN-DEC)
+    #         │ │  │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+    #         │ │  │ │ │
+    #         │ │  │ │ │
+    #         │ │  │ │ │
+    - cron:  '0 5 * * *'
+
+
+jobs:
+  update-knowhere-commits:
+    name: update-knowhere-commit
+    runs-on: ubuntu-latest
+    # env:
+    #   OS_NAME: ubuntu20.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: get knowhere latest commit
+        id: get-knowhere-latest-commit
+        run: | 
+          cd ..
+          git clone https://github.com/milvus-io/knowhere.git
+          cd knowhere
+          export commit=$(git rev-parse --short HEAD)
+          echo $commit
+          echo "::set-output name=knowhere-commit::$commit"
+          cd ../milvus
+      - name: Update Commit Changes
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i "s#( KNOWHERE_VERSION.*#( KNOWHERE_VERSION ${{ steps.get-knowhere-latest-commit.outputs.knowhere-commit }} )#g" internal/core/thirdparty/knowhere/CMakeLists.txt
+          head -n 17 internal/core/thirdparty/knowhere/CMakeLists.txt
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add internal/core/thirdparty/knowhere/CMakeLists.txt
+          git commit -m "Update knowhere commit"
+      - name: Create Pull Request
+        id: cpr
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: sre-ci-robot <sre-ci-robot@users.noreply.github.com>
+          signoff: true
+          branch: update_knowhere_commit_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Knowhere Commit'
+          body: |
+            Update Knowhere Commit
+            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
+            Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+      - name: Check outputs
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
