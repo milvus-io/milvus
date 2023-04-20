@@ -70,7 +70,7 @@ func Test_flushSegmentWatcher(t *testing.T) {
 			segmentIndexes:       map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
 		},
-		&indexBuilder{}, &handoff{}, &IndexCoord{
+		&indexBuilder{}, &IndexCoord{
 			dataCoordClient: NewDataCoordMock(),
 		})
 	assert.NoError(t, err)
@@ -97,7 +97,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{segBytes}, 1, nil
 				},
-			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.NoError(t, err)
@@ -108,7 +108,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{"10"}, 1, nil
 				},
-			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.NoError(t, err)
@@ -121,7 +121,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{segBytes}, 1, errors.New("error")
 				},
-			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.Error(t, err)
@@ -134,7 +134,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{"segID"}, 1, nil
 				},
-			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.Error(t, err)
@@ -158,7 +158,6 @@ func Test_flushedSegmentWatcher_internalRun(t *testing.T) {
 		ic: &IndexCoord{
 			dataCoordClient: NewDataCoordMock(),
 		},
-		handoff: nil,
 		internalTasks: map[UniqueID]*internalTask{
 			segID: {
 				state: indexTaskPrepare,
@@ -266,15 +265,6 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 
 	fsw := &flushedSegmentWatcher{
 		ctx: context.Background(),
-		handoff: &handoff{
-			segments:         map[UniqueID]*datapb.SegmentInfo{},
-			taskMutex:        sync.RWMutex{},
-			wg:               sync.WaitGroup{},
-			meta:             meta,
-			notifyChan:       make(chan struct{}, 1),
-			scheduleDuration: time.Second,
-			kvClient:         nil,
-		},
 		ic: &IndexCoord{
 			dataCoordClient: &DataCoordMock{
 				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
@@ -350,8 +340,6 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 		assert.Equal(t, indexTaskInProgress, fsw.internalTasks[segID].state)
 		fsw.internalTaskMutex.RUnlock()
 	})
-
-	fsw.handoff.deleteTask(segID)
 
 	t.Run("inProgress", func(t *testing.T) {
 		fsw.internalProcess(segID)
@@ -498,7 +486,6 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 				loopCtx:         context.Background(),
 				dataCoordClient: NewDataCoordMock(),
 			},
-			handoff: nil,
 			internalTasks: map[UniqueID]*internalTask{
 				segID: {
 					state: indexTaskPrepare,
@@ -540,7 +527,6 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 					},
 				},
 			},
-			handoff: nil,
 			internalTasks: map[UniqueID]*internalTask{
 				segID: {
 					state:       indexTaskPrepare,
@@ -642,7 +628,6 @@ func Test_flushSegmentWatcher_constructTask_error(t *testing.T) {
 		ic: &IndexCoord{
 			rootCoordClient: NewRootCoordMock(),
 		},
-		handoff: nil,
 		internalTasks: map[UniqueID]*internalTask{
 			segID: task,
 		},

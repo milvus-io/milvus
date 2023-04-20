@@ -53,7 +53,6 @@ type flushedSegmentWatcher struct {
 	meta    *metaTable
 	builder *indexBuilder
 	ic      *IndexCoord
-	handoff *handoff
 
 	internalTasks map[UniqueID]*internalTask
 }
@@ -63,8 +62,7 @@ type internalTask struct {
 	segmentInfo *datapb.SegmentInfo
 }
 
-func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv, meta *metaTable, builder *indexBuilder,
-	handoff *handoff, ic *IndexCoord) (*flushedSegmentWatcher, error) {
+func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv, meta *metaTable, builder *indexBuilder, ic *IndexCoord) (*flushedSegmentWatcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	fsw := &flushedSegmentWatcher{
 		ctx:               ctx,
@@ -76,7 +74,6 @@ func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv, meta *metaTable, 
 		internalNotify:    make(chan struct{}, 1),
 		meta:              meta,
 		builder:           builder,
-		handoff:           handoff,
 		ic:                ic,
 	}
 	err := fsw.reloadFromKV()
@@ -239,7 +236,6 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 	switch t.state {
 	case indexTaskPrepare:
 		if t.segmentInfo.GetIsFake() {
-			fsw.handoff.enqueue(t.segmentInfo)
 			fsw.updateInternalTaskState(segID, indexTaskDone)
 			fsw.internalNotifyFunc()
 			return
@@ -258,7 +254,7 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 		fsw.updateInternalTaskState(segID, indexTaskInProgress)
 		fsw.internalNotifyFunc()
 	case indexTaskInProgress:
-		if fsw.handoff.taskDone(segID) {
+		if fsw.checkIndexState(segID) {
 			fsw.updateInternalTaskState(segID, indexTaskDone)
 			fsw.internalNotifyFunc()
 		}
@@ -272,6 +268,11 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 		log.Info("IndexCoord flushedSegmentWatcher internal task get invalid state", zap.Int64("segID", segID),
 			zap.String("state", t.state.String()))
 	}
+}
+
+func (fsw *flushedSegmentWatcher) checkIndexState(segID int64) bool {
+	state := fsw.meta.GetSegmentIndexState(segID)
+	return state.state == commonpb.IndexState_Finished
 }
 
 func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
@@ -318,7 +319,6 @@ func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
 		log.Ctx(fsw.ctx).Info("flushedSegmentWatcher construct task success", zap.Int64("segID", t.segmentInfo.ID),
 			zap.Int64("buildID", buildID), zap.Bool("already have index task", have))
 	}
-	fsw.handoff.enqueue(t.segmentInfo)
 	return nil
 }
 

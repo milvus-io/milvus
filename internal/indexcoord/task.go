@@ -232,7 +232,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	buildIDs, segments, err := cit.createIndexAtomic(index, segmentsInfo.GetInfos())
+	buildIDs, _, err := cit.createIndexAtomic(index, segmentsInfo.GetInfos())
 	if err != nil {
 		log.Error("IndexCoord create index fail", zap.Int64("collectionID", cit.req.CollectionID),
 			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))
@@ -240,10 +240,6 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	}
 	for _, buildID := range buildIDs {
 		cit.indexCoordClient.indexBuilder.enqueue(buildID)
-	}
-	// If the handoff is not notified here, the segment that has been loaded will not be able to replace the index
-	for _, segment := range segments {
-		cit.indexCoordClient.handoff.enqueue(segment)
 	}
 	return nil
 }
