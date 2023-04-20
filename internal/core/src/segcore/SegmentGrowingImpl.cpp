@@ -14,8 +14,11 @@
 #include <queue>
 #include <thread>
 #include <boost/iterator/counting_iterator.hpp>
+#include <type_traits>
 
 #include "common/Consts.h"
+#include "common/Types.h"
+#include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -298,6 +301,12 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
+        case DataType::JSON: {
+            FixedVector<std::string> output(count);
+            bulk_subscript_impl<Json, std::string>(
+                *vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
         default: {
             PanicInfo("unsupported type");
         }
@@ -327,21 +336,25 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
     }
 }
 
-template <typename T>
+template <typename S, typename T>
 void
 SegmentGrowingImpl::bulk_subscript_impl(const VectorBase& vec_raw,
                                         const int64_t* seg_offsets,
                                         int64_t count,
                                         void* output_raw) const {
-    static_assert(IsScalar<T>);
-    auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
+    static_assert(IsScalar<S>);
+    auto vec_ptr = dynamic_cast<const ConcurrentVector<S>*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     auto output = reinterpret_cast<T*>(output_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            output[i] = vec[offset];
+            if constexpr (std::is_same_v<S, Json>) {
+                output[i] = vec[offset].dump();
+            } else {
+                output[i] = vec[offset];
+            }
         }
     }
 }

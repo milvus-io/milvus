@@ -144,7 +144,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_active_count(Timestamp ts) const override;
 
     // for scalar vectors
-    template <typename T>
+    template <typename S, typename T = S>
     void
     bulk_subscript_impl(const VectorBase& vec_raw,
                         const int64_t* seg_offsets,

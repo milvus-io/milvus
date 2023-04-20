@@ -138,7 +138,7 @@ class SegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
-    template <typename T>
+    template <typename S, typename T = S>
     static void
     bulk_subscript_impl(const ColumnBase* field,
                         const int64_t* seg_offsets,

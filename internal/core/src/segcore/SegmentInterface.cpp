@@ -117,7 +117,6 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             auto data = reinterpret_cast<const int64_t*>(output.data());
             auto obj = scalar_array->mutable_long_data();
             obj->mutable_data()->Add(data, data + size);
-
             fields_data->AddAllocated(data_array.release());
             continue;
         }
