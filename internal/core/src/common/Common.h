@@ -21,9 +21,9 @@
 
 namespace milvus {
 
-extern int64_t index_file_slice_size;
-extern int64_t thread_core_coefficient;
-extern int cpu_num;
+extern int64_t FILE_SLICE_SIZE;
+extern int64_t THREAD_CORE_COEFFICIENT;
+extern int CPU_NUM;
 
 void
 SetIndexSliceSize(const int64_t size);

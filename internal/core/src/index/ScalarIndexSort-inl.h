@@ -19,6 +19,7 @@
 #include <utility>
 #include <pb/schema.pb.h>
 #include <vector>
+#include <map>
 #include <string>
 #include "knowhere/common/Log.h"
 #include "Meta.h"
@@ -74,7 +75,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
 
 template <typename T>
 inline void
-ScalarIndexSort<T>::Build(const size_t n, const T* values) {
+ScalarIndexSort<T>::Build(size_t n, const T* values) {
     if (is_built_)
         return;
     if (n == 0) {
@@ -134,9 +135,8 @@ ScalarIndexSort<T>::Upload(const Config& config) {
 
 template <typename T>
 inline void
-ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
+ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary, const Config& config) {
     size_t index_size;
-    milvus::Assemble(const_cast<BinarySet&>(index_binary));
     auto index_length = index_binary.GetByName("index_length");
     memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
 
@@ -152,12 +152,27 @@ ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
 
 template <typename T>
 inline void
+ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
+    milvus::Assemble(const_cast<BinarySet&>(index_binary));
+    LoadWithoutAssemble(index_binary, config);
+}
+
+template <typename T>
+inline void
 ScalarIndexSort<T>::Load(const Config& config) {
     auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(), "index file paths is empty when load disk ann index");
-    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    AssembleIndexDatas(index_datas);
+    BinarySet binary_set;
+    for (auto& [key, data] : index_datas) {
+        auto size = data->Size();
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto buf = std::shared_ptr<uint8_t[]>((uint8_t*)const_cast<void*>(data->Data()), deleter);
+        binary_set.Append(key, buf, size);
+    }
 
-    Load(binary_set, config);
+    LoadWithoutAssemble(binary_set, config);
 }
 
 template <typename T>

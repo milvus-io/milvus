@@ -18,6 +18,7 @@
 #include "storage/MinioChunkManager.h"
 
 #include "storage/Util.h"
+#include "common/Common.h"
 
 namespace milvus::storage {
 
@@ -46,16 +47,32 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) noexcept {
     std::vector<int64_t> slice_sizes;
     std::vector<std::string> slice_names;
 
+    auto AddBatchIndexFiles = [&]() {
+        auto res = PutIndexData(rcm_.get(), data_slices, slice_sizes, slice_names, field_meta_, index_meta_);
+        for (auto& [file, size] : res) {
+            remote_paths_to_size_[file] = size;
+        }
+    };
+
     auto remotePrefix = GetRemoteIndexObjectPrefix();
+    int64_t batch_size = 0;
     for (auto iter = binary_set.binary_map_.begin(); iter != binary_set.binary_map_.end(); iter++) {
+        if (batch_size >= DEFAULT_FIELD_MAX_MEMORY_LIMIT) {
+            AddBatchIndexFiles();
+            data_slices.clear();
+            slice_sizes.clear();
+            slice_names.clear();
+            batch_size = 0;
+        }
+
         data_slices.emplace_back(iter->second->data.get());
         slice_sizes.emplace_back(iter->second->size);
         slice_names.emplace_back(remotePrefix + "/" + iter->first);
+        batch_size += iter->second->size;
     }
 
-    auto res = PutIndexData(rcm_.get(), data_slices, slice_sizes, slice_names, field_meta_, index_meta_);
-    for (auto iter = res.begin(); iter != res.end(); ++iter) {
-        remote_paths_to_size_[iter->first] = iter->second;
+    if (data_slices.size() > 0) {
+        AddBatchIndexFiles();
     }
 
     return true;
@@ -66,25 +83,36 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
     return true;
 }
 
-BinarySet
+std::map<std::string, storage::FieldDataPtr>
 MemFileManagerImpl::LoadIndexToMemory(std::vector<std::string> remote_files) {
-    auto index_datas = GetObjectData(rcm_.get(), remote_files);
-    int batch_size = remote_files.size();
-    AssertInfo(index_datas.size() == batch_size, "inconsistent file num and index data num!");
+    std::map<std::string, storage::FieldDataPtr> file_to_index_data;
+    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::vector<std::string> batch_files;
 
-    BinarySet binary_set;
-    for (int i = 0; i < batch_size; ++i) {
-        std::string index_key(remote_files[i].substr(remote_files[i].find_last_of("/") + 1));
-        auto index_data = index_datas[i];
-        auto index_size = index_data->Size();
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[index_size]);
-        memcpy(buf.get(), (uint8_t*)index_data->Data(), index_size);
-        binary_set.Append(index_key, buf, index_size);
-        index_data.reset();
+    auto LoadBatchIndexFiles = [&]() {
+        auto index_datas = GetObjectData(rcm_.get(), batch_files);
+        for (size_t idx = 0; idx < batch_files.size(); ++idx) {
+            auto file_name = batch_files[idx].substr(batch_files[idx].find_last_of("/") + 1);
+            file_to_index_data[file_name] = index_datas[idx];
+        }
+    };
+
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            LoadBatchIndexFiles();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
     }
-    index_datas.clear();
 
-    return binary_set;
+    if (batch_files.size() > 0) {
+        LoadBatchIndexFiles();
+    }
+
+    AssertInfo(file_to_index_data.size() == remote_files.size(), "inconsistent file num and index data num!");
+
+    return file_to_index_data;
 }
 
 std::vector<FieldDataPtr>
@@ -93,9 +121,31 @@ MemFileManagerImpl::CacheRawDataToMemory(std::vector<std::string> remote_files) 
         return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
     });
 
-    auto field_datas = GetObjectData(rcm_.get(), remote_files);
-    AssertInfo(field_datas.size() == remote_files.size(), "inconsistent file num and raw data num!");
+    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::vector<std::string> batch_files;
+    std::vector<FieldDataPtr> field_datas;
 
+    auto FetchRawData = [&]() {
+        auto raw_datas = GetObjectData(rcm_.get(), batch_files);
+        for (auto& data : raw_datas) {
+            field_datas.emplace_back(data);
+        }
+    };
+
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+
+    AssertInfo(field_datas.size() == remote_files.size(), "inconsistent file num and raw data num!");
     return field_datas;
 }
 

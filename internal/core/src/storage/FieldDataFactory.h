@@ -42,7 +42,7 @@ class FieldDataFactory {
     }
 
     FieldDataPtr
-    CreateFieldData(const DataType& type, const int64_t dim = 1);
+    CreateFieldData(const DataType& type, int64_t dim = 1, int64_t total_num_rows = 0);
 };
 
 }  // namespace milvus::storage

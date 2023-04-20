@@ -103,6 +103,7 @@ PayloadInputStream::Read(int64_t nbytes, void* out) {
         nbytes = remain;
     std::memcpy(out, data_ + tell_, nbytes);
     tell_ += nbytes;
+
     return arrow::Result<int64_t>(nbytes);
 }
 

@@ -32,6 +32,14 @@ namespace milvus::index {
 
 #if defined(__linux__) || defined(__APPLE__)
 
+class UnistdException : public std::runtime_error {
+ public:
+    explicit UnistdException(const std::string& msg) : std::runtime_error(msg) {
+    }
+    virtual ~UnistdException() {
+    }
+};
+
 StringIndexMarisa::StringIndexMarisa(storage::FileManagerImplPtr file_manager) {
     if (file_manager != nullptr) {
         file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(file_manager);
@@ -64,7 +72,7 @@ StringIndexMarisa::Build(const Config& config) {
     for (auto data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (size_t i = 0; i < slice_num; ++i) {
-            keyset.push_back(reinterpret_cast<const char*>(data->RawValue(i)));
+            keyset.push_back((*static_cast<const std::string*>(data->RawValue(i))).c_str());
         }
         total_num_rows += slice_num;
     }
@@ -76,8 +84,7 @@ StringIndexMarisa::Build(const Config& config) {
     for (auto data : field_datas) {
         auto slice_num = data->get_num_rows();
         for (size_t i = 0; i < slice_num; ++i) {
-            std::string value(reinterpret_cast<const char*>(data->RawValue(i)));
-            auto str_id = lookup(value);
+            auto str_id = lookup(*static_cast<const std::string*>(data->RawValue(i)));
             assert(valid_str_id(str_id));
             str_ids_[offset++] = str_id;
         }
@@ -120,15 +127,15 @@ StringIndexMarisa::Serialize(const Config& config) {
     trie_.write(fd);
 
     auto size = get_file_size(fd);
-    auto buf = new uint8_t[size];
+    auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
 
-    while (read(fd, buf, size) != size) {
-        lseek(fd, 0, SEEK_SET);
-    }
-    std::shared_ptr<uint8_t[]> index_data(buf);
-
+    lseek(fd, 0, SEEK_SET);
+    auto status = read(fd, index_data.get(), size);
     close(fd);
     remove(file.c_str());
+    if (status != size) {
+        throw UnistdException("read index from fd error, errorCode is " + std::to_string(status));
+    }
 
     auto str_ids_len = str_ids_.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
@@ -138,7 +145,7 @@ StringIndexMarisa::Serialize(const Config& config) {
     res_set.Append(MARISA_TRIE_INDEX, index_data, size);
     res_set.Append(MARISA_STR_IDS, str_ids, str_ids_len);
 
-    milvus::Disassemble(res_set);
+    Disassemble(res_set);
 
     return res_set;
 }
@@ -159,9 +166,7 @@ StringIndexMarisa::Upload(const Config& config) {
 }
 
 void
-StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
-    milvus::Assemble(const_cast<BinarySet&>(set));
-
+StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set, const Config& config) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = std::string("/tmp/") + uuid_string;
@@ -171,8 +176,12 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 
     auto fd = open(file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     lseek(fd, 0, SEEK_SET);
-    while (write(fd, index->data.get(), len) != len) {
-        lseek(fd, 0, SEEK_SET);
+
+    auto status = write(fd, index->data.get(), len);
+    if (status != len) {
+        close(fd);
+        remove(file.c_str());
+        throw UnistdException("write index to fd error, errorCode is " + std::to_string(status));
     }
 
     lseek(fd, 0, SEEK_SET);
@@ -189,12 +198,26 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 }
 
 void
+StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
+    milvus::Assemble(const_cast<BinarySet&>(set));
+    LoadWithoutAssemble(set, config);
+}
+
+void
 StringIndexMarisa::Load(const Config& config) {
     auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(), "index file paths is empty when load index");
-    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    AssembleIndexDatas(index_datas);
+    BinarySet binary_set;
+    for (auto& [key, data] : index_datas) {
+        auto size = data->Size();
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto buf = std::shared_ptr<uint8_t[]>((uint8_t*)const_cast<void*>(data->Data()), deleter);
+        binary_set.Append(key, buf, size);
+    }
 
-    Load(binary_set, config);
+    LoadWithoutAssemble(binary_set, config);
 }
 
 const TargetBitmapPtr

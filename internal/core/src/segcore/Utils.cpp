@@ -12,6 +12,9 @@
 #include "segcore/Utils.h"
 
 #include "index/ScalarIndex.h"
+#include "storage/RemoteChunkManagerFactory.h"
+#include "common/Common.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -479,6 +482,43 @@ ReverseDataFromIndex(const index::IndexBase* index,
     }
 
     return data_array;
+}
+
+// init segcore storage config first, and create default remote chunk manager
+// segcore use default remote chunk manager to load data from minio/s3
+std::vector<storage::FieldDataPtr>
+LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
+    auto rcm = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
+    std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
+        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+    });
+
+    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    std::vector<std::string> batch_files;
+    std::vector<storage::FieldDataPtr> field_datas;
+
+    auto FetchRawData = [&]() {
+        auto raw_datas = GetObjectData(rcm.get(), batch_files);
+        for (auto& data : raw_datas) {
+            field_datas.emplace_back(data);
+        }
+    };
+
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+
+    AssertInfo(field_datas.size() == remote_files.size(), "inconsistent file num and raw data num!");
+    return field_datas;
 }
 
 }  // namespace milvus::segcore

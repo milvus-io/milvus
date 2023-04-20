@@ -32,7 +32,7 @@ class PayloadInputStream;
 struct Payload {
     DataType data_type;
     const uint8_t* raw_data;
-    int rows;
+    int64_t rows;
     std::optional<int> dimension;
 };
 

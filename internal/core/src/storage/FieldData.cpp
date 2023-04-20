@@ -21,20 +21,33 @@ namespace milvus::storage {
 template <typename Type, bool is_scalar>
 void
 FieldDataImpl<Type, is_scalar>::FillFieldData(const void* source, ssize_t element_count) {
-    AssertInfo(element_count % dim_ == 0, "invalid element count");
     if (element_count == 0) {
         return;
     }
-    AssertInfo(field_data_.size() == 0, "no empty field vector");
-    field_data_.resize(element_count);
-    std::copy_n(static_cast<const Type*>(source), element_count, field_data_.data());
+
+    std::lock_guard lck(tell_mutex_);
+    if (tell_ + element_count > get_num_rows()) {
+        resize_field_data(tell_ + element_count);
+    }
+    std::copy_n(static_cast<const Type*>(source), element_count * dim_, field_data_.data() + tell_ * dim_);
+    tell_ += element_count;
+}
+
+template <typename ArrayType, arrow::Type::type ArrayDataType>
+std::pair<const void*, int64_t>
+GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array->type()->id() == ArrayDataType, "inconsistent data type");
+    auto typed_array = std::dynamic_pointer_cast<ArrayType>(array);
+    auto element_count = array->length();
+
+    return std::make_pair(typed_array->raw_values(), element_count);
 }
 
 template <typename Type, bool is_scalar>
 void
 FieldDataImpl<Type, is_scalar>::FillFieldData(const std::shared_ptr<arrow::Array> array) {
     AssertInfo(array != nullptr, "null arrow array");
-    auto element_count = array->length() * dim_;
+    auto element_count = array->length();
     if (element_count == 0) {
         return;
     }
@@ -49,34 +62,28 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(const std::shared_ptr<arrow::Array
             return FillFieldData(values.data(), element_count);
         }
         case DataType::INT8: {
-            AssertInfo(array->type()->id() == arrow::Type::type::INT8, "inconsistent data type");
-            auto int8_array = std::dynamic_pointer_cast<arrow::Int8Array>(array);
-            return FillFieldData(int8_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::Int8Array, arrow::Type::type::INT8>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::INT16: {
-            AssertInfo(array->type()->id() == arrow::Type::type::INT16, "inconsistent data type");
-            auto int16_array = std::dynamic_pointer_cast<arrow::Int16Array>(array);
-            return FillFieldData(int16_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::Int16Array, arrow::Type::type::INT16>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::INT32: {
-            AssertInfo(array->type()->id() == arrow::Type::type::INT32, "inconsistent data type");
-            auto int32_array = std::dynamic_pointer_cast<arrow::Int32Array>(array);
-            return FillFieldData(int32_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::Int32Array, arrow::Type::type::INT32>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::INT64: {
-            AssertInfo(array->type()->id() == arrow::Type::type::INT64, "inconsistent data type");
-            auto int64_array = std::dynamic_pointer_cast<arrow::Int64Array>(array);
-            return FillFieldData(int64_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::Int64Array, arrow::Type::type::INT64>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::FLOAT: {
-            AssertInfo(array->type()->id() == arrow::Type::type::FLOAT, "inconsistent data type");
-            auto float_array = std::dynamic_pointer_cast<arrow::FloatArray>(array);
-            return FillFieldData(float_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::FloatArray, arrow::Type::type::FLOAT>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::DOUBLE: {
-            AssertInfo(array->type()->id() == arrow::Type::type::DOUBLE, "inconsistent data type");
-            auto double_array = std::dynamic_pointer_cast<arrow::DoubleArray>(array);
-            return FillFieldData(double_array->raw_values(), element_count);
+            auto array_info = GetDataInfoFromArray<arrow::DoubleArray, arrow::Type::type::DOUBLE>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
         case DataType::VARCHAR: {
@@ -88,15 +95,11 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(const std::shared_ptr<arrow::Array
             }
             return FillFieldData(values.data(), element_count);
         }
-        case DataType::VECTOR_FLOAT: {
-            AssertInfo(array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY, "inconsistent data type");
-            auto vector_array = std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(array);
-            return FillFieldData(vector_array->raw_values(), element_count);
-        }
+        case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_BINARY: {
-            AssertInfo(array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY, "inconsistent data type");
-            auto vector_array = std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(array);
-            return FillFieldData(vector_array->raw_values(), element_count);
+            auto array_info =
+                GetDataInfoFromArray<arrow::FixedSizeBinaryArray, arrow::Type::type::FIXED_SIZE_BINARY>(array);
+            return FillFieldData(array_info.first, array_info.second);
         }
         default: {
             throw NotSupportedDataTypeException(GetName() + "::FillFieldData" + " not support data type " +

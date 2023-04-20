@@ -28,6 +28,7 @@
 #include "knowhere/index/IndexType.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "parquet/schema.h"
 
 namespace milvus::storage {
 
@@ -52,11 +53,8 @@ CreateArrowSchema(DataType data_type);
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim);
 
-int64_t
-GetPayloadSize(const Payload* payload);
-
-const uint8_t*
-GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> array, DataType data_type);
+int
+GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema, DataType data_type);
 
 int
 GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array, DataType data_type);
@@ -107,16 +105,22 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
                           std::string object_key);
 
 std::vector<FieldDataPtr>
-GetObjectData(RemoteChunkManager* remote_chunk_manager, std::vector<std::string> remote_files);
+GetObjectData(RemoteChunkManager* remote_chunk_manager, const std::vector<std::string>& remote_files);
 
 std::map<std::string, int64_t>
 PutIndexData(RemoteChunkManager* remote_chunk_manager,
-             std::vector<const uint8_t*>& data_slices,
+             const std::vector<const uint8_t*>& data_slices,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
              IndexMeta& index_meta);
 
 int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr> field_datas);
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+
+void
+ReleaseArrowUnused();
+
+// size_t
+// getCurrentRSS();
 }  // namespace milvus::storage

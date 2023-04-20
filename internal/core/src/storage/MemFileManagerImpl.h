@@ -55,7 +55,7 @@ class MemFileManagerImpl : public FileManagerImpl {
         return "MemIndexFileManagerImpl";
     }
 
-    BinarySet
+    std::map<std::string, storage::FieldDataPtr>
     LoadIndexToMemory(std::vector<std::string> remote_files);
 
     std::vector<FieldDataPtr>

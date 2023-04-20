@@ -150,13 +150,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     for (auto& [id, info] : load_info.field_infos) {  // only one field for now, parallel load field data in golang
         AssertInfo(info.row_count > 0, "The row count of field data is 0");
         auto field_id = FieldId(id);
-        auto remote_chunk_manager = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
         auto insert_files = info.insert_files;
-        std::sort(insert_files.begin(), insert_files.end(), [](const std::string& a, const std::string& b) {
-            return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
-        });
-
-        auto field_datas = storage::GetObjectData(remote_chunk_manager.get(), insert_files);
+        auto field_datas = LoadFieldDatasFromRemote(insert_files);
         int64_t size = storage::GetTotalNumRowsForFieldDatas(field_datas);
         AssertInfo(size == info.row_count, "inconsistent field data row count with meta");
         LoadFieldData(field_id, field_datas);
@@ -206,10 +201,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
         }
         ++system_ready_count_;
     } else {
-        // prepare data
-        auto& field_meta = schema_->operator[](field_id);
-        auto data_type = field_meta.get_data_type();
-
         // write data under lock
         std::unique_lock lck(mutex_);
 
@@ -226,11 +217,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
         if (schema_->get_primary_field_id() == field_id) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
-            std::vector<PkType> pks(size);
-            ParsePksFromFieldData(data_type, pks, field_datas);
-            for (int i = 0; i < size; ++i) {
-                insert_record_.insert_pk(pks[i], i);
-            }
+            insert_record_.insert_pks(field_datas);
             insert_record_.seal_pks();
         }
 

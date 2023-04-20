@@ -22,6 +22,7 @@
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "index/Index.h"
+#include "storage/ChunkManager.h"
 
 namespace milvus::segcore {
 
@@ -135,5 +136,8 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta);
+
+std::vector<storage::FieldDataPtr>
+LoadFieldDatasFromRemote(std::vector<std::string>& remote_files);
 
 }  // namespace milvus::segcore

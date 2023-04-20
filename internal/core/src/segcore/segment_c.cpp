@@ -220,7 +220,6 @@ LoadFieldRawData(CSegmentInterface c_segment, int64_t field_id, const void* data
         AssertInfo(segment != nullptr, "segment conversion failed");
         milvus::DataType data_type;
         int64_t dim = 1;
-        int64_t element_count = row_count;
         if (milvus::SystemProperty::Instance().IsSystem(milvus::FieldId(field_id))) {
             data_type = milvus::DataType::INT64;
         } else {
@@ -229,23 +228,10 @@ LoadFieldRawData(CSegmentInterface c_segment, int64_t field_id, const void* data
 
             if (milvus::datatype_is_vector(data_type)) {
                 dim = field_meta.get_dim();
-                switch (data_type) {
-                    case milvus::DataType::VECTOR_FLOAT: {
-                        element_count = row_count * dim;
-                        break;
-                    }
-                    case milvus::DataType::VECTOR_BINARY: {
-                        AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
-                        element_count = row_count * (dim / 8);
-                        break;
-                    }
-                    default:
-                        throw std::runtime_error("invalid vector type");
-                }
             }
         }
         auto field_data = milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
-        field_data->FillFieldData(data, element_count);
+        field_data->FillFieldData(data, row_count);
         segment->LoadFieldData(milvus::FieldId(field_id), std::vector<milvus::storage::FieldDataPtr>{field_data});
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

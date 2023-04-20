@@ -47,10 +47,10 @@ VectorMemIndex::Serialize(const Config& config) {
     knowhere::Config serialize_config = config;
     parse_config(serialize_config);
 
-    auto ret = index_->Serialize(serialize_config);
-    milvus::Disassemble(ret);
+    auto binary_set = index_->Serialize(serialize_config);
+    Disassemble(binary_set);
 
-    return ret;
+    return binary_set;
 }
 
 BinarySet
@@ -69,19 +69,33 @@ VectorMemIndex::Upload(const Config& config) {
 }
 
 void
-VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
-    milvus::Assemble(const_cast<BinarySet&>(binary_set));
+VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
     index_->Load(binary_set);
     SetDim(index_->Dim());
+}
+
+void
+VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
+    milvus::Assemble(const_cast<BinarySet&>(binary_set));
+    LoadWithoutAssemble(binary_set, config);
 }
 
 void
 VectorMemIndex::Load(const Config& config) {
     auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(), "index file paths is empty when load index");
-    auto binary_set = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
 
-    Load(binary_set, config);
+    AssembleIndexDatas(index_datas);
+    BinarySet binary_set;
+    for (auto& [key, data] : index_datas) {
+        auto size = data->Size();
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto buf = std::shared_ptr<uint8_t[]>((uint8_t*)const_cast<void*>(data->Data()), deleter);
+        binary_set.Append(key, buf, size);
+    }
+
+    LoadWithoutAssemble(binary_set, config);
 }
 
 void
@@ -118,7 +132,7 @@ VectorMemIndex::Build(const Config& config) {
     for (auto data : field_datas) {
         total_size += data->Size();
         total_num_rows += data->get_num_rows();
-        AssertInfo(dim == 0 || dim == data->get_dim(), "inconsistent dim value in on field data!");
+        AssertInfo(dim == 0 || dim == data->get_dim(), "inconsistent dim value between field datas!");
         dim = data->get_dim();
     }
 
