@@ -38,6 +38,10 @@ void
 AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                            const char* str,
                            int str_size);
+void
+AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
+                           const uint8_t* data,
+                           int length);
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);

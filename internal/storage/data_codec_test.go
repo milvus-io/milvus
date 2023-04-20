@@ -45,6 +45,8 @@ const (
 	StringField       = 107
 	BinaryVectorField = 108
 	FloatVectorField  = 109
+	ArrayField        = 110
+	JSONField         = 111
 )
 
 func TestInsertCodec(t *testing.T) {
@@ -129,6 +131,19 @@ func TestInsertCodec(t *testing.T) {
 					DataType:     schemapb.DataType_String,
 				},
 				{
+					FieldID:     ArrayField,
+					Name:        "field_int32_array",
+					Description: "int32 array",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int32,
+				},
+				{
+					FieldID:     JSONField,
+					Name:        "field_json",
+					Description: "json",
+					DataType:    schemapb.DataType_JSON,
+				},
+				{
 					FieldID:      BinaryVectorField,
 					Name:         "field_binary_vector",
 					IsPrimaryKey: false,
@@ -186,6 +201,27 @@ func TestInsertCodec(t *testing.T) {
 				Data: []float32{4, 5, 6, 7, 4, 5, 6, 7},
 				Dim:  4,
 			},
+			ArrayField: &ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{3, 2, 1}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{6, 5, 4}},
+						},
+					},
+				},
+			},
+			JSONField: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{"batch":2}`),
+					[]byte(`{"key":"world"}`),
+				},
+			},
 		},
 	}
 
@@ -229,6 +265,27 @@ func TestInsertCodec(t *testing.T) {
 				Data: []float32{0, 1, 2, 3, 0, 1, 2, 3},
 				Dim:  4,
 			},
+			ArrayField: &ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+						},
+					},
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{4, 5, 6}},
+						},
+					},
+				},
+			},
+			JSONField: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{"batch":1}`),
+					[]byte(`{"key":"hello"}`),
+				},
+			},
 		},
 	}
 
@@ -246,6 +303,8 @@ func TestInsertCodec(t *testing.T) {
 			StringField:       &StringFieldData{[]string{}},
 			BinaryVectorField: &BinaryVectorFieldData{[]byte{}, 8},
 			FloatVectorField:  &FloatVectorFieldData{[]float32{}, 4},
+			ArrayField:        &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}},
+			JSONField:         &JSONFieldData{[][]byte{}},
 		},
 	}
 	b, s, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
@@ -283,6 +342,23 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)
 	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).Data)
+
+	int32ArrayList := [][]int32{{1, 2, 3}, {4, 5, 6}, {3, 2, 1}, {6, 5, 4}}
+	resultArrayList := [][]int32{}
+	for _, v := range resultData.Data[ArrayField].(*ArrayFieldData).Data {
+		resultArrayList = append(resultArrayList, v.GetIntData().GetData())
+	}
+	assert.EqualValues(t, int32ArrayList, resultArrayList)
+
+	assert.Equal(t,
+		[][]byte{
+			[]byte(`{"batch":1}`),
+			[]byte(`{"key":"hello"}`),
+			[]byte(`{"batch":2}`),
+			[]byte(`{"key":"world"}`),
+		},
+		resultData.Data[JSONField].(*JSONFieldData).Data)
+
 	log.Debug("Data", zap.Any("Data", resultData.Data))
 	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
 
@@ -465,6 +541,21 @@ func TestMemorySize(t *testing.T) {
 				Data: []float32{4, 5, 6, 7},
 				Dim:  4,
 			},
+			ArrayField: &ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+						},
+					},
+				},
+			},
+			JSONField: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{"batch":1}`),
+				},
+			},
 		},
 	}
 	assert.Equal(t, insertData1.Data[RowIDField].GetMemorySize(), 8)
@@ -479,6 +570,8 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertData1.Data[StringField].GetMemorySize(), 17)
 	assert.Equal(t, insertData1.Data[BinaryVectorField].GetMemorySize(), 5)
 	assert.Equal(t, insertData1.Data[FloatField].GetMemorySize(), 4)
+	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 3*4)
+	assert.Equal(t, insertData1.Data[JSONField].GetMemorySize(), len([]byte(`{"batch":1}`))+16)
 
 	insertData2 := &InsertData{
 		Data: map[int64]FieldData{

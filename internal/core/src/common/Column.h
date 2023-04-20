@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 
 #include <cstddef>
+#include <ostream>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -26,8 +27,12 @@
 #include "common/Utils.h"
 #include "exceptions/EasyAssert.h"
 #include "fmt/core.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus::segcore {
+
+#define FIELD_DATA(info, field) (info->scalars().field##_data().data())
 
 struct Entry {
     char* data;
@@ -103,11 +108,17 @@ class VariableColumn : public ColumnBase {
     using ViewType =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
+    template <typename Ctor>
     VariableColumn(int64_t segment_id,
                    const FieldMeta& field_meta,
-                   const LoadFieldDataInfo& info) {
+                   const LoadFieldDataInfo& info,
+                   Ctor&& ctor) {
         auto begin = info.field_data->scalars().string_data().data().begin();
         auto end = info.field_data->scalars().string_data().data().end();
+        if constexpr (std::is_same_v<T, nlohmann::json>) {
+            begin = info.field_data->scalars().json_data().data().begin();
+            end = info.field_data->scalars().json_data().data().end();
+        }
 
         indices_.reserve(info.row_count);
         while (begin != end) {
@@ -117,7 +128,7 @@ class VariableColumn : public ColumnBase {
         }
 
         data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
-        construct_views();
+        construct_views(std::forward<Ctor>(ctor));
     }
 
     VariableColumn(VariableColumn&& field) noexcept
@@ -145,14 +156,28 @@ class VariableColumn : public ColumnBase {
     }
 
  protected:
+    template <typename Ctor>
     void
-    construct_views() {
+    construct_views(Ctor ctor) {
         views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i],
-                                indices_[i + 1] - indices_[i]);
+            views_.emplace_back(
+                ctor(data_ + indices_[i], indices_[i + 1] - indices_[i]));
         }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
+        views_.emplace_back(
+            ctor(data_ + indices_.back(), size_ - indices_.back()));
+
+        // as we stores the json objects entirely in memory,
+        // the raw data is not needed anymore
+        if constexpr (std::is_same_v<T, nlohmann::json>) {
+            if (munmap(data_, size_)) {
+                AssertInfo(
+                    true,
+                    fmt::format(
+                        "failed to unmap json field after deserialized, err={}",
+                        strerror(errno)));
+            }
+        }
     }
 
  private:

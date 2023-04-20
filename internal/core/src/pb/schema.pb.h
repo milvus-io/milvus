@@ -49,6 +49,9 @@ extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table
 namespace milvus {
 namespace proto {
 namespace schema {
+class ArrayArray;
+struct ArrayArrayDefaultTypeInternal;
+extern ArrayArrayDefaultTypeInternal _ArrayArray_default_instance_;
 class BoolArray;
 struct BoolArrayDefaultTypeInternal;
 extern BoolArrayDefaultTypeInternal _BoolArray_default_instance_;
@@ -76,6 +79,9 @@ extern IDsDefaultTypeInternal _IDs_default_instance_;
 class IntArray;
 struct IntArrayDefaultTypeInternal;
 extern IntArrayDefaultTypeInternal _IntArray_default_instance_;
+class JSONArray;
+struct JSONArrayDefaultTypeInternal;
+extern JSONArrayDefaultTypeInternal _JSONArray_default_instance_;
 class LongArray;
 struct LongArrayDefaultTypeInternal;
 extern LongArrayDefaultTypeInternal _LongArray_default_instance_;
@@ -95,6 +101,7 @@ extern VectorFieldDefaultTypeInternal _VectorField_default_instance_;
 }  // namespace proto
 }  // namespace milvus
 PROTOBUF_NAMESPACE_OPEN
+template<> ::milvus::proto::schema::ArrayArray* Arena::CreateMaybeMessage<::milvus::proto::schema::ArrayArray>(Arena*);
 template<> ::milvus::proto::schema::BoolArray* Arena::CreateMaybeMessage<::milvus::proto::schema::BoolArray>(Arena*);
 template<> ::milvus::proto::schema::BytesArray* Arena::CreateMaybeMessage<::milvus::proto::schema::BytesArray>(Arena*);
 template<> ::milvus::proto::schema::CollectionSchema* Arena::CreateMaybeMessage<::milvus::proto::schema::CollectionSchema>(Arena*);
@@ -104,6 +111,7 @@ template<> ::milvus::proto::schema::FieldSchema* Arena::CreateMaybeMessage<::mil
 template<> ::milvus::proto::schema::FloatArray* Arena::CreateMaybeMessage<::milvus::proto::schema::FloatArray>(Arena*);
 template<> ::milvus::proto::schema::IDs* Arena::CreateMaybeMessage<::milvus::proto::schema::IDs>(Arena*);
 template<> ::milvus::proto::schema::IntArray* Arena::CreateMaybeMessage<::milvus::proto::schema::IntArray>(Arena*);
+template<> ::milvus::proto::schema::JSONArray* Arena::CreateMaybeMessage<::milvus::proto::schema::JSONArray>(Arena*);
 template<> ::milvus::proto::schema::LongArray* Arena::CreateMaybeMessage<::milvus::proto::schema::LongArray>(Arena*);
 template<> ::milvus::proto::schema::ScalarField* Arena::CreateMaybeMessage<::milvus::proto::schema::ScalarField>(Arena*);
 template<> ::milvus::proto::schema::SearchResultData* Arena::CreateMaybeMessage<::milvus::proto::schema::SearchResultData>(Arena*);
@@ -125,6 +133,8 @@ enum DataType : int {
   Double = 11,
   String = 20,
   VarChar = 21,
+  Array = 22,
+  JSON = 23,
   BinaryVector = 100,
   FloatVector = 101,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
@@ -308,6 +318,7 @@ class FieldSchema final :
     kIsPrimaryKeyFieldNumber = 3,
     kAutoIDFieldNumber = 8,
     kStateFieldNumber = 9,
+    kElementTypeFieldNumber = 10,
   };
   // repeated .milvus.proto.common.KeyValuePair type_params = 6;
   int type_params_size() const;
@@ -418,6 +429,15 @@ class FieldSchema final :
   void _internal_set_state(::milvus::proto::schema::FieldState value);
   public:
 
+  // .milvus.proto.schema.DataType element_type = 10;
+  void clear_element_type();
+  ::milvus::proto::schema::DataType element_type() const;
+  void set_element_type(::milvus::proto::schema::DataType value);
+  private:
+  ::milvus::proto::schema::DataType _internal_element_type() const;
+  void _internal_set_element_type(::milvus::proto::schema::DataType value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.FieldSchema)
  private:
   class _Internal;
@@ -435,6 +455,7 @@ class FieldSchema final :
     bool is_primary_key_;
     bool autoid_;
     int state_;
+    int element_type_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -1775,6 +1796,337 @@ class StringArray final :
 };
 // -------------------------------------------------------------------
 
+class ArrayArray final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.ArrayArray) */ {
+ public:
+  inline ArrayArray() : ArrayArray(nullptr) {}
+  ~ArrayArray() override;
+  explicit PROTOBUF_CONSTEXPR ArrayArray(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ArrayArray(const ArrayArray& from);
+  ArrayArray(ArrayArray&& from) noexcept
+    : ArrayArray() {
+    *this = ::std::move(from);
+  }
+
+  inline ArrayArray& operator=(const ArrayArray& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ArrayArray& operator=(ArrayArray&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const ArrayArray& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ArrayArray* internal_default_instance() {
+    return reinterpret_cast<const ArrayArray*>(
+               &_ArrayArray_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    9;
+
+  friend void swap(ArrayArray& a, ArrayArray& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ArrayArray* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ArrayArray* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ArrayArray* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ArrayArray>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const ArrayArray& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const ArrayArray& from) {
+    ArrayArray::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ArrayArray* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.schema.ArrayArray";
+  }
+  protected:
+  explicit ArrayArray(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 1,
+    kElementTypeFieldNumber = 2,
+  };
+  // repeated .milvus.proto.schema.ScalarField data = 1;
+  int data_size() const;
+  private:
+  int _internal_data_size() const;
+  public:
+  void clear_data();
+  ::milvus::proto::schema::ScalarField* mutable_data(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::ScalarField >*
+      mutable_data();
+  private:
+  const ::milvus::proto::schema::ScalarField& _internal_data(int index) const;
+  ::milvus::proto::schema::ScalarField* _internal_add_data();
+  public:
+  const ::milvus::proto::schema::ScalarField& data(int index) const;
+  ::milvus::proto::schema::ScalarField* add_data();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::ScalarField >&
+      data() const;
+
+  // .milvus.proto.schema.DataType element_type = 2;
+  void clear_element_type();
+  ::milvus::proto::schema::DataType element_type() const;
+  void set_element_type(::milvus::proto::schema::DataType value);
+  private:
+  ::milvus::proto::schema::DataType _internal_element_type() const;
+  void _internal_set_element_type(::milvus::proto::schema::DataType value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.schema.ArrayArray)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::ScalarField > data_;
+    int element_type_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_schema_2eproto;
+};
+// -------------------------------------------------------------------
+
+class JSONArray final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.JSONArray) */ {
+ public:
+  inline JSONArray() : JSONArray(nullptr) {}
+  ~JSONArray() override;
+  explicit PROTOBUF_CONSTEXPR JSONArray(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  JSONArray(const JSONArray& from);
+  JSONArray(JSONArray&& from) noexcept
+    : JSONArray() {
+    *this = ::std::move(from);
+  }
+
+  inline JSONArray& operator=(const JSONArray& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline JSONArray& operator=(JSONArray&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const JSONArray& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const JSONArray* internal_default_instance() {
+    return reinterpret_cast<const JSONArray*>(
+               &_JSONArray_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    10;
+
+  friend void swap(JSONArray& a, JSONArray& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(JSONArray* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(JSONArray* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  JSONArray* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<JSONArray>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const JSONArray& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const JSONArray& from) {
+    JSONArray::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(JSONArray* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.schema.JSONArray";
+  }
+  protected:
+  explicit JSONArray(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 1,
+  };
+  // repeated bytes data = 1;
+  int data_size() const;
+  private:
+  int _internal_data_size() const;
+  public:
+  void clear_data();
+  const std::string& data(int index) const;
+  std::string* mutable_data(int index);
+  void set_data(int index, const std::string& value);
+  void set_data(int index, std::string&& value);
+  void set_data(int index, const char* value);
+  void set_data(int index, const void* value, size_t size);
+  std::string* add_data();
+  void add_data(const std::string& value);
+  void add_data(std::string&& value);
+  void add_data(const char* value);
+  void add_data(const void* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& data() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_data();
+  private:
+  const std::string& _internal_data(int index) const;
+  std::string* _internal_add_data();
+  public:
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.schema.JSONArray)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> data_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_schema_2eproto;
+};
+// -------------------------------------------------------------------
+
 class ScalarField final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.ScalarField) */ {
  public:
@@ -1826,6 +2178,8 @@ class ScalarField final :
     kDoubleData = 5,
     kStringData = 6,
     kBytesData = 7,
+    kArrayData = 8,
+    kJsonData = 9,
     DATA_NOT_SET = 0,
   };
 
@@ -1834,7 +2188,7 @@ class ScalarField final :
                &_ScalarField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    11;
 
   friend void swap(ScalarField& a, ScalarField& b) {
     a.Swap(&b);
@@ -1914,6 +2268,8 @@ class ScalarField final :
     kDoubleDataFieldNumber = 5,
     kStringDataFieldNumber = 6,
     kBytesDataFieldNumber = 7,
+    kArrayDataFieldNumber = 8,
+    kJsonDataFieldNumber = 9,
   };
   // .milvus.proto.schema.BoolArray bool_data = 1;
   bool has_bool_data() const;
@@ -2041,6 +2397,42 @@ class ScalarField final :
       ::milvus::proto::schema::BytesArray* bytes_data);
   ::milvus::proto::schema::BytesArray* unsafe_arena_release_bytes_data();
 
+  // .milvus.proto.schema.ArrayArray array_data = 8;
+  bool has_array_data() const;
+  private:
+  bool _internal_has_array_data() const;
+  public:
+  void clear_array_data();
+  const ::milvus::proto::schema::ArrayArray& array_data() const;
+  PROTOBUF_NODISCARD ::milvus::proto::schema::ArrayArray* release_array_data();
+  ::milvus::proto::schema::ArrayArray* mutable_array_data();
+  void set_allocated_array_data(::milvus::proto::schema::ArrayArray* array_data);
+  private:
+  const ::milvus::proto::schema::ArrayArray& _internal_array_data() const;
+  ::milvus::proto::schema::ArrayArray* _internal_mutable_array_data();
+  public:
+  void unsafe_arena_set_allocated_array_data(
+      ::milvus::proto::schema::ArrayArray* array_data);
+  ::milvus::proto::schema::ArrayArray* unsafe_arena_release_array_data();
+
+  // .milvus.proto.schema.JSONArray json_data = 9;
+  bool has_json_data() const;
+  private:
+  bool _internal_has_json_data() const;
+  public:
+  void clear_json_data();
+  const ::milvus::proto::schema::JSONArray& json_data() const;
+  PROTOBUF_NODISCARD ::milvus::proto::schema::JSONArray* release_json_data();
+  ::milvus::proto::schema::JSONArray* mutable_json_data();
+  void set_allocated_json_data(::milvus::proto::schema::JSONArray* json_data);
+  private:
+  const ::milvus::proto::schema::JSONArray& _internal_json_data() const;
+  ::milvus::proto::schema::JSONArray* _internal_mutable_json_data();
+  public:
+  void unsafe_arena_set_allocated_json_data(
+      ::milvus::proto::schema::JSONArray* json_data);
+  ::milvus::proto::schema::JSONArray* unsafe_arena_release_json_data();
+
   void clear_data();
   DataCase data_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.ScalarField)
@@ -2053,6 +2445,8 @@ class ScalarField final :
   void set_has_double_data();
   void set_has_string_data();
   void set_has_bytes_data();
+  void set_has_array_data();
+  void set_has_json_data();
 
   inline bool has_data() const;
   inline void clear_has_data();
@@ -2071,6 +2465,8 @@ class ScalarField final :
       ::milvus::proto::schema::DoubleArray* double_data_;
       ::milvus::proto::schema::StringArray* string_data_;
       ::milvus::proto::schema::BytesArray* bytes_data_;
+      ::milvus::proto::schema::ArrayArray* array_data_;
+      ::milvus::proto::schema::JSONArray* json_data_;
     } data_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -2135,7 +2531,7 @@ class VectorField final :
                &_VectorField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    12;
 
   friend void swap(VectorField& a, VectorField& b) {
     a.Swap(&b);
@@ -2342,7 +2738,7 @@ class FieldData final :
                &_FieldData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    13;
 
   friend void swap(FieldData& a, FieldData& b) {
     a.Swap(&b);
@@ -2576,7 +2972,7 @@ class IDs final :
                &_IDs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    14;
 
   friend void swap(IDs& a, IDs& b) {
     a.Swap(&b);
@@ -2766,7 +3162,7 @@ class SearchResultData final :
                &_SearchResultData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    15;
 
   friend void swap(SearchResultData& a, SearchResultData& b) {
     a.Swap(&b);
@@ -3247,6 +3643,26 @@ inline void FieldSchema::_internal_set_state(::milvus::proto::schema::FieldState
 inline void FieldSchema::set_state(::milvus::proto::schema::FieldState value) {
   _internal_set_state(value);
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.state)
+}
+
+// .milvus.proto.schema.DataType element_type = 10;
+inline void FieldSchema::clear_element_type() {
+  _impl_.element_type_ = 0;
+}
+inline ::milvus::proto::schema::DataType FieldSchema::_internal_element_type() const {
+  return static_cast< ::milvus::proto::schema::DataType >(_impl_.element_type_);
+}
+inline ::milvus::proto::schema::DataType FieldSchema::element_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.element_type)
+  return _internal_element_type();
+}
+inline void FieldSchema::_internal_set_element_type(::milvus::proto::schema::DataType value) {
+  
+  _impl_.element_type_ = value;
+}
+inline void FieldSchema::set_element_type(::milvus::proto::schema::DataType value) {
+  _internal_set_element_type(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.element_type)
 }
 
 // -------------------------------------------------------------------
@@ -3828,6 +4244,149 @@ StringArray::mutable_data() {
 
 // -------------------------------------------------------------------
 
+// ArrayArray
+
+// repeated .milvus.proto.schema.ScalarField data = 1;
+inline int ArrayArray::_internal_data_size() const {
+  return _impl_.data_.size();
+}
+inline int ArrayArray::data_size() const {
+  return _internal_data_size();
+}
+inline void ArrayArray::clear_data() {
+  _impl_.data_.Clear();
+}
+inline ::milvus::proto::schema::ScalarField* ArrayArray::mutable_data(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ArrayArray.data)
+  return _impl_.data_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::ScalarField >*
+ArrayArray::mutable_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.ArrayArray.data)
+  return &_impl_.data_;
+}
+inline const ::milvus::proto::schema::ScalarField& ArrayArray::_internal_data(int index) const {
+  return _impl_.data_.Get(index);
+}
+inline const ::milvus::proto::schema::ScalarField& ArrayArray::data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ArrayArray.data)
+  return _internal_data(index);
+}
+inline ::milvus::proto::schema::ScalarField* ArrayArray::_internal_add_data() {
+  return _impl_.data_.Add();
+}
+inline ::milvus::proto::schema::ScalarField* ArrayArray::add_data() {
+  ::milvus::proto::schema::ScalarField* _add = _internal_add_data();
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.ArrayArray.data)
+  return _add;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::ScalarField >&
+ArrayArray::data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.ArrayArray.data)
+  return _impl_.data_;
+}
+
+// .milvus.proto.schema.DataType element_type = 2;
+inline void ArrayArray::clear_element_type() {
+  _impl_.element_type_ = 0;
+}
+inline ::milvus::proto::schema::DataType ArrayArray::_internal_element_type() const {
+  return static_cast< ::milvus::proto::schema::DataType >(_impl_.element_type_);
+}
+inline ::milvus::proto::schema::DataType ArrayArray::element_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ArrayArray.element_type)
+  return _internal_element_type();
+}
+inline void ArrayArray::_internal_set_element_type(::milvus::proto::schema::DataType value) {
+  
+  _impl_.element_type_ = value;
+}
+inline void ArrayArray::set_element_type(::milvus::proto::schema::DataType value) {
+  _internal_set_element_type(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ArrayArray.element_type)
+}
+
+// -------------------------------------------------------------------
+
+// JSONArray
+
+// repeated bytes data = 1;
+inline int JSONArray::_internal_data_size() const {
+  return _impl_.data_.size();
+}
+inline int JSONArray::data_size() const {
+  return _internal_data_size();
+}
+inline void JSONArray::clear_data() {
+  _impl_.data_.Clear();
+}
+inline std::string* JSONArray::add_data() {
+  std::string* _s = _internal_add_data();
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.schema.JSONArray.data)
+  return _s;
+}
+inline const std::string& JSONArray::_internal_data(int index) const {
+  return _impl_.data_.Get(index);
+}
+inline const std::string& JSONArray::data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.JSONArray.data)
+  return _internal_data(index);
+}
+inline std::string* JSONArray::mutable_data(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.JSONArray.data)
+  return _impl_.data_.Mutable(index);
+}
+inline void JSONArray::set_data(int index, const std::string& value) {
+  _impl_.data_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::set_data(int index, std::string&& value) {
+  _impl_.data_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::set_data(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.data_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::set_data(int index, const void* value, size_t size) {
+  _impl_.data_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.schema.JSONArray.data)
+}
+inline std::string* JSONArray::_internal_add_data() {
+  return _impl_.data_.Add();
+}
+inline void JSONArray::add_data(const std::string& value) {
+  _impl_.data_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::add_data(std::string&& value) {
+  _impl_.data_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::add_data(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.data_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.schema.JSONArray.data)
+}
+inline void JSONArray::add_data(const void* value, size_t size) {
+  _impl_.data_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.schema.JSONArray.data)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+JSONArray::data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.JSONArray.data)
+  return _impl_.data_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+JSONArray::mutable_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.JSONArray.data)
+  return &_impl_.data_;
+}
+
+// -------------------------------------------------------------------
+
 // ScalarField
 
 // .milvus.proto.schema.BoolArray bool_data = 1;
@@ -4345,6 +4904,154 @@ inline ::milvus::proto::schema::BytesArray* ScalarField::_internal_mutable_bytes
 inline ::milvus::proto::schema::BytesArray* ScalarField::mutable_bytes_data() {
   ::milvus::proto::schema::BytesArray* _msg = _internal_mutable_bytes_data();
   // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.bytes_data)
+  return _msg;
+}
+
+// .milvus.proto.schema.ArrayArray array_data = 8;
+inline bool ScalarField::_internal_has_array_data() const {
+  return data_case() == kArrayData;
+}
+inline bool ScalarField::has_array_data() const {
+  return _internal_has_array_data();
+}
+inline void ScalarField::set_has_array_data() {
+  _impl_._oneof_case_[0] = kArrayData;
+}
+inline void ScalarField::clear_array_data() {
+  if (_internal_has_array_data()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.data_.array_data_;
+    }
+    clear_has_data();
+  }
+}
+inline ::milvus::proto::schema::ArrayArray* ScalarField::release_array_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ScalarField.array_data)
+  if (_internal_has_array_data()) {
+    clear_has_data();
+    ::milvus::proto::schema::ArrayArray* temp = _impl_.data_.array_data_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.data_.array_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::schema::ArrayArray& ScalarField::_internal_array_data() const {
+  return _internal_has_array_data()
+      ? *_impl_.data_.array_data_
+      : reinterpret_cast< ::milvus::proto::schema::ArrayArray&>(::milvus::proto::schema::_ArrayArray_default_instance_);
+}
+inline const ::milvus::proto::schema::ArrayArray& ScalarField::array_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ScalarField.array_data)
+  return _internal_array_data();
+}
+inline ::milvus::proto::schema::ArrayArray* ScalarField::unsafe_arena_release_array_data() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:milvus.proto.schema.ScalarField.array_data)
+  if (_internal_has_array_data()) {
+    clear_has_data();
+    ::milvus::proto::schema::ArrayArray* temp = _impl_.data_.array_data_;
+    _impl_.data_.array_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void ScalarField::unsafe_arena_set_allocated_array_data(::milvus::proto::schema::ArrayArray* array_data) {
+  clear_data();
+  if (array_data) {
+    set_has_array_data();
+    _impl_.data_.array_data_ = array_data;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.schema.ScalarField.array_data)
+}
+inline ::milvus::proto::schema::ArrayArray* ScalarField::_internal_mutable_array_data() {
+  if (!_internal_has_array_data()) {
+    clear_data();
+    set_has_array_data();
+    _impl_.data_.array_data_ = CreateMaybeMessage< ::milvus::proto::schema::ArrayArray >(GetArenaForAllocation());
+  }
+  return _impl_.data_.array_data_;
+}
+inline ::milvus::proto::schema::ArrayArray* ScalarField::mutable_array_data() {
+  ::milvus::proto::schema::ArrayArray* _msg = _internal_mutable_array_data();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.array_data)
+  return _msg;
+}
+
+// .milvus.proto.schema.JSONArray json_data = 9;
+inline bool ScalarField::_internal_has_json_data() const {
+  return data_case() == kJsonData;
+}
+inline bool ScalarField::has_json_data() const {
+  return _internal_has_json_data();
+}
+inline void ScalarField::set_has_json_data() {
+  _impl_._oneof_case_[0] = kJsonData;
+}
+inline void ScalarField::clear_json_data() {
+  if (_internal_has_json_data()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.data_.json_data_;
+    }
+    clear_has_data();
+  }
+}
+inline ::milvus::proto::schema::JSONArray* ScalarField::release_json_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ScalarField.json_data)
+  if (_internal_has_json_data()) {
+    clear_has_data();
+    ::milvus::proto::schema::JSONArray* temp = _impl_.data_.json_data_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.data_.json_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::schema::JSONArray& ScalarField::_internal_json_data() const {
+  return _internal_has_json_data()
+      ? *_impl_.data_.json_data_
+      : reinterpret_cast< ::milvus::proto::schema::JSONArray&>(::milvus::proto::schema::_JSONArray_default_instance_);
+}
+inline const ::milvus::proto::schema::JSONArray& ScalarField::json_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ScalarField.json_data)
+  return _internal_json_data();
+}
+inline ::milvus::proto::schema::JSONArray* ScalarField::unsafe_arena_release_json_data() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:milvus.proto.schema.ScalarField.json_data)
+  if (_internal_has_json_data()) {
+    clear_has_data();
+    ::milvus::proto::schema::JSONArray* temp = _impl_.data_.json_data_;
+    _impl_.data_.json_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void ScalarField::unsafe_arena_set_allocated_json_data(::milvus::proto::schema::JSONArray* json_data) {
+  clear_data();
+  if (json_data) {
+    set_has_json_data();
+    _impl_.data_.json_data_ = json_data;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.schema.ScalarField.json_data)
+}
+inline ::milvus::proto::schema::JSONArray* ScalarField::_internal_mutable_json_data() {
+  if (!_internal_has_json_data()) {
+    clear_data();
+    set_has_json_data();
+    _impl_.data_.json_data_ = CreateMaybeMessage< ::milvus::proto::schema::JSONArray >(GetArenaForAllocation());
+  }
+  return _impl_.data_.json_data_;
+}
+inline ::milvus::proto::schema::JSONArray* ScalarField::mutable_json_data() {
+  ::milvus::proto::schema::JSONArray* _msg = _internal_mutable_json_data();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.json_data)
   return _msg;
 }
 
@@ -5224,6 +5931,10 @@ SearchResultData::mutable_topks() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

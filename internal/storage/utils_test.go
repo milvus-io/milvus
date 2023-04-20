@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -358,6 +359,12 @@ func genAllFieldsSchema(fVecDim, bVecDim int) (schema *schemapb.CollectionSchema
 					},
 				},
 			},
+			{
+				DataType: schemapb.DataType_Array,
+			},
+			{
+				DataType: schemapb.DataType_JSON,
+			},
 		},
 	}
 	fieldIDs = make([]UniqueID, 0)
@@ -445,6 +452,28 @@ func generateFloat64Array(numRows int) []float64 {
 	return ret
 }
 
+func generateBytesArray(numRows int) [][]byte {
+	ret := make([][]byte, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, []byte(fmt.Sprint(rand.Int())))
+	}
+	return ret
+}
+
+func generateInt32ArrayList(numRows int) []*schemapb.ScalarField {
+	ret := make([]*schemapb.ScalarField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{
+					Data: []int32{rand.Int31(), rand.Int31()},
+				},
+			},
+		})
+	}
+	return ret
+}
+
 func genRowWithAllFields(fVecDim, bVecDim int) (blob *commonpb.Blob, pk int64, row []interface{}) {
 	schema, _, _ := genAllFieldsSchema(fVecDim, bVecDim)
 	ret := &commonpb.Blob{
@@ -497,6 +526,23 @@ func genRowWithAllFields(fVecDim, bVecDim int) (blob *commonpb.Blob, pk int64, r
 		case schemapb.DataType_Double:
 			data := rand.Float64()
 			_ = binary.Write(&buffer, common.Endian, data)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
+		case schemapb.DataType_Array:
+			data := &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3},
+					},
+				},
+			}
+			bytes, _ := proto.Marshal(data)
+			binary.Write(&buffer, common.Endian, bytes)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
+		case schemapb.DataType_JSON:
+			data := []byte(`{"key":"value"}`)
+			binary.Write(&buffer, common.Endian, data)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, data)
 		}
@@ -749,6 +795,49 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			for nrows := 0; nrows < numRows; nrows++ {
 				columns[idx] = append(columns[idx], data[nrows*bVecDim/8:(nrows+1)*bVecDim/8])
 			}
+
+		case schemapb.DataType_Array:
+			data := generateInt32ArrayList(numRows)
+			f := &schemapb.FieldData{
+				Type:      schemapb.DataType_Array,
+				FieldName: field.GetName(),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data:        data,
+								ElementType: schemapb.DataType_Int32,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], d)
+			}
+
+		case schemapb.DataType_JSON:
+			data := generateBytesArray(numRows)
+			f := &schemapb.FieldData{
+				Type:      schemapb.DataType_Array,
+				FieldName: field.GetName(),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], d)
+			}
 		}
 	}
 
@@ -758,6 +847,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	numRows, fVecDim, bVecDim := 10, 8, 8
 	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim)
+	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim)
 
 	idata, err := RowBasedInsertMsgToInsertData(msg, schema)
@@ -794,6 +884,7 @@ func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 func TestInsertMsgToInsertData(t *testing.T) {
 	numRows, fVecDim, bVecDim := 10, 8, 8
 	schema, _, fieldIDs := genAllFieldsSchema(fVecDim, bVecDim)
+	fieldIDs = fieldIDs[:len(fieldIDs)-2]
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim)
 
 	idata, err := InsertMsgToInsertData(msg, schema)
@@ -801,7 +892,7 @@ func TestInsertMsgToInsertData(t *testing.T) {
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
 		fData, ok := idata.Data[fID]
-		assert.True(t, ok)
+		assert.True(t, ok, "fID =", fID)
 		assert.Equal(t, len(column), fData.RowNum())
 		for j := range column {
 			assert.Equal(t, fData.GetRow(j), column[j])
@@ -868,6 +959,20 @@ func TestMergeInsertData(t *testing.T) {
 				Data: []float32{0},
 				Dim:  1,
 			},
+			ArrayField: &ArrayFieldData{
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: []int32{1, 2, 3},
+							},
+						},
+					},
+				},
+			},
+			JSONField: &JSONFieldData{
+				Data: [][]byte{[]byte(`{"key":"value"}`)},
+			},
 		},
 		Infos: nil,
 	}
@@ -910,6 +1015,20 @@ func TestMergeInsertData(t *testing.T) {
 			FloatVectorField: &FloatVectorFieldData{
 				Data: []float32{0},
 				Dim:  1,
+			},
+			ArrayField: &ArrayFieldData{
+				Data: []*schemapb.ScalarField{
+					{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: []int32{4, 5, 6},
+							},
+						},
+					},
+				},
+			},
+			JSONField: &JSONFieldData{
+				Data: [][]byte{[]byte(`{"hello":"world"}`)},
 			},
 		},
 		Infos: nil,
@@ -964,6 +1083,15 @@ func TestMergeInsertData(t *testing.T) {
 	f, ok = merged.Data[FloatVectorField]
 	assert.True(t, ok)
 	assert.Equal(t, []float32{0, 0}, f.(*FloatVectorFieldData).Data)
+
+	f, ok = merged.Data[ArrayField]
+	assert.True(t, ok)
+	assert.Equal(t, []int32{1, 2, 3}, f.(*ArrayFieldData).Data[0].GetIntData().GetData())
+	assert.Equal(t, []int32{4, 5, 6}, f.(*ArrayFieldData).Data[1].GetIntData().GetData())
+
+	f, ok = merged.Data[JSONField]
+	assert.True(t, ok)
+	assert.EqualValues(t, [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)}, f.(*JSONFieldData).Data)
 }
 
 func TestGetPkFromInsertData(t *testing.T) {

@@ -16,6 +16,7 @@
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
 
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "common/Types.h"
 #include "config/ConfigChunkManager.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/dataset.h"
@@ -192,17 +194,19 @@ GetDataSize(const FieldMeta& field, size_t row_count, const DataArray* data) {
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING: {
-                auto begin = data->scalars().string_data().data().begin();
-                auto end = data->scalars().string_data().data().end();
-
-                ssize_t size{0};
-                while (begin != end) {
-                    size += begin->size();
-                    begin++;
+                ssize_t size{};
+                for (auto& data : data->scalars().string_data().data()) {
+                    size += data.size();
                 }
                 return size;
             }
-
+            case DataType::JSON: {
+                ssize_t size{};
+                for (auto& data : data->scalars().json_data().data()) {
+                    size += data.size();
+                }
+                return size;
+            }
             default:
                 PanicInfo(fmt::format("not supported data type {}",
                                       datatype_name(data_type)));
@@ -260,6 +264,16 @@ FillField(DataType data_type,
             }
             return dst;
         }
+
+        case DataType::JSON: {
+            char* dest = reinterpret_cast<char*>(dst);
+            for (auto& data : data->scalars().json_data().data()) {
+                memcpy(dest, data.data(), data.size());
+                dest += data.size();
+            }
+            return dst;
+        }
+
         case DataType::VECTOR_FLOAT:
             return memcpy(
                 dst, data->vectors().float_vector().data().data(), size);

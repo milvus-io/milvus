@@ -435,10 +435,12 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 		)
 		suite.Require().NoError(err)
 
+		vecFieldIDs := funcutil.GetVecFieldIDs(schema)
 		indexes, err := segments.GenAndSaveIndex(
 			suite.collectionID,
 			suite.partitionIDs[i%partNum],
 			suite.validSegmentIDs[i],
+			vecFieldIDs[0],
 			100,
 			segments.IndexFaissIVFFlat,
 			segments.L2,

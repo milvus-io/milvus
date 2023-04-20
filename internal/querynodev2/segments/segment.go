@@ -594,6 +594,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		           const long* primary_keys,
 		           const unsigned long* timestamps);
 	*/
+
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 

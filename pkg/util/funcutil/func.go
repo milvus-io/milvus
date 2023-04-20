@@ -234,6 +234,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
+		case *schemapb.ScalarField_ArrayData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetArrayData().Data)
+		case *schemapb.ScalarField_JsonData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetJsonData().Data)
 		default:
 			return 0, fmt.Errorf("%s is not supported now", scalarType)
 		}

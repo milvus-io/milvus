@@ -71,6 +71,32 @@ func genEmptyVarCharFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: nil}},
+			},
+		},
+		FieldId: field.GetFieldID(),
+	}
+}
+
+func genEmptyJSONFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: nil}},
+			},
+		},
+		FieldId: field.GetFieldID(),
+	}
+}
+
 func genEmptyBinaryVectorFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	dim, err := GetDim(field)
 	if err != nil {
@@ -124,6 +150,10 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyDoubleFieldData(field), nil
 	case schemapb.DataType_VarChar:
 		return genEmptyVarCharFieldData(field), nil
+	case schemapb.DataType_Array:
+		return genEmptyArrayFieldData(field), nil
+	case schemapb.DataType_JSON:
+		return genEmptyJSONFieldData(field), nil
 	case schemapb.DataType_BinaryVector:
 		return genEmptyBinaryVectorFieldData(field)
 	case schemapb.DataType_FloatVector:

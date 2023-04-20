@@ -56,6 +56,8 @@ func TestGenEmptyFieldData(t *testing.T) {
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
 		schemapb.DataType_VarChar,
+		schemapb.DataType_Array,
+		schemapb.DataType_JSON,
 	}
 	allUnsupportedTypes := []schemapb.DataType{
 		schemapb.DataType_String,

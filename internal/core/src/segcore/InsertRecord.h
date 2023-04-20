@@ -217,6 +217,12 @@ struct InsertRecord {
                                                          size_per_chunk);
                     break;
                 }
+                case DataType::JSON:
+                case DataType::ARRAY: {
+                    this->append_field_data<std::string>(field_id,
+                                                         size_per_chunk);
+                    break;
+                }
                 default: {
                     PanicInfo("unsupported");
                 }

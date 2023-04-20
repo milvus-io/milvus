@@ -59,6 +59,8 @@ enum class DataType {
 
     STRING = 20,
     VARCHAR = 21,
+    ARRAY = 22,
+    JSON = 23,
 
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,

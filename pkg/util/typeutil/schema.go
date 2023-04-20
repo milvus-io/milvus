@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
+const DynamicFieldMaxLength = 512
+
 func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error) {
 	maxLength := 0
 	var err error
@@ -37,10 +39,9 @@ func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 		paramsMap[p.Key] = p.Value
 	}
 
-	maxLengthPerRowKey := "max_length"
-
 	switch fieldSchema.DataType {
 	case schemapb.DataType_VarChar:
+		maxLengthPerRowKey := "max_length"
 		maxLengthPerRowValue, ok := paramsMap[maxLengthPerRowKey]
 		if !ok {
 			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
@@ -49,6 +50,8 @@ func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 		if err != nil {
 			return 0, err
 		}
+	case schemapb.DataType_Array, schemapb.DataType_JSON:
+		return DynamicFieldMaxLength, nil
 	default:
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
 	}
@@ -74,7 +77,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_Array, schemapb.DataType_JSON:
 			maxLengthPerRow, err := GetAvgLengthOfVarLengthField(fs)
 			if err != nil {
 				return 0, err
@@ -107,6 +110,42 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return res, nil
 }
 
+func CalcColumnSize(column *schemapb.FieldData) int {
+	res := 0
+	switch column.GetType() {
+	case schemapb.DataType_Bool:
+		res += len(column.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8:
+		res += len(column.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int16:
+		res += len(column.GetScalars().GetIntData().GetData()) * 2
+	case schemapb.DataType_Int32:
+		res += len(column.GetScalars().GetIntData().GetData()) * 4
+	case schemapb.DataType_Int64:
+		res += len(column.GetScalars().GetLongData().GetData()) * 8
+	case schemapb.DataType_Float:
+		res += len(column.GetScalars().GetFloatData().GetData()) * 4
+	case schemapb.DataType_Double:
+		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
+	case schemapb.DataType_VarChar:
+		for _, str := range column.GetScalars().GetStringData().GetData() {
+			res += len(str)
+		}
+	case schemapb.DataType_Array:
+		for _, array := range column.GetScalars().GetArrayData().GetData() {
+			res += CalcColumnSize(&schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{Scalars: array},
+				Type:  column.GetScalars().GetArrayData().GetElementType(),
+			})
+		}
+	case schemapb.DataType_JSON:
+		for _, str := range column.GetScalars().GetJsonData().GetData() {
+			res += len(str)
+		}
+	}
+	return res
+}
+
 func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, error) {
 	res := 0
 	for _, fs := range fieldsData {
@@ -123,8 +162,21 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
 				return 0, fmt.Errorf("offset out range of field datas")
 			}
-			//TODO:: check len(varChar) <= maxLengthPerRow
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
+		case schemapb.DataType_Array:
+			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
+				return 0, fmt.Errorf("offset out range of field datas")
+			}
+			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
+			res += CalcColumnSize(&schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{Scalars: array},
+				Type:  fs.GetScalars().GetArrayData().GetElementType(),
+			})
+		case schemapb.DataType_JSON:
+			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
+				return 0, fmt.Errorf("offset out range of field datas")
+			}
+			res += len(fs.GetScalars().GetJsonData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector:
 			res += int(fs.GetVectors().GetDim())
 		case schemapb.DataType_FloatVector:
@@ -346,6 +398,26 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 					}
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data[idx])
+				}
+			case *schemapb.ScalarField_ArrayData:
+				if dstScalar.GetArrayData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data: []*schemapb.ScalarField{srcScalar.ArrayData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
+				}
+			case *schemapb.ScalarField_JsonData:
+				if dstScalar.GetJsonData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: [][]byte{srcScalar.JsonData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data[idx])
 				}
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))

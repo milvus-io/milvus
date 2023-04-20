@@ -56,6 +56,14 @@ PayloadWriter::add_one_string_payload(const char* str, int str_size) {
 }
 
 void
+PayloadWriter::add_one_binary_payload(const uint8_t* data, int length) {
+    AssertInfo(output_ == nullptr, "payload writer has been finished");
+    AssertInfo(milvus::datatype_is_binary(column_type_), "mismatch data type");
+    AddOneBinaryToArrowBuilder(builder_, data, length);
+    rows_.fetch_add(1);
+}
+
+void
 PayloadWriter::add_payload(const Payload& raw_data) {
     AssertInfo(output_ == nullptr, "payload writer has been finished");
     AssertInfo(column_type_ == raw_data.data_type, "mismatch data type");

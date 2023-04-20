@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/parquet"
@@ -19,6 +20,8 @@ type PayloadReader struct {
 	colType schemapb.DataType
 	numRows int64
 }
+
+var _ PayloadReaderInterface = (*PayloadReader)(nil)
 
 func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, error) {
 	if len(buf) == 0 {
@@ -66,6 +69,12 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 		return r.GetFloatVectorFromPayload()
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, err := r.GetStringFromPayload()
+		return val, 0, err
+	case schemapb.DataType_Array:
+		val, err := r.GetArrayFromPayload()
+		return val, 0, err
+	case schemapb.DataType_JSON:
+		val, err := r.GetJSONFromPayload()
 		return val, 0, err
 	default:
 		return nil, 0, errors.New("unknown type")
@@ -238,6 +247,33 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, error) {
 		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
 	}
 
+	return readByteAndConvert(r, func(bytes parquet.ByteArray) string {
+		return bytes.String()
+	})
+}
+
+func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, error) {
+	if r.colType != schemapb.DataType_Array {
+		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
+	}
+	return readByteAndConvert(r, func(bytes parquet.ByteArray) *schemapb.ScalarField {
+		v := &schemapb.ScalarField{}
+		proto.Unmarshal(bytes, v)
+		return v
+	})
+}
+
+func (r *PayloadReader) GetJSONFromPayload() ([][]byte, error) {
+	if r.colType != schemapb.DataType_JSON {
+		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
+	}
+
+	return readByteAndConvert(r, func(bytes parquet.ByteArray) []byte {
+		return bytes
+	})
+}
+
+func readByteAndConvert[T any](r *PayloadReader, convert func(parquet.ByteArray) T) ([]T, error) {
 	values := make([]parquet.ByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
@@ -248,9 +284,9 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, error) {
 		return nil, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
-	ret := make([]string, r.numRows)
+	ret := make([]T, r.numRows)
 	for i := 0; i < int(r.numRows); i++ {
-		ret[i] = values[i].String()
+		ret[i] = convert(values[i])
 	}
 	return ret, nil
 }

@@ -17,6 +17,7 @@
 package typeutil
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
 
@@ -123,12 +124,23 @@ func TestSchema(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldID:     109,
+				Name:        "field_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+			{
+				FieldID:  110,
+				Name:     "field_json",
+				DataType: schemapb.DataType_JSON,
+			},
 		},
 	}
 
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
 		size, err := EstimateSizePerRecord(schema)
-		assert.Equal(t, 680, size)
+		assert.Equal(t, 680+DynamicFieldMaxLength*2, size)
 		assert.Nil(t, err)
 	})
 
@@ -360,6 +372,44 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_Int8:
+		data := []int32{}
+		for _, v := range fieldValue.([]int8) {
+			data = append(data, int32(v))
+		}
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int8,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data,
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Int16:
+		data := []int32{}
+		for _, v := range fieldValue.([]int16) {
+			data = append(data, int32(v))
+		}
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int16,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data,
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
 	case schemapb.DataType_Int32:
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_Int32,
@@ -420,6 +470,21 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_VarChar:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: fieldValue.([]string),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
 	case schemapb.DataType_BinaryVector:
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_BinaryVector,
@@ -444,6 +509,49 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
 							Data: fieldValue.([]float32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Array:
+		data := fieldValue.([][]int32)
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        []*schemapb.ScalarField{},
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		for _, list := range data {
+			arrayList := fieldData.GetScalars().GetArrayData()
+			arrayList.Data = append(arrayList.Data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: list,
+					},
+				},
+			})
+		}
+
+	case schemapb.DataType_JSON:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_JSON,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: fieldValue.([][]byte),
 						},
 					},
 				},
@@ -765,4 +873,120 @@ func TestComparePk(t *testing.T) {
 	assert.False(t, less)
 	less = ComparePKInSlice(strPks, 2, 1)
 	assert.False(t, less)
+}
+
+func TestCalcColumnSize(t *testing.T) {
+	fieldValues := map[int64]any{
+		100: []int8{0, 1},
+		101: []int16{0, 1},
+		102: []int32{0, 1},
+		103: []int64{0, 1},
+		104: []float32{0, 1},
+		105: []float64{0, 1},
+		106: []string{"0", "1"},
+		107: []float32{0, 1, 2, 3},
+		109: [][]int32{{1, 2, 3}, {4, 5, 6}},
+		110: [][]byte{[]byte(`{"key":"value"}`), []byte(`{"hello":"world"}`)},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:        "testColl",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "field_int8",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int8,
+			},
+			{
+				FieldID:      101,
+				Name:         "field_int16",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Int16,
+			},
+			{
+				FieldID:      102,
+				Name:         "field_int32",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Int32,
+			},
+			{
+				FieldID:      103,
+				Name:         "field_int64",
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      104,
+				Name:         "field_float",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Float,
+			},
+			{
+				FieldID:      105,
+				Name:         "field_double",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Double,
+			},
+			{
+				FieldID:      106,
+				Name:         "field_string",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "125",
+					},
+				},
+			},
+			{
+				FieldID:     109,
+				Name:        "field_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+			{
+				FieldID:  110,
+				Name:     "field_json",
+				DataType: schemapb.DataType_JSON,
+			},
+		},
+	}
+
+	for _, field := range schema.GetFields() {
+		values := fieldValues[field.GetFieldID()]
+		fieldData := genFieldData(field.GetName(), field.GetFieldID(), field.GetDataType(), values, 0)
+		size := CalcColumnSize(fieldData)
+		expected := 0
+		switch field.GetDataType() {
+		case schemapb.DataType_VarChar:
+			data := values.([]string)
+			for _, v := range data {
+				expected += len(v)
+			}
+		case schemapb.DataType_Array:
+			data := values.([][]int32)
+			for _, v := range data {
+				expected += binary.Size(v)
+			}
+		case schemapb.DataType_JSON:
+			data := values.([][]byte)
+			for _, v := range data {
+				expected += len(v)
+			}
+
+		default:
+			expected = binary.Size(fieldValues[field.GetFieldID()])
+		}
+
+		assert.Equal(t, expected, size, field.GetName())
+	}
 }

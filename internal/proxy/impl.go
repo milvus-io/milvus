@@ -2042,7 +2042,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		// req:       request,
 		insertMsg: &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -2058,7 +2057,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 				FieldsData:     request.FieldsData,
 				NumRows:        uint64(request.NumRows),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
-				// RowData: transfer column based request to this
 			},
 		},
 		idAllocator:   node.rowIDAllocator,

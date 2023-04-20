@@ -75,6 +75,10 @@ datatype_name(DataType data_type) {
             return "double";
         case DataType::VARCHAR:
             return "varChar";
+        case DataType::ARRAY:
+            return "array";
+        case DataType::JSON:
+            return "json";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY: {
@@ -106,10 +110,23 @@ datatype_is_string(DataType datatype) {
 }
 
 inline bool
+datatype_is_binary(DataType datatype) {
+    switch (datatype) {
+        case DataType::ARRAY:
+        case DataType::JSON:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
 datatype_is_variable(DataType datatype) {
     switch (datatype) {
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::ARRAY:
+        case DataType::JSON:
             return true;
         default:
             return false;
@@ -152,7 +169,7 @@ class FieldMeta {
 
     FieldMeta(const FieldName& name, FieldId id, DataType type)
         : name_(name), id_(id), type_(type) {
-        Assert(!is_vector());
+        Assert(!datatype_is_vector(type_));
     }
 
     FieldMeta(const FieldName& name,
@@ -163,7 +180,7 @@ class FieldMeta {
           id_(id),
           type_(type),
           string_info_(StringInfo{max_length}) {
-        Assert(is_string());
+        Assert(datatype_is_string(type_));
     }
 
     FieldMeta(const FieldName& name,
@@ -175,39 +192,26 @@ class FieldMeta {
           id_(id),
           type_(type),
           vector_info_(VectorInfo{dim, metric_type}) {
-        Assert(is_vector());
-    }
-
-    bool
-    is_vector() const {
-        Assert(type_ != DataType::NONE);
-        return type_ == DataType::VECTOR_BINARY ||
-               type_ == DataType::VECTOR_FLOAT;
-    }
-
-    bool
-    is_string() const {
-        Assert(type_ != DataType::NONE);
-        return type_ == DataType::VARCHAR || type_ == DataType::STRING;
+        Assert(datatype_is_vector(type_));
     }
 
     int64_t
     get_dim() const {
-        Assert(is_vector());
+        Assert(datatype_is_vector(type_));
         Assert(vector_info_.has_value());
         return vector_info_->dim_;
     }
 
     int64_t
     get_max_len() const {
-        Assert(is_string());
+        Assert(datatype_is_string(type_));
         Assert(string_info_.has_value());
         return string_info_->max_length;
     }
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
-        Assert(is_vector());
+        Assert(datatype_is_vector(type_));
         Assert(vector_info_.has_value());
         return vector_info_->metric_type_;
     }
@@ -227,12 +231,26 @@ class FieldMeta {
         return type_;
     }
 
+    bool
+    is_vector() const {
+        return datatype_is_vector(type_);
+    }
+
+    bool
+    is_string() const {
+        return datatype_is_string(type_);
+    }
+
     size_t
     get_sizeof() const {
+        static const size_t ARRAY_SIZE = 128;
+        static const size_t JSON_SIZE = 512;
         if (is_vector()) {
             return datatype_sizeof(type_, get_dim());
         } else if (is_string()) {
             return string_info_->max_length;
+        } else if (datatype_is_variable(type_)) {
+            return type_ == DataType::ARRAY ? ARRAY_SIZE : JSON_SIZE;
         } else {
             return datatype_sizeof(type_);
         }
