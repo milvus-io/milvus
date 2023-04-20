@@ -171,19 +171,62 @@ func (suite *ServerSuite) TestRecoverFailed() {
 }
 
 func (suite *ServerSuite) TestNodeUp() {
-	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
-	err := newNode.Start()
+	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
+	err := node1.Start()
 	suite.NoError(err)
-	defer newNode.Stop()
+	defer node1.Stop()
 
 	suite.Eventually(func() bool {
-		node := suite.server.nodeMgr.Get(newNode.ID)
+		node := suite.server.nodeMgr.Get(node1.ID)
 		if node == nil {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, newNode.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node1.ID)
+			if replica == nil {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, time.Second)
+
+	// mock node1 lost connection
+	fakeLostConnectionErr := errors.New("fake lost connection error")
+	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, fakeLostConnectionErr)
+
+	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
+	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil).Maybe()
+	err = node2.Start()
+	suite.NoError(err)
+	defer node2.Stop()
+
+	// expect node2 won't be add to qc, due to unhealthy nodes exist
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
+		}
+		for _, collection := range suite.collections {
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
+			if replica == nil {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Second)
+
+	// mock node1 down, so no unhealthy nodes exist
+	suite.server.nodeMgr.Remove(node1.ID)
+
+	// expect node2 will be add to qc
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
+		}
+		for _, collection := range suite.collections {
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
 			if replica == nil {
 				return false
 			}

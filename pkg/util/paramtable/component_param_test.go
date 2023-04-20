@@ -267,6 +267,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.enableRGAutoRecover", "false")
 		enableResourceGroupAutoRecover = Params.EnableRGAutoRecover
 		assert.Equal(t, false, enableResourceGroupAutoRecover.GetAsBool())
+
+		checkHealthInterval := Params.CheckHealthInterval.GetAsInt()
+		assert.Equal(t, 3000, checkHealthInterval)
+		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
+		assert.Equal(t, 100, checkHealthRPCTimeout)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

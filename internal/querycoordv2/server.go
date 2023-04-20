@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -112,13 +113,16 @@ type Server struct {
 	// Active-standby
 	enableActiveStandBy bool
 	activateFunc        func() error
+
+	nodeUpEventChan chan int64
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:             ctx,
+		cancel:          cancel,
+		nodeUpEventChan: make(chan int64, 10240),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -387,7 +391,9 @@ func (s *Server) startQueryCoord() error {
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
-	s.wg.Add(1)
+
+	s.wg.Add(2)
+	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
 	log.Info("start recovering dist and target")
@@ -621,9 +627,7 @@ func (s *Server) watchNodes(revision int64) {
 					zap.String("nodeAddr", addr),
 				)
 				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
-				s.handleNodeUp(nodeID)
-				s.metricsCacheManager.InvalidateSystemInfoMetrics()
-				s.checkerController.Check()
+				s.nodeUpEventChan <- nodeID
 
 			case sessionutil.SessionUpdateEvent:
 				nodeID := event.Session.ServerID
@@ -641,6 +645,44 @@ func (s *Server) watchNodes(revision int64) {
 				s.nodeMgr.Remove(nodeID)
 				s.handleNodeDown(nodeID)
 				s.metricsCacheManager.InvalidateSystemInfoMetrics()
+			}
+		}
+	}
+}
+
+func (s *Server) handleNodeUpLoop() {
+	log := log.Ctx(s.ctx).WithRateGroup("qcv2.Server", 1, 60)
+	defer s.wg.Done()
+	// small check interval value can reduce the latency of node up
+	ticker := time.NewTicker(Params.QueryCoordCfg.CheckHealthInterval.GetAsDuration(time.Millisecond))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(s.ctx, Params.QueryCoordCfg.CheckHealthRPCTimeout.GetAsDuration(time.Millisecond))
+			defer cancel()
+			reasons, err := s.checkNodeHealth(ctx)
+			if err != nil {
+				log.RatedWarn(10, "unhealthy node exist, node up will be delayed",
+					zap.Int("delayedNodeUpEvents", len(s.nodeUpEventChan)),
+					zap.Int("unhealthyNodeNum", len(reasons)),
+					zap.Strings("unhealthyReason", reasons))
+				return
+			}
+			for len(s.nodeUpEventChan) > 0 {
+				nodeID := <-s.nodeUpEventChan
+				if s.nodeMgr.Get(nodeID) != nil {
+					// only if all nodes are healthy, node up event will be handled
+					s.handleNodeUp(nodeID)
+					s.metricsCacheManager.InvalidateSystemInfoMetrics()
+					s.checkerController.Check()
+				} else {
+					log.Warn("node already down",
+						zap.Int64("nodeID", nodeID))
+				}
 			}
 		}
 	}
