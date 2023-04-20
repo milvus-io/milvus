@@ -94,6 +94,7 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
+	hasStartedTTLoop bool
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 	helper           ServerHelper
@@ -196,6 +197,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby,
+		hasStartedTTLoop:       false,
 	}
 
 	for _, opt := range opts {
@@ -491,11 +493,27 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopWg.Add(3)
-	s.startDataNodeTtLoop(s.serverLoopCtx)
+	s.mayStartServerLoop()
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.garbageCollector.start()
+}
+
+func (s *Server) mayStartServerLoop() {
+	startLoop := func() {
+		s.startDataNodeTtLoop(s.serverLoopCtx)
+		s.serverLoopWg.Add(1)
+		s.hasStartedTTLoop = true
+	}
+	//lazily trigger creating dataCoord timeTick channel to save topic resources
+	//this is a temporary solution for vdc and will be removed later
+	if !s.hasStartedTTLoop && !Params.DataCoordCfg.LazyWatchDCTTChannel {
+		startLoop()
+		return
+	}
+	if !s.hasStartedTTLoop && s.channelManager.HasValidChannel() {
+		startLoop()
+	}
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
@@ -513,7 +531,6 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick),
 		zap.String("subscription", subName))
 	ttMsgStream.Start()
-
 	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
 }
 
@@ -668,6 +685,7 @@ func (s *Server) setLastFlushTime(segments []*SegmentInfo) {
 
 // start a goroutine wto watch services
 func (s *Server) startWatchService(ctx context.Context) {
+	s.serverLoopWg.Add(1)
 	go s.watchService(ctx)
 }
 
@@ -782,6 +800,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 // startFlushLoop starts a goroutine to handle post func process
 // which is to notify `RootCoord` that this segment is flushed
 func (s *Server) startFlushLoop(ctx context.Context) {
+	s.serverLoopWg.Add(1)
 	go func() {
 		defer logutil.LogPanic()
 		defer s.serverLoopWg.Done()

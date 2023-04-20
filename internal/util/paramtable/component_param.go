@@ -1346,6 +1346,7 @@ type dataCoordConfig struct {
 	WatchTimeoutInterval         time.Duration
 	ChannelBalanceSilentDuration time.Duration
 	ChannelBalanceInterval       time.Duration
+	LazyWatchDCTTChannel         bool
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 float64
@@ -1391,6 +1392,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initWatchTimeoutInterval()
 	p.initChannelBalanceSilentDuration()
 	p.initChannelBalanceInterval()
+	p.initLazyWatchDCTTChannel()
 
 	p.initSegmentMaxSize()
 	p.initDiskSegmentMaxSize()
@@ -1432,6 +1434,10 @@ func (p *dataCoordConfig) initChannelBalanceSilentDuration() {
 
 func (p *dataCoordConfig) initChannelBalanceInterval() {
 	p.ChannelBalanceInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.balanceInterval", 360)) * time.Second
+}
+
+func (p *dataCoordConfig) initLazyWatchDCTTChannel() {
+	p.LazyWatchDCTTChannel = p.Base.ParseBool("dataCoord.lazy.watch.ttChannel", true)
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {

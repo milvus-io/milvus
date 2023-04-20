@@ -873,6 +873,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		defer cancel()
 
 		cm, err := NewChannelManager(metakv, newMockHandler())
+		assert.False(t, cm.HasValidChannel())
 		assert.Nil(t, err)
 		assert.Nil(t, cm.AddNode(1))
 		assert.Nil(t, cm.AddNode(2))
@@ -894,6 +895,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		require.NoError(t, err)
 
 		cm2, err := NewChannelManager(metakv, newMockHandler())
+		assert.True(t, cm2.HasValidChannel())
 		assert.Nil(t, err)
 		assert.Nil(t, cm2.Startup(ctx, []int64{3}))
 

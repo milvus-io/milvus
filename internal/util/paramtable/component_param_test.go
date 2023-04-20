@@ -380,6 +380,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.EnableActiveStandby, false)
 		assert.True(t, Params.SegmentCompactableProportion >= Params.SegmentSmallProportion)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
+
+		assert.True(t, Params.LazyWatchDCTTChannel)
+		Params.Base.Save("dataCoord.lazy.watch.ttChannel", "false")
+		Params.initLazyWatchDCTTChannel()
+		assert.False(t, Params.LazyWatchDCTTChannel)
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

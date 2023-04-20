@@ -886,3 +886,13 @@ func (c *ChannelManager) isSilent() bool {
 	}
 	return time.Since(c.lastActiveTimestamp) >= Params.DataCoordCfg.ChannelBalanceSilentDuration
 }
+
+func (c *ChannelManager) HasValidChannel() bool {
+	nodeChannels := c.store.GetChannels()
+	for _, nodeChan := range nodeChannels {
+		if len(nodeChan.Channels) > 0 {
+			return true
+		}
+	}
+	return false
+}

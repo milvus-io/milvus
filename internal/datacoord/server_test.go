@@ -4026,6 +4026,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	Params.DataCoordCfg.LazyWatchDCTTChannel = false
 	factory := dependency.NewDefaultFactory(true)
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd,
