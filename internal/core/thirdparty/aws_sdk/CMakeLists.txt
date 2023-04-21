@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 # -------------------------------------------------------------------------------
 
-set(AWS_SDK_VERSION "1.9.234")
+set(AWS_SDK_VERSION "1.11.44")
 
 macro(build_aws_sdk_s3)
     message(STATUS "Building AWS-SDK-${AWS_SDK_VERSION} from source")
@@ -24,8 +24,12 @@ macro(build_aws_sdk_s3)
     set(AWS_SDK_S3_CMAKE_ARGS
         "-DCMAKE_BUILD_TYPE=Release"
         "-DBUILD_ONLY=s3"
+        "-DBUILD_SHARED_LIBS=ON"
         "-DENABLE_TESTING=OFF"
         "-DAUTORUN_UNIT_TESTS=OFF"
+        "-DCUSTOM_MEMORY_MANAGEMENT=OFF"
+        "-DAWS_CUSTOM_MEMORY_MANAGEMENT=OFF"
+        "-DUSE_AWS_MEMORY_MANAGEMENT=OFF"
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 
     if ( APPLE )
@@ -64,6 +68,16 @@ macro(build_aws_sdk_s3)
         IMPORTED_LOCATION ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_SHARED_LIBRARY_SUFFIX}
         INTERFACE_INCLUDE_DIRECTORIES ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
     add_dependencies(aws-cpp-sdk-s3 aws_sdk_s3_ep)
+
+    if ( APPLE )
+        add_library(aws-crt-cpp SHARED IMPORTED)
+        set_target_properties(aws-crt-cpp
+            PROPERTIES
+            IMPORTED_GLOBAL TRUE
+            IMPORTED_LOCATION ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-crt-cpp${CMAKE_SHARED_LIBRARY_SUFFIX}
+            INTERFACE_INCLUDE_DIRECTORIES ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
+        add_dependencies(aws-crt-cpp aws_sdk_s3_ep)
+    endif()
 
     # add_library(aws-cpp-sdk-sts SHARED IMPORTED)
     # set_target_properties(aws-cpp-sdk-sts

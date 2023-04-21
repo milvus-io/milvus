@@ -46,8 +46,10 @@ add_library(milvus_storage SHARED ${STORAGE_FILES})
 
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
-if ( LINUX OR APPLE )
+if ( LINUX )
     target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-core aws-cpp-sdk-s3 google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
+elseif ( APPLE )
+    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-core aws-cpp-sdk-s3 aws-crt-cpp google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
 elseif ( MSYS )
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()

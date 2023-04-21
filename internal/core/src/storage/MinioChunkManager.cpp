@@ -172,8 +172,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 }
 
 MinioChunkManager::~MinioChunkManager() {
-    ShutdownSDKAPI();
     client_.reset();
+    ShutdownSDKAPI();
 }
 
 uint64_t
