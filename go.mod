@@ -18,11 +18,13 @@ require (
 	github.com/gin-gonic/gin v1.9.0
 	github.com/gofrs/flock v0.8.1
 	github.com/golang/protobuf v1.5.3
-	github.com/klauspost/compress v1.14.4
+	github.com/klauspost/compress v1.16.0
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230522080721-ef84459b8f87
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/minio/minio-go/v7 v7.0.17
+	github.com/nats-io/nats-server/v2 v2.9.15
+	github.com/nats-io/nats.go v1.24.0
 	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
@@ -39,7 +41,7 @@ require (
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.6.0
 	go.uber.org/zap v1.17.0
-	golang.org/x/crypto v0.5.0
+	golang.org/x/crypto v0.6.0
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17
 	golang.org/x/oauth2 v0.6.0
 	golang.org/x/sync v0.1.0
@@ -62,8 +64,12 @@ require (
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.6 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	go.uber.org/automaxprocs v1.4.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
+	github.com/minio/highwayhash v1.0.2 // indirect
+	github.com/nats-io/jwt/v2 v2.3.0 // indirect
+	github.com/nats-io/nkeys v0.3.0 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
+	go.uber.org/automaxprocs v1.5.1 // indirect
 )
 
 require (
@@ -193,7 +199,7 @@ require (
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/term v0.6.0 // indirect
-	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba // indirect
+	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.7.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.9.3 // indirect
