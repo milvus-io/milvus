@@ -333,7 +333,7 @@ func TestCreateRetrievePlan(t *testing.T) {
 
 func TestCreateSearchPlan(t *testing.T) {
 	schema := newTestSchema()
-	_, err := CreateSearchPlan(schema, "Int64Field > 0", "FloatVectorField", &planpb.QueryInfo{
+	_, err := CreateSearchPlan(schema, `JSONField["A"] +5 > 10`, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
 		SearchParams: "",

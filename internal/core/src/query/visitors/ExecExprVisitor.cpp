@@ -14,13 +14,21 @@
 #include <boost/variant.hpp>
 #include <deque>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
+#include "common/Json.h"
+#include "common/Types.h"
+#include "exceptions/EasyAssert.h"
+#include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "query/Relational.h"
 #include "query/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "simdjson/error.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
@@ -160,11 +168,16 @@ Assemble(const std::deque<BitsetType>& srcs) -> BitsetType {
     return res;
 }
 
-template <typename T, typename IndexFunc, typename ElementFunc>
+template <typename T,
+          typename ExprValueType,
+          typename IndexFunc,
+          typename ElementFunc>
 auto
-ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
-                                      IndexFunc index_func,
-                                      ElementFunc element_func) -> BitsetType {
+ExecExprVisitor::ExecRangeVisitorImpl(
+    FieldId field_id,
+    IndexFunc index_func,
+    ElementFunc element_func,
+    const std::vector<std::string>& nested_path) -> BitsetType {
     auto& schema = segment_.get_schema();
     auto& field_meta = schema[field_id];
     auto indexing_barrier = segment_.num_chunk_index(field_id);
@@ -194,8 +207,26 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
-            auto x = data[index];
-            result[index] = element_func(x);
+            if constexpr (std::is_same_v<T, milvus::Json>) {
+                using GetType = std::conditional_t<
+                    std::is_same_v<ExprValueType, std::string>,
+                    std::string_view,
+                    ExprValueType>;
+                GetType x;
+                auto err = data[index][nested_path].template get(x);
+                for (auto& s : nested_path) {
+                    std::cout << s << std::endl;
+                }
+                std::cout << fmt::format("{}", boost::join(nested_path, ","))
+                          << std::endl;
+                if (err != simdjson::SUCCESS) {
+                    result[index] = false;
+                } else {
+                    result[index] = element_func(ExprValueType(x));
+                }
+            } else {
+                result[index] = element_func(data[index]);
+            }
         }
 
         results.emplace_back(std::move(result));
@@ -206,12 +237,16 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
     return final_result;
 }
 
-template <typename T, typename IndexFunc, typename ElementFunc>
+template <typename T,
+          typename ExprValueType,
+          typename IndexFunc,
+          typename ElementFunc>
 auto
-ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
-                                          IndexFunc index_func,
-                                          ElementFunc element_func)
-    -> BitsetType {
+ExecExprVisitor::ExecDataRangeVisitorImpl(
+    FieldId field_id,
+    IndexFunc index_func,
+    ElementFunc element_func,
+    const std::vector<std::string>& nested_path) -> BitsetType {
     auto& schema = segment_.get_schema();
     auto& field_meta = schema[field_id];
     auto size_per_chunk = segment_.size_per_chunk();
@@ -234,7 +269,21 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
-            result[index] = element_func(data[index]);
+            if constexpr (std::is_same_v<T, milvus::Json>) {
+                using GetType = std::conditional_t<
+                    std::is_same_v<ExprValueType, std::string>,
+                    std::string_view,
+                    ExprValueType>;
+                GetType x;
+                auto err = data[index][nested_path].template get(x);
+                if (err != simdjson::SUCCESS) {
+                    result[index] = false;
+                } else {
+                    result[index] = element_func(ExprValueType(x));
+                }
+            } else {
+                result[index] = element_func(data[index]);
+            }
         }
         AssertInfo(
             result.size() == this_size,
@@ -287,7 +336,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x == val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::NotEqual: {
             auto index_func = [val](Index* index) {
@@ -295,7 +344,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x != val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::GreaterEqual: {
             auto index_func = [val](Index* index) {
@@ -303,7 +352,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x >= val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::GreaterThan: {
             auto index_func = [val](Index* index) {
@@ -311,7 +360,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x > val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::LessEqual: {
             auto index_func = [val](Index* index) {
@@ -319,7 +368,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x <= val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::LessThan: {
             auto index_func = [val](Index* index) {
@@ -327,7 +376,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val](T x) { return (x < val); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         case OpType::PrefixMatch: {
             auto index_func = [val](Index* index) {
@@ -338,7 +387,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
             };
             auto elem_func = [val, op](T x) { return Match(x, val, op); };
             return ExecRangeVisitorImpl<T>(
-                expr.field_id_, index_func, elem_func);
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
         }
         // TODO: PostfixMatch
         default: {
@@ -347,6 +396,62 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
     }
 }
 #pragma clang diagnostic pop
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr = static_cast<UnaryRangeExprImpl<ExprValueType>&>(expr_raw);
+
+    auto op = expr.op_type_;
+    auto val = expr.value_;
+    auto& nested_path = expr.nested_path_;
+    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+    switch (op) {
+        case OpType::Equal: {
+            auto elem_func = [val](ExprValueType x) { return (x == val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::NotEqual: {
+            auto elem_func = [val](ExprValueType x) { return (x != val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::GreaterEqual: {
+            auto elem_func = [val](ExprValueType x) { return (x >= val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::GreaterThan: {
+            auto elem_func = [val](ExprValueType x) { return (x > val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::LessEqual: {
+            auto elem_func = [val](ExprValueType x) { return (x <= val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::LessThan: {
+            auto elem_func = [val](ExprValueType x) { return (x < val); };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        case OpType::PrefixMatch: {
+            auto elem_func = [val, op](ExprValueType x) {
+                return Match(x, val, op);
+            };
+            return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+                expr.field_id_, index_func, elem_func, expr.nested_path_);
+        }
+        // TODO: PostfixMatch
+        default: {
+            PanicInfo("unsupported range node");
+        }
+    }
+}
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "Simplify"
@@ -360,6 +465,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
     auto right_operand = expr.right_operand_;
     auto op = expr.op_type_;
     auto val = expr.value_;
+    auto& nested_path = expr.nested_path_;
 
     switch (op) {
         case OpType::Equal: {
@@ -370,11 +476,13 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand, &nested_path](T x) {
+                        // visit the nested field
+                        // now it must be Json
                         return ((x + right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
-                        expr.field_id_, index_func, elem_func);
+                        expr.field_id_, index_func, elem_func, nested_path);
                 }
                 case ArithOpType::Sub: {
                     auto index_func = [val, right_operand](Index* index,
@@ -386,7 +494,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         return ((x - right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
-                        expr.field_id_, index_func, elem_func);
+                        expr.field_id_, index_func, elem_func, nested_path);
                 }
                 case ArithOpType::Mul: {
                     auto index_func = [val, right_operand](Index* index,
@@ -398,7 +506,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         return ((x * right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
-                        expr.field_id_, index_func, elem_func);
+                        expr.field_id_, index_func, elem_func, nested_path);
                 }
                 case ArithOpType::Div: {
                     auto index_func = [val, right_operand](Index* index,
@@ -410,7 +518,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         return ((x / right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
-                        expr.field_id_, index_func, elem_func);
+                        expr.field_id_, index_func, elem_func, nested_path);
                 }
                 case ArithOpType::Mod: {
                     auto index_func = [val, right_operand](Index* index,
@@ -422,7 +530,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         return (static_cast<T>(fmod(x, right_operand)) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
-                        expr.field_id_, index_func, elem_func);
+                        expr.field_id_, index_func, elem_func, nested_path);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -503,6 +611,162 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
 }
 #pragma clang diagnostic pop
 
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
+    BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
+    auto& expr =
+        static_cast<BinaryArithOpEvalRangeExprImpl<ExprValueType>&>(expr_raw);
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto arith_op = expr.arith_op_;
+    auto right_operand = expr.right_operand_;
+    auto op = expr.op_type_;
+    auto val = expr.value_;
+    auto& nested_path = expr.nested_path_;
+
+    switch (op) {
+        case OpType::Equal: {
+            switch (arith_op) {
+                case ArithOpType::Add: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x + right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Sub: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x - right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Mul: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x * right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Div: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x / right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Mod: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return (static_cast<ExprValueType>(
+                                    fmod(x, right_operand)) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                default: {
+                    PanicInfo("unsupported arithmetic operation");
+                }
+            }
+        }
+        case OpType::NotEqual: {
+            switch (arith_op) {
+                case ArithOpType::Add: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x + right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Sub: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x - right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Mul: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x * right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Div: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return ((x / right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                case ArithOpType::Mod: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [val, right_operand](ExprValueType x) {
+                        return (static_cast<ExprValueType>(
+                                    fmod(x, right_operand)) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json,
+                                                    ExprValueType>(
+                        expr.field_id_, index_func, elem_func);
+                }
+                default: {
+                    PanicInfo("unsupported arithmetic operation");
+                }
+            }
+        }
+        default: {
+            PanicInfo("unsupported range node with arithmetic operation");
+        }
+    }
+}
+
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
@@ -513,7 +777,7 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    auto& expr = static_cast<BinaryRangeExprImpl<IndexInnerType>&>(expr_raw);
+    auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
 
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
@@ -525,19 +789,65 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
     };
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(
+            expr.field_id_, index_func, elem_func, expr.nested_path_);
     } else if (lower_inclusive && !upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x < val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(
+            expr.field_id_, index_func, elem_func, expr.nested_path_);
     } else if (!lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x <= val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(
+            expr.field_id_, index_func, elem_func, expr.nested_path_);
     } else {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x < val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(
+            expr.field_id_, index_func, elem_func, expr.nested_path_);
     }
 }
 #pragma clang diagnostic pop
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+
+    auto& expr = static_cast<BinaryRangeExprImpl<ExprValueType>&>(expr_raw);
+    bool lower_inclusive = expr.lower_inclusive_;
+    bool upper_inclusive = expr.upper_inclusive_;
+    ExprValueType val1 = expr.lower_value_;
+    ExprValueType val2 = expr.upper_value_;
+
+    // no json index now
+    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+
+    if (lower_inclusive && upper_inclusive) {
+        auto elem_func = [val1, val2](ExprValueType x) {
+            return (val1 <= x && x <= val2);
+        };
+        return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+            expr.field_id_, index_func, elem_func);
+    } else if (lower_inclusive && !upper_inclusive) {
+        auto elem_func = [val1, val2](ExprValueType x) {
+            return (val1 <= x && x < val2);
+        };
+        return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+            expr.field_id_, index_func, elem_func);
+    } else if (!lower_inclusive && upper_inclusive) {
+        auto elem_func = [val1, val2](ExprValueType x) {
+            return (val1 < x && x <= val2);
+        };
+        return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+            expr.field_id_, index_func, elem_func);
+    } else {
+        auto elem_func = [val1, val2](ExprValueType x) {
+            return (val1 < x && x < val2);
+        };
+        return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+            expr.field_id_, index_func, elem_func);
+    }
+}
 
 void
 ExecExprVisitor::visit(UnaryRangeExpr& expr) {
@@ -582,6 +892,26 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             }
             break;
         }
+        case DataType::JSON: {
+            switch (expr.val_case_) {
+                case proto::plan::GenericValue::ValCase::kBoolVal:
+                    res = ExecUnaryRangeVisitorDispatcherJson<bool>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kInt64Val:
+                    res = ExecUnaryRangeVisitorDispatcherJson<int64_t>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kFloatVal:
+                    res = ExecUnaryRangeVisitorDispatcherJson<double>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kStringVal:
+                    res =
+                        ExecUnaryRangeVisitorDispatcherJson<std::string>(expr);
+                    break;
+                default:
+                    PanicInfo("unknown data type");
+            }
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -619,6 +949,30 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
         }
         case DataType::DOUBLE: {
             res = ExecBinaryArithOpEvalRangeVisitorDispatcher<double>(expr);
+            break;
+        }
+        case DataType::JSON: {
+            switch (expr.val_case_) {
+                case proto::plan::GenericValue::ValCase::kBoolVal: {
+                    res = ExecBinaryArithOpEvalRangeVisitorDispatcherJson<bool>(
+                        expr);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kInt64Val: {
+                    res = ExecBinaryArithOpEvalRangeVisitorDispatcherJson<
+                        int64_t>(expr);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kFloatVal: {
+                    res =
+                        ExecBinaryArithOpEvalRangeVisitorDispatcherJson<double>(
+                            expr);
+                    break;
+                }
+                default: {
+                    PanicInfo("unsupported value type {} in expression");
+                }
+            }
             break;
         }
         default:
@@ -672,6 +1026,31 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             }
             break;
         }
+        case DataType::JSON: {
+            switch (expr.val_case_) {
+                case proto::plan::GenericValue::ValCase::kBoolVal: {
+                    res = ExecBinaryRangeVisitorDispatcherJson<bool>(expr);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kInt64Val: {
+                    res = ExecBinaryRangeVisitorDispatcherJson<int64_t>(expr);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kFloatVal: {
+                    res = ExecBinaryRangeVisitorDispatcherJson<double>(expr);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kStringVal: {
+                    res =
+                        ExecBinaryRangeVisitorDispatcherJson<std::string>(expr);
+                    break;
+                }
+                default: {
+                    PanicInfo("unsupported value type {} in expression");
+                }
+            }
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -713,9 +1092,9 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
     // check for sealed segment, load either raw field data or index
     auto left_indexing_barrier = segment_.num_chunk_index(expr.left_field_id_);
     auto left_data_barrier = segment_.num_chunk_data(expr.left_field_id_);
-    AssertInfo(
-        std::max(left_data_barrier, left_indexing_barrier) == num_chunk,
-        "max(left_data_barrier, left_indexing_barrier) not equal to num_chunk");
+    AssertInfo(std::max(left_data_barrier, left_indexing_barrier) == num_chunk,
+               "max(left_data_barrier, left_indexing_barrier) not equal to "
+               "num_chunk");
 
     auto right_indexing_barrier =
         segment_.num_chunk_index(expr.right_field_id_);
@@ -909,12 +1288,12 @@ ExecExprVisitor::visit(CompareExpr& expr) {
     auto& schema = segment_.get_schema();
     auto& left_field_meta = schema[expr.left_field_id_];
     auto& right_field_meta = schema[expr.right_field_id_];
-    AssertInfo(
-        expr.left_data_type_ == left_field_meta.get_data_type(),
-        "[ExecExprVisitor]Left data type not equal to left field meta type");
-    AssertInfo(
-        expr.right_data_type_ == right_field_meta.get_data_type(),
-        "[ExecExprVisitor]right data type not equal to right field meta type");
+    AssertInfo(expr.left_data_type_ == left_field_meta.get_data_type(),
+               "[ExecExprVisitor]Left data type not equal to left "
+               "field meta type");
+    AssertInfo(expr.right_data_type_ == right_field_meta.get_data_type(),
+               "[ExecExprVisitor]right data type not equal to right field "
+               "meta type");
 
     BitsetType res;
     switch (expr.op_type_) {
@@ -1045,7 +1424,8 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
         return term_set.find(x) != term_set.end();
     };
 
-    return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+    return ExecRangeVisitorImpl<T>(
+        expr.field_id_, index_func, elem_func, expr.nested_path_);
 }
 
 // TODO: bool is so ugly here.
@@ -1077,14 +1457,41 @@ ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw)
         return term_set.find(x) != term_set.end();
     };
 
-    return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+    return ExecRangeVisitorImpl<T>(
+        expr.field_id_, index_func, elem_func, expr.nested_path_);
+}
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
+    -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
+    auto& nested_path = expr.nested_path_;
+    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+
+    const std::vector<ExprValueType> terms(expr.terms_.begin(),
+                                           expr.terms_.end());
+    auto n = terms.size();
+    std::unordered_set<ExprValueType> term_set(expr.terms_.begin(),
+                                               expr.terms_.end());
+
+    auto elem_func = [&terms, &term_set](ExprValueType x) {
+        //// terms has already been sorted.
+        // return std::binary_search(terms.begin(), terms.end(), x);
+        return term_set.find(x) != term_set.end();
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json, ExprValueType>(
+        expr.field_id_, index_func, elem_func, expr.nested_path_);
 }
 
 void
 ExecExprVisitor::visit(TermExpr& expr) {
     auto& field_meta = segment_.get_schema()[expr.field_id_];
     AssertInfo(expr.data_type_ == field_meta.get_data_type(),
-               "[ExecExprVisitor]DataType of expr isn't field_meta data type ");
+               "[ExecExprVisitor]DataType of expr isn't field_meta "
+               "data type ");
     BitsetType res;
     switch (expr.data_type_) {
         case DataType::BOOL: {
@@ -1120,6 +1527,25 @@ ExecExprVisitor::visit(TermExpr& expr) {
                 res = ExecTermVisitorImpl<std::string>(expr);
             } else {
                 res = ExecTermVisitorImpl<std::string_view>(expr);
+            }
+            break;
+        }
+        case DataType::JSON: {
+            switch (expr.val_case_) {
+                case proto::plan::GenericValue::ValCase::kBoolVal:
+                    res = ExecTermVisitorImplTemplateJson<bool>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kInt64Val:
+                    res = ExecTermVisitorImplTemplateJson<int64_t>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kFloatVal:
+                    res = ExecTermVisitorImplTemplateJson<double>(expr);
+                    break;
+                case proto::plan::GenericValue::ValCase::kStringVal:
+                    res = ExecTermVisitorImplTemplateJson<std::string>(expr);
+                    break;
+                default:
+                    PanicInfo("unknown data type");
             }
             break;
         }

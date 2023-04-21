@@ -22,6 +22,7 @@
 #include "Plan.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "generated/VerifyPlanNodeVisitor.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
@@ -92,7 +93,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
     auto field_name = FieldName(out_iter.key());
-    auto body = out_iter.value();
+    auto& body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
     Assert(!datatype_is_vector(data_type));
 
@@ -218,14 +219,18 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     auto values = body["values"];
 
     std::vector<T> terms(values.size());
+    auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     for (int i = 0; i < values.size(); i++) {
         auto value = values[i];
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value.is_boolean());
+            val_case = proto::plan::GenericValue::ValCase::kBoolVal;
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value.is_number_integer());
+            val_case = proto::plan::GenericValue::ValCase::kInt64Val;
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value.is_number());
+            val_case = proto::plan::GenericValue::ValCase::kFloatVal;
         } else {
             static_assert(always_false<T>, "unsupported type");
         }
@@ -234,7 +239,9 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     std::sort(terms.begin(), terms.end());
     return std::make_unique<TermExprImpl<T>>(schema.get_field_id(field_name),
                                              schema[field_name].get_data_type(),
-                                             terms);
+                                             terms,
+                                             val_case,
+                                             std::vector<std::string>());
 }
 
 template <typename T>
@@ -304,6 +311,8 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
                 schema.get_field_id(field_name),
                 schema[field_name].get_data_type(),
+                std::vector<std::string>(),
+                proto::plan::GenericValue::ValCase::VAL_NOT_SET,
                 arith_op_mapping_.at(arith_op_name),
                 right_operand,
                 mapping_.at(op_name),
@@ -323,7 +332,9 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             schema.get_field_id(field_name),
             schema[field_name].get_data_type(),
             mapping_.at(op_name),
-            item.value());
+            item.value(),
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET,
+            std::vector<std::string>());
     } else if (body.size() == 2) {
         bool has_lower_value = false;
         bool has_upper_value = false;
@@ -368,6 +379,8 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
         return std::make_unique<BinaryRangeExprImpl<T>>(
             schema.get_field_id(field_name),
             schema[field_name].get_data_type(),
+            std::vector<std::string>(),
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET,
             lower_inclusive,
             upper_inclusive,
             lower_value,

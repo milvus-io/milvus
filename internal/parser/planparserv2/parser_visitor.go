@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -175,7 +176,8 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
-	if !typeutil.IsArithmetic(leftExpr.dataType) || !typeutil.IsArithmetic(rightExpr.dataType) {
+	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJsonType(leftExpr.dataType)) ||
+		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJsonType(rightExpr.dataType)) {
 		return fmt.Errorf("'%s' can only be used between integer or floating expressions", arithNameMap[ctx.GetOp().GetTokenType()])
 	}
 
@@ -344,6 +346,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	}
 
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
+
 	if leftValue != nil && rightValue != nil {
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserLT:
@@ -533,19 +536,17 @@ func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{}
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	identifier := ctx.Identifier().GetText()
-	childExpr, err := v.translateIdentifier(identifier)
-	if err != nil {
+	child := ctx.Expr(1).Accept(v)
+	if err := getError(child); err != nil {
 		return err
 	}
-
-	columnInfo := toColumnInfo(childExpr)
+	columnInfo := toColumnInfo(child.(*ExprWithType))
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
 	lower := ctx.Expr(0).Accept(v)
-	upper := ctx.Expr(1).Accept(v)
+	upper := ctx.Expr(2).Accept(v)
 	if err := getError(lower); err != nil {
 		return err
 	}
@@ -562,7 +563,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
-	switch childExpr.dataType {
+	switch columnInfo.GetDataType() {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(lowerValue) || !IsString(upperValue) {
 			return fmt.Errorf("invalid range operations")
@@ -617,18 +618,17 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	identifier := ctx.Identifier().GetText()
-	childExpr, err := v.translateIdentifier(identifier)
-	if err != nil {
+	child := ctx.Expr(1).Accept(v)
+	if err := getError(child); err != nil {
 		return err
 	}
 
-	columnInfo := toColumnInfo(childExpr)
+	columnInfo := toColumnInfo(child.(*ExprWithType))
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
-	lower := ctx.Expr(1).Accept(v)
+	lower := ctx.Expr(2).Accept(v)
 	upper := ctx.Expr(0).Accept(v)
 	if err := getError(lower); err != nil {
 		return err
@@ -646,7 +646,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
-	switch childExpr.dataType {
+	switch columnInfo.GetDataType() {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(lowerValue) || !IsString(upperValue) {
 			return fmt.Errorf("invalid range operations")
@@ -881,4 +881,32 @@ func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
 // VisitBitOr unsupported.
 func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 	return fmt.Errorf("BitOr is not supported: %s", ctx.GetText())
+}
+
+func (v *ParserVisitor) VisitJSON(ctx *parser.JSONContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	length := len(ctx.AllJsonFiled())
+	nestedPath := make([]string, 0, length)
+	for i := 0; i < length; i++ {
+		path := strings.Trim(strings.Trim(ctx.JsonFiled(i).GetText(), "[]"), "\"")
+		nestedPath = append(nestedPath, path)
+	}
+	jsonField, err := v.schema.GetFieldFromName(identifier)
+	if err != nil {
+		return err
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:    jsonField.FieldID,
+						DataType:   jsonField.DataType,
+						NestedPath: nestedPath,
+					},
+				},
+			},
+		},
+		dataType: jsonField.DataType,
+	}
 }

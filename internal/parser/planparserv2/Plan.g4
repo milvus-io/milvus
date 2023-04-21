@@ -6,6 +6,7 @@ expr:
 	| BooleanConstant										                # Boolean
 	| StringLiteral											                # String
 	| Identifier											                # Identifier
+	| Identifier (JsonFiled)+                                               # JSON
 	| '(' expr ')'											                # Parens
 	| expr LIKE StringLiteral                                               # Like
 	| expr POW expr											                # Power
@@ -16,8 +17,8 @@ expr:
 	| expr op = (SHL | SHR) expr							                # Shift
 	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                  # Term
 	| expr op = (IN | NIN) EmptyTerm                                        # EmptyTerm
-	| expr op1 = (LT | LE) Identifier op2 = (LT | LE) expr		            # Range
-	| expr op1 = (GT | GE) Identifier op2 = (GT | GE) expr                  # ReverseRange
+	| expr op1 = (LT | LE) expr op2 = (LT | LE) expr		                # Range
+	| expr op1 = (GT | GE) expr op2 = (GT | GE) expr                        # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                # Relational
 	| expr op = (EQ | NE) expr								                # Equality
 	| expr BAND expr										                # BitAnd
@@ -66,6 +67,7 @@ NOT: '!' | 'not';
 IN: 'in';
 NIN: 'not in';
 EmptyTerm: '[' (Whitespace | Newline)* ']';
+JsonFiled: ('[' (StringLiteral | IntegerConstant) ']');
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

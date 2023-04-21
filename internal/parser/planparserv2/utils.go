@@ -113,6 +113,9 @@ func toValueExpr(n *planpb.GenericValue) *ExprWithType {
 }
 
 func getSameType(a, b schemapb.DataType) (schemapb.DataType, error) {
+	if hasJsonField(a, b) {
+		return schemapb.DataType_JSON, nil
+	}
 	if typeutil.IsFloatingType(a) && typeutil.IsArithmetic(b) {
 		return schemapb.DataType_Double, nil
 	}
@@ -122,6 +125,13 @@ func getSameType(a, b schemapb.DataType) (schemapb.DataType, error) {
 	}
 
 	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", a.String(), b.String())
+}
+
+func hasJsonField(a, b schemapb.DataType) bool {
+	if typeutil.IsJsonType(a) || typeutil.IsJsonType(b) {
+		return true
+	}
+	return false
 }
 
 func calcDataType(left, right *ExprWithType, reverse bool) (schemapb.DataType, error) {
@@ -155,6 +165,9 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	if typeutil.IsArrayTye(dataType) {
+		return value, nil
+	}
 	if typeutil.IsStringType(dataType) && IsString(value) {
 		return value, nil
 	}

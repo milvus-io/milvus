@@ -131,6 +131,8 @@ ShowExprVisitor::visit(TermExpr& expr) {
                 return TermExtract<double>(expr);
             case DataType::FLOAT:
                 return TermExtract<float>(expr);
+            case DataType::JSON:
+                return TermExtract<milvus::Json>(expr);
             default:
                 PanicInfo("unsupported type");
         }
@@ -189,6 +191,9 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
         case DataType::FLOAT:
             json_opt_ = UnaryRangeExtract<float>(expr);
             return;
+        case DataType::JSON:
+            json_opt_ = UnaryRangeExtract<milvus::Json>(expr);
+            return;
         default:
             PanicInfo("unsupported type");
     }
@@ -240,6 +245,9 @@ ShowExprVisitor::visit(BinaryRangeExpr& expr) {
             return;
         case DataType::FLOAT:
             json_opt_ = BinaryRangeExtract<float>(expr);
+            return;
+        case DataType::JSON:
+            json_opt_ = BinaryRangeExtract<milvus::Json>(expr);
             return;
         default:
             PanicInfo("unsupported type");
@@ -311,6 +319,9 @@ ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
             return;
         case DataType::FLOAT:
             json_opt_ = BinaryArithOpEvalRangeExtract<float>(expr);
+            return;
+        case DataType::JSON:
+            json_opt_ = BinaryArithOpEvalRangeExtract<milvus::Json>(expr);
             return;
         default:
             PanicInfo("unsupported type");

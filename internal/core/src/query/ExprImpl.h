@@ -17,10 +17,12 @@
 #pragma once
 
 #include <tuple>
+#include <utility>
 #include <vector>
 #include <boost/container/vector.hpp>
 
 #include "Expr.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
@@ -30,8 +32,11 @@ struct TermExprImpl : TermExpr {
 
     TermExprImpl(const FieldId field_id,
                  const DataType data_type,
-                 const std::vector<T>& terms)
-        : TermExpr(field_id, data_type), terms_(terms) {
+                 const std::vector<T>& terms,
+                 const proto::plan::GenericValue::ValCase val_case,
+                 std::vector<std::string> nested_path)
+        : TermExpr(field_id, data_type, val_case, std::move(nested_path)),
+          terms_(terms) {
     }
 };
 
@@ -40,13 +45,22 @@ struct BinaryArithOpEvalRangeExprImpl : BinaryArithOpEvalRangeExpr {
     const T right_operand_;
     const T value_;
 
-    BinaryArithOpEvalRangeExprImpl(const FieldId field_id,
-                                   const DataType data_type,
-                                   const ArithOpType arith_op,
-                                   const T right_operand,
-                                   const OpType op_type,
-                                   const T value)
-        : BinaryArithOpEvalRangeExpr(field_id, data_type, op_type, arith_op),
+    BinaryArithOpEvalRangeExprImpl(
+        const FieldId field_id,
+        const DataType data_type,
+        std::vector<std::string> nested_path,
+        const proto::plan::GenericValue::ValCase val_case,
+        const ArithOpType arith_op,
+        const T right_operand,
+        const OpType op_type,
+        const T value)
+        : BinaryArithOpEvalRangeExpr(
+              field_id,
+              data_type,
+              std::forward<std::vector<std::string>>(nested_path),
+              val_case,
+              op_type,
+              arith_op),
           right_operand_(right_operand),
           value_(value) {
     }
@@ -59,8 +73,11 @@ struct UnaryRangeExprImpl : UnaryRangeExpr {
     UnaryRangeExprImpl(const FieldId field_id,
                        const DataType data_type,
                        const OpType op_type,
-                       const T value)
-        : UnaryRangeExpr(field_id, data_type, op_type), value_(value) {
+                       const T value,
+                       const proto::plan::GenericValue::ValCase val_case,
+                       const std::vector<std::string> nested_path)
+        : UnaryRangeExpr(field_id, data_type, op_type, val_case, nested_path),
+          value_(value) {
     }
 };
 
@@ -71,12 +88,18 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
 
     BinaryRangeExprImpl(const FieldId field_id,
                         const DataType data_type,
+                        std::vector<std::string> nested_path,
+                        const proto::plan::GenericValue::ValCase val_case,
                         const bool lower_inclusive,
                         const bool upper_inclusive,
                         const T lower_value,
                         const T upper_value)
-        : BinaryRangeExpr(
-              field_id, data_type, lower_inclusive, upper_inclusive),
+        : BinaryRangeExpr(field_id,
+                          data_type,
+                          std::forward<std::vector<std::string>>(nested_path),
+                          val_case,
+                          lower_inclusive,
+                          upper_inclusive),
           lower_value_(lower_value),
           upper_value_(upper_value) {
     }

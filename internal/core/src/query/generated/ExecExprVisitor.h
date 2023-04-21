@@ -14,6 +14,7 @@
 // DO NOT EDIT
 #include <optional>
 #include <boost/variant.hpp>
+#include <type_traits>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -62,26 +63,55 @@ class ExecExprVisitor : public ExprVisitor {
     }
 
  public:
-    template <typename T, typename IndexFunc, typename ElementFunc>
+    template <
+        typename T,
+        typename ExprValueType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>,
+        typename IndexFunc,
+        typename ElementFunc>
     auto
     ExecRangeVisitorImpl(FieldId field_id,
                          IndexFunc func,
-                         ElementFunc element_func) -> BitsetType;
+                         ElementFunc element_func,
+                         const std::vector<std::string>& nested_path = {})
+        -> BitsetType;
 
-    template <typename T, typename IndexFunc, typename ElementFunc>
+    template <
+        typename T,
+        typename ExprValueType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>,
+        typename IndexFunc,
+        typename ElementFunc>
     auto
     ExecDataRangeVisitorImpl(FieldId field_id,
                              IndexFunc index_func,
-                             ElementFunc element_func) -> BitsetType;
+                             ElementFunc element_func,
+                             const std::vector<std::string>& nested_path = {})
+        -> BitsetType;
 
     template <typename T>
     auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
+    template <typename ExprValueType>
+    auto
+    ExecUnaryRangeVisitorDispatcherJson(
+        UnaryRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
+        BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
     template <typename T>
     auto
     ExecBinaryArithOpEvalRangeVisitorDispatcher(
         BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
+        -> BitsetType;
 
     template <typename T>
     auto
@@ -94,6 +124,10 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename T>
     auto
     ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>
     auto

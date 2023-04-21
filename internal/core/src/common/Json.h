@@ -33,6 +33,7 @@
 
 namespace milvus {
 using document = simdjson::ondemand::document;
+using value_result = simdjson::simdjson_result<simdjson::ondemand::value>;
 class Json {
  public:
     Json() = default;
@@ -58,6 +59,13 @@ class Json {
     Json(const char* data, size_t len) : data_(data, len) {
     }
 
+    Json(const Json& json) {
+        if (json.own_data_.has_value()) {
+            own_data_ = simdjson::padded_string(
+                json.own_data_.value().data(), json.own_data_.value().length());
+        }
+        data_ = json.data_;
+    };
     Json(Json&& json) = default;
 
     Json&
@@ -66,7 +74,6 @@ class Json {
             own_data_ = simdjson::padded_string(
                 json.own_data_.value().data(), json.own_data_.value().length());
         }
-
         data_ = json.data_;
         return *this;
     }
@@ -95,17 +102,12 @@ class Json {
         return doc;
     }
 
-    simdjson::ondemand::value
+    value_result
     operator[](const std::string_view field) const {
-        simdjson::ondemand::value result;
-        auto err = doc().get_value()[field].get(result);
-        AssertInfo(
-            err == simdjson::SUCCESS,
-            fmt::format("failed to access the field {}: {}", field, err));
-        return result;
+        return doc().get_value()[field];
     }
 
-    simdjson::ondemand::value
+    value_result
     operator[](std::vector<std::string> nested_path) const {
         std::for_each(
             nested_path.begin(), nested_path.end(), [](std::string& key) {
@@ -113,14 +115,7 @@ class Json {
                 boost::replace_all(key, "/", "~1");
             });
         auto pointer = boost::algorithm::join(nested_path, "/");
-        simdjson::ondemand::value result;
-        auto err = doc().at_pointer(pointer).get(result);
-        AssertInfo(
-            err == simdjson::SUCCESS,
-            fmt::format("failed to access the field with json pointer {}: {}",
-                        pointer,
-                        err));
-        return result;
+        return doc().at_pointer("/" + pointer);
     }
 
     std::string_view

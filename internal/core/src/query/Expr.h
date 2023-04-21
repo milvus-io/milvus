@@ -99,13 +99,21 @@ struct LogicalBinaryExpr : BinaryExprBase {
 struct TermExpr : Expr {
     const FieldId field_id_;
     const DataType data_type_;
+    const std::vector<std::string> nested_path_;
+    const proto::plan::GenericValue::ValCase val_case_;
 
  protected:
     // prevent accidental instantiation
     TermExpr() = delete;
 
-    TermExpr(const FieldId field_id, const DataType data_type)
-        : field_id_(field_id), data_type_(data_type) {
+    TermExpr(const FieldId field_id,
+             const DataType data_type,
+             const proto::plan::GenericValue::ValCase val_case,
+             std::vector<std::string> nested_path)
+        : field_id_(field_id),
+          data_type_(data_type),
+          val_case_(val_case),
+          nested_path_(std::move(nested_path)) {
     }
 
  public:
@@ -134,6 +142,8 @@ static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
 struct BinaryArithOpEvalRangeExpr : Expr {
     const FieldId field_id_;
     const DataType data_type_;
+    const std::vector<std::string> nested_path_;
+    const proto::plan::GenericValue::ValCase val_case_;
     const OpType op_type_;
     const ArithOpType arith_op_;
 
@@ -141,12 +151,17 @@ struct BinaryArithOpEvalRangeExpr : Expr {
     // prevent accidental instantiation
     BinaryArithOpEvalRangeExpr() = delete;
 
-    BinaryArithOpEvalRangeExpr(const FieldId field_id,
-                               const DataType data_type,
-                               const OpType op_type,
-                               const ArithOpType arith_op)
+    BinaryArithOpEvalRangeExpr(
+        const FieldId field_id,
+        const DataType data_type,
+        std::vector<std::string> nested_path,
+        const proto::plan::GenericValue::ValCase val_case,
+        const OpType op_type,
+        const ArithOpType arith_op)
         : field_id_(field_id),
           data_type_(data_type),
+          nested_path_(std::move(nested_path)),
+          val_case_(val_case),
           op_type_(op_type),
           arith_op_(arith_op) {
     }
@@ -172,6 +187,8 @@ struct UnaryRangeExpr : Expr {
     const FieldId field_id_;
     const DataType data_type_;
     const OpType op_type_;
+    const proto::plan::GenericValue::ValCase val_case_;
+    const std::vector<std::string> nested_path_;
 
  protected:
     // prevent accidental instantiation
@@ -179,8 +196,14 @@ struct UnaryRangeExpr : Expr {
 
     UnaryRangeExpr(const FieldId field_id,
                    const DataType data_type,
-                   const OpType op_type)
-        : field_id_(field_id), data_type_(data_type), op_type_(op_type) {
+                   const OpType op_type,
+                   const proto::plan::GenericValue::ValCase val_case,
+                   std::vector<std::string> nested_path)
+        : field_id_(field_id),
+          data_type_(data_type),
+          op_type_(op_type),
+          val_case_(val_case),
+          nested_path_(std::move(nested_path)) {
     }
 
  public:
@@ -191,8 +214,11 @@ struct UnaryRangeExpr : Expr {
 struct BinaryRangeExpr : Expr {
     const FieldId field_id_;
     const DataType data_type_;
+    const std::vector<std::string> nested_path_;
+    const proto::plan::GenericValue::ValCase val_case_;
     const bool lower_inclusive_;
     const bool upper_inclusive_;
+    ;
 
  protected:
     // prevent accidental instantiation
@@ -200,10 +226,14 @@ struct BinaryRangeExpr : Expr {
 
     BinaryRangeExpr(const FieldId field_id,
                     const DataType data_type,
+                    std::vector<std::string> nested_path,
+                    const proto::plan::GenericValue::ValCase val_case,
                     const bool lower_inclusive,
                     const bool upper_inclusive)
         : field_id_(field_id),
           data_type_(data_type),
+          nested_path_(std::move(nested_path)),
+          val_case_(val_case),
           lower_inclusive_(lower_inclusive),
           upper_inclusive_(upper_inclusive) {
     }

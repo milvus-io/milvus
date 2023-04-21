@@ -266,6 +266,21 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
+func (helper *SchemaHelper) GetJsonField() (*schemapb.FieldSchema, error) {
+	jsonFieldNum := 0
+	var jsonField *schemapb.FieldSchema
+	for _, filed := range helper.schema.Fields {
+		if filed.DataType == schemapb.DataType_JSON {
+			jsonFieldNum++
+			jsonField = filed
+		}
+	}
+	if jsonFieldNum != 1 {
+		return nil, errors.New(fmt.Sprintf("there is multile json field, num = %d", jsonFieldNum))
+	}
+	return jsonField, nil
+}
+
 // IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -285,6 +300,14 @@ func IsIntegerType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+func IsArrayTye(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Array, schemapb.DataType_JSON:
+		return true
+	}
+	return false
 }
 
 // IsFloatingType returns true if input is a floating type, otherwise false
@@ -316,6 +339,15 @@ func IsBoolType(dataType schemapb.DataType) bool {
 func IsStringType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsJsonType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Array, schemapb.DataType_JSON:
 		return true
 	default:
 		return false

@@ -25,6 +25,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Relational.
 	VisitRelational(ctx *RelationalContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#JSON.
+	VisitJSON(ctx *JSONContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#String.
 	VisitString(ctx *StringContext) interface{}
 
