@@ -696,7 +696,7 @@ TEST(Sealed, BF) {
 
     auto vec_data = GenRandomFloatVecs(N, dim);
     auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(DataType::VECTOR_FLOAT, dim);
-    field_data->FillFieldData(vec_data.data(), N * dim);
+    field_data->FillFieldData(vec_data.data(), N);
     segment->LoadFieldData(fake_id, std::vector<storage::FieldDataPtr>{field_data});
 
     auto topK = 1;
@@ -747,7 +747,7 @@ TEST(Sealed, BF_Overflow) {
 
     auto vec_data = GenMaxFloatVecs(N, dim);
     auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(DataType::VECTOR_FLOAT, dim);
-    field_data->FillFieldData(vec_data.data(), N * dim);
+    field_data->FillFieldData(vec_data.data(), N);
     segment->LoadFieldData(fake_id, std::vector<storage::FieldDataPtr>{field_data});
 
     auto topK = 1;

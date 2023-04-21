@@ -160,8 +160,8 @@ TEST(storage, InsertDataString) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<std::string> new_data(data.size());
     for (int i = 0; i < data.size(); ++i) {
-        new_data[i] = reinterpret_cast<const char*>(new_payload->RawValue(i));
-        ASSERT_EQ(new_payload->get_element_size(i), data[i].size());
+        new_data[i] = *static_cast<const std::string*>(new_payload->RawValue(i));
+        ASSERT_EQ(new_payload->Size(i), data[i].size());
     }
     ASSERT_EQ(data, new_data);
 }
@@ -217,7 +217,7 @@ TEST(storage, InsertDataFloatVector) {
     int DIM = 2;
     auto field_data =
         milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(storage::DataType::VECTOR_FLOAT, DIM);
-    field_data->FillFieldData(data.data(), data.size());
+    field_data->FillFieldData(data.data(), data.size() / DIM);
 
     storage::InsertData insert_data(field_data);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
@@ -242,7 +242,7 @@ TEST(storage, InsertDataBinaryVector) {
     int DIM = 16;
     auto field_data =
         milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(storage::DataType::VECTOR_BINARY, DIM);
-    field_data->FillFieldData(data.data(), data.size());
+    field_data->FillFieldData(data.data(), data.size() * 8 / DIM);
 
     storage::InsertData insert_data(field_data);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};

@@ -52,8 +52,9 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
             if (data_type == DataType::STRING) {
                 AssertInfo(field_data->get_data_type() == DataType::STRING, "wrong index type in index binlog file");
                 AssertInfo(field_data->get_num_rows() == 1, "wrong length of string num in old index binlog file");
-                auto new_field_data = FieldDataFactory::GetInstance().CreateFieldData(DataType::INT8, 1);
-                new_field_data->FillFieldData(field_data->RawValue(0), field_data->Size());
+                auto new_field_data = FieldDataFactory::GetInstance().CreateFieldData(DataType::INT8);
+                new_field_data->FillFieldData((*static_cast<const std::string*>(field_data->RawValue(0))).c_str(),
+                                              field_data->Size());
                 field_data = new_field_data;
             }
 

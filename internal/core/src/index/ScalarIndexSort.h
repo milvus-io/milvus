@@ -20,6 +20,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <map>
 #include <string>
 #include "knowhere/common/Exception.h"
 #include "index/IndexStructure.h"
@@ -86,6 +87,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     IsBuilt() const {
         return is_built_;
     }
+
+    void
+    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
  private:
     bool is_built_;

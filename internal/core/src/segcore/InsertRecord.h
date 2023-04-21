@@ -247,6 +247,33 @@ struct InsertRecord {
         pk2offset_->insert(pk, offset);
     }
 
+    void
+    insert_pks(const std::vector<storage::FieldDataPtr>& field_datas) {
+        std::lock_guard lck(shared_mutex_);
+        int64_t offset = 0;
+        for (auto& data : field_datas) {
+            int64_t row_count = data->get_num_rows();
+            auto data_type = data->get_data_type();
+            switch (data_type) {
+                case DataType::INT64: {
+                    for (int i = 0; i < row_count; ++i) {
+                        pk2offset_->insert(*static_cast<const int64_t*>(data->RawValue(i)), offset++);
+                    }
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    for (int i = 0; i < row_count; ++i) {
+                        pk2offset_->insert(*static_cast<const std::string*>(data->RawValue(i)), offset++);
+                    }
+                    break;
+                }
+                default: {
+                    PanicInfo("unsupported primary key data type");
+                }
+            }
+        }
+    }
+
     bool
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);

@@ -29,6 +29,7 @@
 #include "common/Types.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
+#include "storage/FieldData.h"
 
 namespace milvus::index {
 
@@ -122,5 +123,8 @@ GetIndexMetaFromConfig(const Config& config);
 
 Config
 ParseConfigFromIndexParams(const std::map<std::string, std::string>& index_params);
+
+void
+AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas);
 
 }  // namespace milvus::index

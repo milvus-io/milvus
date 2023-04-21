@@ -21,6 +21,7 @@
 #include "storage/FieldDataFactory.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPool.h"
+#include "log/Log.h"
 
 #ifdef BUILD_DISK_ANN
 #include "storage/DiskFileManagerImpl.h"
@@ -231,6 +232,20 @@ CreateArrowSchema(DataType data_type, int dim) {
 }
 
 int
+GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema, DataType data_type) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT: {
+            return schema->type_length() / sizeof(float);
+        }
+        case DataType::VECTOR_BINARY: {
+            return schema->type_length() * 8;
+        }
+        default:
+            PanicInfo("unsupported data type");
+    }
+}
+
+int
 GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data, DataType data_type) {
     switch (data_type) {
         case DataType::VECTOR_FLOAT: {
@@ -336,12 +351,52 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
     indexData->SetFieldDataMeta(field_meta);
     auto serialized_index_data = indexData->serialize_to_remote_file();
     auto serialized_index_size = serialized_index_data.size();
+
     remote_chunk_manager->Write(object_key, serialized_index_data.data(), serialized_index_size);
     return std::pair<std::string, size_t>(object_key, serialized_index_size);
 }
 
+// /**
+//  * Returns the current resident set size (physical memory use) measured
+//  * in bytes, or zero if the value cannot be determined on this OS.
+//  */
+// size_t
+// getCurrentRSS() {
+// #if defined(_WIN32)
+//     /* Windows -------------------------------------------------- */
+//     PROCESS_MEMORY_COUNTERS info;
+//     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
+//     return (size_t)info.WorkingSetSize;
+
+// #elif defined(__APPLE__) && defined(__MACH__)
+//     /* OSX ------------------------------------------------------ */
+//     struct mach_task_basic_info info;
+//     mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+//     if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS)
+//         return (size_t)0L; /* Can't access? */
+//     return (size_t)info.resident_size;
+
+// #elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+//     /* Linux ---------------------------------------------------- */
+//     long rss = 0L;
+//     FILE* fp = NULL;
+//     if ((fp = fopen("/proc/self/statm", "r")) == NULL)
+//         return (size_t)0L; /* Can't open? */
+//     if (fscanf(fp, "%*s%ld", &rss) != 1) {
+//         fclose(fp);
+//         return (size_t)0L; /* Can't read? */
+//     }
+//     fclose(fp);
+//     return (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
+
+// #else
+//     /* AIX, BSD, Solaris, and Unknown OS ------------------------ */
+//     return (size_t)0L; /* Unsupported. */
+// #endif
+// }
+
 std::vector<FieldDataPtr>
-GetObjectData(RemoteChunkManager* remote_chunk_manager, std::vector<std::string> remote_files) {
+GetObjectData(RemoteChunkManager* remote_chunk_manager, const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPool::GetInstance();
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     for (auto& file : remote_files) {
@@ -353,13 +408,13 @@ GetObjectData(RemoteChunkManager* remote_chunk_manager, std::vector<std::string>
         auto res = futures[i].get();
         datas.emplace_back(res->GetFieldData());
     }
-
+    ReleaseArrowUnused();
     return datas;
 }
 
 std::map<std::string, int64_t>
 PutIndexData(RemoteChunkManager* remote_chunk_manager,
-             std::vector<const uint8_t*>& data_slices,
+             const std::vector<const uint8_t*>& data_slices,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
@@ -380,18 +435,31 @@ PutIndexData(RemoteChunkManager* remote_chunk_manager,
         auto res = future.get();
         remote_paths_to_size[res.first] = res.second;
     }
-
+    ReleaseArrowUnused();
     return remote_paths_to_size;
 }
 
 int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr> field_datas) {
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     int64_t count = 0;
     for (auto& field_data : field_datas) {
         count += field_data->get_num_rows();
     }
 
     return count;
+}
+
+void
+ReleaseArrowUnused() {
+    static std::mutex release_mutex;
+
+    // While multiple threads are releasing memory,
+    // we don't need everyone do releasing,
+    // just let some of them do this also works well
+    if (release_mutex.try_lock()) {
+        arrow::default_memory_pool()->ReleaseUnused();
+        release_mutex.unlock();
+    }
 }
 
 }  // namespace milvus::storage

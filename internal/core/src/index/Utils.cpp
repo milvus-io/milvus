@@ -24,6 +24,8 @@
 #include "index/Meta.h"
 #include <google/protobuf/text_format.h>
 #include "exceptions/EasyAssert.h"
+#include "common/Slice.h"
+#include "storage/FieldDataFactory.h"
 
 namespace milvus::index {
 
@@ -200,6 +202,33 @@ ParseConfigFromIndexParams(const std::map<std::string, std::string>& index_param
     }
 
     return config;
+}
+
+void
+AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas) {
+    if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
+        auto slice_meta = index_datas.at(INDEX_FILE_SLICE_META);
+        Config meta_data = Config::parse(std::string(static_cast<const char*>(slice_meta->Data()), slice_meta->Size()));
+
+        for (auto& item : meta_data[META]) {
+            std::string prefix = item[NAME];
+            int slice_num = item[SLICE_NUM];
+            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+            auto new_field_data =
+                storage::FieldDataFactory::GetInstance().CreateFieldData(DataType::INT8, 1, total_len);
+
+            for (auto i = 0; i < slice_num; ++i) {
+                std::string file_name = GenSlicedFileName(prefix, i);
+                AssertInfo(index_datas.find(file_name) != index_datas.end(), "lost index slice data");
+                auto data = index_datas.at(file_name);
+                auto len = data->Size();
+                new_field_data->FillFieldData(data->Data(), len);
+                index_datas.erase(file_name);
+            }
+            AssertInfo(new_field_data->IsFull(), "index len is inconsistent after disassemble and assemble");
+            index_datas[prefix] = new_field_data;
+        }
+    }
 }
 
 }  // namespace milvus::index

@@ -35,9 +35,10 @@ BinlogReader::Read(int64_t nbytes) {
     if (nbytes > remain) {
         return std::make_pair(Status(SERVER_UNEXPECTED_ERROR, "out range of binlog data"), nullptr);
     }
-    auto res = std::shared_ptr<uint8_t[]>(new uint8_t[nbytes]);
-    std::memcpy(res.get(), data_.get() + tell_, nbytes);
+    auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+    auto res = std::shared_ptr<uint8_t[]>(data_.get() + tell_, deleter);
     tell_ += nbytes;
+
     return std::make_pair(Status(SERVER_SUCCESS, ""), res);
 }
 

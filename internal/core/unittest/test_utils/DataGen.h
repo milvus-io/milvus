@@ -431,18 +431,16 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
     DataType data_type;
     int64_t dim = 1;
     const void* raw_data = nullptr;
-    int64_t element_count = raw_count;
+
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             raw_data = data->vectors().float_vector().data().data();
             dim = field_meta.get_dim();
-            element_count *= dim;
             data_type = DataType::VECTOR_FLOAT;
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
             raw_data = data->vectors().binary_vector().data();
             dim = field_meta.get_dim();
             AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
-            element_count *= (dim / 8);
             data_type = DataType::VECTOR_BINARY;
         } else {
             PanicInfo("unsupported");
@@ -497,7 +495,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
                 raw_data = data_raw.data();
                 data_type = DataType::VARCHAR;
                 auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
-                field_data->FillFieldData(raw_data, element_count);
+                field_data->FillFieldData(raw_data, raw_count);
                 return field_data;
             }
             default: {
@@ -507,7 +505,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
     }
 
     auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
-    field_data->FillFieldData(raw_data, element_count);
+    field_data->FillFieldData(raw_data, raw_count);
     return field_data;
 }
 

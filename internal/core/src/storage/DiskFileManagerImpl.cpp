@@ -81,7 +81,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     std::vector<int64_t> local_file_offsets;
 
     int slice_num = 0;
-    auto parallel_degree = uint64_t(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT / (index_file_slice_size << 20));
+    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     for (int64_t offset = 0; offset < fileSize; slice_num++) {
         if (batch_remote_files.size() >= parallel_degree) {
             AddBatchIndexFiles(file, local_file_offsets, batch_remote_files, remote_file_sizes);
@@ -90,7 +90,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
             local_file_offsets.clear();
         }
 
-        auto batch_size = std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
+        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
         batch_remote_files.emplace_back(GetRemoteIndexPath(fileName, slice_num));
         remote_file_sizes.emplace_back(batch_size);
         local_file_offsets.emplace_back(offset);
@@ -160,7 +160,7 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
 
     auto EstimateParalleDegree = [&](const std::string& file) -> uint64_t {
         auto fileSize = rcm_->Size(file);
-        return uint64_t(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT / fileSize);
+        return uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / fileSize);
     };
 
     for (auto& slices : index_slices) {
@@ -219,38 +219,56 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
         return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
     });
 
-    auto field_datas = GetObjectData(rcm_.get(), remote_files);
-    int batch_size = remote_files.size();
-    AssertInfo(field_datas.size() == batch_size, "inconsistent file num and raw data num!");
-
-    uint32_t num_rows = 0;
-    uint32_t dim = 0;
-    for (int i = 0; i < batch_size; ++i) {
-        auto field_data = field_datas[i];
-        auto num = field_data->get_num_rows();
-        num_rows += uint32_t(num);
-        AssertInfo(dim == 0 || dim == field_data->get_dim(), "inconsistent dim value in multi binlogs!");
-        dim = field_data->get_dim();
-    }
-
     auto segment_id = GetFieldDataMeta().segment_id;
     auto field_id = GetFieldDataMeta().field_id;
     auto local_data_path = storage::GenFieldRawDataPathPrefix(segment_id, field_id) + "raw_data";
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     local_chunk_manager.CreateFile(local_data_path);
 
-    int64_t write_offset = 0;
+    // get batch raw data from s3 and write batch data to disk file
+    // TODO: load and write of different batches at the same time
+    std::vector<std::string> batch_files;
+
+    // file format
+    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
+    uint32_t num_rows = 0;
+    uint32_t dim = 0;
+    int64_t write_offset = sizeof(num_rows) + sizeof(dim);
+
+    auto FetchRawData = [&]() {
+        auto field_datas = GetObjectData(rcm_.get(), batch_files);
+        int batch_size = batch_files.size();
+        for (int i = 0; i < batch_size; ++i) {
+            auto field_data = field_datas[i];
+            num_rows += uint32_t(field_data->get_num_rows());
+            AssertInfo(dim == 0 || dim == field_data->get_dim(), "inconsistent dim value in multi binlogs!");
+            dim = field_data->get_dim();
+
+            auto data_size = field_data->get_num_rows() * dim * sizeof(float);
+            local_chunk_manager.Write(local_data_path, write_offset, const_cast<void*>(field_data->Data()), data_size);
+            write_offset += data_size;
+        }
+    };
+
+    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+
+    // write num_rows and dim value to file header
+    write_offset = 0;
     local_chunk_manager.Write(local_data_path, write_offset, &num_rows, sizeof(num_rows));
     write_offset += sizeof(num_rows);
     local_chunk_manager.Write(local_data_path, write_offset, &dim, sizeof(dim));
-    write_offset += sizeof(dim);
-
-    for (int i = 0; i < batch_size; ++i) {
-        auto field_data = field_datas[i];
-        auto data_size = field_data->get_num_rows() * dim * sizeof(float);
-        local_chunk_manager.Write(local_data_path, write_offset, const_cast<void*>(field_data->Data()), data_size);
-        write_offset += data_size;
-    }
 
     return local_data_path;
 }

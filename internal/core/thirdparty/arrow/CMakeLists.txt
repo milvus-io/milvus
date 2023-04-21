@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set( ARROW_VERSION "8.0.1" )
+set( ARROW_VERSION "11.0.0" )
 set( ARROW_SOURCE_URL
     "https://github.com/apache/arrow/archive/apache-arrow-${ARROW_VERSION}.tar.gz")
-set( ARROW_MD5 "4a3df76290f70d19027008b64290c0bd" )
+set( ARROW_MD5 "c31335b6f5422a352e2aef5a7a469c91" )
 
 # These three components is required by arrow
 find_package(Boost REQUIRED COMPONENTS regex system filesystem)

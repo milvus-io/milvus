@@ -202,8 +202,8 @@ BaseEventData::Serialize() {
     }
     if (datatype_is_string(data_type)) {
         for (size_t offset = 0; offset < field_data->get_num_rows(); ++offset) {
-            payload_writer->add_one_string_payload(reinterpret_cast<const char*>(field_data->RawValue(offset)),
-                                                   field_data->get_element_size(offset));
+            payload_writer->add_one_string_payload(
+                (*static_cast<const std::string*>(field_data->RawValue(offset))).c_str(), field_data->Size(offset));
         }
     } else {
         auto payload = Payload{data_type, static_cast<const uint8_t*>(field_data->Data()), field_data->get_num_rows(),
