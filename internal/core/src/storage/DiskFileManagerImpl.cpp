@@ -123,42 +123,72 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager.Size(file);
 
-    // Split local data to multi part with specified size
+    std::vector<std::string> batch_remote_files;
+    std::vector<int64_t> remote_file_sizes;
+    std::vector<int64_t> local_file_offsets;
+
     int slice_num = 0;
-    auto remotePrefix = GetRemoteIndexObjectPrefix();
-    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    auto parallel_degree = uint64_t(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT /
+                                    (index_file_slice_size << 20));
     for (int64_t offset = 0; offset < fileSize; slice_num++) {
+        if (batch_remote_files.size() >= parallel_degree) {
+            AddBatchIndexFiles(file,
+                               local_file_offsets,
+                               batch_remote_files,
+                               remote_file_sizes);
+            batch_remote_files.clear();
+            remote_file_sizes.clear();
+            local_file_offsets.clear();
+        }
+
         auto batch_size =
             std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
-        // Put file to remote
-        char objectKey[200];
-        snprintf(objectKey,
-                 sizeof(objectKey),
-                 "%s/%s_%d",
-                 remotePrefix.c_str(),
-                 fileName.c_str(),
-                 slice_num);
-
-        // use multi-thread to put part file
-        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
-                                      rcm_.get(),
-                                      file,
-                                      offset,
-                                      batch_size,
-                                      index_meta_,
-                                      field_meta_,
-                                      std::string(objectKey)));
+        batch_remote_files.emplace_back(
+            GenerateRemoteIndexFile(fileName, slice_num));
+        remote_file_sizes.emplace_back(batch_size);
+        local_file_offsets.emplace_back(offset);
         offset += batch_size;
     }
-    for (auto& future : futures) {
-        auto res = future.get();
-        remote_paths_to_size_[res.first] = res.second;
+    if (batch_remote_files.size() > 0) {
+        AddBatchIndexFiles(
+            file, local_file_offsets, batch_remote_files, remote_file_sizes);
     }
     FILEMANAGER_CATCH
     FILEMANAGER_END
 
     return true;
 }  // namespace knowhere
+
+void
+DiskFileManagerImpl::AddBatchIndexFiles(
+    const std::string& local_file_name,
+    const std::vector<int64_t>& local_file_offsets,
+    const std::vector<std::string>& remote_files,
+    const std::vector<int64_t>& remote_file_sizes) {
+    auto& pool = ThreadPool::GetInstance();
+
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(local_file_offsets.size() == remote_files.size(),
+               "inconsistent size of offset slices with file slices");
+    AssertInfo(remote_files.size() == remote_file_sizes.size(),
+               "inconsistent size of file slices with size slices");
+
+    for (int64_t i = 0; i < remote_files.size(); ++i) {
+        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
+                                      rcm_.get(),
+                                      local_file_name,
+                                      local_file_offsets[i],
+                                      remote_file_sizes[i],
+                                      index_meta_,
+                                      field_meta_,
+                                      remote_files[i]));
+    }
+
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size_[res.first] = res.second;
+    }
+}
 
 void
 DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
@@ -262,7 +292,7 @@ DiskFileManagerImpl::GetFileName(const std::string& localfile) {
 }
 
 std::string
-DiskFileManagerImpl::GetRemoteIndexObjectPrefix() {
+DiskFileManagerImpl::GetRemoteIndexObjectPrefix() const {
     return remote_root_path_ + "/" + std::string(INDEX_ROOT_PATH) + "/" +
            std::to_string(index_meta_.build_id) + "/" +
            std::to_string(index_meta_.index_version) + "/" +
