@@ -13,6 +13,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "nlohmann/json.hpp"
+#include "simdjson.h"
 
 namespace milvus::segcore {
 
@@ -74,10 +75,10 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::JSON: {
-            auto json_data = FIELD_DATA(data, json);
+            auto& json_data = FIELD_DATA(data, json);
             std::vector<Json> data_raw(json_data.size());
             for (auto& json_bytes : json_data) {
-                data_raw.emplace_back(Json::parse(json_bytes));
+                data_raw.emplace_back(simdjson::padded_string(json_bytes));
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
@@ -155,7 +156,7 @@ VectorBase::fill_chunk_data(ssize_t element_count,
 
             size_t index = 0;
             for (auto& str : FIELD_DATA(data, json)) {
-                chunk[index++] = str;
+                chunk[index++] = Json(simdjson::padded_string(str));
             }
             return;
         }

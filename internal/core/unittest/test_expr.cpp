@@ -433,10 +433,9 @@ TEST(Expr, TestTerm) {
 }
 
 TEST(Expr, TestSimpleDsl) {
-    using namespace milvus::query;
     using namespace milvus::segcore;
 
-    auto vec_dsl = Json::parse(R"({
+    auto vec_dsl = query::Json::parse(R"({
                 "vector": {
                     "fakevec": {
                         "metric_type": "L2",
@@ -459,47 +458,47 @@ TEST(Expr, TestSimpleDsl) {
                 terms.push_back(i);
             }
         }
-        Json s;
+        query::Json s;
         s["term"]["age"]["values"] = terms;
         return s;
     };
     // std::cout << get_item(0).dump(-2);
     // std::cout << vec_dsl.dump(-2);
-    std::vector<std::tuple<Json, std::function<bool(int)>>> testcases;
+    std::vector<std::tuple<query::Json, std::function<bool(int)>>> testcases;
     {
-        Json dsl;
-        dsl["must"] = Json::array(
+        query::Json dsl;
+        dsl["must"] = query::Json::array(
             {vec_dsl, get_item(0), get_item(1), get_item(2, 0), get_item(3)});
         testcases.emplace_back(
             dsl, [](int64_t x) { return (x & 0b1111) == 0b1011; });
     }
 
     {
-        Json dsl;
-        Json sub_dsl;
-        sub_dsl["must"] = Json::array(
+        query::Json dsl;
+        query::Json sub_dsl;
+        sub_dsl["must"] = query::Json::array(
             {get_item(0), get_item(1), get_item(2, 0), get_item(3)});
-        dsl["must"] = Json::array({sub_dsl, vec_dsl});
+        dsl["must"] = query::Json::array({sub_dsl, vec_dsl});
         testcases.emplace_back(
             dsl, [](int64_t x) { return (x & 0b1111) == 0b1011; });
     }
 
     {
-        Json dsl;
-        Json sub_dsl;
-        sub_dsl["should"] = Json::array(
+        query::Json dsl;
+        query::Json sub_dsl;
+        sub_dsl["should"] = query::Json::array(
             {get_item(0), get_item(1), get_item(2, 0), get_item(3)});
-        dsl["must"] = Json::array({sub_dsl, vec_dsl});
+        dsl["must"] = query::Json::array({sub_dsl, vec_dsl});
         testcases.emplace_back(
             dsl, [](int64_t x) { return !!((x & 0b1111) ^ 0b0100); });
     }
 
     {
-        Json dsl;
-        Json sub_dsl;
-        sub_dsl["must_not"] = Json::array(
+        query::Json dsl;
+        query::Json sub_dsl;
+        sub_dsl["must_not"] = query::Json::array(
             {get_item(0), get_item(1), get_item(2, 0), get_item(3)});
-        dsl["must"] = Json::array({sub_dsl, vec_dsl});
+        dsl["must"] = query::Json::array({sub_dsl, vec_dsl});
         testcases.emplace_back(
             dsl, [](int64_t x) { return (x & 0b1111) != 0b1011; });
     }
@@ -526,13 +525,13 @@ TEST(Expr, TestSimpleDsl) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(
+    query::ExecExprVisitor visitor(
         *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (auto [clause, ref_func] : testcases) {
-        Json dsl;
+        query::Json dsl;
         dsl["bool"] = clause;
         // std::cout << dsl.dump(2);
-        auto plan = CreatePlan(*schema, dsl.dump());
+        auto plan = query::CreatePlan(*schema, dsl.dump());
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
         EXPECT_EQ(final.size(), N * num_iters);
 

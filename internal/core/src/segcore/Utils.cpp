@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+#include <string>
 
+#include "common/Utils.h"
 #include "index/ScalarIndex.h"
 
 namespace milvus::segcore {
@@ -125,6 +127,13 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
                 *(obj->mutable_data()->Add()) = std::string();
             }
             break;
+        }
+        case DataType::JSON: {
+            auto obj = scalar_array->mutable_json_data();
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = std::string();
+            }
         }
         default: {
             PanicInfo("unsupported datatype");
@@ -341,7 +350,7 @@ MergeDataArray(
                 auto data = FIELD_DATA(src_field_data, bool).data();
                 auto obj = scalar_array->mutable_bool_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
-                continue;
+                break;
             }
             case DataType::INT8:
             case DataType::INT16:
@@ -349,34 +358,40 @@ MergeDataArray(
                 auto data = FIELD_DATA(src_field_data, int).data();
                 auto obj = scalar_array->mutable_int_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
-                continue;
+                break;
             }
             case DataType::INT64: {
                 auto data = FIELD_DATA(src_field_data, long).data();
                 auto obj = scalar_array->mutable_long_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
-                continue;
+                break;
             }
             case DataType::FLOAT: {
                 auto data = FIELD_DATA(src_field_data, float).data();
                 auto obj = scalar_array->mutable_float_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
-                continue;
+                break;
             }
             case DataType::DOUBLE: {
                 auto data = FIELD_DATA(src_field_data, double).data();
                 auto obj = scalar_array->mutable_double_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
-                continue;
+                break;
             }
             case DataType::VARCHAR: {
-                auto& data = src_field_data->scalars().string_data();
+                auto& data = FIELD_DATA(src_field_data, string);
                 auto obj = scalar_array->mutable_string_data();
-                *(obj->mutable_data()->Add()) = data.data(src_offset);
-                continue;
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::JSON: {
+                auto& data = FIELD_DATA(src_field_data, json);
+                auto obj = scalar_array->mutable_json_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
             }
             default: {
-                PanicInfo("unsupported datatype");
+                PanicInfo(fmt::format("unsupported data type {}", data_type));
             }
         }
     }

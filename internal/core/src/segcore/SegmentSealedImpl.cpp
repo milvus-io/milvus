@@ -20,12 +20,12 @@
 #include <string_view>
 
 #include "Utils.h"
+#include "Types.h"
 #include "common/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "log/Log.h"
-#include "nlohmann/json.hpp"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -240,25 +240,12 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
                 case milvus::DataType::STRING:
                 case milvus::DataType::VARCHAR: {
                     column = std::make_unique<VariableColumn<std::string>>(
-                        get_segment_id(),
-                        field_meta,
-                        info,
-                        [](const char* data, size_t len) {
-                            return std::string_view(data, len);
-                        });
+                        get_segment_id(), field_meta, info);
                     break;
                 }
                 case milvus::DataType::JSON: {
                     column = std::make_unique<VariableColumn<Json>>(
-                        get_segment_id(),
-                        field_meta,
-                        info,
-                        [](const char* data, size_t len) {
-                            if (len > 0) {
-                                return Json::parse(data, data + len);
-                            }
-                            return Json{};
-                        });
+                        get_segment_id(), field_meta, info);
                 }
                 default: {
                 }
@@ -267,7 +254,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(column));
         } else {
-            auto column = FixedColumn(get_segment_id(), field_meta, info);
+            auto column = Column(get_segment_id(), field_meta, info);
             size = column.size();
             std::unique_lock lck(mutex_);
             fixed_fields_.emplace(field_id, std::move(column));
@@ -728,7 +715,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
             default:
                 PanicInfo(
-                    fmt::format("unsupported data type: {}",
+                    fmt::format("718 unsupported data type: {}",
                                 datatype_name(field_meta.get_data_type())));
         }
     }

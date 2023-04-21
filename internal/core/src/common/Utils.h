@@ -32,6 +32,7 @@
 #include "exceptions/EasyAssert.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
+#include "simdjson.h"
 
 namespace milvus {
 #define FIELD_DATA(data_array, type) \
@@ -373,6 +374,11 @@ CreateMap(int64_t segment_id,
     // macOS doesn't support MAP_POPULATE
     mmap_flags |= MAP_POPULATE;
 #endif
+
+    // simdjson requires a padding following the json data
+    size_t padding = field_meta.get_data_type() == DataType::JSON
+                         ? simdjson::SIMDJSON_PADDING
+                         : 0;
     // Allocate memory
     if (info.mmap_dir_path == nullptr) {
         auto data_type = field_meta.get_data_type();
@@ -383,7 +389,7 @@ CreateMap(int64_t segment_id,
 
         // Use anon mapping so we are able to free these memory with munmap only
         void* map = mmap(nullptr,
-                         data_size,
+                         data_size + padding,
                          PROT_READ | PROT_WRITE,
                          mmap_flags | MAP_ANON,
                          -1,
@@ -428,7 +434,7 @@ CreateMap(int64_t segment_id,
         return nullptr;
     }
 
-    auto map = mmap(nullptr, written, PROT_READ, mmap_flags, fd, 0);
+    auto map = mmap(nullptr, written + padding, PROT_READ, mmap_flags, fd, 0);
     AssertInfo(map != MAP_FAILED,
                fmt::format("failed to create map for data file {}, err: {}",
                            filepath.c_str(),
