@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
@@ -40,7 +41,7 @@ var (
 		Fields:               []*Field{fieldModel},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
-		ShardsNum:            1,
+		ShardsNum:            common.DefaultShardsNum,
 		CreateTime:           1,
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
@@ -79,7 +80,7 @@ var (
 		},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
-		ShardsNum:            1,
+		ShardsNum:            common.DefaultShardsNum,
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
 		Properties: []*commonpb.KeyValuePair{

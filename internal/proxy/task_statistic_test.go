@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -30,7 +31,7 @@ func TestStatisticTask_all(t *testing.T) {
 		qc = types.NewMockQueryCoord(t)
 		qn = types.NewMockQueryNode(t)
 
-		shardsNum      = int32(2)
+		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 

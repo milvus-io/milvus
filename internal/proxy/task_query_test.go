@@ -37,7 +37,7 @@ func TestQueryTask_all(t *testing.T) {
 		qc = NewQueryCoordMock(withValidShardLeaders())
 		qn = &QueryNodeMock{}
 
-		shardsNum      = int32(2)
+		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
 
 		expr   = fmt.Sprintf("%s > 0", testInt64Field)

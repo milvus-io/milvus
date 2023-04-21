@@ -481,7 +481,7 @@ func TestCreateCollectionTask(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 	ctx := context.Background()
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -770,7 +770,7 @@ func TestHasCollectionTask(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	int64Field := "int64"
 	floatVecField := "fvec"
 	dim := 128
@@ -919,7 +919,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	int64Field := "int64"
 	floatVecField := "fvec"
 	dim := 128
@@ -1312,7 +1312,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	prefix := "TestTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1566,7 +1566,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
-	shardsNum := int32(2)
+	shardsNum := common.DefaultShardsNum
 	prefix := "TestTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
