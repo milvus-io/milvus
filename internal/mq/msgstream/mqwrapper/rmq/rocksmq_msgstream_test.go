@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package msgstream
+package rmq
 
 import (
 	"context"
@@ -25,8 +25,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -35,47 +33,12 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-const (
-	DefaultPulsarTenant    = "public"
-	DefaultPulsarNamespace = "default"
-)
-
-var Params paramtable.ComponentParam
-
-func TestMain(m *testing.M) {
-	Params.Init()
-	mockKafkaCluster, err := kafka.NewMockCluster(1)
-	defer mockKafkaCluster.Close()
-	if err != nil {
-		// nolint
-		fmt.Printf("Failed to create MockCluster: %s\n", err)
-		os.Exit(1)
-	}
-	broker := mockKafkaCluster.BootstrapServers()
-	Params.Save("kafka.brokerList", broker)
-
-	exitCode := m.Run()
-	os.Exit(exitCode)
-}
-
-func getPulsarAddress() string {
-	pulsarHost := Params.GetWithDefault("pulsar.address", "")
-	port := Params.GetWithDefault("pulsar.port", "")
-	if len(pulsarHost) != 0 && len(port) != 0 {
-		return "pulsar://" + pulsarHost + ":" + port
-	}
-	panic("invalid pulsar address")
-}
 
 type fixture struct {
 	t      *testing.T
@@ -87,10 +50,6 @@ type parameters struct {
 }
 
 func (f *fixture) setup() []parameters {
-	pulsarAddress := getPulsarAddress()
-	pulsarClient, err := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(f.t, err)
-
 	rocksdbName := "/tmp/rocksmq_unittest_" + f.t.Name()
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
@@ -110,10 +69,9 @@ func (f *fixture) setup() []parameters {
 		log.Fatalf("InitRmq error = %v", err)
 	}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 
 	parameters := []parameters{
-		{pulsarClient},
 		{rmqClient},
 	}
 	return parameters
@@ -437,10 +395,11 @@ func initRmqStream(ctx context.Context,
 	producerChannels []string,
 	consumerChannels []string,
 	consumerGroupName string,
-	opts ...msgstream.RepackFunc) (msgstream.MsgStream, msgstream.MsgStream) {
+	opts ...msgstream.RepackFunc,
+) (msgstream.MsgStream, msgstream.MsgStream) {
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 	inputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
@@ -448,7 +407,7 @@ func initRmqStream(ctx context.Context,
 	}
 	var input msgstream.MsgStream = inputStream
 
-	rmqClient2, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions()
 	outputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
 	var output msgstream.MsgStream = outputStream
@@ -460,10 +419,11 @@ func initRmqTtStream(ctx context.Context,
 	producerChannels []string,
 	consumerChannels []string,
 	consumerGroupName string,
-	opts ...msgstream.RepackFunc) (msgstream.MsgStream, msgstream.MsgStream) {
+	opts ...msgstream.RepackFunc,
+) (msgstream.MsgStream, msgstream.MsgStream) {
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 	inputStream, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
@@ -471,7 +431,7 @@ func initRmqTtStream(ctx context.Context,
 	}
 	var input msgstream.MsgStream = inputStream
 
-	rmqClient2, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions()
 	outputStream, _ := msgstream.NewMqTtMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerGroupName, mqwrapper.SubscriptionPositionEarliest)
 	var output msgstream.MsgStream = outputStream
@@ -578,7 +538,7 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 	outputStream, _ = msgstream.NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	consumerSubName = funcutil.RandomString(8)
 	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
@@ -682,7 +642,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 	outputStream, _ = msgstream.NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	consumerSubName = funcutil.RandomString(8)
 	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
@@ -731,7 +691,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	outputStream.Close()
 
 	factory := msgstream.ProtoUDFactory{}
-	rmqClient2, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions()
 	outputStream2, _ := msgstream.NewMqMsgStream(ctx, 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
 	outputStream2.AsConsumer(consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
 
@@ -764,7 +724,6 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 }
 
 func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
-
 	producerChannels := []string{"insert1"}
 	consumerChannels := []string{"insert1"}
 	consumerSubName := "subInsert"
@@ -773,7 +732,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	etcdKV := initRmq(rocksdbName)
 	factory := msgstream.ProtoUDFactory{}
 
-	rmqClient, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient, _ := NewClientWithDefaultOptions()
 
 	otherInputStream, _ := msgstream.NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	otherInputStream.AsProducer([]string{"root_timetick"})
@@ -786,7 +745,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 		inputStream.Produce(getTimeTickMsgPack(int64(i)))
 	}
 
-	rmqClient2, _ := rmq.NewClientWithDefaultOptions()
+	rmqClient2, _ := NewClientWithDefaultOptions()
 	outputStream, _ := msgstream.NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionLatest)
 

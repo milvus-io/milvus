@@ -14,36 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package msgstream
+package nmq
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
-func TestRmsFactory(t *testing.T) {
-	defer os.Unsetenv("ROCKSMQ_PATH")
-	paramtable.Init()
+func TestNatsMQProducer(t *testing.T) {
+	c, err := createNmqClient()
+	assert.NoError(t, err)
+	defer c.Close()
+	topic := t.Name()
+	pOpts := mqwrapper.ProducerOptions{Topic: topic}
 
-	dir := t.TempDir()
-
-	rmsFactory := NewRocksmqFactory(dir)
-
-	ctx := context.Background()
-	_, err := rmsFactory.NewMsgStream(ctx)
+	// Check Topic()
+	p, err := c.CreateProducer(pOpts)
 	assert.Nil(t, err)
+	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
 
-	_, err = rmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	// Check Send()
+	msg := &mqwrapper.ProducerMessage{
+		Payload:    []byte{},
+		Properties: map[string]string{},
+	}
+	_, err = p.Send(context.TODO(), msg)
 	assert.Nil(t, err)
 }

@@ -88,7 +88,8 @@ func runComponent[T component](ctx context.Context,
 	localMsg bool,
 	runWg *sync.WaitGroup,
 	creator func(context.Context, dependency.Factory) (T, error),
-	metricRegister func(*prometheus.Registry)) T {
+	metricRegister func(*prometheus.Registry),
+) T {
 	var role T
 	var wg sync.WaitGroup
 
@@ -247,19 +248,6 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 		paramtable.Init()
 		params := paramtable.Get()
-
-		if params.RocksmqEnable() {
-			path, err := params.Load("rocksmq.path")
-			if err != nil {
-				panic(err)
-			}
-
-			if err = rocksmqimpl.InitRocksMQ(path); err != nil {
-				panic(err)
-			}
-			defer stopRocksmq()
-		}
-
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
 			etcd.InitEtcdServer(

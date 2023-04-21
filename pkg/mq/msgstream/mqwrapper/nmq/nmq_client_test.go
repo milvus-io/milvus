@@ -14,70 +14,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rmq
+package nmq
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/apache/pulsar-client-go/pulsar"
-	rocksmqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	pulsarwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func TestMain(m *testing.M) {
-	paramtable.Init()
-
-	rand.Seed(time.Now().UnixNano())
-	path := "/tmp/milvus/rdb_data"
-	defer os.RemoveAll(path)
-	_ = rocksmqimplserver.InitRocksMQ(path)
-	exitCode := m.Run()
-	defer rocksmqimplserver.CloseRocksMQ()
-	os.Exit(exitCode)
+func createNmqClient() (*nmqClient, error) {
+	return NewClient(natsServerAddress)
 }
 
-func Test_NewRmqClient(t *testing.T) {
-	client, err := createRmqClient()
-	defer client.Close()
+func Test_NewNmqClient(t *testing.T) {
+	client, err := createNmqClient()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	client.Close()
 }
 
-func TestRmqClient_CreateProducer(t *testing.T) {
-	opts := rocksmqimplclient.Options{}
-	client, err := NewClient(opts)
-	defer client.Close()
+func TestNmqClient_CreateProducer(t *testing.T) {
+	client, err := createNmqClient()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
-	topic := "TestRmqClient_CreateProducer"
+	topic := "TestNmqClient_CreateProducer"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-
-	defer producer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+	defer producer.Close()
 
-	rmqProducer := producer.(*rmqProducer)
-	defer rmqProducer.Close()
-	assert.Equal(t, rmqProducer.Topic(), topic)
+	nmqProducer := producer.(*nmqProducer)
+	assert.Equal(t, nmqProducer.Topic(), topic)
 
 	msg := &mqwrapper.ProducerMessage{
 		Payload:    []byte{},
 		Properties: nil,
 	}
-	_, err = rmqProducer.Send(context.TODO(), msg)
+	_, err = nmqProducer.Send(context.TODO(), msg)
 	assert.Nil(t, err)
 
 	invalidOpts := mqwrapper.ProducerOptions{Topic: ""}
@@ -86,8 +69,8 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	assert.Error(t, e)
 }
 
-func TestRmqClient_GetLatestMsg(t *testing.T) {
-	client, err := createRmqClient()
+func TestNmqClient_GetLatestMsg(t *testing.T) {
+	client, err := createNmqClient()
 	assert.Nil(t, err)
 	defer client.Close()
 
@@ -139,46 +122,56 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 	assert.True(t, ret)
 }
 
-func TestRmqClient_Subscribe(t *testing.T) {
-	client, err := createRmqClient()
-	defer client.Close()
+func TestNmqClient_IllegalSubscribe(t *testing.T) {
+	client, err := createNmqClient()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
-	topic := "TestRmqClient_Subscribe"
+	sub, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic: "",
+	})
+	assert.Nil(t, sub)
+	assert.Error(t, err)
+
+	sub, err = client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:            "123",
+		SubscriptionName: "",
+	})
+	assert.Nil(t, sub)
+	assert.Error(t, err)
+}
+
+func TestNmqClient_Subscribe(t *testing.T) {
+	client, err := createNmqClient()
+	assert.Nil(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	topic := "TestNmqClient_Subscribe"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	defer producer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+	defer producer.Close()
 
 	subName := "subName"
 	consumerOpts := mqwrapper.ConsumerOptions{
-		Topic:                       subName,
-		SubscriptionName:            subName,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
-		BufSize:                     0,
-	}
-	consumer, err := client.Subscribe(consumerOpts)
-	assert.NotNil(t, err)
-	assert.Nil(t, consumer)
-
-	consumerOpts = mqwrapper.ConsumerOptions{
 		Topic:                       "",
 		SubscriptionName:            subName,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	}
 
-	consumer, err = client.Subscribe(consumerOpts)
+	consumer, err := client.Subscribe(consumerOpts)
 	assert.NotNil(t, err)
 	assert.Nil(t, consumer)
 
 	consumerOpts.Topic = topic
 	consumer, err = client.Subscribe(consumerOpts)
-	defer consumer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 	assert.Equal(t, consumer.Subscription(), subName)
 
 	msg := &mqwrapper.ProducerMessage{
@@ -195,29 +188,31 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		assert.FailNow(t, "consumer failed to yield message in 100 milliseconds")
 	case msg := <-consumer.Chan():
 		consumer.Ack(msg)
-		rmqmsg := msg.(*rmqMessage)
-		msgPayload := rmqmsg.Payload()
+		nmqmsg := msg.(*nmqMessage)
+		msgPayload := nmqmsg.Payload()
 		assert.NotEmpty(t, msgPayload)
-		msgTopic := rmqmsg.Topic()
+		msgTopic := nmqmsg.Topic()
 		assert.Equal(t, msgTopic, topic)
-		msgProp := rmqmsg.Properties()
+		msgProp := nmqmsg.Properties()
 		assert.Empty(t, msgProp)
-		msgID := rmqmsg.ID()
-		rID := msgID.(*rmqID)
-		assert.NotZero(t, rID)
+		msgID := nmqmsg.ID()
+		rID := msgID.(*nmqID)
+		assert.Equal(t, rID.messageID, MessageIDType(1))
 	}
 }
 
-func TestRmqClient_EarliestMessageID(t *testing.T) {
-	client, _ := createRmqClient()
+func TestNmqClient_EarliestMessageID(t *testing.T) {
+	client, _ := createNmqClient()
 	defer client.Close()
 
 	mid := client.EarliestMessageID()
 	assert.NotNil(t, mid)
+	nmqmsg := mid.(*nmqID)
+	assert.Equal(t, nmqmsg.messageID, MessageIDType(1))
 }
 
-func TestRmqClient_StringToMsgID(t *testing.T) {
-	client, _ := createRmqClient()
+func TestNmqClient_StringToMsgID(t *testing.T) {
+	client, _ := createNmqClient()
 	defer client.Close()
 
 	str := "5"
@@ -231,19 +226,12 @@ func TestRmqClient_StringToMsgID(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestRmqClient_BytesToMsgID(t *testing.T) {
-	client, _ := createRmqClient()
+func TestNmqClient_BytesToMsgID(t *testing.T) {
+	client, _ := createNmqClient()
 	defer client.Close()
 
-	mid := pulsar.EarliestMessageID()
-	binary := pulsarwrapper.SerializePulsarMsgID(mid)
-
-	res, err := client.BytesToMsgID(binary)
+	mid := client.EarliestMessageID()
+	res, err := client.BytesToMsgID(mid.Serialize())
 	assert.Nil(t, err)
 	assert.NotNil(t, res)
-}
-
-func createRmqClient() (*rmqClient, error) {
-	opts := rocksmqimplclient.Options{}
-	return NewClient(opts)
 }

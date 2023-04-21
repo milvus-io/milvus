@@ -83,6 +83,11 @@ cpp_coverage/
 
 # virtualenv
 venv/
+.venv/
+
+# gopls generated
+go.work
+go.work.sum
 
 # docker compose volumes
 deployments/docker/*/volumes

@@ -19,6 +19,7 @@ package rmq
 import (
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"go.uber.org/zap"
@@ -27,12 +28,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
+// nmqClient implements mqwrapper.Client.
+var _ mqwrapper.Client = &rmqClient{}
+
 // rmqClient contains a rocksmq client
 type rmqClient struct {
 	client client.Client
 }
 
-func NewClientWithDefaultOptions() (*rmqClient, error) {
+func NewClientWithDefaultOptions() (mqwrapper.Client, error) {
 	option := client.Options{Server: server.Rmq}
 	return NewClient(option)
 }
@@ -60,6 +64,11 @@ func (rc *rmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 
 // Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	if options.BufSize == 0 {
+		err := errors.New("subscription bufSize of rmq should never be zero")
+		log.Warn("unexpected subscription consumer options", zap.Error(err))
+		return nil, err
+	}
 	receiveChannel := make(chan client.Message, options.BufSize)
 
 	cli, err := rc.client.Subscribe(client.ConsumerOptions{
