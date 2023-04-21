@@ -429,7 +429,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			suite.collectionID,
 			suite.partitionIDs[i%partNum],
 			suite.validSegmentIDs[i],
-			100,
+			1000,
 			schema,
 			suite.node.vectorStorage,
 		)
@@ -441,7 +441,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			suite.partitionIDs[i%partNum],
 			suite.validSegmentIDs[i],
 			vecFieldIDs[0],
-			100,
+			1000,
 			segments.IndexFaissIVFFlat,
 			segments.L2,
 			suite.node.vectorStorage,
@@ -904,11 +904,11 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 
-	concurrency := 8
+	concurrency := 16
 	futures := make([]*conc.Future[*internalpb.SearchResults], 0, concurrency)
 	for i := 0; i < concurrency; i++ {
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
-			creq, err := suite.genCSearchRequest(1, IndexFaissIDMap, schema)
+			creq, err := suite.genCSearchRequest(30, IndexFaissIDMap, schema)
 			req := &querypb.SearchRequest{
 				Req:             creq,
 				FromShardLeader: false,
