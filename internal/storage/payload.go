@@ -30,7 +30,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -330,9 +329,6 @@ func (w *PayloadWriter) AddOneJSONToPayload(msg []byte) error {
 	length := len(bytes)
 	cmsg := (*C.uint8_t)(unsafe.Pointer(&bytes[0]))
 	clength := C.int(length)
-	// defer C.free(unsafe.Pointer(cmsg))
-
-	log.Debug("yah01", zap.String("jsonBytes", string(bytes)))
 
 	status := C.AddOneJSONToPayload(w.payloadWriterPtr, cmsg, clength)
 	return HandleCStatus(&status, "AddOneJSONToPayload failed")

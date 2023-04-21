@@ -34,6 +34,12 @@
 #include "knowhere/expected.h"
 
 namespace milvus {
+#define FIELD_DATA(data_array, type) \
+    (data_array->scalars().type##_data().data())
+
+#define VEC_FIELD_DATA(data_array, type) \
+    (data_array->vectors().type##_vector().data())
+
 inline DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
     return knowhere::GenDataSet(nb, dim, xb);
@@ -196,14 +202,14 @@ GetDataSize(const FieldMeta& field, size_t row_count, const DataArray* data) {
             case DataType::VARCHAR:
             case DataType::STRING: {
                 ssize_t size{};
-                for (auto& data : data->scalars().string_data().data()) {
+                for (auto& data : FIELD_DATA(data, string)) {
                     size += data.size();
                 }
                 return size;
             }
             case DataType::JSON: {
                 ssize_t size{};
-                for (auto& data : data->scalars().json_data().data()) {
+                for (auto& data : FIELD_DATA(data, json)) {
                     size += data.size();
                 }
                 return size;
@@ -225,50 +231,44 @@ FillField(DataType data_type,
     auto data = info.field_data;
     switch (data_type) {
         case DataType::BOOL: {
-            return memcpy(dst, data->scalars().bool_data().data().data(), size);
+            return memcpy(dst, FIELD_DATA(data, bool).data(), size);
         }
         case DataType::INT8: {
-            auto src_data = data->scalars().int_data().data();
+            auto src_data = FIELD_DATA(data, int);
             std::vector<int8_t> data_raw(src_data.size());
             std::copy_n(src_data.data(), src_data.size(), data_raw.data());
             return memcpy(dst, data_raw.data(), size);
         }
         case DataType::INT16: {
-            auto src_data = data->scalars().int_data().data();
+            auto src_data = FIELD_DATA(data, int);
             std::vector<int16_t> data_raw(src_data.size());
             std::copy_n(src_data.data(), src_data.size(), data_raw.data());
             return memcpy(dst, data_raw.data(), size);
         }
         case DataType::INT32: {
-            return memcpy(dst, data->scalars().int_data().data().data(), size);
+            return memcpy(dst, FIELD_DATA(data, int).data(), size);
         }
         case DataType::INT64: {
-            return memcpy(dst, data->scalars().long_data().data().data(), size);
+            return memcpy(dst, FIELD_DATA(data, long).data(), size);
         }
         case DataType::FLOAT: {
-            return memcpy(
-                dst, data->scalars().float_data().data().data(), size);
+            return memcpy(dst, FIELD_DATA(data, float).data(), size);
         }
         case DataType::DOUBLE: {
-            return memcpy(
-                dst, data->scalars().double_data().data().data(), size);
+            return memcpy(dst, FIELD_DATA(data, double).data(), size);
         }
         case DataType::VARCHAR: {
             char* dest = reinterpret_cast<char*>(dst);
-            auto begin = data->scalars().string_data().data().begin();
-            auto end = data->scalars().string_data().data().end();
-
-            while (begin != end) {
-                memcpy(dest, begin->data(), begin->size());
-                dest += begin->size();
-                begin++;
+            for (auto& data : FIELD_DATA(data, string)) {
+                memcpy(dest, data.data(), data.size());
+                dest += data.size();
             }
             return dst;
         }
 
         case DataType::JSON: {
             char* dest = reinterpret_cast<char*>(dst);
-            for (auto& data : data->scalars().json_data().data()) {
+            for (auto& data : FIELD_DATA(data, json)) {
                 memcpy(dest, data.data(), data.size());
                 dest += data.size();
             }
@@ -276,11 +276,10 @@ FillField(DataType data_type,
         }
 
         case DataType::VECTOR_FLOAT:
-            return memcpy(
-                dst, data->vectors().float_vector().data().data(), size);
+            return memcpy(dst, VEC_FIELD_DATA(data, float).data(), size);
 
         case DataType::VECTOR_BINARY:
-            return memcpy(dst, data->vectors().binary_vector().data(), size);
+            return memcpy(dst, VEC_FIELD_DATA(data, binary), size);
 
         default: {
             PanicInfo("unsupported");
@@ -292,53 +291,59 @@ inline ssize_t
 WriteFieldData(int fd, DataType data_type, const DataArray* data, size_t size) {
     switch (data_type) {
         case DataType::BOOL: {
-            return write(fd, data->scalars().bool_data().data().data(), size);
+            return write(fd, FIELD_DATA(data, bool).data(), size);
         }
         case DataType::INT8: {
-            auto src_data = data->scalars().int_data().data();
+            auto src_data = FIELD_DATA(data, int);
             std::vector<int8_t> data_raw(src_data.size());
             std::copy_n(src_data.data(), src_data.size(), data_raw.data());
             return write(fd, data_raw.data(), size);
         }
         case DataType::INT16: {
-            auto src_data = data->scalars().int_data().data();
+            auto src_data = FIELD_DATA(data, int);
             std::vector<int16_t> data_raw(src_data.size());
             std::copy_n(src_data.data(), src_data.size(), data_raw.data());
             return write(fd, data_raw.data(), size);
         }
         case DataType::INT32: {
-            return write(fd, data->scalars().int_data().data().data(), size);
+            return write(fd, FIELD_DATA(data, int).data(), size);
         }
         case DataType::INT64: {
-            return write(fd, data->scalars().long_data().data().data(), size);
+            return write(fd, FIELD_DATA(data, long).data(), size);
         }
         case DataType::FLOAT: {
-            return write(fd, data->scalars().float_data().data().data(), size);
+            return write(fd, FIELD_DATA(data, float).data(), size);
         }
         case DataType::DOUBLE: {
-            return write(fd, data->scalars().double_data().data().data(), size);
+            return write(fd, FIELD_DATA(data, double).data(), size);
         }
         case DataType::VARCHAR: {
-            auto begin = data->scalars().string_data().data().begin();
-            auto end = data->scalars().string_data().data().end();
-
             ssize_t total_written{0};
-            while (begin != end) {
-                ssize_t written = write(fd, begin->data(), begin->size());
-                if (written < begin->size()) {
+            for (auto& str : FIELD_DATA(data, string)) {
+                ssize_t written = write(fd, str.data(), str.size());
+                if (written < str.size()) {
                     break;
                 }
                 total_written += written;
-                begin++;
+            }
+            return total_written;
+        }
+        case DataType::JSON: {
+            ssize_t total_written{0};
+            for (auto& json : FIELD_DATA(data, json)) {
+                ssize_t written = write(fd, json.data(), json.size());
+                if (written < json.size()) {
+                    break;
+                }
+                total_written += written;
             }
             return total_written;
         }
         case DataType::VECTOR_FLOAT:
-            return write(
-                fd, data->vectors().float_vector().data().data(), size);
+            return write(fd, VEC_FIELD_DATA(data, float).data(), size);
 
         case DataType::VECTOR_BINARY:
-            return write(fd, data->vectors().binary_vector().data(), size);
+            return write(fd, VEC_FIELD_DATA(data, binary), size);
 
         default: {
             PanicInfo("unsupported");

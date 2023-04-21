@@ -83,7 +83,8 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.Require().NoError(err)
 	insertRecord, err = storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
-	suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+	err = suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+	suite.Require().NoError(err)
 
 	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
 	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)

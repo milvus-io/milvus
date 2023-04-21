@@ -19,6 +19,7 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_unordered_set.h>
 
+#include <nlohmann/json.hpp>
 #include <NamedType/named_type.hpp>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/container/vector.hpp>
@@ -78,6 +79,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using Json = nlohmann::json;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {

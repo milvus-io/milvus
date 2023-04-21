@@ -17,6 +17,7 @@
 #pragma once
 #include "Types.h"
 #include <string>
+#include <type_traits>
 
 namespace milvus {
 
@@ -51,7 +52,7 @@ constexpr bool IsVector = std::is_base_of_v<VectorTrait, T>;
 template <typename T>
 constexpr bool IsScalar =
     std::is_fundamental_v<T> || std::is_same_v<T, std::string> ||
-    std::is_same_v<T, std::string_view>;
+    std::is_same_v<T, Json> || std::is_same_v<T, std::string_view>;
 
 template <typename T, typename Enabled = void>
 struct EmbeddedTypeImpl;

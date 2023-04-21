@@ -24,6 +24,7 @@
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
 #include "common/Span.h"
+#include "common/Types.h"
 #include "common/Utils.h"
 #include "exceptions/EasyAssert.h"
 #include "fmt/core.h"
@@ -31,8 +32,6 @@
 #include "nlohmann/json.hpp"
 
 namespace milvus::segcore {
-
-#define FIELD_DATA(info, field) (info->scalars().field##_data().data())
 
 struct Entry {
     char* data;
@@ -113,11 +112,11 @@ class VariableColumn : public ColumnBase {
                    const FieldMeta& field_meta,
                    const LoadFieldDataInfo& info,
                    Ctor&& ctor) {
-        auto begin = info.field_data->scalars().string_data().data().begin();
-        auto end = info.field_data->scalars().string_data().data().end();
-        if constexpr (std::is_same_v<T, nlohmann::json>) {
-            begin = info.field_data->scalars().json_data().data().begin();
-            end = info.field_data->scalars().json_data().data().end();
+        auto begin = FIELD_DATA(info.field_data, string).begin();
+        auto end = FIELD_DATA(info.field_data, string).end();
+        if constexpr (std::is_same_v<T, Json>) {
+            begin = FIELD_DATA(info.field_data, json).begin();
+            end = FIELD_DATA(info.field_data, json).end();
         }
 
         indices_.reserve(info.row_count);
@@ -155,6 +154,13 @@ class VariableColumn : public ColumnBase {
         return views_[i];
     }
 
+    std::string_view
+    raw_at(const int i) const {
+        size_t len = (i == indices_.size() - 1) ? size_ - indices_.back()
+                                                : indices_[i + 1] - indices_[i];
+        return std::string_view(data_ + indices_[i], len);
+    }
+
  protected:
     template <typename Ctor>
     void
@@ -166,18 +172,6 @@ class VariableColumn : public ColumnBase {
         }
         views_.emplace_back(
             ctor(data_ + indices_.back(), size_ - indices_.back()));
-
-        // as we stores the json objects entirely in memory,
-        // the raw data is not needed anymore
-        if constexpr (std::is_same_v<T, nlohmann::json>) {
-            if (munmap(data_, size_)) {
-                AssertInfo(
-                    true,
-                    fmt::format(
-                        "failed to unmap json field after deserialized, err={}",
-                        strerror(errno)));
-            }
-        }
     }
 
  private:

@@ -24,6 +24,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
@@ -192,7 +193,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
             auto timestamps = reinterpret_cast<const Timestamp*>(
-                info.field_data->scalars().long_data().data().data());
+                FIELD_DATA(info.field_data, long).data());
 
             TimestampIndex index;
             auto min_slice_length = size < 4096 ? 1 : 4096;
@@ -211,7 +212,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
             auto row_ids = reinterpret_cast<const idx_t*>(
-                info.field_data->scalars().long_data().data().data());
+                FIELD_DATA(info.field_data, long).data());
             // write data under lock
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
@@ -247,15 +248,15 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
                     break;
                 }
                 case milvus::DataType::JSON: {
-                    column = std::make_unique<VariableColumn<nlohmann::json>>(
+                    column = std::make_unique<VariableColumn<Json>>(
                         get_segment_id(),
                         field_meta,
                         info,
                         [](const char* data, size_t len) {
                             if (len > 0) {
-                                return nlohmann::json::parse(data, data + len);
+                                return Json::parse(data, data + len);
                             }
-                            return nlohmann::json{};
+                            return Json{};
                         });
                 }
                 default: {
@@ -420,6 +421,7 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
     if (del_barrier == 0) {
         return;
     }
+
     auto bitmap_holder = get_deleted_bitmap(
         del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
@@ -598,18 +600,18 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
     }
 }
 
-template <typename T>
+template <typename S, typename T>
 void
 SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
                                        const int64_t* seg_offsets,
                                        int64_t count,
                                        void* dst_raw) {
-    auto field = reinterpret_cast<const VariableColumn<T>*>(column);
+    auto field = reinterpret_cast<const VariableColumn<S>*>(column);
     auto dst = reinterpret_cast<T*>(dst_raw);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = std::move(T((*field)[offset]));
+            dst[i] = std::move(T(field->raw_at(offset)));
         }
     }
 }
@@ -677,6 +679,17 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             case DataType::STRING: {
                 FixedVector<std::string> output(count);
                 bulk_subscript_impl<std::string>(
+                    variable_fields_.at(field_id).get(),
+                    seg_offsets,
+                    count,
+                    output.data());
+                return CreateScalarDataArrayFrom(
+                    output.data(), count, field_meta);
+            }
+
+            case DataType::JSON: {
+                FixedVector<std::string> output(count);
+                bulk_subscript_impl<Json, std::string>(
                     variable_fields_.at(field_id).get(),
                     seg_offsets,
                     count,

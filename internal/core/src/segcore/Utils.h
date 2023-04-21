@@ -13,7 +13,7 @@
 #include <exception>
 #include <memory>
 #include <stdexcept>
-#include <stdlib.h>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
