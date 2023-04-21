@@ -21,9 +21,9 @@ OS := $(shell uname -s)
 ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
-useasan = false 
+useasan = false
 ifeq (${USE_ASAN}, true)
-useasan = true 
+useasan = true
 endif
 
 export GIT_BRANCH=master
@@ -58,19 +58,6 @@ tools/bin/revive: tools/check/go.mod
 cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
-# put generate proto as a separated target because build cpp have different cases like with unittest.
-generated-proto-go-without-cpp: export protoc:=${PWD}/cmake_build/bin/protoc
-generated-proto-go-without-cpp: 
-	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
-	@(env bash $(PWD)/scripts/proto_gen_go.sh)
-
-generated-proto-go: build-cpp generated-proto-go-without-cpp
-
-check-proto-product-only:
-	 @(env bash $(PWD)/scripts/check_proto_product.sh)
-check-proto-product: generated-proto-go check-proto-product-only
-	
 
 fmt:
 ifdef GO_DIFF_FILES
@@ -150,13 +137,6 @@ print-gpu-build-info:
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
-embd-milvus: build-cpp-embd print-build-info
-	@echo "Building **Embedded** Milvus ..."
-	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -ldflags="-r /tmp/milvus/lib/ -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		${AARCH64_FLAG} -buildmode=c-shared -o $(INSTALL_PATH)/embd-milvus.so $(PWD)/pkg/embedded/embedded.go 1>/dev/null
-
 update-milvus-api: download-milvus-proto
 	@echo "Update milvus/api version ..."
 	@(env bash $(PWD)/scripts/update-api-version.sh)
@@ -165,25 +145,34 @@ download-milvus-proto:
 	@echo "Download milvus-proto repo ..."
 	@(env bash $(PWD)/scripts/download_milvus_proto.sh)
 
-build-cpp: download-milvus-proto
+build-3rdparty:
+	@echo "Build 3rdparty ..."
+	@(env bash $(PWD)/scripts/3rdparty_build.sh)
+
+generated-proto: download-milvus-proto build-3rdparty
+	@echo "Generate proto ..."
+	@mkdir -p ${GOPATH}/bin
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
+	@(env bash $(PWD)/scripts/generate_proto.sh)
+
+build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-gpu: download-milvus-proto
+build-cpp-gpu: generated-proto
 	@echo "Building Milvus cpp gpu library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-embd: download-milvus-proto
-	@echo "Building **Embedded** Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
-
-build-cpp-with-unittest: download-milvus-proto
+build-cpp-with-unittest: generated-proto
 	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-with-coverage: download-milvus-proto
+build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${useasan} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+
+check-proto-product: generated-proto
+	 @(env bash $(PWD)/scripts/check_proto_product.sh)
 
 
 # Run the tests.
@@ -274,11 +263,6 @@ codecov-cpp: build-cpp-with-coverage
 	@echo "Running cpp coverage..."
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
-# Package docker image locally.
-# TODO: fix error occur at starting up
-docker: install
-	./build/build_image.sh
-
 # Build each component and install binary to $GOPATH/bin.
 install: milvus
 	@echo "Installing binary to './bin'"
@@ -297,7 +281,6 @@ gpu-install: milvus-gpu
 	-cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH) 2>/dev/null
 	-cp -r -P $(PWD)/internal/core/output/lib64/*.so* $(LIBRARY_PATH) 2>/dev/null
 	@echo "Installation successful."
-
 
 clean:
 	@echo "Cleaning up all the generated files"
@@ -351,10 +334,10 @@ generate-mockery: getdeps
 	# internal/datanode
 	$(PWD)/bin/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator/ --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator  --outpkg=allocator --inpackage
 	# internal/querycoordv2
-	$(PWD)/bin/mockery --name=QueryNodeServer --dir=$(PWD)/internal/proto/querypb/ --output=$(PWD)/internal/querycoordv2/mocks --filename=mock_querynode.go --with-expecter --structname=MockQueryNodeServer 
-	$(PWD)/bin/mockery --name=Broker --dir=$(PWD)/internal/querycoordv2/meta --output=$(PWD)/internal/querycoordv2/meta --filename=mock_broker.go --with-expecter --structname=MockBroker --outpkg=meta 
-	$(PWD)/bin/mockery --name=Scheduler --dir=$(PWD)/internal/querycoordv2/task --output=$(PWD)/internal/querycoordv2/task --filename=mock_scheduler.go --with-expecter --structname=MockScheduler --outpkg=task --inpackage 
-	$(PWD)/bin/mockery --name=Cluster --dir=$(PWD)/internal/querycoordv2/session --output=$(PWD)/internal/querycoordv2/session --filename=mock_cluster.go --with-expecter --structname=MockCluster --outpkg=session --inpackage 
+	$(PWD)/bin/mockery --name=QueryNodeServer --dir=$(PWD)/internal/proto/querypb/ --output=$(PWD)/internal/querycoordv2/mocks --filename=mock_querynode.go --with-expecter --structname=MockQueryNodeServer
+	$(PWD)/bin/mockery --name=Broker --dir=$(PWD)/internal/querycoordv2/meta --output=$(PWD)/internal/querycoordv2/meta --filename=mock_broker.go --with-expecter --structname=MockBroker --outpkg=meta
+	$(PWD)/bin/mockery --name=Scheduler --dir=$(PWD)/internal/querycoordv2/task --output=$(PWD)/internal/querycoordv2/task --filename=mock_scheduler.go --with-expecter --structname=MockScheduler --outpkg=task --inpackage
+	$(PWD)/bin/mockery --name=Cluster --dir=$(PWD)/internal/querycoordv2/session --output=$(PWD)/internal/querycoordv2/session --filename=mock_cluster.go --with-expecter --structname=MockCluster --outpkg=session --inpackage
 	$(PWD)/bin/mockery --name=Store --dir=$(PWD)/internal/querycoordv2/meta --output=$(PWD)/internal/querycoordv2/meta --filename=mock_store.go --with-expecter --structname=MockStore --outpkg=meta --inpackage
 	$(PWD)/bin/mockery --name=Balance --dir=$(PWD)/internal/querycoordv2/balance --output=$(PWD)/internal/querycoordv2/balance --filename=mock_balancer.go --with-expecter --structname=MockBalancer --outpkg=balance --inpackage
 	$(PWD)/bin/mockery --name=Controller --dir=$(PWD)/internal/querycoordv2/dist --output=$(PWD)/internal/querycoordv2/dist --filename=mock_controller.go --with-expecter --structname=MockController --outpkg=dist --inpackage
@@ -370,7 +353,5 @@ generate-mockery: getdeps
 	$(PWD)/bin/mockery --name=Manager --dir=$(PWD)/internal/querynodev2/cluster --output=$(PWD)/internal/querynodev2/cluster --filename=mock_manager.go --with-expecter --outpkg=cluster --structname=MockManager --inpackage
 	$(PWD)/bin/mockery --name=Loader --dir=$(PWD)/internal/querynodev2/segments --output=$(PWD)/internal/querynodev2/segments --filename=mock_loader.go --with-expecter --outpkg=segments --structname=MockLoader --inpackage
 	$(PWD)/bin/mockery --name=Worker --dir=$(PWD)/internal/querynodev2/cluster --output=$(PWD)/internal/querynodev2/cluster --filename=mock_worker.go --with-expecter --outpkg=worker --structname=MockWorker --inpackage
-	$(PWD)/bin/mockery --name=ShardDelegator --dir=$(PWD)/internal/querynodev2/delegator/ --output=$(PWD)/internal/querynodev2/delegator/ --filename=mock_delegator.go --with-expecter --outpkg=delegator --structname=MockShardDelegator --inpackage        
-
-ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp codecov-go
+	$(PWD)/bin/mockery --name=ShardDelegator --dir=$(PWD)/internal/querynodev2/delegator/ --output=$(PWD)/internal/querynodev2/delegator/ --filename=mock_delegator.go --with-expecter --outpkg=delegator --structname=MockShardDelegator --inpackage
 
