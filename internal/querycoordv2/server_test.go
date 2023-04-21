@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -160,8 +159,7 @@ func (suite *ServerSuite) TestRecoverFailed() {
 
 	broker := meta.NewMockBroker(suite.T())
 	for _, collection := range suite.collections {
-		broker.EXPECT().GetPartitions(mock.Anything, collection).Return([]int64{1}, nil)
-		broker.EXPECT().GetRecoveryInfo(context.TODO(), collection, mock.Anything).Return(nil, nil, errors.New("CollectionNotExist"))
+		broker.EXPECT().GetRecoveryInfoV2(context.TODO(), collection).Return(nil, nil, errors.New("CollectionNotExist"))
 	}
 	suite.server.targetMgr = meta.NewTargetManager(broker, suite.server.meta)
 	err = suite.server.Start()
@@ -173,19 +171,62 @@ func (suite *ServerSuite) TestRecoverFailed() {
 }
 
 func (suite *ServerSuite) TestNodeUp() {
-	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
-	err := newNode.Start()
+	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
+	err := node1.Start()
 	suite.NoError(err)
-	defer newNode.Stop()
+	defer node1.Stop()
 
 	suite.Eventually(func() bool {
-		node := suite.server.nodeMgr.Get(newNode.ID)
+		node := suite.server.nodeMgr.Get(node1.ID)
 		if node == nil {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, newNode.ID)
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node1.ID)
+			if replica == nil {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, time.Second)
+
+	// mock node1 lost connection
+	fakeLostConnectionErr := errors.New("fake lost connection error")
+	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, fakeLostConnectionErr)
+
+	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
+	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil).Maybe()
+	err = node2.Start()
+	suite.NoError(err)
+	defer node2.Stop()
+
+	// expect node2 won't be add to qc, due to unhealthy nodes exist
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
+		}
+		for _, collection := range suite.collections {
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
+			if replica == nil {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Second)
+
+	// mock node1 down, so no unhealthy nodes exist
+	suite.server.nodeMgr.Remove(node1.ID)
+
+	// expect node2 will be add to qc
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(node2.ID)
+		if node == nil {
+			return false
+		}
+		for _, collection := range suite.collections {
+			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(collection, node2.ID)
 			if replica == nil {
 				return false
 			}
@@ -347,41 +388,25 @@ func (suite *ServerSuite) assertLoaded(collection int64) {
 }
 
 func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
-	var (
-		mu             sync.Mutex
-		vChannels      []*datapb.VchannelInfo
-		segmentBinlogs []*datapb.SegmentBinlogs
-	)
-
-	for partition, segments := range suite.segments[collection] {
-		segments := segments
-		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Maybe().Return(func(ctx context.Context, collectionID, partitionID int64) []*datapb.VchannelInfo {
-			mu.Lock()
-			vChannels = []*datapb.VchannelInfo{}
-			for _, channel := range suite.channels[collection] {
-				vChannels = append(vChannels, &datapb.VchannelInfo{
-					CollectionID: collection,
-					ChannelName:  channel,
-				})
-			}
-			segmentBinlogs = []*datapb.SegmentBinlogs{}
-			for _, segment := range segments {
-				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-					SegmentID:     segment,
-					InsertChannel: suite.channels[collection][segment%2],
-				})
-			}
-			return vChannels
-		},
-			func(ctx context.Context, collectionID, partitionID int64) []*datapb.SegmentBinlogs {
-				return segmentBinlogs
-			},
-			func(ctx context.Context, collectionID, partitionID int64) error {
-				mu.Unlock()
-				return nil
-			},
-		)
+	vChannels := []*datapb.VchannelInfo{}
+	for _, channel := range suite.channels[collection] {
+		vChannels = append(vChannels, &datapb.VchannelInfo{
+			CollectionID: collection,
+			ChannelName:  channel,
+		})
 	}
+
+	segmentInfos := []*datapb.SegmentInfo{}
+	for _, segments := range suite.segments[collection] {
+		for _, segment := range segments {
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID:            segment,
+				PartitionID:   suite.partitions[collection][0],
+				InsertChannel: suite.channels[collection][segment%2],
+			})
+		}
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Maybe().Return(vChannels, segmentInfos, nil)
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {
@@ -391,39 +416,41 @@ func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQu
 
 func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.DataCoord) {
 	var (
-		vChannels      []*datapb.VchannelInfo
-		segmentBinlogs []*datapb.SegmentBinlogs
+		vChannels    []*datapb.VchannelInfo
+		segmentInfos []*datapb.SegmentInfo
 	)
 
-	for partition, segments := range suite.segments[collection] {
-		segments := segments
-		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
-			),
+	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequestV2{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+		),
+		CollectionID: collection,
+	}
+
+	vChannels = []*datapb.VchannelInfo{}
+	for _, channel := range suite.channels[collection] {
+		vChannels = append(vChannels, &datapb.VchannelInfo{
 			CollectionID: collection,
-			PartitionID:  partition,
-		}
-		vChannels = []*datapb.VchannelInfo{}
-		for _, channel := range suite.channels[collection] {
-			vChannels = append(vChannels, &datapb.VchannelInfo{
-				CollectionID: collection,
-				ChannelName:  channel,
-			})
-		}
-		segmentBinlogs = []*datapb.SegmentBinlogs{}
+			ChannelName:  channel,
+		})
+	}
+
+	segmentInfos = []*datapb.SegmentInfo{}
+	for _, segments := range suite.segments[collection] {
 		for _, segment := range segments {
-			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-				SegmentID:     segment,
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID:            segment,
 				InsertChannel: suite.channels[collection][segment%2],
 			})
 		}
-		dataCoord.EXPECT().GetRecoveryInfo(mock.Anything, getRecoveryInfoRequest).Maybe().Return(&datapb.GetRecoveryInfoResponse{
-			Status:   merr.Status(nil),
-			Channels: vChannels,
-			Binlogs:  segmentBinlogs,
-		}, nil)
 	}
+	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, getRecoveryInfoRequest).Return(&datapb.GetRecoveryInfoResponseV2{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Channels: vChannels,
+		Segments: segmentInfos,
+	}, nil).Maybe()
 }
 
 func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status querypb.LoadStatus) {

@@ -42,7 +42,7 @@ func TestUnmarshalCollectionModel(t *testing.T) {
 			CollectionName:   "cn",
 			Description:      "",
 			AutoID:           false,
-			ShardsNum:        int32(1),
+			ShardsNum:        common.DefaultShardsNum,
 			StartPosition:    "",
 			ConsistencyLevel: int32(commonpb.ConsistencyLevel_Eventually),
 			Properties:       "",
@@ -61,7 +61,7 @@ func TestUnmarshalCollectionModel(t *testing.T) {
 		assert.Equal(t, "cn", ret.Name)
 		assert.Equal(t, "", ret.Description)
 		assert.Equal(t, false, ret.AutoID)
-		assert.Equal(t, int32(1), ret.ShardsNum)
+		assert.Equal(t, common.DefaultShardsNum, ret.ShardsNum)
 		assert.Equal(t, 0, len(ret.StartPositions))
 		assert.Equal(t, commonpb.ConsistencyLevel(3), ret.ConsistencyLevel)
 		assert.Nil(t, ret.Properties)

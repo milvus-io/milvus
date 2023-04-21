@@ -267,6 +267,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.enableRGAutoRecover", "false")
 		enableResourceGroupAutoRecover = Params.EnableRGAutoRecover
 		assert.Equal(t, false, enableResourceGroupAutoRecover.GetAsBool())
+
+		checkHealthInterval := Params.CheckHealthInterval.GetAsInt()
+		assert.Equal(t, 3000, checkHealthInterval)
+		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
+		assert.Equal(t, 100, checkHealthRPCTimeout)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -298,6 +303,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1000), Params.MaxGroupNQ.GetAsInt64())
 		assert.Equal(t, 10.0, Params.TopKMergeRatio.GetAsFloat())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
+		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)*4), Params.KnowhereThreadPoolSize.GetAsUint32())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")

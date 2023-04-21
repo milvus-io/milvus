@@ -294,8 +294,8 @@ TEST(StringExpr, Term) {
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
         auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
+        auto begin = FIELD_DATA(new_str_col, string).begin();
+        auto end = FIELD_DATA(new_str_col, string).end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
         seg->Insert(iter * N,
@@ -396,8 +396,8 @@ TEST(StringExpr, Compare) {
         auto reserve_col = [&, raw_data](const FieldMeta& field_meta,
                                          std::vector<std::string>& str_col) {
             auto new_str_col = raw_data.get_col(field_meta.get_id());
-            auto begin = new_str_col->scalars().string_data().data().begin();
-            auto end = new_str_col->scalars().string_data().data().end();
+            auto begin = FIELD_DATA(new_str_col, string).begin();
+            auto end = FIELD_DATA(new_str_col, string).end();
             str_col.insert(str_col.end(), begin, end);
         };
 
@@ -495,8 +495,8 @@ TEST(StringExpr, UnaryRange) {
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
         auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
+        auto begin = FIELD_DATA(new_str_col, string).begin();
+        auto end = FIELD_DATA(new_str_col, string).end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
         seg->Insert(iter * N,
@@ -599,8 +599,8 @@ TEST(StringExpr, BinaryRange) {
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
         auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
+        auto begin = FIELD_DATA(new_str_col, string).begin();
+        auto end = FIELD_DATA(new_str_col, string).end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
         seg->Insert(iter * N,

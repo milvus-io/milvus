@@ -1127,6 +1127,8 @@ type queryCoordConfig struct {
 	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
 	CheckResourceGroupInterval ParamItem `refreshable:"false"`
 	EnableRGAutoRecover        ParamItem `refreshable:"true"`
+	CheckHealthInterval        ParamItem `refreshable:"false"`
+	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1352,6 +1354,26 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.EnableRGAutoRecover.Init(base.mgr)
+
+	p.CheckHealthInterval = ParamItem{
+		Key:          "queryCoord.checkHealthInterval",
+		Version:      "2.2.7",
+		DefaultValue: "3000",
+		PanicIfEmpty: true,
+		Doc:          "3s, the interval when query coord try to check health of query node",
+		Export:       true,
+	}
+	p.CheckHealthInterval.Init(base.mgr)
+
+	p.CheckHealthRPCTimeout = ParamItem{
+		Key:          "queryCoord.checkHealthRPCTimeout",
+		Version:      "2.2.7",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "100ms, the timeout of check health rpc to query node",
+		Export:       true,
+	}
+	p.CheckHealthRPCTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1367,9 +1389,10 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	ChunkRows        ParamItem `refreshable:"false"`
-	SmallIndexNlist  ParamItem `refreshable:"false"`
-	SmallIndexNProbe ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize ParamItem `refreshable:"false"`
+	ChunkRows              ParamItem `refreshable:"false"`
+	SmallIndexNlist        ParamItem `refreshable:"false"`
+	SmallIndexNProbe       ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1441,6 +1464,25 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.StatsPublishInterval.Init(base.mgr)
+
+	p.KnowhereThreadPoolSize = ParamItem{
+		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
+		Version:      "2.0.0",
+		DefaultValue: "4",
+		Formatter: func(v string) string {
+			factor := getAsInt64(v)
+			if factor <= 0 || !p.EnableDisk.GetAsBool() {
+				factor = 1
+			} else if factor > 32 {
+				factor = 32
+			}
+			knowhereThreadPoolSize := uint32(runtime.GOMAXPROCS(0)) * uint32(factor)
+			return strconv.FormatUint(uint64(knowhereThreadPoolSize), 10)
+		},
+		Doc:    "The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).",
+		Export: true,
+	}
+	p.KnowhereThreadPoolSize.Init(base.mgr)
 
 	p.ChunkRows = ParamItem{
 		Key:          "queryNode.segcore.chunkRows",
@@ -1777,7 +1819,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.WatchTimeoutInterval = ParamItem{
 		Key:          "dataCoord.channel.watchTimeoutInterval",
 		Version:      "2.2.3",
-		DefaultValue: "30",
+		DefaultValue: "120",
 		Doc:          "Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.",
 		Export:       true,
 	}

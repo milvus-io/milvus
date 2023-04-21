@@ -184,6 +184,13 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 	return nil
 }
 
+// Close notifies the running checker.
+func (c *ChannelManager) Close() {
+	if c.stopChecker != nil {
+		c.stopChecker()
+	}
+}
+
 // checkOldNodes processes the existing watch channels when starting up.
 // ToWatch         get startTs and timeoutTs, start timer
 // WatchSuccess    ignore
@@ -240,10 +247,10 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 
 // unwatchDroppedChannels removes drops channel that are marked to drop.
 func (c *ChannelManager) unwatchDroppedChannels() {
-	nodeChannels := c.store.GetNodesChannels()
+	nodeChannels := c.store.GetChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
-			if !c.h.CheckShouldDropChannel(ch.Name) {
+			if !c.h.CheckShouldDropChannel(ch.Name, ch.CollectionID) {
 				continue
 			}
 			err := c.remove(nodeChannel.NodeID, ch)
@@ -766,7 +773,7 @@ func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) err
 
 	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
 
-	if c.isMarkedDrop(channelName) {
+	if c.isMarkedDrop(channelName, ch.CollectionID) {
 		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
@@ -813,7 +820,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 
 	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
 
-	if c.isMarkedDrop(channelName) {
+	if c.isMarkedDrop(channelName, chToCleanUp.CollectionID) {
 		if err := c.remove(nodeID, chToCleanUp); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
 		}
@@ -871,8 +878,8 @@ func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) 
 	return false, 0
 }
 
-func (c *ChannelManager) isMarkedDrop(channelName string) bool {
-	return c.h.CheckShouldDropChannel(channelName)
+func (c *ChannelManager) isMarkedDrop(channelName string, collectionID UniqueID) bool {
+	return c.h.CheckShouldDropChannel(channelName, collectionID)
 }
 
 func getReleaseOp(nodeID UniqueID, ch *channel) ChannelOpSet {

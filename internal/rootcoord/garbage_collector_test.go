@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
@@ -113,8 +114,8 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		shardsNum := 2
-		pchans := ticker.getDmlChannelNames(shardsNum)
+		shardsNum := common.DefaultShardsNum
+		pchans := ticker.getDmlChannelNames(int(shardsNum))
 		gc.ReDropCollection(&model.Collection{PhysicalChannelNames: pchans}, 1000)
 		<-releaseCollectionChan
 		assert.True(t, releaseCollectionCalled)
@@ -333,7 +334,7 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 	t.Run("failed to GcPartitionData", func(t *testing.T) {
 		ticker := newTickerWithMockFailStream() // failed to broadcast drop msg.
-		shardsNum := 2
+		shardsNum := int(common.DefaultShardsNum)
 		pchans := ticker.getDmlChannelNames(shardsNum)
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -348,7 +349,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 
 	t.Run("failed to RemovePartition", func(t *testing.T) {
 		ticker := newTickerWithMockNormalStream()
-		shardsNum := 2
+		shardsNum := int(common.DefaultShardsNum)
 		pchans := ticker.getDmlChannelNames(shardsNum)
 		meta := newMockMetaTable()
 		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
@@ -367,7 +368,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		ticker := newTickerWithMockNormalStream()
-		shardsNum := 2
+		shardsNum := int(common.DefaultShardsNum)
 		pchans := ticker.getDmlChannelNames(shardsNum)
 		meta := newMockMetaTable()
 		removePartitionCalled := false

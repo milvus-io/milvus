@@ -89,7 +89,7 @@ func emptyInsertMsg(collectionID int64, partitionID int64, segmentID int64, chan
 	return insertMsg
 }
 
-//gen IDs with random pks for DeleteMsg
+// gen IDs with random pks for DeleteMsg
 func genDefaultDeletePK(rowSum int) *schemapb.IDs {
 	pkDatas := []int64{}
 
@@ -106,7 +106,7 @@ func genDefaultDeletePK(rowSum int) *schemapb.IDs {
 	}
 }
 
-//gen IDs with specified pk
+// gen IDs with specified pk
 func genDeletePK(pks ...int64) *schemapb.IDs {
 	pkDatas := make([]int64, 0, len(pks))
 	pkDatas = append(pkDatas, pks...)
@@ -164,9 +164,9 @@ func genFiledDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*s
 	fieldsData := make([]*schemapb.FieldData, 0)
 	for _, field := range schema.Fields {
 		if field.DataType < 100 {
-			fieldsData = append(fieldsData, segments.GenTestScalarFieldData(field.DataType, field.DataType.String(), numRows))
+			fieldsData = append(fieldsData, segments.GenTestScalarFieldData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows))
 		} else {
-			fieldsData = append(fieldsData, segments.GenTestVectorFiledData(field.DataType, field.DataType.String(), numRows, defaultDim))
+			fieldsData = append(fieldsData, segments.GenTestVectorFiledData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows, defaultDim))
 		}
 	}
 	return fieldsData

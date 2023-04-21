@@ -53,6 +53,10 @@ AddDoubleToPayload(CPayloadWriter payloadWriter, double* values, int length);
 CStatus
 AddOneStringToPayload(CPayloadWriter payloadWriter, char* cstr, int str_size);
 CStatus
+AddOneArrayToPayload(CPayloadWriter payloadWriter, uint8_t* cdata, int length);
+CStatus
+AddOneJSONToPayload(CPayloadWriter payloadWriter, uint8_t* cdata, int length);
+CStatus
 AddBinaryVectorToPayload(CPayloadWriter payloadWriter,
                          uint8_t* values,
                          int dimension,

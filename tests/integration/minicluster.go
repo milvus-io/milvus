@@ -423,8 +423,6 @@ func (cluster *MiniCluster) Start() error {
 
 func (cluster *MiniCluster) Stop() error {
 	log.Info("mini cluster stop")
-	cluster.proxy.Stop()
-	log.Info("mini cluster proxy stopped")
 	cluster.rootCoord.Stop()
 	log.Info("mini cluster rootCoord stopped")
 	cluster.dataCoord.Stop()
@@ -432,19 +430,23 @@ func (cluster *MiniCluster) Stop() error {
 	//cluster.indexCoord.Stop()
 	cluster.queryCoord.Stop()
 	log.Info("mini cluster queryCoord stopped")
+	cluster.proxy.Stop()
+	log.Info("mini cluster proxy stopped")
 
 	for _, dataNode := range cluster.dataNodes {
 		dataNode.Stop()
 	}
 	log.Info("mini cluster datanodes stopped")
+
 	for _, queryNode := range cluster.queryNodes {
 		queryNode.Stop()
 	}
-	log.Info("mini cluster indexnodes stopped")
+	log.Info("mini cluster querynodes stopped")
+
 	for _, indexNode := range cluster.indexNodes {
 		indexNode.Stop()
 	}
-	log.Info("mini cluster querynodes stopped")
+	log.Info("mini cluster indexnodes stopped")
 
 	cluster.etcdCli.KV.Delete(cluster.ctx, Params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.etcdCli.Close()

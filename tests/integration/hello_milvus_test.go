@@ -102,7 +102,7 @@ func TestHelloMilvus(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
@@ -226,9 +226,11 @@ func TestHelloMilvus(t *testing.T) {
 	topk := 10
 	roundDecimal := -1
 	nprobe := 10
+	params := make(map[string]int)
+	params["nprobe"] = nprobe
 
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, nq, dim, nprobe, topk, roundDecimal)
+		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 
@@ -256,10 +258,10 @@ func constructSearchRequest(
 	dbName, collectionName string,
 	expr string,
 	floatVecField string,
-	nq, dim, nprobe, topk, roundDecimal int,
+	metricType string,
+	params map[string]int,
+	nq, dim, topk, roundDecimal int,
 ) *milvuspb.SearchRequest {
-	params := make(map[string]string)
-	params["nprobe"] = strconv.Itoa(nprobe)
 	b, err := json.Marshal(params)
 	if err != nil {
 		panic(err)
@@ -282,7 +284,7 @@ func constructSearchRequest(
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
-				Value: distance.L2,
+				Value: metricType,
 			},
 			{
 				Key:   SearchParamsKey,
@@ -352,11 +354,35 @@ func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.Field
 	}
 }
 
+func newInt64PrimaryKey(fieldName string, numRows int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: generateInt64Array(numRows),
+					},
+				},
+			},
+		},
+	}
+}
+
 func generateFloatVectors(numRows, dim int) []float32 {
 	total := numRows * dim
 	ret := make([]float32, 0, total)
 	for i := 0; i < total; i++ {
 		ret = append(ret, rand.Float32())
+	}
+	return ret
+}
+
+func generateInt64Array(numRows int) []int64 {
+	ret := make([]int64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, int64(rand.Int()))
 	}
 	return ret
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -79,7 +80,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID,
-		100,
+		4,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -99,7 +100,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID+1,
-		100,
+		4,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -204,10 +205,12 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 		)
 		suite.NoError(err)
 
+		vecFields := funcutil.GetVecFieldIDs(suite.schema)
 		indexInfo, err := GenAndSaveIndex(
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
+			vecFields[0],
 			100,
 			IndexFaissIVFFlat,
 			L2,
@@ -227,8 +230,9 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
 	for _, segment := range segments {
-		suite.True(segment.ExistIndex(simpleFloatVecField.id))
+		suite.True(segment.ExistIndex(vecFields[0]))
 	}
 }
 

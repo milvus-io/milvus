@@ -89,7 +89,7 @@ func NewLoader(
 		ioPoolSize = configPoolSize
 	}
 
-	ioPool := conc.NewPool(ioPoolSize, ants.WithPreAlloc(true))
+	ioPool := conc.NewPool[*storage.Blob](ioPoolSize, ants.WithPreAlloc(true))
 
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 
@@ -106,7 +106,7 @@ func NewLoader(
 type segmentLoader struct {
 	manager CollectionManager
 	cm      storage.ChunkManager
-	ioPool  *conc.Pool
+	ioPool  *conc.Pool[*storage.Blob]
 }
 
 var _ Loader = (*segmentLoader)(nil)
@@ -418,7 +418,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segme
 	iCodec := storage.InsertCodec{}
 
 	// change all field bin log loading into concurrent
-	loadFutures := make([]*conc.Future[any], 0, len(fieldBinlogs))
+	loadFutures := make([]*conc.Future[*storage.Blob], 0, len(fieldBinlogs))
 	for _, fieldBinlog := range fieldBinlogs {
 		futures := loader.loadFieldBinlogsAsync(ctx, fieldBinlog)
 		loadFutures = append(loadFutures, futures...)
@@ -431,8 +431,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segme
 			return future.Err()
 		}
 
-		blob := future.Value().(*storage.Blob)
-		blobs[index] = blob
+		blobs[index] = future.Value()
 	}
 	log.Info("log field binlogs done",
 		zap.Int64("collection", segment.collectionID),
@@ -507,8 +506,7 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Local
 
 	blobs := make([]*storage.Blob, len(futures))
 	for index, future := range futures {
-		blob := future.Value().(*storage.Blob)
-		blobs[index] = blob
+		blobs[index] = future.Value()
 	}
 
 	insertData := storage.InsertData{
@@ -524,11 +522,11 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Local
 }
 
 // Load binlogs concurrently into memory from KV storage asyncly
-func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*conc.Future[any] {
-	futures := make([]*conc.Future[any], 0, len(field.Binlogs))
+func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*conc.Future[*storage.Blob] {
+	futures := make([]*conc.Future[*storage.Blob], 0, len(field.Binlogs))
 	for i := range field.Binlogs {
 		path := field.Binlogs[i].GetLogPath()
-		future := loader.ioPool.Submit(func() (interface{}, error) {
+		future := loader.ioPool.Submit(func() (*storage.Blob, error) {
 			binLog, err := loader.cm.Read(ctx, path)
 			if err != nil {
 				log.Warn("failed to load binlog", zap.String("filePath", path), zap.Error(err))
@@ -571,7 +569,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context, segment *Local
 func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
 	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-	futures := make([]*conc.Future[any], 0, len(indexInfo.IndexFilePaths))
+	futures := make([]*conc.Future[*storage.Blob], 0, len(indexInfo.IndexFilePaths))
 	indexCodec := storage.NewIndexFileBinlogCodec()
 
 	// TODO, remove the load index info froam
@@ -616,7 +614,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 	// load in memory index
 	for _, p := range indexInfo.IndexFilePaths {
 		indexPath := p
-		indexFuture := loader.ioPool.Submit(func() (interface{}, error) {
+		indexFuture := loader.ioPool.Submit(func() (*storage.Blob, error) {
 			log.Info("load index file", zap.String("path", indexPath))
 			data, err := loader.cm.Read(ctx, indexPath)
 			if err != nil {
@@ -624,7 +622,10 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 				return nil, err
 			}
 			blobs, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(indexPath), Value: data}})
-			return blobs, err
+			if err != nil {
+				return nil, err
+			}
+			return blobs[0], nil
 		})
 
 		futures = append(futures, indexFuture)
@@ -636,8 +637,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 	}
 
 	for _, index := range futures {
-		blobs := index.Value().([]*storage.Blob)
-		indexBuffer = append(indexBuffer, blobs[0].Value)
+		indexBuffer = append(indexBuffer, index.Value().GetValue())
 	}
 
 	return segment.LoadIndex(indexBuffer, indexInfo, fieldType)

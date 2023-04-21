@@ -13,14 +13,6 @@ type MockScheduler struct {
 	mock.Mock
 }
 
-func (_m *MockScheduler) GetChannelTaskNum() int {
-	return 0
-}
-
-func (_m *MockScheduler) GetSegmentTaskNum() int {
-	return 0
-}
-
 type MockScheduler_Expecter struct {
 	mock *mock.Mock
 }
@@ -122,6 +114,42 @@ func (_c *MockScheduler_Dispatch_Call) Return() *MockScheduler_Dispatch_Call {
 	return _c
 }
 
+// GetChannelTaskNum provides a mock function with given fields:
+func (_m *MockScheduler) GetChannelTaskNum() int {
+	ret := _m.Called()
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockScheduler_GetChannelTaskNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelTaskNum'
+type MockScheduler_GetChannelTaskNum_Call struct {
+	*mock.Call
+}
+
+// GetChannelTaskNum is a helper method to define mock.On call
+func (_e *MockScheduler_Expecter) GetChannelTaskNum() *MockScheduler_GetChannelTaskNum_Call {
+	return &MockScheduler_GetChannelTaskNum_Call{Call: _e.mock.On("GetChannelTaskNum")}
+}
+
+func (_c *MockScheduler_GetChannelTaskNum_Call) Run(run func()) *MockScheduler_GetChannelTaskNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetChannelTaskNum_Call) Return(_a0 int) *MockScheduler_GetChannelTaskNum_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // GetNodeChannelDelta provides a mock function with given fields: nodeID
 func (_m *MockScheduler) GetNodeChannelDelta(nodeID int64) int {
 	ret := _m.Called(nodeID)
@@ -192,6 +220,42 @@ func (_c *MockScheduler_GetNodeSegmentDelta_Call) Run(run func(nodeID int64)) *M
 }
 
 func (_c *MockScheduler_GetNodeSegmentDelta_Call) Return(_a0 int) *MockScheduler_GetNodeSegmentDelta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+// GetSegmentTaskNum provides a mock function with given fields:
+func (_m *MockScheduler) GetSegmentTaskNum() int {
+	ret := _m.Called()
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockScheduler_GetSegmentTaskNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentTaskNum'
+type MockScheduler_GetSegmentTaskNum_Call struct {
+	*mock.Call
+}
+
+// GetSegmentTaskNum is a helper method to define mock.On call
+func (_e *MockScheduler_Expecter) GetSegmentTaskNum() *MockScheduler_GetSegmentTaskNum_Call {
+	return &MockScheduler_GetSegmentTaskNum_Call{Call: _e.mock.On("GetSegmentTaskNum")}
+}
+
+func (_c *MockScheduler_GetSegmentTaskNum_Call) Run(run func()) *MockScheduler_GetSegmentTaskNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetSegmentTaskNum_Call) Return(_a0 int) *MockScheduler_GetSegmentTaskNum_Call {
 	_c.Call.Return(_a0)
 	return _c
 }

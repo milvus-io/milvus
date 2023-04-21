@@ -25,7 +25,7 @@ type Scheduler struct {
 	queryProcessQueue chan *QueryTask
 	queryWaitQueue    chan *QueryTask
 
-	pool *conc.Pool
+	pool *conc.Pool[any]
 }
 
 func NewScheduler() *Scheduler {
@@ -38,16 +38,16 @@ func NewScheduler() *Scheduler {
 		mergedSearchTasks:  make(chan *SearchTask, maxReadConcurrency),
 		// queryProcessQueue: make(chan),
 
-		pool: conc.NewPool(maxReadConcurrency, ants.WithPreAlloc(true)),
+		pool: conc.NewPool[any](maxReadConcurrency, ants.WithPreAlloc(true)),
 	}
 }
 
 func (s *Scheduler) Add(task Task) bool {
 	switch t := task.(type) {
 	case *SearchTask:
+		t.tr.RecordSpan()
 		select {
 		case s.searchWaitQueue <- t:
-			t.tr.RecordSpan()
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 		default:
 			return false

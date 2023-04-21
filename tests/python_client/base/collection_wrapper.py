@@ -64,6 +64,10 @@ class ApiCollectionWrapper:
         return self.collection.num_entities
 
     @property
+    def num_entities_without_flush(self):
+        return self.collection.num_entities
+
+    @property
     def primary_field(self):
         return self.collection.primary_field
 

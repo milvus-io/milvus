@@ -142,7 +142,6 @@ func (suite *PlanSuite) TestPlanNewSearchRequest() {
 	searchReq, err := NewSearchRequest(suite.collection, req, req.Req.GetPlaceholderGroup())
 	suite.NoError(err)
 
-	suite.Equal(simpleFloatVecField.id, searchReq.searchFieldID)
 	suite.EqualValues(nq, searchReq.getNumOfQuery())
 
 	searchReq.Delete()

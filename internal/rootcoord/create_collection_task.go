@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -133,7 +134,7 @@ func (t *createCollectionTask) prepareSchema() error {
 
 func (t *createCollectionTask) assignShardsNum() {
 	if t.Req.GetShardsNum() <= 0 {
-		t.Req.ShardsNum = 2
+		t.Req.ShardsNum = common.DefaultShardsNum
 	}
 }
 

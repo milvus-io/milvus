@@ -47,6 +47,7 @@ type Broker interface {
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
+	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 }
 
 type CoordinatorBroker struct {
@@ -133,6 +134,32 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	}
 
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
+}
+
+func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	defer cancel()
+
+	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequestV2{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+		),
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+	}
+	recoveryInfo, err := broker.dataCoord.GetRecoveryInfoV2(ctx, getRecoveryInfoRequest)
+	if err != nil {
+		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
+		return nil, nil, err
+	}
+
+	if recoveryInfo.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = errors.New(recoveryInfo.GetStatus().GetReason())
+		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
+		return nil, nil, err
+	}
+
+	return recoveryInfo.Channels, recoveryInfo.Segments, nil
 }
 
 func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) (*datapb.GetSegmentInfoResponse, error) {

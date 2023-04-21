@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -32,7 +33,7 @@ func TestStatisticTask_all(t *testing.T) {
 		qc = types.NewMockQueryCoord(t)
 		qn = types.NewMockQueryNode(t)
 
-		shardsNum      = int32(2)
+		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 

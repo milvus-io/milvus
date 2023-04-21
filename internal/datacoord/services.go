@@ -744,6 +744,102 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return resp, nil
 }
 
+// GetRecoveryInfoV2 get recovery info for segment
+// Called by: QueryCoord.
+func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+	collectionID := req.GetCollectionID()
+	partitionIDs := req.GetPartitionIDs()
+	log := log.With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs),
+	)
+	log.Info("get recovery info request received")
+	resp := &datapb.GetRecoveryInfoResponseV2{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	if s.isClosed() {
+		resp.Status.Reason = serverNotServingErrMsg
+		return resp, nil
+	}
+
+	dresp, err := s.rootCoordClient.DescribeCollectionInternal(s.ctx, &milvuspb.DescribeCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID: collectionID,
+	})
+	if err = VerifyResponse(dresp, err); err != nil {
+		log.Error("get collection info from rootcoord failed",
+			zap.Error(err))
+
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	channels := dresp.GetVirtualChannelNames()
+	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
+	flushedIDs := make(typeutil.UniqueSet)
+	for _, c := range channels {
+		channelInfo := s.handler.GetQueryVChanPositions(&channel{Name: c, CollectionID: collectionID}, partitionIDs...)
+		channelInfos = append(channelInfos, channelInfo)
+		log.Info("datacoord append channelInfo in GetRecoveryInfo",
+			zap.Any("channelInfo", channelInfo),
+		)
+		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
+	}
+
+	segmentInfos := make([]*datapb.SegmentInfo, 0)
+	for id := range flushedIDs {
+		segment := s.meta.GetSegment(id)
+		if segment == nil {
+			errMsg := fmt.Sprintf("failed to get segment %d", id)
+			log.Error(errMsg)
+			resp.Status.Reason = errMsg
+			return resp, nil
+		}
+		// Skip non-flushing, non-flushed and dropped segments.
+		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
+			continue
+		}
+		// Also skip bulk insert segments.
+		if segment.GetIsImporting() {
+			continue
+		}
+
+		binlogs := segment.GetBinlogs()
+		if len(binlogs) == 0 {
+			continue
+		}
+		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
+		if rowCount != segment.NumOfRows && rowCount > 0 {
+			log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
+				zap.Int64("segment ID", segment.GetID()),
+				zap.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+				zap.Int64("segment bin log row count (correct)", rowCount))
+		} else {
+			rowCount = segment.NumOfRows
+		}
+
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:            segment.ID,
+			PartitionID:   segment.PartitionID,
+			CollectionID:  segment.CollectionID,
+			InsertChannel: segment.InsertChannel,
+			NumOfRows:     rowCount,
+			Binlogs:       segment.Binlogs,
+			Statslogs:     segment.Statslogs,
+			Deltalogs:     segment.Deltalogs,
+		})
+	}
+
+	resp.Channels = channelInfos
+	resp.Segments = segmentInfos
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
 // GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {

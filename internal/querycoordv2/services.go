@@ -946,8 +946,17 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
+	errReasons, err := s.checkNodeHealth(ctx)
+	if err != nil || len(errReasons) != 0 {
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
+}
+
+func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 	group, ctx := errgroup.WithContext(ctx)
-	errReasons := make([]string, 0, len(s.nodeMgr.GetAll()))
+	errReasons := make([]string, 0)
 
 	mu := &sync.Mutex{}
 	for _, node := range s.nodeMgr.GetAll() {
@@ -965,11 +974,8 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	}
 
 	err := group.Wait()
-	if err != nil || len(errReasons) != 0 {
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
-	}
 
-	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
+	return errReasons, err
 }
 
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {

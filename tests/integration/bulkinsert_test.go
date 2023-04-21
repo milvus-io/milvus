@@ -124,7 +124,7 @@ func TestBulkInsert(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
@@ -265,9 +265,11 @@ func TestBulkInsert(t *testing.T) {
 	topk := 10
 	roundDecimal := -1
 	nprobe := 10
+	params := make(map[string]int)
+	params["nprobe"] = nprobe
 
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, nq, dim, nprobe, topk, roundDecimal)
+		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 

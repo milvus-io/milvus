@@ -31,6 +31,9 @@ const (
 	// IP represents inner product distance
 	IP = "IP"
 
+	// COSINE represents cosine distance
+	COSINE = "COSINE"
+
 	// HAMMING represents hamming distance
 	HAMMING = "HAMMING"
 
@@ -84,7 +87,7 @@ const (
 )
 
 // METRICS is a set of all metrics types supported for float vector.
-var METRICS = []string{L2, IP} // const
+var METRICS = []string{L2, IP, COSINE} // const
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
 var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const

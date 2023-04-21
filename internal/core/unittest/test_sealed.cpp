@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <boost/format.hpp>
 
+#include "common/Types.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
@@ -384,6 +385,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -480,6 +482,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -764,7 +767,8 @@ TEST(Sealed, OverlapDelete) {
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
-    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
@@ -807,7 +811,8 @@ TEST(Sealed, OverlapDelete) {
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
 
@@ -822,7 +827,8 @@ TEST(Sealed, OverlapDelete) {
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
-        << "deleted_count=" << segment->get_deleted_count() << " pks_count=" << pks.size() << std::endl;
+        << "deleted_count=" << segment->get_deleted_count()
+        << " pks_count=" << pks.size() << std::endl;
 
     // Load overlapping delete records
     row_count += 3;
@@ -830,16 +836,19 @@ TEST(Sealed, OverlapDelete) {
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
     timestamps.insert(timestamps.end(), {11, 11, 11});
-    LoadDeletedRecordInfo overlap_info = {timestamps.data(), new_ids.get(), row_count};
+    LoadDeletedRecordInfo overlap_info = {
+        timestamps.data(), new_ids.get(), row_count};
     segment->LoadDeletedRecord(overlap_info);
 
     BitsetType bitset(N, false);
     // NOTE: need to change delete timestamp, so not to hit the cache
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
-        << "deleted_count=" << segment->get_deleted_count() << " pks_count=" << pks.size() << std::endl;
+        << "deleted_count=" << segment->get_deleted_count()
+        << " pks_count=" << pks.size() << std::endl;
     segment->mask_with_delete(bitset, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
-        << "bitset_count=" << bitset.count() << " pks_count=" << pks.size() << std::endl;
+        << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
+        << std::endl;
 }
 
 auto

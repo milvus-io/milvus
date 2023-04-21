@@ -106,19 +106,18 @@ func (suite *JobSuite) SetupSuite() {
 				ChannelName:  channel,
 			})
 		}
+
+		segmentBinlogs := []*datapb.SegmentInfo{}
 		for partition, segments := range partitions {
-			segmentBinlogs := []*datapb.SegmentBinlogs{}
 			for _, segment := range segments {
-				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
-					SegmentID:     segment,
+				segmentBinlogs = append(segmentBinlogs, &datapb.SegmentInfo{
+					ID:            segment,
+					PartitionID:   partition,
 					InsertChannel: suite.channels[collection][segment%2],
 				})
 			}
-
-			suite.broker.EXPECT().
-				GetRecoveryInfo(mock.Anything, collection, partition).
-				Return(vChannels, segmentBinlogs, nil)
 		}
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil)
 	}
 
 	suite.cluster = session.NewMockCluster(suite.T())
@@ -578,8 +577,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.meta.ResourceManager.AddResourceGroup("rg3")
 
 	// test load 3 replica in 1 rg, should pass rg check
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(999)).Return([]int64{888}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(999), int64(888)).Return(nil, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(999)).Return(nil, nil, nil)
 	req := &querypb.LoadPartitionsRequest{
 		CollectionID:   999,
 		PartitionIDs:   []int64{888},
@@ -602,8 +600,7 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
 
 	// test load 3 replica in 3 rg, should pass rg check
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(999)).Return([]int64{888}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(999), int64(888)).Return(nil, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(999)).Return(nil, nil, nil)
 	req = &querypb.LoadPartitionsRequest{
 		CollectionID:   999,
 		PartitionIDs:   []int64{888},

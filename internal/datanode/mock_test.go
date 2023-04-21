@@ -1050,7 +1050,7 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 
 	resp.CollectionID = m.collectionID
 	resp.Schema = meta.Schema
-	resp.ShardsNum = 2
+	resp.ShardsNum = common.DefaultShardsNum
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

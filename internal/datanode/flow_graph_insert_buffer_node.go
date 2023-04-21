@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -183,7 +184,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	seg2Upload, err := ibNode.addSegmentAndUpdateRowNum(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
-		err = fmt.Errorf("update segment states in channel meta wrong, err = %s", err)
+		err = errors.Wrap(err, "update segment states in channel meta wrong")
 		log.Error(err.Error())
 		panic(err)
 	}
@@ -193,7 +194,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		err := ibNode.bufferInsertMsg(msg, startPositions[0], endPositions[0])
 		if err != nil {
 			// error occurs when missing schema info or data is misaligned, should not happen
-			err = fmt.Errorf("insertBufferNode msg to buffer failed, err = %s", err)
+			err = errors.Wrap(err, "insertBufferNode msg to buffer failed")
 			log.Error(err.Error())
 			panic(err)
 		}

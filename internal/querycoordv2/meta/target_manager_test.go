@@ -22,6 +22,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -115,18 +117,19 @@ func (suite *TargetManagerSuite) SetupTest() {
 			})
 		}
 
-		for partition, segments := range suite.segments[collection] {
-			allSegments := make([]*datapb.SegmentBinlogs, 0)
+		allSegments := make([]*datapb.SegmentInfo, 0)
+		for partitionID, segments := range suite.segments[collection] {
 			for _, segment := range segments {
-
-				allSegments = append(allSegments, &datapb.SegmentBinlogs{
-					SegmentID:     segment,
+				allSegments = append(allSegments, &datapb.SegmentInfo{
+					ID:            segment,
 					InsertChannel: suite.channels[collection][0],
+					CollectionID:  collection,
+					PartitionID:   partitionID,
 				})
 			}
-			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments, nil)
 		}
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
+
 		suite.mgr.UpdateCollectionNextTargetWithPartitions(collection, suite.partitions[collection]...)
 	}
 }
@@ -181,7 +184,20 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
-	nextTargetSegments := []*datapb.SegmentBinlogs{
+	nextTargetSegments := []*datapb.SegmentInfo{
+		{
+			ID:            11,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+		},
+		{
+			ID:            12,
+			PartitionID:   1,
+			InsertChannel: "channel-2",
+		},
+	}
+
+	nextTargetBinlogs := []*datapb.SegmentBinlogs{
 		{
 			SegmentID:     11,
 			InsertChannel: "channel-1",
@@ -192,13 +208,26 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil)
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetHistoricalSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
 	suite.assertSegments([]int64{}, suite.mgr.GetHistoricalSegmentsByCollection(collectionID, CurrentTarget))
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
+
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, status.Errorf(codes.NotFound, "fake not found"))
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
+	err := suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	suite.NoError(err)
+
+	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID)
+	suite.Error(err)
+
+	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
+	suite.NoError(err)
+
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {

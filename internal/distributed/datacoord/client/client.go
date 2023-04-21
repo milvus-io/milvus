@@ -423,6 +423,31 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return ret.(*datapb.GetRecoveryInfoResponse), err
 }
 
+// GetRecoveryInfoV2 request segment recovery info of collection/partitions
+//
+// ctx is the context to control request deadline and cancellation
+// req contains the collection/partitions id to query
+//
+// response struct `GetRecoveryInfoResponseV2` contains the list of segments info and corresponding vchannel info
+// error is returned only when some communication issue occurs
+func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.GetRecoveryInfoV2(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.GetRecoveryInfoResponseV2), err
+}
+
 // GetFlushedSegments returns flushed segment list of requested collection/parition
 //
 // ctx is the context to control request deadline and cancellation

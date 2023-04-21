@@ -21,12 +21,12 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 type TargetScope = int32
@@ -66,7 +66,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
 
-	log.Info("start to update current target for collection")
+	log.Debug("start to update current target for collection")
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
@@ -76,7 +76,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
 	mgr.next.removeCollectionTarget(collectionID)
 
-	log.Info("finish to update current target for collection",
+	log.Debug("finish to update current target for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 }
@@ -115,9 +115,10 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 }
 
 func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partitionIDs ...int64) error {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := log.With(zap.Int64("collectionID", collectionID),
+		zap.Int64s("PartitionIDs", partitionIDs))
 
-	log.Info("start to update next targets for collection")
+	log.Debug("start to update next targets for collection")
 	newTarget, err := mgr.PullNextTarget(mgr.broker, collectionID, partitionIDs...)
 	if err != nil {
 		log.Error("failed to get next targets for collection",
@@ -127,14 +128,14 @@ func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partiti
 
 	mgr.next.updateCollectionTarget(collectionID, newTarget)
 
-	log.Info("finish to update next targets for collection",
+	log.Debug("finish to update next targets for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 
 	return nil
 }
 
-func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (*CollectionTarget, error) {
+func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (*CollectionTarget, error) {
 	log.Info("start to pull next targets for partition",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
@@ -179,6 +180,56 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, chos
 				Statslogs:     binlog.GetStatslogs(),
 				Deltalogs:     binlog.GetDeltalogs(),
 			}
+		}
+	}
+
+	for _, infos := range channelInfos {
+		merged := mgr.mergeDmChannelInfo(infos)
+		dmChannels[merged.GetChannelName()] = merged
+	}
+	return NewCollectionTarget(segments, dmChannels), nil
+}
+
+func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (*CollectionTarget, error) {
+	log.Debug("start to pull next targets for collection",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
+
+	channelInfos := make(map[string][]*datapb.VchannelInfo)
+	segments := make(map[int64]*datapb.SegmentInfo, 0)
+	dmChannels := make(map[string]*DmChannel)
+
+	if len(chosenPartitionIDs) == 0 {
+		return NewCollectionTarget(segments, dmChannels), nil
+	}
+
+	tryPullNextTargetV1 := func() (*CollectionTarget, error) {
+		// for rolling  upgrade, when call GetRecoveryInfoV2 failed, back to retry GetRecoveryInfo
+		target, err := mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
+		if err != nil {
+			return nil, err
+		}
+
+		return target, nil
+	}
+
+	// we should pull `channel targets` from all partitions because QueryNodes need to load
+	// the complete growing segments. And we should pull `segments targets` only from the chosen partitions.
+	vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID)
+	if err != nil {
+		if funcutil.IsGrpcErr(err) {
+			return tryPullNextTargetV1()
+		}
+		return nil, err
+	}
+	for _, info := range vChannelInfos {
+		channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
+	}
+
+	partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
+	for _, segmentInfo := range segmentInfos {
+		if partitionSet.Contain(segmentInfo.GetPartitionID()) {
+			segments[segmentInfo.GetID()] = segmentInfo
 		}
 	}
 

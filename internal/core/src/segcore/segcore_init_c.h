@@ -32,7 +32,7 @@ char*
 SegcoreSetSimdType(const char*);
 
 void
-SegcoreSetThreadPoolNum(const uint32_t num_threads);
+SegcoreSetKnowhereThreadPoolNum(const uint32_t num_threads);
 
 #ifdef __cplusplus
 }

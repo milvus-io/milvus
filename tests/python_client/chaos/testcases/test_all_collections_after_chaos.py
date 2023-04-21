@@ -12,7 +12,7 @@ from utils.util_common import get_collections
 class TestAllCollection(TestcaseBase):
     """ Test case of end to end"""
 
-    @pytest.fixture(scope="function", params=get_collections())
+    @pytest.fixture(scope="function", params=get_collections(file_name="chaos_test_all_collections.json"))
     def collection_name(self, request):
         if request.param == [] or request.param == "":
             pytest.skip("The collection name is invalid")

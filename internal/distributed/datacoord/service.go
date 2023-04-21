@@ -283,6 +283,11 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return s.dataCoord.GetRecoveryInfo(ctx, req)
 }
 
+// GetRecoveryInfoV2 gets information for recovering channels
+func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+	return s.dataCoord.GetRecoveryInfoV2(ctx, req)
+}
+
 // GetFlushedSegments get all flushed segments of a partition
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	return s.dataCoord.GetFlushedSegments(ctx, req)

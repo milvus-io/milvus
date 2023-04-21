@@ -303,6 +303,17 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta);
                 break;
             }
+            case DataType::JSON: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    auto str = R"({"key":)" + std::to_string(er()) + "}";
+                    for (int j = 0; j < repeat_count; j++) {
+                        data[i * repeat_count + j] = str;
+                    }
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
             default: {
                 throw std::runtime_error("unimplemented");
             }
@@ -517,8 +528,7 @@ GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
                        {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataSet(N, dim, vec);
     auto indexing = std::make_unique<index::VectorMemNMIndex>(
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-        knowhere::metric::L2);
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2);
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }

@@ -59,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -89,6 +88,7 @@ type QueryNode struct {
 
 	// call once
 	initOnce sync.Once
+	stopOnce sync.Once
 
 	// internal components
 	manager             *segments.Manager
@@ -118,8 +118,9 @@ type QueryNode struct {
 	vectorStorage     storage.ChunkManager
 	etcdKV            *etcdkv.EtcdKV
 
-	// Pool for search/query
-	taskPool *conc.Pool
+	/*
+		// Pool for search/query
+		knnPool *conc.Pool*/
 
 	// parameter turning hook
 	queryHook queryHook
@@ -181,6 +182,9 @@ func (node *QueryNode) InitSegcore() {
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
+
+	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
+	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
 
 	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.SmallIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
@@ -267,7 +271,6 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
-		node.taskPool = conc.NewDefaultPool()
 		node.scheduler = tasks.NewScheduler()
 
 		node.clusterManager = cluster.NewWorkerManager(func(nodeID int64) (cluster.Worker, error) {
@@ -341,12 +344,21 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
-
-	log.Warn("Query node stop..")
-	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	node.lifetime.Wait()
-	node.session.Revoke(time.Second)
-	node.pipelineManager.Close()
+	node.stopOnce.Do(func() {
+		log.Info("Query node stop...")
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		node.lifetime.Wait()
+		node.cancel()
+		if node.pipelineManager != nil {
+			node.pipelineManager.Close()
+		}
+		if node.session != nil {
+			node.session.Stop()
+		}
+		if node.dispClient != nil {
+			node.dispClient.Close()
+		}
+	})
 	return nil
 }
 

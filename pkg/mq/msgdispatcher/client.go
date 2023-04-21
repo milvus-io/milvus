@@ -37,6 +37,7 @@ type (
 type Client interface {
 	Register(vchannel string, pos *Pos, subPos SubPos) (<-chan *MsgPack, error)
 	Deregister(vchannel string)
+	Close()
 }
 
 var _ Client = (*client)(nil)
@@ -96,4 +97,17 @@ func (c *client) Deregister(vchannel string) {
 		log.Info("deregister done", zap.String("role", c.role),
 			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	}
+}
+
+func (c *client) Close() {
+	log := log.With(zap.String("role", c.role),
+		zap.Int64("nodeID", c.nodeID))
+	c.managerMu.Lock()
+	defer c.managerMu.Unlock()
+	for pchannel, manager := range c.managers {
+		log.Info("close manager", zap.String("channel", pchannel))
+		delete(c.managers, pchannel)
+		manager.Close()
+	}
+	log.Info("dispatcher client closed")
 }

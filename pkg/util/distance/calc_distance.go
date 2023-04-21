@@ -28,6 +28,8 @@ const (
 	L2 = "L2"
 	// IP represents the inner product distance
 	IP = "IP"
+	// COSINE represents the cosine distance
+	COSINE = "COSINE"
 	// HAMMING represents the hamming distance
 	HAMMING = "HAMMING"
 	// TANIMOTO represents the tanimoto distance

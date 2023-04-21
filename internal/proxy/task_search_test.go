@@ -28,10 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-const (
-	testShardsNum = int32(2)
-)
-
 func TestSearchTask_PostExecute(t *testing.T) {
 	t.Run("Test empty result", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -73,7 +69,7 @@ func createColl(t *testing.T, name string, rc types.RootCoord) {
 		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
 			CollectionName: name,
 			Schema:         marshaledSchema,
-			ShardsNum:      testShardsNum,
+			ShardsNum:      common.DefaultShardsNum,
 		},
 		ctx:       ctx,
 		rootCoord: rc,

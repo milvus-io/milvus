@@ -30,9 +30,7 @@ CheckBruteForceSearchParam(const FieldMeta& field,
     AssertInfo(datatype_is_vector(data_type),
                "[BruteForceSearch] Data type isn't vector type");
     bool is_float_data_type = (data_type == DataType::VECTOR_FLOAT);
-    bool is_float_metric_type =
-        IsMetricType(metric_type, knowhere::metric::IP) ||
-        IsMetricType(metric_type, knowhere::metric::L2);
+    bool is_float_metric_type = IsFloatMetricType(metric_type);
     AssertInfo(is_float_data_type == is_float_metric_type,
                "[BruteForceSearch] Data type and metric type miss-match");
 }

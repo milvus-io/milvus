@@ -533,6 +533,24 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			fieldData.Data = append(fieldData.Data, srcData...)
 			idata.Data[field.FieldID] = fieldData
+		case schemapb.DataType_Array:
+			srcData := srcFields[field.FieldID].GetScalars().GetArrayData().GetData()
+
+			fieldData := &ArrayFieldData{
+				Data: make([]*schemapb.ScalarField, 0, len(srcData)),
+			}
+
+			fieldData.Data = append(fieldData.Data, srcData...)
+			idata.Data[field.FieldID] = fieldData
+		case schemapb.DataType_JSON:
+			srcData := srcFields[field.FieldID].GetScalars().GetJsonData().GetData()
+
+			fieldData := &JSONFieldData{
+				Data: make([][]byte, 0, len(srcData)),
+			}
+
+			fieldData.Data = append(fieldData.Data, srcData...)
+			idata.Data[field.FieldID] = fieldData
 		}
 	}
 
@@ -634,6 +652,28 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	fieldData.Data = append(fieldData.Data, field.Data...)
 }
 
+func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &ArrayFieldData{
+			Data: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*ArrayFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+}
+
+func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &JSONFieldData{
+			Data: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*JSONFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+}
+
 func mergeBinaryVectorField(data *InsertData, fid FieldID, field *BinaryVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BinaryVectorFieldData{
@@ -680,6 +720,10 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeDoubleField(data, fid, field)
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
+	case *ArrayFieldData:
+		mergeArrayField(data, fid, field)
+	case *JSONFieldData:
+		mergeJSONField(data, fid, field)
 	case *BinaryVectorFieldData:
 		mergeBinaryVectorField(data, fid, field)
 	case *FloatVectorFieldData:
@@ -771,6 +815,16 @@ func stringFieldDataToPbBytes(field *StringFieldData) ([]byte, error) {
 	return proto.Marshal(arr)
 }
 
+func arrayFieldDataToPbBytes(field *ArrayFieldData) ([]byte, error) {
+	arr := &schemapb.ArrayArray{Data: field.Data}
+	return proto.Marshal(arr)
+}
+
+func jsonFieldDataToPbBytes(field *JSONFieldData) ([]byte, error) {
+	arr := &schemapb.JSONArray{Data: field.Data}
+	return proto.Marshal(arr)
+}
+
 func binaryWrite(endian binary.ByteOrder, data interface{}) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, endian, data)
@@ -793,6 +847,10 @@ func FieldDataToBytes(endian binary.ByteOrder, fieldData FieldData) ([]byte, err
 		return boolFieldDataToPbBytes(field)
 	case *StringFieldData:
 		return stringFieldDataToPbBytes(field)
+	case *ArrayFieldData:
+		return arrayFieldDataToPbBytes(field)
+	case *JSONFieldData:
+		return jsonFieldDataToPbBytes(field)
 	case *BinaryVectorFieldData:
 		return field.Data, nil
 	case *FloatVectorFieldData:
@@ -933,6 +991,34 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *ArrayFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Array,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *JSONFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_JSON,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
 								Data: rawData.Data,
 							},
 						},

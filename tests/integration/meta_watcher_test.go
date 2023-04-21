@@ -115,7 +115,7 @@ func TestShowSegments(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
@@ -207,7 +207,7 @@ func TestShowReplicas(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
-		ShardsNum:      2,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	assert.NoError(t, err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {

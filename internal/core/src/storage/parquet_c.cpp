@@ -39,16 +39,6 @@ ReleaseArrowUnused() {
     }
 }
 
-static const char*
-ErrorMsg(const std::string_view msg) {
-    if (msg.empty())
-        return nullptr;
-    auto ret = (char*)malloc(msg.size() + 1);
-    std::memcpy(ret, msg.data(), msg.size());
-    ret[msg.size()] = '\0';
-    return ret;
-}
-
 extern "C" CPayloadWriter
 NewPayloadWriter(int columnType) {
     auto data_type = static_cast<milvus::DataType>(columnType);
@@ -137,6 +127,28 @@ AddOneStringToPayload(CPayloadWriter payloadWriter, char* cstr, int str_size) {
     try {
         auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
         p->add_one_string_payload(cstr, str_size);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+AddOneArrayToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
+    try {
+        auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
+        p->add_one_binary_payload(data, length);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+AddOneJSONToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
+    try {
+        auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
+        p->add_one_binary_payload(data, length);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
