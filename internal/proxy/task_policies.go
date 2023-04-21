@@ -18,7 +18,7 @@ import (
 
 // type pickShardPolicy func(ctx context.Context, mgr *shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
-type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string) error, map[string][]nodeInfo) error
+type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string, int) error, map[string][]nodeInfo) error
 
 var (
 	errBegin               = errors.New("begin error")
@@ -106,10 +106,11 @@ func groupShardleadersWithSameQueryNode(
 func mergeRoundRobinPolicy(
 	ctx context.Context,
 	mgr *shardClientMgr,
-	query func(context.Context, UniqueID, types.QueryNode, []string) error,
+	query func(context.Context, UniqueID, types.QueryNode, []string, int) error,
 	dml2leaders map[string][]nodeInfo) error {
 	nexts := make(map[string]int)
 	errSet := make(map[string]error) // record err for dml channels
+	totalChannelNum := len(dml2leaders)
 	for dml := range dml2leaders {
 		nexts[dml] = 0
 	}
@@ -128,7 +129,7 @@ func mergeRoundRobinPolicy(
 			qn := nodeset[nodeID]
 			go func() {
 				defer wg.Done()
-				if err := query(ctx, nodeID, qn, channels); err != nil {
+				if err := query(ctx, nodeID, qn, channels, totalChannelNum); err != nil {
 					log.Ctx(ctx).Warn("failed to do query with node", zap.Int64("nodeID", nodeID),
 						zap.Strings("dmlChannels", channels), zap.Error(err))
 					mu.Lock()

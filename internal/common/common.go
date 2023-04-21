@@ -76,6 +76,10 @@ const (
 )
 
 const (
+	TopKKey        = "topk"
+	SearchParamKey = "search_param"
+	SegmentNumKey  = "segment_num"
+
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"

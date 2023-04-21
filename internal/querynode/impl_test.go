@@ -19,17 +19,20 @@ package querynode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -37,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/panjf2000/ants/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -797,6 +801,62 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel},
 	}, defaultDMLChannel)
 	assert.NoError(t, err)
+
+	// test querynode plugin
+	node.queryHook = &mockHook1{}
+	newReq := typeutil.Clone(req)
+	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, req.SerializedExprPlan, newReq.SerializedExprPlan)
+
+	node.queryHook = &mockHook2{}
+	newReq = typeutil.Clone(req)
+	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.NotEqual(t, req.SerializedExprPlan, newReq.SerializedExprPlan)
+	reqSearchParams, err := getSearchParamFromPlanExpr(req.SerializedExprPlan)
+	assert.NoError(t, err)
+	newReqSearchParams, err := getSearchParamFromPlanExpr(newReq.SerializedExprPlan)
+	assert.NoError(t, err)
+	assert.NotEqual(t, reqSearchParams, newReqSearchParams)
+	assert.Equal(t, newReqSearchParams, "test")
+
+	node.queryHook = &mockHook3{}
+	newReq = typeutil.Clone(req)
+	res, err := node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, res.Status.Reason, fmt.Errorf("unexpected param").Error())
+
+	node.queryHook = &mockHook3{}
+	newReq = typeutil.Clone(req)
+	newReq.SerializedExprPlan, _ = json.Marshal("")
+	res, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             newReq,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+		TotalChannelNum: 1,
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	plan := &planpb.PlanNode{}
+	err = proto.Unmarshal(newReq.SerializedExprPlan, plan)
+	assert.Equal(t, res.Status.Reason, err.Error())
+	node.queryHook = nil
+
 	// search with ignore growing segment
 	req.IgnoreGrowing = true
 	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{

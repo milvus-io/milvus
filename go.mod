@@ -36,7 +36,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
-	github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
 	github.com/sbinet/npyio v0.6.0
 	github.com/shirou/gopsutil/v3 v3.22.9
 	github.com/spaolacci/murmur3 v1.1.0

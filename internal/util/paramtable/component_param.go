@@ -1033,6 +1033,7 @@ func (p *queryCoordConfig) initEnableRGAutoRecover() {
 type queryNodeConfig struct {
 	Base *BaseTable
 
+	SoPath        string
 	Alias         string
 	QueryNodeIP   string
 	QueryNodePort int64
@@ -1088,6 +1089,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
 
+	p.initSoPath()
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 
@@ -1124,6 +1126,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 // InitAlias initializes an alias for the QueryNode role.
 func (p *queryNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
+}
+
+func (p *queryNodeConfig) initSoPath() {
+	p.SoPath = p.Base.LoadWithDefault("queryNode.soPath", "")
 }
 
 // advanced params

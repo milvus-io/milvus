@@ -283,6 +283,7 @@ message SearchRequest {
   repeated int64 segmentIDs = 3;
   bool from_shard_leader = 4;
   DataScope scope = 5; // All, Streaming, Historical
+  int32 total_channel_num = 6;
 }
 
 message QueryRequest {
