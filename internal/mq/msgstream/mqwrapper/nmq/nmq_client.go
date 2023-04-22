@@ -51,8 +51,8 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 	if err != nil {
 		return nil, util.WrapError("Failed to create jetstream context", err)
 	}
-	// TODO: investigate on permance of multiple streams vs multiple topics.
-	// AddStream is idempotent.
+	// TODO: investigate on performance of multiple streams vs multiple topics.
+	// Note that addStream is idempotent.
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
 		Subjects: []string{options.Topic},
@@ -73,7 +73,6 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		return nil, fmt.Errorf("Invalid consumer config: empty subscription name.")
 	}
 	// TODO: inject jetstream options.
-	// also, propagate back more detailed errors
 	js, err := nc.conn.JetStream()
 	if err != nil {
 		return nil, util.WrapError("Failed to create jetstream context", err)

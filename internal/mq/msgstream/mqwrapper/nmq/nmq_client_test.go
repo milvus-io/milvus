@@ -212,7 +212,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 		assert.Empty(t, msgProp)
 		msgID := nmqmsg.ID()
 		rID := msgID.(*nmqID)
-		assert.Equal(t, rID.messageID, uint64(1))
+		assert.Equal(t, rID.messageID, MessageIDType(1))
 	}
 }
 
@@ -223,7 +223,7 @@ func TestNmqClient_EarliestMessageID(t *testing.T) {
 	mid := client.EarliestMessageID()
 	assert.NotNil(t, mid)
 	nmqmsg := mid.(*nmqID)
-	assert.Equal(t, nmqmsg.messageID, uint64(1))
+	assert.Equal(t, nmqmsg.messageID, MessageIDType(1))
 }
 
 func TestNmqClient_StringToMsgID(t *testing.T) {

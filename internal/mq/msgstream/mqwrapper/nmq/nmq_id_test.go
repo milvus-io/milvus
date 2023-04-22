@@ -98,5 +98,5 @@ func Test_SerializeNmqID(t *testing.T) {
 func Test_DeserializeNmqID(t *testing.T) {
 	bin := SerializeNmqID(5)
 	id := DeserializeNmqID(bin)
-	assert.Equal(t, id, uint64(5))
+	assert.Equal(t, id, MessageIDType(5))
 }

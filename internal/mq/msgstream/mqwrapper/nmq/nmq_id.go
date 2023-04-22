@@ -21,11 +21,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
-type MessageID = uint64
+type MessageIDType = uint64
 
 // nmqID wraps message ID for natsmq
 type nmqID struct {
-	messageID MessageID
+	messageID MessageIDType
 }
 
 // Check if nmqID implements MessageID interface
@@ -50,13 +50,13 @@ func (nid *nmqID) Equal(msgID []byte) (bool, error) {
 }
 
 // SerializeNmqID is used to serialize a message ID to byte array
-func SerializeNmqID(messageID uint64) []byte {
+func SerializeNmqID(messageID MessageIDType) []byte {
 	b := make([]byte, 8)
-	common.Endian.PutUint64(b, uint64(messageID))
+	common.Endian.PutUint64(b, MessageIDType(messageID))
 	return b
 }
 
 // DeserializeNmqID is used to deserialize a message ID from byte array
-func DeserializeNmqID(messageID []byte) uint64 {
-	return uint64(common.Endian.Uint64(messageID))
+func DeserializeNmqID(messageID []byte) MessageIDType {
+	return MessageIDType(common.Endian.Uint64(messageID))
 }
