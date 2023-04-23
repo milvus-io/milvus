@@ -136,7 +136,7 @@ type dmlChannels struct {
 	capacity   int64
 	// pool maintains channelName => dmlMsgStream mapping, stable
 	pool sync.Map
-	// mut protects channlsHeap only
+	// mut protects channelsHeap only
 	mut sync.Mutex
 	// channelsHeap is the heap to pop next dms for use
 	channelsHeap channelsHeap
