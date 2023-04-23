@@ -137,6 +137,11 @@ func (job *ReleasePartitionJob) Execute() error {
 		return partition.GetPartitionID(), lo.Contains(req.GetPartitionIDs(), partition.GetPartitionID())
 	})
 
+	if len(toRelease) == 0 {
+		log.Warn("releasing partition(s) not loaded")
+		return nil
+	}
+
 	// If all partitions are released and LoadType is LoadPartition, clear all
 	if len(toRelease) == len(loadedPartitions) &&
 		job.meta.GetLoadType(req.GetCollectionID()) == querypb.LoadType_LoadPartition {
