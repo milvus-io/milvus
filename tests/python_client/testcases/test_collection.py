@@ -3545,6 +3545,23 @@ class TestLoadPartition(TestcaseBase):
         collection_w.load()
         collection_w.query(default_term_expr)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23176")
+    def test_release_unloaded_partition(self):
+        """
+        target: test load collection after load and drop partition
+        method: 1. load partition
+                2. release the other partition
+                3. query on the first partition
+        expected: no exception
+        """
+        collection_w = self.init_collection_general(prefix)[0]
+        partition_w1 = self.init_partition_wrap(collection_w, partition1)
+        partition_w2 = self.init_partition_wrap(collection_w, partition2)
+        partition_w1.load()
+        partition_w2.release()
+        collection_w.query(default_term_expr, partition_names=[partition1])
+
 
 class TestCollectionString(TestcaseBase):
     """
