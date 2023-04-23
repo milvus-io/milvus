@@ -14,19 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package msgstream
 
 import (
-	"os"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_InitNatsMQ(t *testing.T) {
-	storeDir := "/tmp/milvus/nats_store_global"
-	defer os.RemoveAll(storeDir)
-	err := InitNatsMQ(storeDir)
+func TestNmqFactory(t *testing.T) {
+	dir := t.TempDir()
+
+	nmqFactory := NewNmqFactory(dir)
+
+	ctx := context.Background()
+	_, err := nmqFactory.NewMsgStream(ctx)
 	assert.Nil(t, err)
-	CloseNatsMQ()
+
+	_, err = nmqFactory.NewTtMsgStream(ctx)
+	assert.Nil(t, err)
+
+	_, err = nmqFactory.NewQueryMsgStream(ctx)
+	assert.Nil(t, err)
+
+	err = nmqFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	assert.Nil(t, err)
 }

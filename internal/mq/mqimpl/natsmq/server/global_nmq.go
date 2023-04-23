@@ -17,7 +17,9 @@
 package server
 
 import (
+	"errors"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
 	"go.uber.org/zap"
@@ -41,6 +43,16 @@ func InitNatsMQ(storeDir string) error {
 			StoreDir:  storeDir,
 		}
 		Nmq, finalErr = server.NewServer(opts)
+		if finalErr != nil {
+			return
+		}
+		go Nmq.Start()
+		// Wait for server to be ready for connections
+		// TODO: Make waiting time a param.
+		if !Nmq.ReadyForConnections(4 * time.Second) {
+			finalErr = errors.New("Still not ready for connection")
+			return
+		}
 	})
 	return finalErr
 }
@@ -49,6 +61,9 @@ func InitNatsMQ(storeDir string) error {
 func CloseNatsMQ() {
 	log.Debug("Closing Natsmq!")
 	if Nmq != nil {
+		// Shut down the server.
 		Nmq.Shutdown()
+		// Wait for server shutdown.
+		Nmq.WaitForShutdown()
 	}
 }

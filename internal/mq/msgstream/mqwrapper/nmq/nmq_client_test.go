@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	nmqserver "github.com/milvus-io/milvus/internal/mq/mqimpl/natsmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -37,28 +37,10 @@ var nats_server_address string
 func TestMain(m *testing.M) {
 	tmpDir := path.Join(os.TempDir(), "nmq_client_test")
 	defer os.RemoveAll(tmpDir)
-	opts := &server.Options{
-		JetStream: true,
-		StoreDir:  string(tmpDir),
-	}
-	ns, err := server.NewServer(opts)
-	if err != nil {
-		panic(err)
-	}
+	nmqserver.InitNatsMQ(tmpDir)
+	nats_server_address = nmqserver.Nmq.ClientURL()
+	defer nmqserver.CloseNatsMQ()
 
-	go ns.Start()
-	// Wait for server to be ready for connections
-	if !ns.ReadyForConnections(4 * time.Second) {
-		panic("not ready for connection")
-	}
-	nats_server_address = ns.ClientURL()
-
-	defer func() {
-		// Shutdown the server (optional)
-		ns.Shutdown()
-		// Wait for server shutdown
-		ns.WaitForShutdown()
-	}()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

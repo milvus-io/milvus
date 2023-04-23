@@ -22,6 +22,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/natsmq/server"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
@@ -31,7 +32,8 @@ type nmqClient struct {
 	conn *nats.Conn
 }
 
-func NewClientWithDefaultOptions(url string) (*nmqClient, error) {
+func NewClientWithDefaultOptions() (*nmqClient, error) {
+	url := server.Nmq.ClientURL()
 	return NewClient(url)
 }
 
