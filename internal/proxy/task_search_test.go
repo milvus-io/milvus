@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -268,7 +269,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 		// contain vector field
 		task.request.OutputFields = []string{testFloatVecField}
-		assert.Error(t, task.PreExecute(ctx))
+		assert.NoError(t, task.PreExecute(ctx))
 	})
 }
 
@@ -1958,4 +1959,288 @@ func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
 		Topks:      []int64{},
 	}
 	return &result
+}
+
+func TestSearchTask_Requery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		dim        = 128
+		rows       = 5
+		collection = "test-requery"
+
+		pkField  = "pk"
+		vecField = "vec"
+	)
+
+	ids := make([]int64, rows)
+	for i := range ids {
+		ids[i] = int64(i)
+	}
+
+	t.Run("Test normal", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				FieldsData: []*schemapb.FieldData{{
+					Type:      schemapb.DataType_Int64,
+					FieldName: pkField,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{
+									Data: ids,
+								},
+							},
+						},
+					},
+				},
+					newFloatVectorFieldData(vecField, rows, dim),
+				},
+			}, nil)
+
+		resultIDs := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		}
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			result: &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					Ids: resultIDs,
+				},
+			},
+			schema: schema,
+			tr:     timerecord.NewTimeRecorder("search"),
+			node:   node,
+		}
+
+		err := qt.Requery()
+		assert.NoError(t, err)
+	})
+
+	t.Run("Test no primary key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{}
+		node := mocks.NewProxy(t)
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			schema:  schema,
+			tr:      timerecord.NewTimeRecorder("search"),
+			node:    node,
+		}
+
+		err := qt.Requery()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test requery failed 1", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("mock err 1"))
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			schema:  schema,
+			tr:      timerecord.NewTimeRecorder("search"),
+			node:    node,
+		}
+
+		err := qt.Requery()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test requery failed 2", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err 2",
+				},
+			}, nil)
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			schema:  schema,
+			tr:      timerecord.NewTimeRecorder("search"),
+			node:    node,
+		}
+
+		err := qt.Requery()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test get pk filed data failed", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				FieldsData: []*schemapb.FieldData{},
+			}, nil)
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			schema:  schema,
+			tr:      timerecord.NewTimeRecorder("search"),
+			node:    node,
+		}
+
+		err := qt.Requery()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test incomplete query result", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(&milvuspb.QueryResults{
+				FieldsData: []*schemapb.FieldData{{
+					Type:      schemapb.DataType_Int64,
+					FieldName: pkField,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{
+									Data: ids[:len(ids)-1],
+								},
+							},
+						},
+					},
+				},
+					newFloatVectorFieldData(vecField, rows, dim),
+				},
+			}, nil)
+
+		resultIDs := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		}
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			result: &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					Ids: resultIDs,
+				},
+			},
+			schema: schema,
+			tr:     timerecord.NewTimeRecorder("search"),
+			node:   node,
+		}
+
+		err := qt.Requery()
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test postExecute with requery failed", func(t *testing.T) {
+		schema := constructCollectionSchema(pkField, vecField, dim, collection)
+		node := mocks.NewProxy(t)
+		node.EXPECT().Query(mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("mock err 1"))
+
+		resultIDs := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		}
+
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+			},
+			request: &milvuspb.SearchRequest{},
+			result: &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					Ids: resultIDs,
+				},
+			},
+			requery:   true,
+			schema:    schema,
+			resultBuf: make(chan *internalpb.SearchResults, 10),
+			tr:        timerecord.NewTimeRecorder("search"),
+			node:      node,
+		}
+		scores := make([]float32, rows)
+		for i := range scores {
+			scores[i] = float32(i)
+		}
+		partialResultData := &schemapb.SearchResultData{
+			Ids:    resultIDs,
+			Scores: scores,
+		}
+		bytes, err := proto.Marshal(partialResultData)
+		assert.NoError(t, err)
+		qt.resultBuf <- &internalpb.SearchResults{
+			SlicedBlob: bytes,
+		}
+
+		err = qt.PostExecute(ctx)
+		t.Logf("err = %s", err)
+		assert.Error(t, err)
+	})
 }

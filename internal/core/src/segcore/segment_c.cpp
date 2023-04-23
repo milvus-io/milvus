@@ -164,6 +164,13 @@ GetRealCount(CSegmentInterface c_segment) {
     return segment->get_real_count();
 }
 
+bool
+HasRawData(CSegmentInterface c_segment, int64_t field_id) {
+    auto segment =
+        reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    return segment->HasRawData(field_id);
+}
+
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,

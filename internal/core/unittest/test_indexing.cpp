@@ -449,6 +449,91 @@ TEST_P(IndexTest, BuildAndQuery) {
     vec_index->Query(xq_dataset, search_info, nullptr);
 }
 
+TEST_P(IndexTest, GetVector) {
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = vec_field_data_type;
+    index::IndexBasePtr index;
+
+    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
+#ifdef BUILD_DISK_ANN
+        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+        auto file_manager =
+            std::make_shared<milvus::storage::DiskFileManagerImpl>(
+                field_data_meta, index_meta, storage_config_);
+        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, file_manager);
+#endif
+    } else {
+        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, nullptr);
+    }
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+    milvus::index::IndexBasePtr new_index;
+    milvus::index::VectorIndex* vec_index = nullptr;
+
+    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
+#ifdef BUILD_DISK_ANN
+        // TODO ::diskann.query need load first, ugly
+        auto binary_set = index->Serialize(milvus::Config{});
+        index.reset();
+        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+        auto file_manager =
+            std::make_shared<milvus::storage::DiskFileManagerImpl>(
+                field_data_meta, index_meta, storage_config_);
+        new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, file_manager);
+
+        vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+
+        std::vector<std::string> index_files;
+        for (auto& binary : binary_set.binary_map_) {
+            index_files.emplace_back(binary.first);
+        }
+        load_conf["index_files"] = index_files;
+        vec_index->Load(binary_set, load_conf);
+        EXPECT_EQ(vec_index->Count(), NB);
+#endif
+    } else {
+        vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    }
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    if (!vec_index->HasRawData()) {
+        return;
+    }
+
+    auto ids_ds = GenRandomIds(NB);
+    auto results = vec_index->GetVector(ids_ds);
+    EXPECT_TRUE(results.size() > 0);
+    if (!is_binary) {
+        std::vector<float> result_vectors(results.size() / (sizeof(float)));
+        memcpy(result_vectors.data(), results.data(), results.size());
+        EXPECT_TRUE(result_vectors.size() == xb_data.size());
+        for (size_t i = 0; i < NB; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            for (size_t j = 0; j < DIM; ++j) {
+                EXPECT_TRUE(result_vectors[i * DIM + j] ==
+                            xb_data[id * DIM + j]);
+            }
+        }
+    } else {
+        EXPECT_TRUE(results.size() == xb_bin_data.size());
+        const auto data_bytes = DIM / 8;
+        for (size_t i = 0; i < NB; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            for (size_t j = 0; j < data_bytes; ++j) {
+                EXPECT_TRUE(results[i * data_bytes + j] ==
+                            xb_bin_data[id * data_bytes + j]);
+            }
+        }
+    }
+}
+
 // #ifdef BUILD_DISK_ANN
 //  TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 //     int64_t NB = 10000;

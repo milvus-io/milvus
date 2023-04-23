@@ -735,6 +735,30 @@ func GetSizeOfIDs(data *schemapb.IDs) int {
 	return result
 }
 
+func GetDataSize(fieldData *schemapb.FieldData) int {
+	switch fieldData.GetType() {
+	case schemapb.DataType_Bool:
+		return len(fieldData.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return len(fieldData.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return len(fieldData.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return len(fieldData.GetScalars().GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return len(fieldData.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_String:
+		return len(fieldData.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_VarChar:
+		return len(fieldData.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_FloatVector:
+		return len(fieldData.GetVectors().GetFloatVector().GetData())
+	case schemapb.DataType_BinaryVector:
+		return len(fieldData.GetVectors().GetBinaryVector())
+	}
+	return 0
+}
+
 func IsPrimaryFieldType(dataType schemapb.DataType) bool {
 	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar {
 		return true
@@ -752,6 +776,33 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 		return data.GetIntId().GetData()[idx]
 	case *schemapb.IDs_StrId:
 		return data.GetStrId().GetData()[idx]
+	}
+	return nil
+}
+
+func GetData(field *schemapb.FieldData, idx int) interface{} {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return field.GetScalars().GetBoolData().GetData()[idx]
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return field.GetScalars().GetIntData().GetData()[idx]
+	case schemapb.DataType_Int64:
+		return field.GetScalars().GetLongData().GetData()[idx]
+	case schemapb.DataType_Float:
+		return field.GetScalars().GetFloatData().GetData()[idx]
+	case schemapb.DataType_Double:
+		return field.GetScalars().GetDoubleData().GetData()[idx]
+	case schemapb.DataType_String:
+		return field.GetScalars().GetStringData().GetData()[idx]
+	case schemapb.DataType_VarChar:
+		return field.GetScalars().GetStringData().GetData()[idx]
+	case schemapb.DataType_FloatVector:
+		dim := int(field.GetVectors().GetDim())
+		return field.GetVectors().GetFloatVector().GetData()[idx*dim : (idx+1)*dim]
+	case schemapb.DataType_BinaryVector:
+		dim := int(field.GetVectors().GetDim())
+		dataBytes := dim / 8
+		return field.GetVectors().GetBinaryVector()[idx*dataBytes : (idx+1)*dataBytes]
 	}
 	return nil
 }

@@ -86,6 +86,16 @@ PrefixMatch(const std::string_view str, const std::string_view prefix) {
 }
 
 inline DatasetPtr
+GenIdsDataset(const int64_t count, const int64_t* ids) {
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->SetRows(count);
+    ret_ds->SetDim(1);
+    ret_ds->SetIds(ids);
+    ret_ds->SetIsOwner(false);
+    return ret_ds;
+}
+
+inline DatasetPtr
 GenResultDataset(const int64_t nq,
                  const int64_t topk,
                  const int64_t* ids,
