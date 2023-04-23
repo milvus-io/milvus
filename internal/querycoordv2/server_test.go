@@ -177,6 +177,7 @@ func (suite *ServerSuite) TestNodeUp() {
 	suite.NoError(err)
 	defer node1.Stop()
 
+	suite.server.notifyNodeUp <- struct{}{}
 	suite.Eventually(func() bool {
 		node := suite.server.nodeMgr.Get(node1.ID)
 		if node == nil {
@@ -191,9 +192,8 @@ func (suite *ServerSuite) TestNodeUp() {
 		return true
 	}, 5*time.Second, time.Second)
 
-	// mock node1 lost connection
-	fakeLostConnectionErr := errors.New("fake lost connection error")
-	node1.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, fakeLostConnectionErr)
+	// mock unhealthy node
+	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
 
 	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
 	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil).Maybe()
@@ -202,6 +202,7 @@ func (suite *ServerSuite) TestNodeUp() {
 	defer node2.Stop()
 
 	// expect node2 won't be add to qc, due to unhealthy nodes exist
+	suite.server.notifyNodeUp <- struct{}{}
 	suite.Eventually(func() bool {
 		node := suite.server.nodeMgr.Get(node2.ID)
 		if node == nil {
@@ -216,8 +217,9 @@ func (suite *ServerSuite) TestNodeUp() {
 		return false
 	}, 5*time.Second, time.Second)
 
-	// mock node1 down, so no unhealthy nodes exist
-	suite.server.nodeMgr.Remove(node1.ID)
+	// mock unhealthy node down, so no unhealthy nodes exist
+	suite.server.nodeMgr.Remove(1001)
+	suite.server.notifyNodeUp <- struct{}{}
 
 	// expect node2 will be add to qc
 	suite.Eventually(func() bool {
