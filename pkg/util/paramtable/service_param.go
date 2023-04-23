@@ -585,16 +585,16 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Key:          "rocksmq.rocksmqPageSize",
 		DefaultValue: strconv.FormatInt(64<<20, 10),
 		Version:      "2.0.0",
-		Doc:          "256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq",
+		Doc:          "64 MB, 64 * 1024 * 1024 bytes, The size of each page of messages in rocksmq",
 		Export:       true,
 	}
 	r.PageSize.Init(base.mgr)
 
 	r.RetentionTimeInMinutes = ParamItem{
 		Key:          "rocksmq.retentionTimeInMinutes",
-		DefaultValue: "7200",
+		DefaultValue: "4320",
 		Version:      "2.0.0",
-		Doc:          "5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.",
+		Doc:          "3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.",
 		Export:       true,
 	}
 	r.RetentionTimeInMinutes.Init(base.mgr)

@@ -138,7 +138,7 @@ type dmlChannels struct {
 	capacity   int64
 	// pool maintains channelName => dmlMsgStream mapping, stable
 	pool sync.Map
-	// mut protects channlsHeap only
+	// mut protects channelsHeap only
 	mut sync.Mutex
 	// channelsHeap is the heap to pop next dms for use
 	channelsHeap channelsHeap
@@ -155,7 +155,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	// if topic created, use the existed topic
 	if params.PreCreatedTopicEnabled.GetAsBool() {
 		chanNamePrefix = ""
-		chanNum = int64(len(params.TopicNames.GetAsStrings()))
+		chanNum = int64(len(params.TopicNames.GetAsStrings())) + chanNumDefault
 		names = params.TopicNames.GetAsStrings()
 	} else {
 		chanNamePrefix = chanNamePrefixDefault

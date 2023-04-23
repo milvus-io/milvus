@@ -779,7 +779,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.DmlChannelNum = ParamItem{
 		Key:          "rootCoord.dmlChannelNum",
 		Version:      "2.0.0",
-		DefaultValue: "256",
+		DefaultValue: "16",
 		Forbidden:    true,
 		Doc:          "The number of dml channels created at system startup",
 		Export:       true,
