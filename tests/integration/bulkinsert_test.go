@@ -51,72 +51,24 @@ const (
 // 5, load
 // 6, search
 func TestBulkInsert(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
 	c, err := StartMiniCluster(ctx)
 	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+	defer func() {
+		err = c.Stop()
+		assert.NoError(t, err)
+		cancel()
+	}()
 
 	prefix := "TestBulkInsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	int64Field := "int64"
-	floatVecField := "embeddings"
-	scalarField := "image_path"
+	floatVecField := floatVecField
 	dim := 128
 
-	constructCollectionSchema := func() *schemapb.CollectionSchema {
-		pk := &schemapb.FieldSchema{
-			Name:         int64Field,
-			IsPrimaryKey: true,
-			Description:  "pk",
-			DataType:     schemapb.DataType_Int64,
-			TypeParams:   nil,
-			IndexParams:  nil,
-			AutoID:       true,
-		}
-		fVec := &schemapb.FieldSchema{
-			Name:         floatVecField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: strconv.Itoa(dim),
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		scalar := &schemapb.FieldSchema{
-			Name:         scalarField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "max_length",
-					Value: "65535",
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		return &schemapb.CollectionSchema{
-			Name:        collectionName,
-			Description: "",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				pk,
-				fVec,
-				scalar,
-			},
-		}
-	}
-	schema := constructCollectionSchema()
+	schema := constructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -207,28 +159,7 @@ func TestBulkInsert(t *testing.T) {
 		CollectionName: collectionName,
 		FieldName:      floatVecField,
 		IndexName:      "_default",
-		ExtraParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: strconv.Itoa(dim),
-			},
-			{
-				Key:   common.MetricTypeKey,
-				Value: distance.L2,
-			},
-			{
-				Key:   "index_type",
-				Value: "HNSW",
-			},
-			{
-				Key:   "M",
-				Value: "64",
-			},
-			{
-				Key:   "efConstruction",
-				Value: "512",
-			},
-		},
+		ExtraParams:    constructIndexParam(dim, IndexHNSW, distance.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -246,30 +177,17 @@ func TestBulkInsert(t *testing.T) {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	for {
-		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
-			CollectionName: collectionName,
-		})
-		if err != nil {
-			panic("GetLoadingProgress fail")
-		}
-		if loadProgress.GetProgress() == 100 {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	waitingForLoad(ctx, c, collectionName)
 
 	// search
-	expr := fmt.Sprintf("%s > 0", "int64")
+	expr := fmt.Sprintf("%s > 0", int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
-	nprobe := 10
-	params := make(map[string]int)
-	params["nprobe"] = nprobe
 
+	params := getSearchParams(IndexHNSW, distance.L2)
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, distance.L2, params, nq, dim, topk, roundDecimal)
+		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 

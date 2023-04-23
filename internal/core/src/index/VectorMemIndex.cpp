@@ -145,4 +145,34 @@ VectorMemIndex::Query(const DatasetPtr dataset,
     return result;
 }
 
+const bool
+VectorMemIndex::HasRawData() const {
+    return index_.HasRawData(GetMetricType());
+}
+
+const std::vector<uint8_t>
+VectorMemIndex::GetVector(const DatasetPtr dataset,
+                          const Config& config) const {
+    auto res = index_.GetVectorByIds(*dataset, config);
+    if (!res.has_value()) {
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to get vector, " + MatchKnowhereError(res.error()));
+    }
+    auto index_type = GetIndexType();
+    auto tensor = res.value()->GetTensor();
+    auto row_num = res.value()->GetRows();
+    auto dim = res.value()->GetDim();
+    int64_t data_size;
+    if (is_in_bin_list(index_type)) {
+        data_size = dim / 8 * row_num;
+    } else {
+        data_size = dim * row_num * sizeof(float);
+    }
+    std::vector<uint8_t> raw_data;
+    raw_data.resize(data_size);
+    memcpy(raw_data.data(), tensor, data_size);
+    return raw_data;
+}
+
 }  // namespace milvus::index

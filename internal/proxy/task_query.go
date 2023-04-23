@@ -9,6 +9,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/samber/lo"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
@@ -492,7 +493,10 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	case *schemapb.IDs_IntId:
 		idsStr = strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids.GetIntId().GetData())), ", "), "[]")
 	case *schemapb.IDs_StrId:
-		idsStr = strings.Trim(strings.Join(ids.GetStrId().GetData(), ", "), "[]")
+		strs := lo.Map(ids.GetStrId().GetData(), func(str string, _ int) string {
+			return fmt.Sprintf("\"%s\"", str)
+		})
+		idsStr = strings.Trim(strings.Join(strs, ", "), "[]")
 	}
 
 	return fieldName + " in [ " + idsStr + " ]"

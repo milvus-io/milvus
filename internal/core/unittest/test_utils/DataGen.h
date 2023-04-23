@@ -599,4 +599,15 @@ GenPKs(const std::vector<int64_t>& pks) {
     return GenPKs(pks.begin(), pks.end());
 }
 
+inline std::shared_ptr<knowhere::DataSet>
+GenRandomIds(int rows, int64_t seed = 42) {
+    std::mt19937 g(seed);
+    auto* ids = new int64_t[rows];
+    for (int i = 0; i < rows; ++i) ids[i] = i;
+    std::shuffle(ids, ids + rows, g);
+    auto ids_ds = GenIdsDataset(rows, ids);
+    ids_ds->SetIsOwner(true);
+    return ids_ds;
+}
+
 }  // namespace milvus::segcore

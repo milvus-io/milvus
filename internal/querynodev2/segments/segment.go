@@ -282,6 +282,13 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 	return fieldInfo.IndexInfo != nil && fieldInfo.IndexInfo.EnableIndex
 }
 
+func (s *LocalSegment) HasRawData(fieldID int64) bool {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))
+	return bool(ret)
+}
+
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
@@ -463,10 +470,18 @@ func (s *LocalSegment) FillIndexedFieldsData(ctx context.Context,
 	)
 
 	for _, fieldData := range result.FieldsData {
-		// If the vector field doesn't have indexed. Vector data is in memory for
-		// brute force search. No need to download data from remote.
-		if fieldData.GetType() != schemapb.DataType_FloatVector && fieldData.GetType() != schemapb.DataType_BinaryVector ||
-			!s.ExistIndex(fieldData.FieldId) {
+		// If the field is not vector field, no need to download data from remote.
+		if !typeutil.IsVectorType(fieldData.GetType()) {
+			continue
+		}
+		// If the vector field doesn't have indexed, vector data is in memory
+		// for brute force search, no need to download data from remote.
+		if !s.ExistIndex(fieldData.FieldId) {
+			continue
+		}
+		// If the index has raw data, vector data could be obtained from index,
+		// no need to download data from remote.
+		if s.HasRawData(fieldData.FieldId) {
 			continue
 		}
 
