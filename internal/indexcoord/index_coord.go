@@ -91,7 +91,6 @@ type IndexCoord struct {
 	indexBuilder          *indexBuilder
 	garbageCollector      *garbageCollector
 	flushedSegmentWatcher *flushedSegmentWatcher
-	handoff               *handoff
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -265,8 +264,7 @@ func (i *IndexCoord) initIndexCoord() error {
 	i.chunkManager = chunkManager
 
 	i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
-	i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
-	i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
+	i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i)
 	if err != nil {
 		return err
 	}
@@ -308,7 +306,6 @@ func (i *IndexCoord) startIndexCoord() {
 
 		i.indexBuilder.Start()
 		i.garbageCollector.Start()
-		i.handoff.Start()
 		i.flushedSegmentWatcher.Start()
 
 	})
