@@ -492,6 +492,7 @@ func (job *ReleasePartitionJob) Execute() error {
 	req := job.req
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
@@ -505,6 +506,11 @@ func (job *ReleasePartitionJob) Execute() error {
 		if partitionIDs.Contain(partition.GetPartitionID()) {
 			toRelease = append(toRelease, partition.GetPartitionID())
 		}
+	}
+
+	if len(toRelease) == 0 {
+		log.Warn("releasing partition(s) not loaded")
+		return nil
 	}
 
 	if len(toRelease) == len(loadedPartitions) { // All partitions are released, clear all
@@ -522,6 +528,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetMgr.RemoveCollection(req.GetCollectionID())
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
 		waitCollectionReleased(job.dist, req.GetCollectionID())
+		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
@@ -532,6 +539,5 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
-	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
 }
