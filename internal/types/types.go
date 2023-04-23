@@ -1082,6 +1082,16 @@ type ProxyComponent interface {
 	// error is always nil
 	DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 
+	// GetIndexStatistics notifies Proxy to return index's statistics
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, field name, index name
+	//
+	// The `Status` in response struct `GetIndexStatisticsResponse` indicates if this operation is processed successfully or fail cause;
+	// the `IndexDescriptions` in `GetIndexStatisticsResponse` return index's statistics.
+	// error is always nil
+	GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error)
+
 	// GetIndexBuildProgress notifies Proxy to return index build progress
 	//
 	// ctx is the context to control request deadline and cancellation
