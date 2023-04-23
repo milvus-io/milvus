@@ -289,15 +289,15 @@ func (scheduler *taskScheduler) upgradeTaskMetrics() {
 		}
 	}
 
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Set(float64(segmentGrowNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Set(float64(segmentReduceNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Set(float64(segmentMoveNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Set(float64(channelGrowNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Add(float64(segmentGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Add(float64(segmentReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Add(float64(segmentMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Add(float64(channelGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Add(float64(channelReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Add(float64(channelMoveNum))
 }
 
-// check checks whether the task is valid to add,
+// check whether the task is valid to add,
 // must hold lock
 func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
@@ -732,7 +732,6 @@ func (scheduler *taskScheduler) remove(task Task) {
 		delete(scheduler.channelTasks, index)
 		log = log.With(zap.String("channel", task.Channel()))
 	}
-	scheduler.upgradeTaskMetrics()
 	log.Info("task removed")
 }
 
@@ -782,6 +781,13 @@ func (scheduler *taskScheduler) checkStale(task Task) bool {
 			log.Warn("the task is stale, the target node is offline")
 			return true
 		}
+		if action.Type() == ActionTypeGrow {
+			isStoppingNode, _ := scheduler.nodeMgr.IsStoppingNode(action.Node())
+			if isStoppingNode {
+				log.Warn("task stale due to dst node for growing has been stopping", zap.Int64("dstNode", action.Node()))
+				return true
+			}
+		}
 	}
 
 	return false
@@ -815,7 +821,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 
 		case ActionTypeReduce:
 			// Do nothing here,
-			// the task should succeeded if the segment not exists
+			// the task should succeed if the segment not exists
 		}
 	}
 	return false
@@ -838,7 +844,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 
 		case ActionTypeReduce:
 			// Do nothing here,
-			// the task should succeeded if the channel not exists
+			// the task should succeed if the channel not exists
 		}
 	}
 	return false

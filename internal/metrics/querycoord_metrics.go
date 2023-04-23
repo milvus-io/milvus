@@ -89,8 +89,8 @@ var (
 			Buckets:   []float64{0, 5, 10, 20, 40, 100, 200, 400, 1000, 10000},
 		}, []string{})
 
-	QueryCoordTaskNum = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	QueryCoordTaskNum = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "task_num",

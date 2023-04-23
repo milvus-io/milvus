@@ -107,23 +107,23 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 0
 	})
-	collectionToBalance := suite.checker.collectionsToBalance()
-	suite.Empty(collectionToBalance)
-	segPlans, _ := suite.checker.balanceCollections(collectionToBalance)
+	replicasToBalance := suite.checker.replicasToBalance()
+	suite.Empty(replicasToBalance)
+	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
 	suite.Empty(segPlans)
 
 	//test enable auto balance
 	Params.QueryCoordCfg.AutoBalance = true
-	idsToBalance := []int64{int64(cid1)}
-	collectionToBalance = suite.checker.collectionsToBalance()
-	suite.ElementsMatch(idsToBalance, collectionToBalance)
+	idsToBalance := []int64{int64(replicaID1)}
+	replicasToBalance = suite.checker.replicasToBalance()
+	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	//next round
-	idsToBalance = []int64{int64(cid2)}
-	collectionToBalance = suite.checker.collectionsToBalance()
-	suite.ElementsMatch(idsToBalance, collectionToBalance)
+	idsToBalance = []int64{int64(replicaID2)}
+	replicasToBalance = suite.checker.replicasToBalance()
+	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	//final round
-	collectionToBalance = suite.checker.collectionsToBalance()
-	suite.Empty(collectionToBalance)
+	replicasToBalance = suite.checker.replicasToBalance()
+	suite.Empty(replicasToBalance)
 }
 
 func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
@@ -154,9 +154,9 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 1
 	})
-	collectionToBalance := suite.checker.collectionsToBalance()
-	suite.Empty(collectionToBalance)
-	segPlans, _ := suite.checker.balanceCollections(collectionToBalance)
+	replicasToBalance := suite.checker.replicasToBalance()
+	suite.Empty(replicasToBalance)
+	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
 	suite.Empty(segPlans)
 }
 
@@ -185,9 +185,9 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.checker.meta.ReplicaManager.Put(replica2)
 
 	//test stopping balance
-	idsToBalance := []int64{int64(cid1), int64(cid2)}
-	collectionToBalance := suite.checker.collectionsToBalance()
-	suite.ElementsMatch(idsToBalance, collectionToBalance)
+	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
+	replicasToBalance := suite.checker.replicasToBalance()
+	suite.ElementsMatch(idsToBalance, replicasToBalance)
 
 	//checker check
 	segPlans, chanPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)

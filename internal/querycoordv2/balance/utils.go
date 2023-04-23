@@ -145,7 +145,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		}
 		distInfo += "]]"
 	}
-	distInfo += "]\n"
+	distInfo += "]"
 	//2. print normal nodes segment distribution
 	distInfo += "[normalNodesSegmentDist:"
 	for normalNodeID, normalNodeSegments := range nodeSegments {
@@ -159,7 +159,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		}
 		distInfo += fmt.Sprintf("] nodeRowSum:%d]", nodeRowSum)
 	}
-	distInfo += "]\n"
+	distInfo += "]"
 
 	//3. print stopping nodes channel distribution
 	distInfo += "[stoppingNodesChannelDist:"
@@ -172,7 +172,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		}
 		distInfo += "]]"
 	}
-	distInfo += "]\n"
+	distInfo += "]"
 
 	//4. print normal nodes channel distribution
 	distInfo += "[normalNodesChannelDist:"
@@ -185,7 +185,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 		}
 		distInfo += "]]"
 	}
-	distInfo += "]\n"
+	distInfo += "]"
 
 	log.Info(distInfo)
 }
