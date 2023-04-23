@@ -1782,6 +1782,16 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	return dit.result, nil
 }
 
+// GetIndexStatistics get the information of index.
+func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	// bank implement
+	return &milvuspb.GetIndexStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+}
+
 // DropIndex drop the index of collection.
 func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {

@@ -598,6 +598,10 @@ func (m *MockProxy) DescribeIndex(ctx context.Context, request *milvuspb.Describ
 	return nil, nil
 }
 
+func (m *MockProxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return nil, nil
 }
@@ -1083,6 +1087,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("DescribeIndex", func(t *testing.T) {
 		_, err := server.DescribeIndex(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("GetIndexStatistics", func(t *testing.T) {
+		_, err := server.GetIndexStatistics(ctx, nil)
 		assert.Nil(t, err)
 	})
 
