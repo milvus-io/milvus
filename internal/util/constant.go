@@ -37,6 +37,7 @@ const (
 	FieldIndexPrefix   = "field-index"
 
 	HeaderAuthorize = "authorization"
+	HeaderDBName    = "dbName"
 	// HeaderSourceID identify requests from Milvus members and client requests
 	HeaderSourceID = "sourceId"
 	// MemberCredID id for Milvus members (data/index/query node/coord component)
@@ -47,6 +48,7 @@ const (
 	DefaultTenant       = ""
 	RoleAdmin           = "admin"
 	RolePublic          = "public"
+	DefaultDBName       = "default"
 
 	PrivilegeWord = "Privilege"
 	AnyWord       = "*"

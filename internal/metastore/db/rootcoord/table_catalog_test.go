@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -1973,7 +1975,7 @@ func TestTableCatalog_ListPolicy(t *testing.T) {
 	policies, err = mockCatalog.ListPolicy(ctx, tenantID)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(policies))
-	require.Equal(t, funcutil.PolicyForPrivilege(roleName1, object1, objectName1, privilege1), policies[0])
+	require.Equal(t, funcutil.PolicyForPrivilege(roleName1, object1, objectName1, privilege1, util.DefaultDBName), policies[0])
 
 	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(nil, errors.New("test error")).Once()
 	_, err = mockCatalog.ListPolicy(ctx, tenantID)

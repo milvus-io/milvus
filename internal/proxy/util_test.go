@@ -738,6 +738,24 @@ func TestGetCurUserFromContext(t *testing.T) {
 	assert.Equal(t, "root", username)
 }
 
+func TestGetCurDBNameFromContext(t *testing.T) {
+	dbName := GetCurDBNameFromContext(context.Background())
+	assert.Equal(t, util.DefaultDBName, dbName)
+
+	dbName = GetCurDBNameFromContext(metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{})))
+	assert.Equal(t, util.DefaultDBName, dbName)
+
+	dbNameKey := strings.ToLower(util.HeaderDBName)
+	dbNameValue := "foodb"
+	contextMap := map[string]string{
+		dbNameKey: dbNameValue,
+	}
+	md := metadata.New(contextMap)
+
+	dbName = GetCurDBNameFromContext(metadata.NewIncomingContext(context.Background(), md))
+	assert.Equal(t, dbNameValue, dbName)
+}
+
 func TestGetRole(t *testing.T) {
 	globalMetaCache = nil
 	_, err := GetRole("foo")

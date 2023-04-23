@@ -5299,3 +5299,18 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.result, nil
 }
+
+func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}

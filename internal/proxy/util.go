@@ -729,6 +729,18 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return username, nil
 }
 
+func GetCurDBNameFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return util.DefaultDBName
+	}
+	dbNameData := md[strings.ToLower(util.HeaderDBName)]
+	if len(dbNameData) < 1 || dbNameData[0] == "" {
+		return util.DefaultDBName
+	}
+	return dbNameData[0]
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, ErrProxyNotReady()

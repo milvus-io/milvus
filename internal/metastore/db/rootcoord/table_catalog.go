@@ -967,7 +967,7 @@ func (tc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, err
 		}
 		for _, grantID := range grantIDs {
 			policies = append(policies,
-				funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object, grant.ObjectName, grantID.Privilege))
+				funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object, grant.ObjectName, grantID.Privilege, "default"))
 		}
 	}
 

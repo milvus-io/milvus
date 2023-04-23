@@ -94,6 +94,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectNameIndexs := privilegeExt.ObjectNameIndexs
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
+	dbName := GetCurDBNameFromContext(ctx)
 	policyInfo := strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ",")
 
 	logWithCurrentRequestInfo := log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
@@ -114,7 +115,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 	for _, roleName := range roleNames {
 		permitFunc := func(resName string) (bool, error) {
-			object := funcutil.PolicyForResource(objectType, resName)
+			object := funcutil.PolicyForResource(dbName, objectType, resName)
 			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
 			if err != nil {
 				return false, err
