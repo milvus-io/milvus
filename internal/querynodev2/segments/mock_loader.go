@@ -65,11 +65,11 @@ type MockLoader_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - segmentType commonpb.SegmentState
-//  - version int64
-//  - infos ...*querypb.SegmentLoadInfo
+//   - ctx context.Context
+//   - collectionID int64
+//   - segmentType commonpb.SegmentState
+//   - version int64
+//   - infos ...*querypb.SegmentLoadInfo
 func (_e *MockLoader_Expecter) Load(ctx interface{}, collectionID interface{}, segmentType interface{}, version interface{}, infos ...interface{}) *MockLoader_Load_Call {
 	return &MockLoader_Load_Call{Call: _e.mock.On("Load",
 		append([]interface{}{ctx, collectionID, segmentType, version}, infos...)...)}
@@ -129,10 +129,10 @@ type MockLoader_LoadBloomFilterSet_Call struct {
 }
 
 // LoadBloomFilterSet is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - version int64
-//  - infos ...*querypb.SegmentLoadInfo
+//   - ctx context.Context
+//   - collectionID int64
+//   - version int64
+//   - infos ...*querypb.SegmentLoadInfo
 func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collectionID interface{}, version interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
 	return &MockLoader_LoadBloomFilterSet_Call{Call: _e.mock.On("LoadBloomFilterSet",
 		append([]interface{}{ctx, collectionID, version}, infos...)...)}
@@ -176,9 +176,9 @@ type MockLoader_LoadDeltaLogs_Call struct {
 }
 
 // LoadDeltaLogs is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segment *LocalSegment
-//  - deltaLogs []*datapb.FieldBinlog
+//   - ctx context.Context
+//   - segment *LocalSegment
+//   - deltaLogs []*datapb.FieldBinlog
 func (_e *MockLoader_Expecter) LoadDeltaLogs(ctx interface{}, segment interface{}, deltaLogs interface{}) *MockLoader_LoadDeltaLogs_Call {
 	return &MockLoader_LoadDeltaLogs_Call{Call: _e.mock.On("LoadDeltaLogs", ctx, segment, deltaLogs)}
 }

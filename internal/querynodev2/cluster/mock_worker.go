@@ -44,8 +44,8 @@ type MockWorker_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.DeleteRequest
+//   - ctx context.Context
+//   - req *querypb.DeleteRequest
 func (_e *MockWorker_Expecter) Delete(ctx interface{}, req interface{}) *MockWorker_Delete_Call {
 	return &MockWorker_Delete_Call{Call: _e.mock.On("Delete", ctx, req)}
 }
@@ -91,8 +91,8 @@ type MockWorker_GetStatistics_Call struct {
 }
 
 // GetStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.GetStatisticsRequest
+//   - ctx context.Context
+//   - req *querypb.GetStatisticsRequest
 func (_e *MockWorker_Expecter) GetStatistics(ctx interface{}, req interface{}) *MockWorker_GetStatistics_Call {
 	return &MockWorker_GetStatistics_Call{Call: _e.mock.On("GetStatistics", ctx, req)}
 }
@@ -165,8 +165,8 @@ type MockWorker_LoadSegments_Call struct {
 }
 
 // LoadSegments is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.LoadSegmentsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.LoadSegmentsRequest
 func (_e *MockWorker_Expecter) LoadSegments(_a0 interface{}, _a1 interface{}) *MockWorker_LoadSegments_Call {
 	return &MockWorker_LoadSegments_Call{Call: _e.mock.On("LoadSegments", _a0, _a1)}
 }
@@ -212,8 +212,8 @@ type MockWorker_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.QueryRequest
+//   - ctx context.Context
+//   - req *querypb.QueryRequest
 func (_e *MockWorker_Expecter) Query(ctx interface{}, req interface{}) *MockWorker_Query_Call {
 	return &MockWorker_Query_Call{Call: _e.mock.On("Query", ctx, req)}
 }
@@ -250,8 +250,8 @@ type MockWorker_ReleaseSegments_Call struct {
 }
 
 // ReleaseSegments is a helper method to define mock.On call
-//  - _a0 context.Context
-//  - _a1 *querypb.ReleaseSegmentsRequest
+//   - _a0 context.Context
+//   - _a1 *querypb.ReleaseSegmentsRequest
 func (_e *MockWorker_Expecter) ReleaseSegments(_a0 interface{}, _a1 interface{}) *MockWorker_ReleaseSegments_Call {
 	return &MockWorker_ReleaseSegments_Call{Call: _e.mock.On("ReleaseSegments", _a0, _a1)}
 }
@@ -297,8 +297,8 @@ type MockWorker_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *querypb.SearchRequest
+//   - ctx context.Context
+//   - req *querypb.SearchRequest
 func (_e *MockWorker_Expecter) Search(ctx interface{}, req interface{}) *MockWorker_Search_Call {
 	return &MockWorker_Search_Call{Call: _e.mock.On("Search", ctx, req)}
 }

@@ -76,7 +76,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("proxy health check is ok", func(t *testing.T) {
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.QueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),
@@ -105,7 +105,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 		dataCoordMock := NewDataCoordMock()
 		dataCoordMock.checkHealthFunc = checkHealthFunc1
 
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.QueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 		node := &Proxy{
 			session: &sessionutil.Session{ServerID: 1},
@@ -124,7 +124,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check quota state", func(t *testing.T) {
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.QueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),

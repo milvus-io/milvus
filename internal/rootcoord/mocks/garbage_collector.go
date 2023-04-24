@@ -49,8 +49,8 @@ type GarbageCollector_GcCollectionData_Call struct {
 }
 
 // GcCollectionData is a helper method to define mock.On call
-//  - ctx context.Context
-//  - coll *model.Collection
+//   - ctx context.Context
+//   - coll *model.Collection
 func (_e *GarbageCollector_Expecter) GcCollectionData(ctx interface{}, coll interface{}) *GarbageCollector_GcCollectionData_Call {
 	return &GarbageCollector_GcCollectionData_Call{Call: _e.mock.On("GcCollectionData", ctx, coll)}
 }
@@ -94,9 +94,9 @@ type GarbageCollector_GcPartitionData_Call struct {
 }
 
 // GcPartitionData is a helper method to define mock.On call
-//  - ctx context.Context
-//  - pChannels []string
-//  - partition *model.Partition
+//   - ctx context.Context
+//   - pChannels []string
+//   - partition *model.Partition
 func (_e *GarbageCollector_Expecter) GcPartitionData(ctx interface{}, pChannels interface{}, partition interface{}) *GarbageCollector_GcPartitionData_Call {
 	return &GarbageCollector_GcPartitionData_Call{Call: _e.mock.On("GcPartitionData", ctx, pChannels, partition)}
 }
@@ -124,8 +124,8 @@ type GarbageCollector_ReDropCollection_Call struct {
 }
 
 // ReDropCollection is a helper method to define mock.On call
-//  - collMeta *model.Collection
-//  - ts uint64
+//   - collMeta *model.Collection
+//   - ts uint64
 func (_e *GarbageCollector_Expecter) ReDropCollection(collMeta interface{}, ts interface{}) *GarbageCollector_ReDropCollection_Call {
 	return &GarbageCollector_ReDropCollection_Call{Call: _e.mock.On("ReDropCollection", collMeta, ts)}
 }
@@ -153,9 +153,9 @@ type GarbageCollector_ReDropPartition_Call struct {
 }
 
 // ReDropPartition is a helper method to define mock.On call
-//  - pChannels []string
-//  - partition *model.Partition
-//  - ts uint64
+//   - pChannels []string
+//   - partition *model.Partition
+//   - ts uint64
 func (_e *GarbageCollector_Expecter) ReDropPartition(pChannels interface{}, partition interface{}, ts interface{}) *GarbageCollector_ReDropPartition_Call {
 	return &GarbageCollector_ReDropPartition_Call{Call: _e.mock.On("ReDropPartition", pChannels, partition, ts)}
 }
@@ -183,7 +183,7 @@ type GarbageCollector_RemoveCreatingCollection_Call struct {
 }
 
 // RemoveCreatingCollection is a helper method to define mock.On call
-//  - collMeta *model.Collection
+//   - collMeta *model.Collection
 func (_e *GarbageCollector_Expecter) RemoveCreatingCollection(collMeta interface{}) *GarbageCollector_RemoveCreatingCollection_Call {
 	return &GarbageCollector_RemoveCreatingCollection_Call{Call: _e.mock.On("RemoveCreatingCollection", collMeta)}
 }

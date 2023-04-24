@@ -273,8 +273,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	})
 }
 
-func getQueryCoord() *types.MockQueryCoord {
-	qc := &types.MockQueryCoord{}
+func getQueryCoord() *mocks.QueryCoord {
+	qc := &mocks.QueryCoord{}
 	qc.EXPECT().Start().Return(nil)
 	qc.EXPECT().Stop().Return(nil)
 	return qc

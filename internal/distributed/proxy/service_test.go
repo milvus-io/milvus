@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/internal/mocks"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -1472,7 +1473,7 @@ func getServer(t *testing.T) *Server {
 	server.rootCoordClient = &MockRootCoord{}
 	server.dataCoordClient = &MockDataCoord{}
 
-	mockQC := &types.MockQueryCoord{}
+	mockQC := &mocks.QueryCoord{}
 	server.queryCoordClient = mockQC
 	mockQC.EXPECT().Init().Return(nil)
 	mockQC.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{

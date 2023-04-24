@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -210,7 +211,7 @@ func (m *MockRootCoordClientInterface) ListPolicy(ctx context.Context, in *inter
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -261,7 +262,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -311,7 +312,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -344,7 +345,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -360,7 +361,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -382,7 +383,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -436,7 +437,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -605,7 +606,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 func TestMetaCache_PolicyInfo(t *testing.T) {
 	client := &MockRootCoordClientInterface{}
-	qc := &types.MockQueryCoord{}
+	qc := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 
 	t.Run("InitMetaCache", func(t *testing.T) {
@@ -688,7 +689,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 func TestMetaCache_LoadCache(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -742,7 +743,7 @@ func TestMetaCache_LoadCache(t *testing.T) {
 func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
@@ -790,7 +791,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.QueryCoord{}
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
