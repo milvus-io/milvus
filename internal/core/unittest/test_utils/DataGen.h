@@ -228,6 +228,14 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
                 insert_cols(data, N, field_meta);
                 break;
             }
+            case DataType::BOOL: {
+                FixedVector<bool> data(N);
+                for (int i = 0; i < N; ++i) {
+                    data[i] = i % 2 == 0 ? true : false;
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
             case DataType::INT64: {
                 vector<int64_t> data(N);
                 for (int i = 0; i < N; i++) {

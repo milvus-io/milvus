@@ -21,7 +21,7 @@ OS := $(shell uname -s)
 ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
-
+opensimd = OFF
 
 export GIT_BRANCH=master
 
@@ -137,20 +137,19 @@ download-milvus-proto:
 
 build-cpp: download-milvus-proto
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
 
 build-cpp-embd: download-milvus-proto
 	@echo "Building **Embedded** Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
 
 build-cpp-with-unittest: download-milvus-proto
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
 
 build-cpp-with-coverage: download-milvus-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
-
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
 
 # Run the tests.
 unittest: test-cpp test-go

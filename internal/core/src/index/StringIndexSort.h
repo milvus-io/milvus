@@ -27,7 +27,7 @@ namespace milvus::index {
 // TODO: should inherit from StringIndex?
 class StringIndexSort : public ScalarIndexSort<std::string> {
  public:
-    const TargetBitmapPtr
+    const TargetBitmap
     Query(const DatasetPtr& dataset) override {
         auto op = dataset->Get<OpType>(OPERATOR_TYPE);
         if (op == OpType::PrefixMatch) {
@@ -37,13 +37,13 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
         return ScalarIndex<std::string>::Query(dataset);
     }
 
-    const TargetBitmapPtr
+    const TargetBitmap
     PrefixMatch(std::string prefix) {
         auto data = GetData();
-        TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data.size());
+        TargetBitmap bitset(data.size());
         for (size_t i = 0; i < data.size(); i++) {
             if (milvus::PrefixMatch(data[i].a_, prefix)) {
-                bitset->set(data[i].idx_);
+                bitset[data[i].idx_] = true;
             }
         }
         return bitset;

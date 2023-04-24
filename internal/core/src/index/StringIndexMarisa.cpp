@@ -220,43 +220,42 @@ StringIndexMarisa::Load(const Config& config) {
     LoadWithoutAssemble(binary_set, config);
 }
 
-const TargetBitmapPtr
+const TargetBitmap
 StringIndexMarisa::In(size_t n, const std::string* values) {
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(str_ids_.size());
+    TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
             auto offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
-                bitset->set(offset);
+                bitset[offset] = true;
             }
         }
     }
     return bitset;
 }
 
-const TargetBitmapPtr
+const TargetBitmap
 StringIndexMarisa::NotIn(size_t n, const std::string* values) {
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(str_ids_.size());
-    bitset->set();
+    TargetBitmap bitset(str_ids_.size(), true);
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
             auto offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
-                bitset->reset(offset);
+                bitset[offset] = false;
             }
         }
     }
     return bitset;
 }
 
-const TargetBitmapPtr
+const TargetBitmap
 StringIndexMarisa::Range(std::string value, OpType op) {
     auto count = Count();
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(count);
+    TargetBitmap bitset(count);
     marisa::Agent agent;
     for (size_t offset = 0; offset < count; ++offset) {
         agent.set_query(str_ids_[offset]);
@@ -280,19 +279,19 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 throw std::invalid_argument(std::string("Invalid OperatorType: ") + std::to_string((int)op) + "!");
         }
         if (set) {
-            bitset->set(offset);
+            bitset[offset] = true;
         }
     }
     return bitset;
 }
 
-const TargetBitmapPtr
+const TargetBitmap
 StringIndexMarisa::Range(std::string lower_bound_value,
                          bool lb_inclusive,
                          std::string upper_bound_value,
                          bool ub_inclusive) {
     auto count = Count();
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(count);
+    TargetBitmap bitset(count);
     if (lower_bound_value.compare(upper_bound_value) > 0 ||
         (lower_bound_value.compare(upper_bound_value) == 0 && !(lb_inclusive && ub_inclusive))) {
         return bitset;
@@ -314,20 +313,20 @@ StringIndexMarisa::Range(std::string lower_bound_value,
             set &= raw_data.compare(upper_bound_value) < 0;
         }
         if (set) {
-            bitset->set(offset);
+            bitset[offset] = true;
         }
     }
     return bitset;
 }
 
-const TargetBitmapPtr
+const TargetBitmap
 StringIndexMarisa::PrefixMatch(std::string prefix) {
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(str_ids_.size());
+    TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
         auto offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
-            bitset->set(offset);
+            bitset[offset] = true;
         }
     }
     return bitset;

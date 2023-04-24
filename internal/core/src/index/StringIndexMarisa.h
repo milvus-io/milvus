@@ -57,19 +57,19 @@ class StringIndexMarisa : public StringIndex {
     void
     Build(size_t n, const std::string* values) override;
 
-    const TargetBitmapPtr
+    const TargetBitmap
     In(size_t n, const std::string* values) override;
 
-    const TargetBitmapPtr
+    const TargetBitmap
     NotIn(size_t n, const std::string* values) override;
 
-    const TargetBitmapPtr
+    const TargetBitmap
     Range(std::string value, OpType op) override;
 
-    const TargetBitmapPtr
+    const TargetBitmap
     Range(std::string lower_bound_value, bool lb_inclusive, std::string upper_bound_value, bool ub_inclusive) override;
 
-    const TargetBitmapPtr
+    const TargetBitmap
     PrefixMatch(std::string prefix) override;
 
     std::string
