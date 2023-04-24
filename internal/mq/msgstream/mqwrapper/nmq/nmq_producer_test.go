@@ -27,11 +27,17 @@ import (
 
 func TestNatsMQProducer(t *testing.T) {
 	c, err := createNmqClient()
-	defer c.Close()
 	assert.NoError(t, err)
-	topic := "test_producer_topic"
+	defer c.Close()
+	topic := t.Name()
 	pOpts := mqwrapper.ProducerOptions{Topic: topic}
+
+	// Check Topic()
 	p, err := c.CreateProducer(pOpts)
+	assert.Nil(t, err)
+	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
+
+	// Check Send()
 	msg := &mqwrapper.ProducerMessage{
 		Payload:    []byte{},
 		Properties: map[string]string{},

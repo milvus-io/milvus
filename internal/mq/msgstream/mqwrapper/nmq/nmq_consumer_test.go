@@ -134,8 +134,8 @@ func TestNatsClientUnsubscribeTwice(t *testing.T) {
 		Topic:            topic,
 		SubscriptionName: topic,
 	})
-	defer consumer.Close()
 	assert.NoError(t, err)
+	defer consumer.Close()
 
 	err = consumer.(*Consumer).sub.Unsubscribe()
 	assert.NoError(t, err)

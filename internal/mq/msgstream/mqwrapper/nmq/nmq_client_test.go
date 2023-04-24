@@ -51,24 +51,23 @@ func createNmqClient() (*nmqClient, error) {
 
 func Test_NewNmqClient(t *testing.T) {
 	client, err := createNmqClient()
-	defer client.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	client.Close()
 }
 
 func TestNmqClient_CreateProducer(t *testing.T) {
 	client, err := createNmqClient()
-	defer client.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
 	topic := "TestNmqClient_CreateProducer"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-
-	defer producer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+	defer producer.Close()
 
 	nmqProducer := producer.(*nmqProducer)
 	assert.Equal(t, nmqProducer.Topic(), topic)
@@ -141,16 +140,16 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 
 func TestNmqClient_Subscribe(t *testing.T) {
 	client, err := createNmqClient()
-	defer client.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
 	topic := "TestNmqClient_Subscribe"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	defer producer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+	defer producer.Close()
 
 	subName := "subName"
 	consumerOpts := mqwrapper.ConsumerOptions{
@@ -166,9 +165,9 @@ func TestNmqClient_Subscribe(t *testing.T) {
 
 	consumerOpts.Topic = topic
 	consumer, err = client.Subscribe(consumerOpts)
-	defer consumer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 	assert.Equal(t, consumer.Subscription(), subName)
 
 	msg := &mqwrapper.ProducerMessage{

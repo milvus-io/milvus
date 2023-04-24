@@ -110,10 +110,10 @@ func (nc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 }
 
 func (nc *Consumer) CheckTopicValid(topic string) error {
-	// A consumer is tied to a topic. In a multi tenant situation,
+	// A consumer is tied to a topic. In a multi-tenant situation,
 	//a consumer is not supposed to check on other topics.
 	if topic != nc.topic {
-		return fmt.Errorf("Error: Consumer of %s checking validness of topic %s.", nc.topic, topic)
+		return fmt.Errorf("consumer of topic %s checking validness of topic %s", nc.topic, topic)
 	}
 	_, err := nc.sub.ConsumerInfo()
 	if err != nil {

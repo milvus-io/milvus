@@ -17,7 +17,7 @@
 package server
 
 import (
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -50,7 +50,7 @@ func InitNatsMQ(storeDir string) error {
 		// Wait for server to be ready for connections
 		// TODO: Make waiting time a param.
 		if !Nmq.ReadyForConnections(4 * time.Second) {
-			finalErr = errors.New("Still not ready for connection")
+			finalErr = fmt.Errorf("invalid consumer config: empty topic")
 			return
 		}
 	})

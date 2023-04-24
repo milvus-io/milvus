@@ -41,7 +41,7 @@ func NewClientWithDefaultOptions() (*nmqClient, error) {
 func NewClient(url string, options ...nats.Option) (*nmqClient, error) {
 	c, err := nats.Connect(url, options...)
 	if err != nil {
-		return nil, util.WrapError("Failed to set nmq client", err)
+		return nil, util.WrapError("failed to set nmq client", err)
 	}
 	return &nmqClient{conn: c}, nil
 }
@@ -51,7 +51,7 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()
 	if err != nil {
-		return nil, util.WrapError("Failed to create jetstream context", err)
+		return nil, util.WrapError("failed to create jetstream context", err)
 	}
 	// TODO: investigate on performance of multiple streams vs multiple topics.
 	// Note that addStream is idempotent.
@@ -60,7 +60,7 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
-		return nil, util.WrapError("Failed to add/connect to jetstream", err)
+		return nil, util.WrapError("failed to add/connect to jetstream", err)
 	}
 	rp := nmqProducer{js: js, topic: options.Topic}
 	return &rp, nil
@@ -68,16 +68,16 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 
 func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	if options.Topic == "" {
-		return nil, fmt.Errorf("Invalid consumer config: empty topic.")
+		return nil, fmt.Errorf("invalid consumer config: empty topic")
 	}
 
 	if options.SubscriptionName == "" {
-		return nil, fmt.Errorf("Invalid consumer config: empty subscription name.")
+		return nil, fmt.Errorf("invalid consumer config: empty subscription name")
 	}
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()
 	if err != nil {
-		return nil, util.WrapError("Failed to create jetstream context", err)
+		return nil, util.WrapError("failed to create jetstream context", err)
 	}
 	// TODO: do we allow passing in an existing natsChan from options?
 	// also, revisit the size.
@@ -88,12 +88,12 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
-		return nil, util.WrapError("Failed to add/connect to jetstream", err)
+		return nil, util.WrapError("failed to add/connect to jetstream", err)
 	}
 	// TODO: do we only allow exclusive subscribe? Current logic allows double subscribe.
 	sub, err := js.ChanSubscribe(options.Topic, natsChan)
 	if err != nil {
-		return nil, util.WrapError("Failed to subscribe", err)
+		return nil, util.WrapError("failed to subscribe", err)
 	}
 	closeChan := make(chan struct{})
 
@@ -117,7 +117,7 @@ func (nc *nmqClient) EarliestMessageID() mqwrapper.MessageID {
 func (nc *nmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 	rID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return nil, util.WrapError("Failed to parse string to MessageID", err)
+		return nil, util.WrapError("failed to parse string to MessageID", err)
 	}
 	return &nmqID{messageID: rID}, nil
 }

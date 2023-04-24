@@ -37,7 +37,6 @@ func (nid *nmqID) Serialize() []byte {
 }
 
 func (nid *nmqID) AtEarliestPosition() bool {
-	// TODO: verify it
 	return nid.messageID <= 1
 }
 
@@ -52,11 +51,11 @@ func (nid *nmqID) Equal(msgID []byte) (bool, error) {
 // SerializeNmqID is used to serialize a message ID to byte array
 func SerializeNmqID(messageID MessageIDType) []byte {
 	b := make([]byte, 8)
-	common.Endian.PutUint64(b, MessageIDType(messageID))
+	common.Endian.PutUint64(b, messageID)
 	return b
 }
 
 // DeserializeNmqID is used to deserialize a message ID from byte array
 func DeserializeNmqID(messageID []byte) MessageIDType {
-	return MessageIDType(common.Endian.Uint64(messageID))
+	return common.Endian.Uint64(messageID)
 }

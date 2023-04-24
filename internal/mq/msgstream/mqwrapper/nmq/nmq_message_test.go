@@ -23,7 +23,7 @@ import (
 )
 
 func TestNmqMessage_All(t *testing.T) {
-	topic := "t"
+	topic := t.Name()
 	payload := []byte("test payload")
 	msg := Message{MsgID: 12, Topic: topic, Payload: payload}
 	nm := &nmqMessage{msg: msg}
