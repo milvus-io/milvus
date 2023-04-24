@@ -18,6 +18,7 @@ service IndexCoord {
   rpc GetIndexInfos(GetIndexInfoRequest) returns (GetIndexInfoResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  rpc GetIndexStatistics(GetIndexStatisticsRequest) returns (GetIndexStatisticsResponse) {}
   // Deprecated: use DescribeIndex instead
   rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
 
@@ -262,4 +263,14 @@ message GetJobStatsResponse {
   int64 task_slots = 5;
   repeated JobInfo job_infos = 6;
   bool enable_disk = 7;
+}
+
+message GetIndexStatisticsRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+}
+
+message GetIndexStatisticsResponse {
+  common.Status status = 1;
+  repeated IndexInfo index_infos = 2;
 }

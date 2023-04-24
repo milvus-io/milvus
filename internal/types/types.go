@@ -366,6 +366,9 @@ type DataCoord interface {
 	// DescribeIndex describe the index info of the collection.
 	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 
+	// GetIndexStatistics get the statistics of the index.
+	GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error)
+
 	// GetIndexBuildProgress get the index building progress by num rows.
 	// Deprecated: use DescribeIndex instead
 	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
