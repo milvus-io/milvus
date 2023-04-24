@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	nmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/natsmq/server"
 )
 
 func TestNmqFactory(t *testing.T) {
@@ -40,4 +42,25 @@ func TestNmqFactory(t *testing.T) {
 
 	err = nmqFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
 	assert.Nil(t, err)
+
+	nmqimplserver.CloseNatsMQ()
+}
+
+func TestNmqFactoryBadPath(t *testing.T) {
+	badDir := "/bad bin"
+	nmqFactory := NewNmqFactory(badDir)
+
+	ctx := context.Background()
+	_, err := nmqFactory.NewMsgStream(ctx)
+	assert.Error(t, err)
+
+	_, err = nmqFactory.NewTtMsgStream(ctx)
+	assert.Error(t, err)
+
+	_, err = nmqFactory.NewQueryMsgStream(ctx)
+	assert.Error(t, err)
+
+	err = nmqFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	assert.Error(t, err)
+	nmqimplserver.CloseNatsMQ()
 }
