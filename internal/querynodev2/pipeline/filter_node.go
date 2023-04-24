@@ -30,11 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//filterNode filter the invalid message of pipeline
+// filterNode filter the invalid message of pipeline
 type filterNode struct {
 	*BaseNode
 	collectionID     UniqueID
@@ -102,7 +103,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	return out
 }
 
-//filtrate message with filter policy
+// filtrate message with filter policy
 func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 
 	switch msg.Type() {
@@ -126,7 +127,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			}
 		}
 	default:
-		return ErrMsgInvalidType
+		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
 	return nil
 }

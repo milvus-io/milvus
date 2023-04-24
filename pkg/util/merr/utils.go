@@ -380,6 +380,33 @@ func WrapErrTopicNotEmpty(name string, msg ...string) error {
 	return err
 }
 
+// Average related
+func WrapErrAverageLabelNotRegister(label string, msg ...string) error {
+	err := errors.Wrapf(ErrAverageLabelNotRegister, "averageLabel=%s", label)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+// shard delegator related
+func WrapErrShardDelegatorNotFound(channel string, msg ...string) error {
+	err := errors.Wrapf(ErrShardDelegatorNotFound, "channel=%s", channel)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+// task related
+func WrapErrTaskQueueFull(msg ...string) error {
+	err := error(ErrTaskQueueFull)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }

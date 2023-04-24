@@ -114,6 +114,14 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrTopicNotFound("unknown", "failed to get topic"), ErrTopicNotFound)
 	s.ErrorIs(WrapErrTopicNotEmpty("unknown", "topic is not empty"), ErrTopicNotEmpty)
 
+	// average related
+	s.ErrorIs(WrapErrAverageLabelNotRegister("unknown", "average label not register"), ErrAverageLabelNotRegister)
+
+	// shard delegator related
+	s.ErrorIs(WrapErrShardDelegatorNotFound("unknown", "fail to get shard delegator"), ErrShardDelegatorNotFound)
+
+	// task related
+	s.ErrorIs(WrapErrTaskQueueFull("test_task_queue", "task queue is full"), ErrTaskQueueFull)
 }
 
 func (s *ErrSuite) TestCombine() {

@@ -103,6 +103,15 @@ var (
 	ErrTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
 
+	// Average related
+	ErrAverageLabelNotRegister = newMilvusError("average label not register", 1400, false)
+
+	// shard delegator related
+	ErrShardDelegatorNotFound = newMilvusError("shard delegator not found", 1500, false)
+
+	// task related
+	ErrTaskQueueFull = newMilvusError("task queue full", 1600, false)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)

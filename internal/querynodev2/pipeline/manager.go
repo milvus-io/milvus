@@ -27,11 +27,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//Manager manage pipeline in querynode
+// Manager manage pipeline in querynode
 type Manager interface {
 	Num() int
 	Add(collectionID UniqueID, channel string) (Pipeline, error)
@@ -55,7 +56,7 @@ func (m *manager) Num() int {
 	return len(m.channel2Pipeline)
 }
 
-//Add pipeline for each channel of collection
+// Add pipeline for each channel of collection
 func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -76,12 +77,12 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	//get shard delegator for add growing in pipeline
 	delegator, ok := m.delegators.Get(channel)
 	if !ok {
-		return nil, WrapErrShardDelegatorNotFound(channel)
+		return nil, merr.WrapErrShardDelegatorNotFound(channel)
 	}
 
 	newPipeLine, err := NewPipeLine(collectionID, channel, m.dataManager, m.tSafeManager, m.dispatcher, delegator)
 	if err != nil {
-		return nil, WrapErrNewPipelineFailed(err)
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "failed to create new pipeline")
 	}
 
 	m.channel2Pipeline[channel] = newPipeLine
@@ -105,7 +106,7 @@ func (m *manager) Get(channel string) Pipeline {
 	return pipeline
 }
 
-//Remove pipeline from Manager by channel
+// Remove pipeline from Manager by channel
 func (m *manager) Remove(channels ...string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -122,7 +123,7 @@ func (m *manager) Remove(channels ...string) {
 	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 }
 
-//Start pipeline by channel
+// Start pipeline by channel
 func (m *manager) Start(channels ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -130,7 +131,8 @@ func (m *manager) Start(channels ...string) error {
 	//check pipelie all exist before start
 	for _, channel := range channels {
 		if _, ok := m.channel2Pipeline[channel]; !ok {
-			return WrapErrStartPipeline(fmt.Sprintf("pipeline with channel %s not exist", channel))
+			reason := fmt.Sprintf("pipeline with channel %s not exist", channel)
+			return merr.WrapErrServiceUnavailable(reason, "pipine start failed")
 		}
 	}
 
@@ -140,7 +142,7 @@ func (m *manager) Start(channels ...string) error {
 	return nil
 }
 
-//Close all pipeline of Manager
+// Close all pipeline of Manager
 func (m *manager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

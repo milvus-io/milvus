@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -47,7 +48,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		msg.deleteMsgs = append(msg.deleteMsgs, deleteMsg)
 		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&deleteMsg.DeleteRequest)))
 	default:
-		return ErrMsgInvalidType
+		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
 	return nil
 }
