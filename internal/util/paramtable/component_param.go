@@ -38,8 +38,9 @@ const (
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 20 // s
-	DefaultSessionRetryTimes = 30
+	DefaultSessionTTL                       = 30 // s
+	DefaultSessionRetryTimes                = 30
+	DefaultRetryRegisterWhenKeepAliveCancel = false
 
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
@@ -174,8 +175,9 @@ type commonConfig struct {
 
 	ClusterName string
 
-	SessionTTL        int64
-	SessionRetryTimes int64
+	SessionTTL                       int64
+	SessionRetryTimes                int64
+	RetryRegisterWhenKeepAliveCancel bool
 
 	ImportMaxFileSize int64
 	GrpcRetryTimes    uint
@@ -234,6 +236,8 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.initSessionTTL()
 	p.initSessionRetryTimes()
+	p.initRetryRegisterWhenKeepAliveCancel()
+
 	p.initGrpcRetryTimes()
 	p.initImportMaxFileSize()
 	p.initJSONMaxLength()
@@ -494,11 +498,15 @@ func (p *commonConfig) initClusterName() {
 }
 
 func (p *commonConfig) initSessionTTL() {
-	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 20)
+	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", DefaultSessionTTL)
 }
 
 func (p *commonConfig) initSessionRetryTimes() {
-	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 30)
+	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", DefaultSessionRetryTimes)
+}
+
+func (p *commonConfig) initRetryRegisterWhenKeepAliveCancel() {
+	p.RetryRegisterWhenKeepAliveCancel = p.Base.ParseBool("common.session.retryRegisterWhenKeepAliveCancel", DefaultRetryRegisterWhenKeepAliveCancel)
 }
 
 func (p *commonConfig) initGrpcRetryTimes() {

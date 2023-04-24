@@ -71,6 +71,7 @@ type Session struct {
 	// When outside context done, Session cancels its goroutines first, then uses
 	// keepAliveCancel to cancel the etcd KeepAlive
 	keepAliveCancel context.CancelFunc
+	keepAliveMu     sync.Mutex
 
 	ServerID    int64  `json:"ServerID,omitempty"`
 	ServerName  string `json:"ServerName,omitempty"`
@@ -80,16 +81,18 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveCh            <-chan bool
+	liveCh            chan bool
 	etcdCli           *clientv3.Client
-	leaseID           *clientv3.LeaseID
+	leaseID           atomic.Value
 	watchSessionKeyCh clientv3.WatchChan
 	wg                sync.WaitGroup
 
 	metaRoot string
 
-	registered   atomic.Value
-	disconnected atomic.Value
+	registered                       atomic.Value
+	disconnected                     atomic.Value
+	reRegistering                    atomic.Value
+	retryRegisterWhenKeepAliveCancel bool
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -186,12 +189,16 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		metaRoot:          metaRoot,
 		Version:           common.Version,
 		useCustomConfig:   false,
-		sessionTTL:        60,
-		sessionRetryTimes: 30,
+		sessionTTL:        30,
+		sessionRetryTimes: 60,
 	}
 
 	session.apply(opts...)
 
+	if !session.useCustomConfig {
+		GlobalParams.InitOnce()
+		session.retryRegisterWhenKeepAliveCancel = GlobalParams.CommonCfg.RetryRegisterWhenKeepAliveCancel
+	}
 	session.UpdateRegistered(false)
 
 	connectEtcdFn := func() error {
@@ -227,9 +234,6 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	if !s.useCustomConfig {
-		GlobalParams.InitOnce()
-	}
 }
 
 // String makes Session struct able to be logged by zap
@@ -239,11 +243,12 @@ func (s *Session) String() string {
 
 // Register will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Register() {
-	ch, err := s.registerService()
+	ch, err := s.registerService(uint(s.sessionRetryTimes), false)
 	if err != nil {
 		panic(err)
 	}
-	s.liveCh = s.processKeepAliveResponse(ch)
+	s.liveCh = make(chan bool)
+	s.processKeepAliveResponse(ch)
 	s.UpdateRegistered(true)
 }
 
@@ -336,55 +341,76 @@ func (s *Session) initWatchSessionCh() {
 //
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
-func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (s *Session) registerService(retryTimes uint, reRegister bool) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	var sessionKey string
 	if s.enableActiveStandBy {
-		s.updateStandby(true)
+		sessionKey = path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", s.ServerName, s.ServerID))
+		if !reRegister {
+			s.updateStandby(true)
+		}
+	} else {
+		sessionKey = s.getSessionKey()
 	}
-	completeKey := s.getCompleteKey()
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Info("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
-
-	ttl := s.sessionTTL
-	retryTimes := s.sessionRetryTimes
-	if !s.useCustomConfig {
-		ttl = GlobalParams.CommonCfg.SessionTTL
-		retryTimes = GlobalParams.CommonCfg.SessionRetryTimes
-	}
+	log := log.With(zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
+	log.Info("service begin to register to etcd")
 
 	registerFn := func() error {
-		resp, err := s.etcdCli.Grant(s.ctx, ttl)
+		resp, err := s.etcdCli.Grant(s.ctx, s.sessionTTL)
 		if err != nil {
-			log.Error("register service", zap.Error(err))
+			log.Error("register service", zap.String("key", sessionKey), zap.Error(err))
 			return err
 		}
-		s.leaseID = &resp.ID
-
+		if s.leaseID.Load() == nil {
+			log.Debug("Update lease ID", zap.Int64("after", int64(resp.ID)))
+		} else {
+			log.Debug("Update lease ID", zap.Int64("before", int64(*s.leaseID.Load().(*clientv3.LeaseID))), zap.Int64("after", int64(resp.ID)))
+		}
+		s.leaseID.Store(&resp.ID)
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
 			return err
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Version(completeKey),
-				"=",
-				0)).
-			Then(clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+		if reRegister {
+			txn := s.etcdCli.Txn(s.ctx)
+			if s.enableActiveStandBy && !s.isStandby.Load().(bool) {
+				txn = txn.Then(clientv3.OpPut(sessionKey, string(sessionJSON), clientv3.WithLease(resp.ID)),
+					clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(resp.ID)))
+			} else {
+				txn = txn.Then(clientv3.OpPut(sessionKey, string(sessionJSON), clientv3.WithLease(resp.ID)))
+			}
+			txnResp, err := txn.Commit()
+			if err != nil {
+				log.Warn("retry register session error", zap.String("Key", sessionKey), zap.Error(err))
+				return err
+			}
+			if !txnResp.Succeeded {
+				return fmt.Errorf("retry register session error not succeed: %s", sessionKey)
+			}
+			log.Info("put session into etcd", zap.String("key", sessionKey), zap.String("value", string(sessionJSON)),
+				zap.Any("lease", resp.ID))
+		} else {
+			txnResp, err := s.etcdCli.Txn(s.ctx).If(
+				clientv3.Compare(
+					clientv3.Version(sessionKey),
+					"=",
+					0)).
+				Then(clientv3.OpPut(sessionKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+			if err != nil {
+				log.Warn("compare and swap error, maybe the Key has already been registered", zap.Error(err))
+				return err
+			}
 
-		if err != nil {
-			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
-			return err
+			if !txnResp.Succeeded {
+				return fmt.Errorf("function CompareAndSwap error for compare is false for Key: %s", sessionKey)
+			}
+			log.Info("put session key into etcd", zap.String("key", sessionKey), zap.String("value", string(sessionJSON)),
+				zap.Any("lease", resp.ID))
 		}
-
-		if !txnResp.Succeeded {
-			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
-		}
-		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
-		s.keepAliveCancel = func() {
-			keepAliveCancel()
-		}
+		s.setKeepAliveCancel(keepAliveCancel)
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
 			fmt.Printf("got error during keeping alive with etcd, err: %s\n", err)
@@ -393,7 +419,17 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(retryTimes)))
+	var err error
+	if reRegister {
+		s.reRegistering.Store(true)
+		defer func() {
+			s.reRegistering.Store(false)
+		}()
+		// if reRegister, set a timeout to avoid stuck in re-register.
+		err = retry.Do(s.ctx, registerFn, retry.Attempts(uint(retryTimes)), retry.FnTimeout(time.Second*time.Duration(10)), retry.TotalTimeout(time.Second*time.Duration(s.sessionTTL)))
+	} else {
+		err = retry.Do(s.ctx, registerFn, retry.Attempts(uint(retryTimes)))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -402,8 +438,8 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
-	failCh := make(chan bool)
+func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
+	log := log.With(zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -411,26 +447,44 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			select {
 			case <-s.ctx.Done():
 				log.Warn("keep alive", zap.Error(errors.New("context done")))
-				if s.keepAliveCancel != nil {
-					s.keepAliveCancel()
-				}
+				s.executeKeepAliveCancel()
 				return
 			case resp, ok := <-ch:
-				if !ok {
-					log.Warn("session keepalive channel closed")
-					close(failCh)
+				if s.Disconnected() {
 					return
 				}
-				if resp == nil {
-					log.Warn("session keepalive response failed")
-					close(failCh)
+				if !ok || resp == nil {
+					if !ok {
+						log.Warn("session keepalive channel closed")
+					} else {
+						log.Warn("session keepalive response failed")
+					}
+
+					if !s.retryRegisterWhenKeepAliveCancel {
+						close(s.liveCh)
+						return
+					}
+
+					if s.reRegistering.Load() != nil && s.reRegistering.Load().(bool) {
+						return
+					}
+					time.Sleep(time.Second)
+
+					// sometimes etcd cluster leader may crush or lost,
+					// we will try to re-register the service to etcd
+					// this retry should have a timeout
+					chNew, err := s.registerService(3, true)
+					if err != nil {
+						log.Error("re-register after keepalive channel close failed", zap.Error(err))
+						close(s.liveCh)
+						return
+					}
+					s.processKeepAliveResponse(chNew)
 					return
 				}
-				//failCh <- true
 			}
 		}
 	}()
-	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
@@ -488,7 +542,7 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 }
 
 func (s *Session) GoingStop() error {
-	if s == nil || s.etcdCli == nil || s.leaseID == nil {
+	if s == nil || s.etcdCli == nil || s.leaseID.Load() == nil {
 		return errors.New("the session hasn't been init")
 	}
 
@@ -511,7 +565,7 @@ func (s *Session) GoingStop() error {
 		log.Error("fail to marshal the session", zap.String("key", completeKey))
 		return err
 	}
-	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))
+	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID.Load().(*clientv3.LeaseID)))
 	if err != nil {
 		log.Error("fail to update the session to stopping state", zap.String("key", completeKey))
 		return err
@@ -701,16 +755,12 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 			case <-ctx.Done():
 				log.Info("liveness exits due to context done")
 				// cancel the etcd keepAlive context
-				if s.keepAliveCancel != nil {
-					s.keepAliveCancel()
-				}
+				s.executeKeepAliveCancel()
 				return
 			case resp, ok := <-s.watchSessionKeyCh:
 				if !ok {
 					log.Warn("watch session key channel closed")
-					if s.keepAliveCancel != nil {
-						s.keepAliveCancel()
-					}
+					s.executeKeepAliveCancel()
 					return
 				}
 				if resp.Err() != nil {
@@ -718,17 +768,13 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					if resp.Err() != v3rpc.ErrCompacted {
 						//close event channel
 						log.Warn("Watch service found error", zap.Error(resp.Err()))
-						if s.keepAliveCancel != nil {
-							s.keepAliveCancel()
-						}
+						s.executeKeepAliveCancel()
 						return
 					}
 					log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
 					getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
 					if err != nil || len(getResp.Kvs) == 0 {
-						if s.keepAliveCancel != nil {
-							s.keepAliveCancel()
-						}
+						s.executeKeepAliveCancel()
 						return
 					}
 					s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
@@ -739,10 +785,14 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					case mvccpb.PUT:
 						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 					case mvccpb.DELETE:
-						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-						if s.keepAliveCancel != nil {
-							s.keepAliveCancel()
+						// if reRegistering, keep alive channel close and then related keys delete. We try re-register service in this scenario.
+						// During this period, DELETE event should be ignored.
+						if s.reRegistering.Load().(bool) {
+							log.Info("session key is deleted during re register, ignore this DELETE event", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+							return
 						}
+						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+						s.executeKeepAliveCancel()
 					}
 				}
 			}
@@ -752,9 +802,8 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 
 func (s *Session) Stop() {
 	s.Revoke(time.Second)
-	if s.keepAliveCancel != nil {
-		s.keepAliveCancel()
-	}
+	s.executeKeepAliveCancel()
+	s.SetDisconnected(true)
 	s.wg.Wait()
 }
 
@@ -763,7 +812,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 	if s == nil {
 		return
 	}
-	if s.etcdCli == nil || s.leaseID == nil {
+	if s.etcdCli == nil || s.leaseID.Load() == nil {
 		return
 	}
 	if s.Disconnected() {
@@ -773,7 +822,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	// ignores resp & error, just do best effort to revoke
-	_, _ = s.etcdCli.Revoke(ctx, *s.leaseID)
+	_, _ = s.etcdCli.Revoke(ctx, *s.leaseID.Load().(*clientv3.LeaseID))
 }
 
 // UpdateRegistered update the state of registered.
@@ -810,6 +859,20 @@ func (s *Session) updateStandby(b bool) {
 	s.isStandby.Store(b)
 }
 
+func (s *Session) setKeepAliveCancel(fn context.CancelFunc) {
+	s.keepAliveMu.Lock()
+	defer s.keepAliveMu.Unlock()
+	s.keepAliveCancel = fn
+}
+
+func (s *Session) executeKeepAliveCancel() {
+	s.keepAliveMu.Lock()
+	defer s.keepAliveMu.Unlock()
+	if s.keepAliveCancel != nil {
+		s.keepAliveCancel()
+	}
+}
+
 // ProcessActiveStandBy is used by coordinators to do active-standby mechanism.
 // coordinator enabled active-standby will first call Register and then call ProcessActiveStandBy.
 // steps:
@@ -840,7 +903,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				clientv3.Version(s.activeKey),
 				"=",
 				0)).
-			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID.Load().(*clientv3.LeaseID)))).Commit()
 		if err != nil {
 			log.Error("register active key to etcd failed", zap.Error(err))
 			return false, -1, err

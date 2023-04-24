@@ -457,8 +457,9 @@ common:
     tlsMode: 0
 
   session:
-    ttl: 20 # ttl value when session granting a lease to register service
+    ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+    retryRegisterWhenKeepAliveCancel: false # if true, session will retry register when keep alive cancel
 
   ImportMaxFileSize: 17179869184  # 16 * 1024 * 1024 * 1024
   # max file size to import for bulkInsert

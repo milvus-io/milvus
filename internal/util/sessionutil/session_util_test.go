@@ -99,7 +99,7 @@ func TestInit(t *testing.T) {
 
 	s := NewSession(ctx, metaRoot, etcdCli)
 	s.Init("inittest", "testAddr", false, false)
-	assert.NotEqual(t, int64(0), s.leaseID)
+	assert.Nil(t, s.leaseID.Load())
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
 	sessions, _, err := s.GetSessions("inittest")
@@ -627,7 +627,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1.LivenessCheck(ctx1, func() {
 		flag = true
 		signal <- struct{}{}
-		s1.keepAliveCancel()
+		s1.executeKeepAliveCancel()
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
@@ -836,6 +836,73 @@ func (s *SessionSuite) TestRevoke() {
 			}
 		})
 	}
+}
+
+func (s *SessionSuite) TestKeepAliveCancelEnableRetryRegister() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.liveCh = make(chan bool)
+	ch := make(chan *clientv3.LeaseKeepAliveResponse)
+	session.processKeepAliveResponse(ch)
+	session.LivenessCheck(ctx, nil)
+	session.retryRegisterWhenKeepAliveCancel = true
+	time.Sleep(time.Millisecond * 500)
+	close(ch)
+	time.Sleep(time.Second * 1)
+	assert.Equal(s.T(), session.Disconnected(), false)
+}
+
+func (s *SessionSuite) TestKeepAliveCancelDisableRetryRegister() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.liveCh = make(chan bool)
+	ch := make(chan *clientv3.LeaseKeepAliveResponse)
+	session.processKeepAliveResponse(ch)
+	session.LivenessCheck(ctx, nil)
+	session.retryRegisterWhenKeepAliveCancel = false
+	time.Sleep(time.Millisecond * 500)
+	close(ch)
+	time.Sleep(time.Second * 1)
+	assert.Equal(s.T(), session.Disconnected(), true)
+}
+
+func (s *SessionSuite) TestKeepAliveCancelWhenRegistering() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.liveCh = make(chan bool)
+	ch := make(chan *clientv3.LeaseKeepAliveResponse)
+	session.processKeepAliveResponse(ch)
+	session.LivenessCheck(ctx, nil)
+	session.retryRegisterWhenKeepAliveCancel = false
+	session.reRegistering.Store(true)
+	time.Sleep(time.Millisecond * 500)
+	close(ch)
+	time.Sleep(time.Second * 1)
+	assert.Equal(s.T(), session.Disconnected(), true)
+}
+
+func (s *SessionSuite) TestLivenessCheckRegistering() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.etcdCli.Put(ctx, session.getSessionKey(), session.String())
+	session.LivenessCheck(ctx, nil)
+	session.reRegistering.Store(true)
+	session.etcdCli.Delete(ctx, session.getSessionKey())
+	time.Sleep(time.Second * 1)
+	assert.Equal(s.T(), session.Disconnected(), false)
+}
+
+func (s *SessionSuite) TestRetryRegisterService() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.ServerName = "rootcoord"
+	session.enableActiveStandBy = true
+	session.isStandby.Store(false)
+	session.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, session.ServerName)
+	ch, err := session.registerService(1, true)
+
+	assert.NoError(s.T(), err)
+	assert.NotNil(s.T(), ch)
 }
 
 func TestSessionSuite(t *testing.T) {

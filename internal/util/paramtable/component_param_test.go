@@ -133,6 +133,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default session TTL time = %d", Params.SessionTTL)
 		assert.Equal(t, Params.SessionRetryTimes, int64(DefaultSessionRetryTimes))
 		t.Logf("default session retry times = %d", Params.SessionRetryTimes)
+		assert.Equal(t, Params.RetryRegisterWhenKeepAliveCancel, DefaultRetryRegisterWhenKeepAliveCancel)
+		t.Logf("default session retry register when keep alive cancel enabled = %t", Params.RetryRegisterWhenKeepAliveCancel)
 
 		assert.Equal(t, Params.GrpcRetryTimes, uint(DefaultGrpcRetryTimes))
 		Params.Base.Save("grpc.server.retryTimes", "6")

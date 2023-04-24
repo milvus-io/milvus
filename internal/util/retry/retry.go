@@ -14,6 +14,7 @@ package retry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -26,20 +27,60 @@ import (
 // fn is the func to run.
 // Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
-
 	c := newDefaultConfig()
 
 	for _, opt := range opts {
 		opt(c)
 	}
-	var el errorutil.ErrorList
 
 	if c.attempts < 1 {
 		c.attempts = 1
 	}
 
+	if c.totalTimeOut != 0 {
+		var el error
+		resultChan := make(chan bool)
+		go func() {
+			el = innerdo(ctx, c, fn)
+			resultChan <- true
+		}()
+
+		select {
+		case <-resultChan:
+			log.Debug("retry func success")
+		case <-time.After(c.totalTimeOut):
+			return fmt.Errorf("total timed out")
+		}
+		return el
+	}
+	return innerdo(ctx, c, fn)
+}
+
+func fnWithTimeout(fn func() error, d time.Duration) error {
+	if d != 0 {
+		resultChan := make(chan bool)
+		var err1 error
+		go func() {
+			err1 = fn()
+			resultChan <- true
+		}()
+
+		select {
+		case <-resultChan:
+			log.Debug("retry func success")
+		case <-time.After(d):
+			return fmt.Errorf("func timed out")
+		}
+		return err1
+	}
+	return fn()
+}
+
+func innerdo(ctx context.Context, c *config, fn func() error) error {
+	var el errorutil.ErrorList
+
 	for i := uint(0); i < c.attempts; i++ {
-		if err := fn(); err != nil {
+		if err := fnWithTimeout(fn, c.fnTimeOut); err != nil {
 			if i%10 == 0 {
 				log.Warn("retry func failed", zap.Uint("retry time", i), zap.Error(err))
 			}

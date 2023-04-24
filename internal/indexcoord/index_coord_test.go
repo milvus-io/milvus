@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -109,7 +110,7 @@ func getFlushedSegmentsMock(segments []int64) func(ctx context.Context, req *dat
 
 func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
-	Params.EtcdCfg.MetaRootPath = "indexcoord-ut"
+	Params.EtcdCfg.MetaRootPath = "indexcoord-ut" + funcutil.RandomString(8)
 
 	// first start an IndexNode
 	inm0 := indexnode.NewIndexNodeMock()
