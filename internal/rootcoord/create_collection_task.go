@@ -21,28 +21,22 @@ import (
 	"errors"
 	"fmt"
 
-	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type collectionChannels struct {
@@ -310,6 +304,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
+	// check collection number quota for the entire the instance
 	existedCollInfos, err := t.core.meta.ListCollections(ctx, typeutil.MaxTimestamp)
 	if err != nil {
 		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
@@ -317,8 +312,17 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum
 	if len(existedCollInfos) >= maxCollectionNum {
-		log.Error("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
 		return fmt.Errorf("failed to create collection, limit={%d}, exceeded the limit number of collections", maxCollectionNum)
+	}
+	// check collection number quota for DB
+	existedColsInDB := lo.Filter(existedCollInfos, func(collection *model.Collection, _ int) bool {
+		return t.Req.GetDbName() != "" && collection.DBName == t.Req.GetDbName()
+	})
+	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB
+	if len(existedColsInDB) >= maxColNumPerDB {
+		log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+		return fmt.Errorf("failed to create collection, maxCollectionNumPerDB={%d}, exceeded the limit number of collections per DB", maxColNumPerDB)
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)

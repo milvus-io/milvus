@@ -10,6 +10,7 @@ import (
 
 type Collection struct {
 	TenantID             string
+	DBName               string // TODO: @jiquan.long please help to assign, persistent and check
 	CollectionID         int64
 	Partitions           []*Partition
 	Name                 string

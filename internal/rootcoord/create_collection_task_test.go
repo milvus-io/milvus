@@ -22,11 +22,10 @@ import (
 	"testing"
 	"time"
 
-	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -34,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
@@ -469,6 +468,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				DbName:         "mock-db",
 				CollectionName: collectionName,
 				Schema:         marshaledSchema,
 				ShardsNum:      int32(shardNum),
@@ -492,6 +492,17 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		Params.QuotaConfig.MaxCollectionNum = originValue
+
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			maxNum := Params.QuotaConfig.MaxCollectionNumPerDB
+			collections := make([]*model.Collection, 0, maxNum)
+			for i := 0; i < maxNum; i++ {
+				collections = append(collections, &model.Collection{DBName: task.Req.GetDbName()})
+			}
+			return collections, nil
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
 
 		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 			return []*model.Collection{}, nil
