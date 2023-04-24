@@ -32,21 +32,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
-var nats_server_address string
+var natsServerAddress string
 
 func TestMain(m *testing.M) {
-	tmpDir := path.Join(os.TempDir(), "nmq_client_test")
-	defer os.RemoveAll(tmpDir)
+	tmpDir := path.Join(os.TempDir(), "nmq_client_test", fmt.Sprint(rand.Int()))
 	nmqserver.InitNatsMQ(tmpDir)
-	nats_server_address = nmqserver.Nmq.ClientURL()
-	defer nmqserver.CloseNatsMQ()
+	natsServerAddress = nmqserver.Nmq.ClientURL()
 
 	exitCode := m.Run()
+
+	nmqserver.CloseNatsMQ()
+	os.RemoveAll(tmpDir)
 	os.Exit(exitCode)
 }
 
 func createNmqClient() (*nmqClient, error) {
-	return NewClient(nats_server_address)
+	return NewClient(natsServerAddress)
 }
 
 func Test_NewNmqClient(t *testing.T) {

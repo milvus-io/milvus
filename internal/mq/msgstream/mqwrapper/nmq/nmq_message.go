@@ -23,6 +23,14 @@ import (
 // Check nmqMessage implements ConsumerMessage
 var _ mqwrapper.Message = (*nmqMessage)(nil)
 
+// This is the payload nats sends. Notices that nats doesn't directly support
+// passing metadata along with actual content. Thus we pack payload and
+// properties together and send it through nats payload.
+type NatsMsgData struct {
+	Payload    []byte            `json:"Payload"`
+	Properties map[string]string `json:"Properties"`
+}
+
 // Message is the message content of a consumer message
 type Message struct {
 	MsgID      MessageIDType

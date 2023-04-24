@@ -18,7 +18,9 @@ package nmq
 
 import (
 	"context"
+	"encoding/json"
 
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/nats-io/nats.go"
 )
@@ -38,7 +40,15 @@ func (np *nmqProducer) Topic() string {
 
 // Send send the producer messages to natsmq
 func (np *nmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
-	pa, err := np.js.Publish(np.topic, message.Payload)
+	msg := NatsMsgData{
+		Payload:    message.Payload,
+		Properties: message.Properties,
+	}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return nil, util.WrapError("failed to create Message payload", err)
+	}
+	pa, err := np.js.Publish(np.topic, payload)
 	return &nmqID{messageID: pa.Sequence}, err
 }
 

@@ -17,6 +17,7 @@
 package nmq
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -63,9 +64,15 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 						meta, err := msg.Metadata()
 						if err != nil {
 							log.Error("Failed to fetch metadata from nats message: ", zap.Error(err))
-						} else {
-							nc.msgChan <- &nmqMessage{msg: Message{MsgID: meta.Sequence.Stream, Topic: nc.topic, Payload: msg.Data}}
+							continue
 						}
+						var data NatsMsgData
+						err = json.Unmarshal(msg.Data, &data)
+						if err != nil {
+							log.Error("Failed to parse data from nats message: ", zap.Error(err))
+							continue
+						}
+						nc.msgChan <- &nmqMessage{msg: Message{MsgID: meta.Sequence.Stream, Topic: nc.topic, Payload: data.Payload, Properties: data.Properties}}
 					case <-nc.closeChan:
 						nc.sub.Unsubscribe()
 						close(nc.msgChan)
@@ -103,7 +110,7 @@ func (nc *Consumer) Close() {
 func (nc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 	cinfo, err := nc.sub.ConsumerInfo()
 	if err != nil {
-		return nil, util.WrapError("Failed to get ConsumerInfo", err)
+		return nil, util.WrapError("failed to get ConsumerInfo", err)
 	}
 	msgID := cinfo.Delivered.Stream
 	return &nmqID{messageID: msgID}, nil
@@ -117,7 +124,7 @@ func (nc *Consumer) CheckTopicValid(topic string) error {
 	}
 	_, err := nc.sub.ConsumerInfo()
 	if err != nil {
-		return util.WrapError("Error: Failed to get ConsumerInfo", err)
+		return util.WrapError("failed to get ConsumerInfo", err)
 	}
 	return nil
 }
