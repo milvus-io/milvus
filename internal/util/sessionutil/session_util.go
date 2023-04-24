@@ -95,7 +95,8 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveCh            <-chan bool
+	leaseKeepAliveCh  <-chan *clientv3.LeaseKeepAliveResponse
+	liveCh            chan bool
 	etcdCli           *clientv3.Client
 	leaseID           *clientv3.LeaseID
 	watchSessionKeyCh clientv3.WatchChan
@@ -258,12 +259,14 @@ func (s *Session) String() string {
 
 // Register will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Register() {
-	ch, err := s.registerService()
+	ch, err := s.registerService(uint(s.sessionRetryTimes))
 	if err != nil {
 		log.Error("Register failed", zap.Error(err))
 		panic(err)
 	}
-	s.liveCh = s.processKeepAliveResponse(ch)
+	s.leaseKeepAliveCh = ch
+	s.liveCh = make(chan bool)
+	s.processKeepAliveResponse()
 	s.UpdateRegistered(true)
 }
 
@@ -375,7 +378,7 @@ func (s *Session) initWatchSessionCh() {
 //
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
-func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (s *Session) registerService(retryTimes uint) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	if s.enableActiveStandBy {
 		s.updateStandby(true)
 	}
@@ -423,7 +426,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(retryTimes))
 	if err != nil {
 		return nil, err
 	}
@@ -432,8 +435,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
-	failCh := make(chan bool)
+func (s *Session) processKeepAliveResponse() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -445,22 +447,25 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					s.keepAliveCancel()
 				}
 				return
-			case resp, ok := <-ch:
+			case resp, ok := <-s.leaseKeepAliveCh:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					close(failCh)
-					return
+					s.registerService(2)
+					ch, err := s.registerService(2)
+					if err != nil {
+						log.Error("re-register after keepalive channel close failed", zap.Error(err))
+						close(s.liveCh)
+					}
+					s.leaseKeepAliveCh = ch
 				}
 				if resp == nil {
 					log.Warn("session keepalive response failed")
-					close(failCh)
+					close(s.liveCh)
 					return
 				}
-				//failCh <- true
 			}
 		}
 	}()
-	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
