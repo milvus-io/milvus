@@ -38,8 +38,9 @@ const (
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 20 //s
-	DefaultSessionRetryTimes = 30
+	DefaultSessionTTL                       = 20 //s
+	DefaultSessionRetryTimes                = 30
+	DefaultRetryRegisterWhenKeepAliveCancel = false
 
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
@@ -208,8 +209,9 @@ type commonConfig struct {
 
 	ClusterName ParamItem `refreshable:"false"`
 
-	SessionTTL        ParamItem `refreshable:"false"`
-	SessionRetryTimes ParamItem `refreshable:"false"`
+	SessionTTL                       ParamItem `refreshable:"false"`
+	SessionRetryTimes                ParamItem `refreshable:"false"`
+	RetryRegisterWhenKeepAliveCancel ParamItem `refreshable:"false"`
 
 	PreCreatedTopicEnabled ParamItem `refreshable:"true"`
 	TopicNames             ParamItem `refreshable:"true"`
@@ -619,6 +621,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.SessionRetryTimes.Init(base.mgr)
+
+	p.RetryRegisterWhenKeepAliveCancel = ParamItem{
+		Key:          "common.session.retryRegisterWhenKeepAliveCancel",
+		Version:      "2.2.9",
+		DefaultValue: "true",
+		Doc:          "session retry register when keepalive cancel",
+		Export:       true,
+	}
+	p.RetryRegisterWhenKeepAliveCancel.Init(base.mgr)
 
 	p.PreCreatedTopicEnabled = ParamItem{
 		Key:          "common.preCreatedTopic.enabled",

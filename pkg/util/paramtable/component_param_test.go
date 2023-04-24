@@ -117,6 +117,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default session TTL time = %d", Params.SessionTTL.GetAsInt64())
 		assert.Equal(t, Params.SessionRetryTimes.GetAsInt64(), int64(DefaultSessionRetryTimes))
 		t.Logf("default session retry times = %d", Params.SessionRetryTimes.GetAsInt64())
+		assert.Equal(t, Params.RetryRegisterWhenKeepAliveCancel.GetAsBool(), DefaultRetryRegisterWhenKeepAliveCancel)
+		t.Logf("default session retry register when keep alive cancel enabled = %t", Params.RetryRegisterWhenKeepAliveCancel.GetAsBool())
 
 		params.Save("common.security.superUsers", "super1,super2,super3")
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())

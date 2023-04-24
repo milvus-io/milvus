@@ -75,6 +75,43 @@ func TestSleep(t *testing.T) {
 	t.Log(err)
 }
 
+func TestFnTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		time.Sleep(time.Second * 2)
+		return fmt.Errorf("some error")
+	}
+
+	err := Do(ctx, testFn, Attempts(3), FnTimeout(time.Second*1))
+	assert.Error(t, err)
+	fmt.Println(err)
+}
+
+func TestTotalTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		time.Sleep(time.Second * 2)
+		return fmt.Errorf("some error")
+	}
+
+	err := Do(ctx, testFn, Attempts(10), TotalTimeout(time.Second*10))
+	assert.Error(t, err)
+	fmt.Println(err)
+}
+
+func TestTotalTimeoutSuccess(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		return nil
+	}
+
+	err := Do(ctx, testFn, Attempts(10), TotalTimeout(time.Second*10))
+	assert.NoError(t, err)
+}
+
 func TestAllError(t *testing.T) {
 	ctx := context.Background()
 

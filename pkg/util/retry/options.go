@@ -17,6 +17,8 @@ type config struct {
 	attempts     uint
 	sleep        time.Duration
 	maxSleepTime time.Duration
+	fnTimeOut    time.Duration
+	totalTimeOut time.Duration
 }
 
 func newDefaultConfig() *config {
@@ -57,5 +59,17 @@ func MaxSleepTime(maxSleepTime time.Duration) Option {
 		} else {
 			c.maxSleepTime = maxSleepTime
 		}
+	}
+}
+
+func FnTimeout(timeOut time.Duration) Option {
+	return func(c *config) {
+		c.fnTimeOut = timeOut
+	}
+}
+
+func TotalTimeout(timeOut time.Duration) Option {
+	return func(c *config) {
+		c.totalTimeOut = timeOut
 	}
 }

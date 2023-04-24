@@ -410,7 +410,7 @@ common:
   session:
     ttl: 20 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
-
+    retryRegisterWhenKeepAliveCancel: false # if true, session retry register when keep alive cancel
   # preCreatedTopic decides whether using existed topic
   preCreatedTopic:
     enabled: false
