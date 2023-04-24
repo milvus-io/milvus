@@ -353,8 +353,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			break
 		}
 
-		//group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
-
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
 			log.Warn("failed to update segment max size", zap.Error(err))
@@ -722,7 +720,6 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
-	segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||

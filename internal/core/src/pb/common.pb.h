@@ -310,6 +310,7 @@ enum MsgType : int {
   CreateIndex = 300,
   DescribeIndex = 301,
   DropIndex = 302,
+  GetIndexStatistics = 303,
   Insert = 400,
   Delete = 401,
   Flush = 402,
