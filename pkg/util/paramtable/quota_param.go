@@ -77,7 +77,8 @@ type quotaConfig struct {
 	DQLMinQueryRate  ParamItem `refreshable:"true"`
 
 	// limits
-	MaxCollectionNum ParamItem `refreshable:"true"`
+	MaxCollectionNum      ParamItem `refreshable:"true"`
+	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting              ParamItem `refreshable:"true"`
@@ -496,11 +497,18 @@ The maximum rate will not be greater than ` + "max" + `.`,
 
 	// limits
 	p.MaxCollectionNum = ParamItem{
-		Key:          "quotaAndLimits.limits.collection.maxNum",
+		Key:          "quotaAndLimits.limits.maxCollectionNum",
 		Version:      "2.2.0",
-		DefaultValue: "65535",
+		DefaultValue: "65536",
 	}
 	p.MaxCollectionNum.Init(base.mgr)
+
+	p.MaxCollectionNumPerDB = ParamItem{
+		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",
+		Version:      "2.2.0",
+		DefaultValue: "64",
+	}
+	p.MaxCollectionNumPerDB.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{

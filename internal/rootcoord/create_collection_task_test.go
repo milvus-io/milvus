@@ -32,6 +32,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -452,6 +453,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			baseTask: baseTask{core: core},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				DbName:         "mock-db",
 				CollectionName: collectionName,
 				Schema:         marshaledSchema,
 				ShardsNum:      int32(shardNum),
@@ -477,6 +479,18 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		err = task.Execute(context.Background())
 		assert.Error(t, err)
 		Params.QuotaConfig.MaxCollectionNum.Formatter = originFormatter
+
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			maxNum := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
+			collections := make([]*model.Collection, 0, maxNum)
+			for i := 0; i < maxNum; i++ {
+				collections = append(collections, &model.Collection{DBName: task.Req.GetDbName()})
+			}
+			return collections, nil
+		}
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
+		assert.True(t, errors.Is(merr.ErrCollectionNumLimitExceeded, err))
 
 		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 			return []*model.Collection{}, nil

@@ -429,6 +429,9 @@ common:
 # If necessary, you can also manually force to deny RW requests.
 quotaAndLimits:
   enabled: true # `true` to enable quota and limits, `false` to disable.
+  limits:
+    maxCollectionNum: 65536
+    maxCollectionNumPerDB: 64
   # quotaCenterCollectInterval is the time interval that quotaCenter
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
