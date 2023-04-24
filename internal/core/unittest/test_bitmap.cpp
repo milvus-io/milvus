@@ -26,12 +26,20 @@ TEST(Bitmap, Naive) {
     sort_index->Build(N, vec.data());
     {
         auto res = sort_index->Range(0, OpType::LessThan);
-        double count = res->count();
+        double count = 0;
+        for (size_t i = 0; i < res.size(); ++i) {
+            if (res[i] == true)
+                count++;
+        }
         ASSERT_NEAR(count / N, 0.5, 0.01);
     }
     {
         auto res = sort_index->Range(-1, false, 1, true);
-        double count = res->count();
+        double count = 0;
+        for (size_t i = 0; i < res.size(); ++i) {
+            if (res[i] == true)
+                count++;
+        }
         ASSERT_NEAR(count / N, 0.682, 0.01);
     }
 }

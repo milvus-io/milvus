@@ -12,6 +12,7 @@
 #include "query/generated/ExecExprVisitor.h"
 
 #include <boost/variant.hpp>
+#include <boost/utility/binary.hpp>
 #include <deque>
 #include <optional>
 #include <string>
@@ -152,6 +153,10 @@ static auto
 Assemble(const std::deque<BitsetType>& srcs) -> BitsetType {
     BitsetType res;
 
+    if (srcs.size() == 1) {
+        return srcs[0];
+    }
+
     int64_t total_size = 0;
     for (auto& chunk : srcs) {
         total_size += chunk.size();
@@ -168,6 +173,69 @@ Assemble(const std::deque<BitsetType>& srcs) -> BitsetType {
     return res;
 }
 
+void
+AppendOneChunk(BitsetType& result, const FixedVector<bool>& chunk_res) {
+    // Append a value once instead of BITSET_BLOCK_BIT_SIZE times.
+    auto AppendBlock = [&result](const bool* ptr, int n) {
+        for (int i = 0; i < n; ++i) {
+            BitSetBlockType val = 0;
+            // This can use CPU SIMD optimzation
+            uint8_t vals[BITSET_BLOCK_SIZE] = {0};
+            for (size_t j = 0; j < 8; ++j) {
+                for (size_t k = 0; k < BITSET_BLOCK_SIZE; ++k) {
+                    vals[k] |= uint8_t(*(ptr + k * 8 + j)) << j;
+                }
+            }
+            for (size_t j = 0; j < BITSET_BLOCK_SIZE; ++j) {
+                val |= BitSetBlockType(vals[j]) << (8 * j);
+            }
+            result.append(val);
+            ptr += BITSET_BLOCK_SIZE * 8;
+        }
+    };
+    // Append bit for these bits that can not be union as a block
+    // Usually n less than BITSET_BLOCK_BIT_SIZE.
+    auto AppendBit = [&result](const bool* ptr, int n) {
+        for (int i = 0; i < n; ++i) {
+            bool bit = *ptr++;
+            result.push_back(bit);
+        }
+    };
+
+    size_t res_len = result.size();
+    size_t chunk_len = chunk_res.size();
+    const bool* chunk_ptr = chunk_res.data();
+
+    int n_prefix =
+        res_len % BITSET_BLOCK_BIT_SIZE == 0
+            ? 0
+            : std::min(BITSET_BLOCK_BIT_SIZE - res_len % BITSET_BLOCK_BIT_SIZE,
+                       chunk_len);
+
+    AppendBit(chunk_ptr, n_prefix);
+
+    if (n_prefix == chunk_len)
+        return;
+
+    size_t n_block = (chunk_len - n_prefix) / BITSET_BLOCK_BIT_SIZE;
+    size_t n_suffix = (chunk_len - n_prefix) % BITSET_BLOCK_BIT_SIZE;
+
+    AppendBlock(chunk_ptr + n_prefix, n_block);
+
+    AppendBit(chunk_ptr + n_prefix + n_block * BITSET_BLOCK_BIT_SIZE, n_suffix);
+
+    return;
+}
+
+BitsetType
+AssembleChunk(const std::vector<FixedVector<bool>>& results) {
+    BitsetType assemble_result;
+    for (auto& result : results) {
+        AppendOneChunk(assemble_result, result);
+    }
+    return assemble_result;
+}
+
 template <typename T, typename IndexFunc, typename ElementFunc>
 auto
 ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
@@ -178,8 +246,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
     auto indexing_barrier = segment_.num_chunk_index(field_id);
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
-    std::deque<BitsetType> results;
-
+    std::vector<FixedVector<bool>> results;
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -190,24 +257,25 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
         // NOTE: knowhere is not const-ready
         // This is a dirty workaround
         auto data = index_func(const_cast<Index*>(&indexing));
-        AssertInfo(data->size() == size_per_chunk,
+        AssertInfo(data.size() == size_per_chunk,
                    "[ExecExprVisitor]Data size not equal to size_per_chunk");
-        results.emplace_back(std::move(*data));
+        results.emplace_back(std::move(data));
     }
     for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
         auto this_size = chunk_id == num_chunk - 1
                              ? row_count_ - chunk_id * size_per_chunk
                              : size_per_chunk;
-        BitsetType result(this_size);
+        FixedVector<bool> chunk_res(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
+        // Can use CPU SIMD optimazation to speed up
         for (int index = 0; index < this_size; ++index) {
-            result[index] = element_func(data[index]);
+            auto x = data[index];
+            chunk_res[index] = element_func(x);
         }
-
-        results.emplace_back(std::move(result));
+        results.emplace_back(std::move(chunk_res));
     }
-    auto final_result = Assemble(results);
+    auto final_result = AssembleChunk(results);
     AssertInfo(final_result.size() == row_count_,
                "[ExecExprVisitor]Final result size not equal to row count");
     return final_result;
@@ -227,7 +295,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
     auto data_barrier = segment_.num_chunk_data(field_id);
     AssertInfo(std::max(data_barrier, indexing_barrier) == num_chunk,
                "max(data_barrier, index_barrier) not equal to num_chunk");
-    std::deque<BitsetType> results;
+    std::vector<FixedVector<bool>> results;
 
     // for growing segment, indexing_barrier will always less than data_barrier
     // so growing segment will always execute expr plan using raw data
@@ -237,15 +305,15 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
         auto this_size = chunk_id == num_chunk - 1
                              ? row_count_ - chunk_id * size_per_chunk
                              : size_per_chunk;
-        BitsetType result(this_size);
+        FixedVector<bool> result(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
             result[index] = element_func(data[index]);
         }
-        AssertInfo(
-            result.size() == this_size,
-            "[ExecExprVisitor]Chunk result size not equal to expected size");
+        AssertInfo(result.size() == this_size,
+                   "[ExecExprVisitor]Chunk result size not equal to "
+                   "expected size");
         results.emplace_back(std::move(result));
     }
 
@@ -260,14 +328,14 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
         auto& indexing =
             segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
         auto this_size = const_cast<Index*>(&indexing)->Count();
-        BitsetType result(this_size);
+        FixedVector<bool> result(this_size);
         for (int offset = 0; offset < this_size; ++offset) {
             result[offset] = index_func(const_cast<Index*>(&indexing), offset);
         }
         results.emplace_back(std::move(result));
     }
 
-    auto final_result = Assemble(results);
+    auto final_result = AssembleChunk(results);
     AssertInfo(final_result.size() == row_count_,
                "[ExecExprVisitor]Final result size not equal to row count");
     return final_result;
@@ -360,7 +428,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw)
     auto val = expr.value_;
     auto& nested_path = expr.column_.nested_path;
     auto field_id = expr.column_.field_id;
-    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+    auto index_func = [=](Index* index) { return TargetBitmap{}; };
     switch (op) {
         case OpType::Equal: {
             auto elem_func = [val, nested_path](const milvus::Json& json) {
@@ -861,7 +929,7 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
     auto& nested_path = expr.column_.nested_path;
 
     // no json index now
-    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+    auto index_func = [=](Index* index) { return TargetBitmap{}; };
 
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [&](const milvus::Json& json) {
@@ -1139,6 +1207,130 @@ struct relational {
     }
 };
 
+template <typename T, typename U, typename CmpFunc>
+TargetBitmap
+ExecExprVisitor::ExecCompareRightType(const T* left_raw_data,
+                                      const FieldId& right_field_id,
+                                      const int64_t current_chunk_id,
+                                      CmpFunc cmp_func) {
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunks = upper_div(row_count_, size_per_chunk);
+    auto size = current_chunk_id == num_chunks - 1
+                    ? row_count_ - current_chunk_id * size_per_chunk
+                    : size_per_chunk;
+
+    TargetBitmap result(size);
+    const U* right_raw_data =
+        segment_.chunk_data<U>(right_field_id, current_chunk_id).data();
+
+    for (int i = 0; i < size; ++i) {
+        result[i] = cmp_func(left_raw_data[i], right_raw_data[i]);
+    }
+
+    return result;
+}
+
+template <typename T, typename CmpFunc>
+BitsetType
+ExecExprVisitor::ExecCompareLeftType(const FieldId& left_field_id,
+                                     const FieldId& right_field_id,
+                                     const DataType& right_field_type,
+                                     CmpFunc cmp_func) {
+    std::vector<FixedVector<bool>> results;
+
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunks = upper_div(row_count_, size_per_chunk);
+
+    for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+        FixedVector<bool> result;
+        const T* left_raw_data =
+            segment_.chunk_data<T>(left_field_id, chunk_id).data();
+
+        switch (right_field_type) {
+            case DataType::BOOL:
+                result = ExecCompareRightType<T, bool, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::INT8:
+                result = ExecCompareRightType<T, int8_t, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::INT16:
+                result = ExecCompareRightType<T, int16_t, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::INT32:
+                result = ExecCompareRightType<T, int32_t, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::INT64:
+                result = ExecCompareRightType<T, int64_t, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::FLOAT:
+                result = ExecCompareRightType<T, float, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            case DataType::DOUBLE:
+                result = ExecCompareRightType<T, double, CmpFunc>(
+                    left_raw_data, right_field_id, chunk_id, cmp_func);
+                break;
+            default:
+                PanicInfo("unsupported left datatype of compare expr");
+        }
+        results.push_back(result);
+    }
+    auto final_result = AssembleChunk(results);
+    AssertInfo(final_result.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
+    return final_result;
+}
+
+template <typename CmpFunc>
+BitsetType
+ExecExprVisitor::ExecCompareExprDispatcherForNonIndexedSegment(
+    CompareExpr& expr, CmpFunc cmp_func) {
+    switch (expr.left_data_type_) {
+        case DataType::BOOL:
+            return ExecCompareLeftType<bool, CmpFunc>(expr.left_field_id_,
+                                                      expr.right_field_id_,
+                                                      expr.right_data_type_,
+                                                      cmp_func);
+        case DataType::INT8:
+            return ExecCompareLeftType<int8_t, CmpFunc>(expr.left_field_id_,
+                                                        expr.right_field_id_,
+                                                        expr.right_data_type_,
+                                                        cmp_func);
+        case DataType::INT16:
+            return ExecCompareLeftType<int16_t, CmpFunc>(expr.left_field_id_,
+                                                         expr.right_field_id_,
+                                                         expr.right_data_type_,
+                                                         cmp_func);
+        case DataType::INT32:
+            return ExecCompareLeftType<int32_t, CmpFunc>(expr.left_field_id_,
+                                                         expr.right_field_id_,
+                                                         expr.right_data_type_,
+                                                         cmp_func);
+        case DataType::INT64:
+            return ExecCompareLeftType<int64_t, CmpFunc>(expr.left_field_id_,
+                                                         expr.right_field_id_,
+                                                         expr.right_data_type_,
+                                                         cmp_func);
+        case DataType::FLOAT:
+            return ExecCompareLeftType<float, CmpFunc>(expr.left_field_id_,
+                                                       expr.right_field_id_,
+                                                       expr.right_data_type_,
+                                                       cmp_func);
+        case DataType::DOUBLE:
+            return ExecCompareLeftType<double, CmpFunc>(expr.left_field_id_,
+                                                        expr.right_field_id_,
+                                                        expr.right_data_type_,
+                                                        cmp_func);
+        default:
+            PanicInfo("unsupported right datatype of compare expr");
+    }
+}
+
 template <typename Op>
 auto
 ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
@@ -1151,6 +1343,11 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
                                   float,
                                   double,
                                   std::string>;
+    auto is_string_expr = [&expr]() -> bool {
+        return expr.left_data_type_ == DataType::VARCHAR ||
+               expr.right_data_type_ == DataType::VARCHAR;
+    };
+
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
@@ -1170,6 +1367,14 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
         "max(right_data_barrier, right_indexing_barrier) not equal to "
         "num_chunk");
 
+    // For segment both fields has no index, can use SIMD to speed up.
+    // Avoiding too much call stack that blocks SIMD.
+    if (left_indexing_barrier == 0 && right_indexing_barrier == 0 &&
+        !is_string_expr()) {
+        return ExecCompareExprDispatcherForNonIndexedSegment<Op>(expr, op);
+    }
+
+    // TODO: refactoring the code that contains too much call stack.
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto size = chunk_id == num_chunk - 1
                         ? row_count_ - chunk_id * size_per_chunk
@@ -1355,8 +1560,8 @@ ExecExprVisitor::visit(CompareExpr& expr) {
     auto& left_field_meta = schema[expr.left_field_id_];
     auto& right_field_meta = schema[expr.right_field_id_];
     AssertInfo(expr.left_data_type_ == left_field_meta.get_data_type(),
-               "[ExecExprVisitor]Left data type not equal to left "
-               "field meta type");
+               "[ExecExprVisitor]Left data type not equal to left field "
+               "meta type");
     AssertInfo(expr.right_data_type_ == right_field_meta.get_data_type(),
                "[ExecExprVisitor]right data type not equal to right field "
                "meta type");
@@ -1534,7 +1739,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
     using Index = index::ScalarIndex<milvus::Json>;
     auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
     auto& nested_path = expr.column_.nested_path;
-    auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+    auto index_func = [=](Index* index) { return TargetBitmap{}; };
 
     std::unordered_set<ExprValueType> term_set(expr.terms_.begin(),
                                                expr.terms_.end());
@@ -1647,7 +1852,7 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
     switch (expr.column_.data_type) {
         case DataType::JSON: {
             using Index = index::ScalarIndex<milvus::Json>;
-            auto index_func = [=](Index* index) { return TargetBitmapPtr{}; };
+            auto index_func = [=](Index* index) { return TargetBitmap{}; };
             auto elem_func = [nested_path](const milvus::Json& json) {
                 auto x = json.exist(nested_path);
                 return x;

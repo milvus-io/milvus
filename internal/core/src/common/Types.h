@@ -125,7 +125,7 @@ template <typename Type>
 using FixedVector = boost::container::vector<Type>;
 
 using Config = nlohmann::json;
-using TargetBitmap = boost::dynamic_bitset<>;
+using TargetBitmap = FixedVector<bool>;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;
@@ -138,6 +138,10 @@ using IndexType = knowhere::IndexType;
 
 // Plus 1 because we can't use greater(>) symbol
 constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
+
+using BitSetBlockType = BitsetType::block_type;
+constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
+constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
 template <typename T>
 using MayRef = std::conditional_t<!std::is_trivially_copyable_v<T> ||
                                       sizeof(T) >= REF_SIZE_THRESHOLD,

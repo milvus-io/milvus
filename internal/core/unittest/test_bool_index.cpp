@@ -13,6 +13,7 @@
 #include <pb/schema.pb.h>
 #include <index/BoolIndex.h>
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/AssertUtils.h"
 
 class BoolIndexTest : public ::testing::Test {
  protected:
@@ -81,10 +82,10 @@ TEST_F(BoolIndexTest, In) {
         index->Build(all_true.data_size(), all_true.data().data());
 
         auto bitset1 = index->In(1, true_test.get());
-        ASSERT_TRUE(bitset1->any());
+        ASSERT_TRUE(Any(bitset1));
 
         auto bitset2 = index->In(1, false_test.get());
-        ASSERT_TRUE(bitset2->none());
+        ASSERT_TRUE(BitSetNone(bitset2));
     }
 
     {
@@ -92,10 +93,10 @@ TEST_F(BoolIndexTest, In) {
         index->Build(all_false.data_size(), all_false.data().data());
 
         auto bitset1 = index->In(1, true_test.get());
-        ASSERT_TRUE(bitset1->none());
+        ASSERT_TRUE(BitSetNone(bitset1));
 
         auto bitset2 = index->In(1, false_test.get());
-        ASSERT_TRUE(bitset2->any());
+        ASSERT_TRUE(Any(bitset2));
     }
 
     {
@@ -104,12 +105,12 @@ TEST_F(BoolIndexTest, In) {
 
         auto bitset1 = index->In(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset1->test(i), (i % 2) == 0);
+            ASSERT_EQ(bitset1[i], (i % 2) == 0);
         }
 
         auto bitset2 = index->In(1, false_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset2->test(i), (i % 2) != 0);
+            ASSERT_EQ(bitset2[i], (i % 2) != 0);
         }
     }
 }
@@ -123,10 +124,10 @@ TEST_F(BoolIndexTest, NotIn) {
         index->Build(all_true.data_size(), all_true.data().data());
 
         auto bitset1 = index->NotIn(1, true_test.get());
-        ASSERT_TRUE(bitset1->none());
+        ASSERT_TRUE(BitSetNone(bitset1));
 
         auto bitset2 = index->NotIn(1, false_test.get());
-        ASSERT_TRUE(bitset2->any());
+        ASSERT_TRUE(Any(bitset2));
     }
 
     {
@@ -134,10 +135,10 @@ TEST_F(BoolIndexTest, NotIn) {
         index->Build(all_false.data_size(), all_false.data().data());
 
         auto bitset1 = index->NotIn(1, true_test.get());
-        ASSERT_TRUE(bitset1->any());
+        ASSERT_TRUE(Any(bitset1));
 
         auto bitset2 = index->NotIn(1, false_test.get());
-        ASSERT_TRUE(bitset2->none());
+        ASSERT_TRUE(BitSetNone(bitset2));
     }
 
     {
@@ -146,12 +147,12 @@ TEST_F(BoolIndexTest, NotIn) {
 
         auto bitset1 = index->NotIn(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset1->test(i), (i % 2) != 0);
+            ASSERT_EQ(bitset1[i], (i % 2) != 0);
         }
 
         auto bitset2 = index->NotIn(1, false_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset2->test(i), (i % 2) == 0);
+            ASSERT_EQ(bitset2[i], (i % 2) == 0);
         }
     }
 }
@@ -168,10 +169,10 @@ TEST_F(BoolIndexTest, Codec) {
         copy_index->Load(index->Serialize(nullptr));
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
-        ASSERT_TRUE(bitset1->none());
+        ASSERT_TRUE(BitSetNone(bitset1));
 
         auto bitset2 = copy_index->NotIn(1, false_test.get());
-        ASSERT_TRUE(bitset2->any());
+        ASSERT_TRUE(Any(bitset2));
     }
 
     {
@@ -182,10 +183,10 @@ TEST_F(BoolIndexTest, Codec) {
         copy_index->Load(index->Serialize(nullptr));
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
-        ASSERT_TRUE(bitset1->any());
+        ASSERT_TRUE(Any(bitset1));
 
         auto bitset2 = copy_index->NotIn(1, false_test.get());
-        ASSERT_TRUE(bitset2->none());
+        ASSERT_TRUE(BitSetNone(bitset2));
     }
 
     {
@@ -197,12 +198,12 @@ TEST_F(BoolIndexTest, Codec) {
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset1->test(i), (i % 2) != 0);
+            ASSERT_EQ(bitset1[i], (i % 2) != 0);
         }
 
         auto bitset2 = copy_index->NotIn(1, false_test.get());
         for (size_t i = 0; i < n; i++) {
-            ASSERT_EQ(bitset2->test(i), (i % 2) == 0);
+            ASSERT_EQ(bitset2[i], (i % 2) == 0);
         }
     }
 }

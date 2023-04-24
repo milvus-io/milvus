@@ -23,7 +23,7 @@
 
 namespace milvus::index {
 template <typename T>
-const TargetBitmapPtr
+const TargetBitmap
 ScalarIndex<T>::Query(const DatasetPtr& dataset) {
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     switch (op) {
