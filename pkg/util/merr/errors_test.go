@@ -19,6 +19,7 @@ package merr
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -69,10 +70,12 @@ func (s *ErrSuite) TestWrap() {
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)
 	s.ErrorIs(WrapErrCollectionNotLoaded("test_collection", "failed to query"), ErrCollectionNotLoaded)
+	s.ErrorIs(WrapErrCollectionLoaded("test_collection", "failed to load"), ErrCollectionLoaded)
 
 	// Partition related
 	s.ErrorIs(WrapErrPartitionNotFound("test_Partition", "failed to get Partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_Partition", "failed to query"), ErrPartitionNotLoaded)
+	s.ErrorIs(WrapErrPartitionNotInTarget("test_Partition", "fail to load"), ErrPartitionNotInTarget)
 
 	// ResourceGroup related
 	s.ErrorIs(WrapErrResourceGroupNotFound("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupNotFound)
@@ -98,6 +101,8 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrNodeNotFound(1, "failed to get node"), ErrNodeNotFound)
 	s.ErrorIs(WrapErrNodeOffline(1, "failed to access node"), ErrNodeOffline)
 	s.ErrorIs(WrapErrNodeLack(3, 1, "need more nodes"), ErrNodeLack)
+	s.ErrorIs(WrapErrNodeNotMatch(3, 1, "node not match"), ErrNodeNotMatch)
+	s.ErrorIs(WrapErrNodeHeartbeatOutdated(1, time.Time{}, "node heartbeat outdated"), ErrNodeHeartbeatOutdated)
 
 	// IO related
 	s.ErrorIs(WrapErrIoKeyNotFound("test_key", "failed to read"), ErrIoKeyNotFound)
@@ -106,6 +111,7 @@ func (s *ErrSuite) TestWrap() {
 	// Parameter related
 	s.ErrorIs(WrapErrParameterInvalid(8, 1, "failed to create"), ErrParameterInvalid)
 	s.ErrorIs(WrapErrParameterInvalidRange(1, 1<<16, 0, "topk should be in range"), ErrParameterInvalid)
+	s.ErrorIs(WrapErrParameterToLoadMismatched(8, 1, "failed to load"), ErrParameterToLoadMismatched)
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)

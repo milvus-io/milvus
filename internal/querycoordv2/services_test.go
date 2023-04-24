@@ -728,7 +728,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
+		suite.Contains(resp.Reason, merr.ErrParameterToLoadMismatched.Error())
 	}
 
 	req := &querypb.LoadCollectionRequest{
@@ -752,7 +752,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
+		suite.Contains(resp.Reason, merr.ErrParameterToLoadMismatched.Error())
 	}
 
 	// Test load with wrong rg num
@@ -863,7 +863,7 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
+		suite.Contains(resp.Reason, merr.ErrParameterToLoadMismatched.Error())
 	}
 }
 

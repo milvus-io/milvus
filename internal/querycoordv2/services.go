@@ -242,11 +242,11 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
-	if err != nil && !errors.Is(err, job.ErrCollectionLoaded) {
+	if err != nil && !errors.Is(err, merr.ErrCollectionLoaded) {
 		msg := "failed to load collection"
 		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(errCode(err), msg, err), nil
+		return merr.Status(err), nil
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -341,11 +341,11 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
-	if err != nil && !errors.Is(err, job.ErrCollectionLoaded) {
+	if err != nil && !errors.Is(err, merr.ErrCollectionLoaded) {
 		msg := "failed to load partitions"
 		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(errCode(err), msg, err), nil
+		return merr.Status(err), nil
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -541,9 +541,9 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster)
 	s.jobScheduler.Add(syncJob)
 	err := syncJob.Wait()
-	if err != nil && !errors.Is(err, job.ErrPartitionNotInTarget) {
+	if err != nil && !errors.Is(err, merr.ErrPartitionNotInTarget) {
 		log.Warn(failedMsg, zap.Error(err))
-		return utils.WrapStatus(errCode(err), failedMsg, err), nil
+		return merr.Status(err), nil
 	}
 
 	return merr.Status(nil), nil
@@ -909,7 +909,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 				_, exist := leader.Segments[segmentID]
 				if !exist {
 					log.Info("leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
-					multierr.AppendInto(&channelErr, WrapErrLackSegment(segmentID))
+					multierr.AppendInto(&channelErr, merr.WrapErrSegmentLack(segmentID))
 					isAvailable = false
 					break
 				}

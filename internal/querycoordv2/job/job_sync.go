@@ -18,6 +18,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type SyncNewCreatedPartitionJob struct {
@@ -55,12 +57,13 @@ func (job *SyncNewCreatedPartitionJob) PreExecute() error {
 	// check if collection not load or loadType is loadPartition
 	collection := job.meta.GetCollection(job.req.GetCollectionID())
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
-		return ErrPartitionNotInTarget
+		return merr.WrapErrPartitionNotInTarget("", "collection not load or loadType is loadPartition")
 	}
 
 	// check if partition already existed
 	if partition := job.meta.GetPartition(job.req.GetPartitionID()); partition != nil {
-		return ErrPartitionNotInTarget
+		msg := fmt.Sprintf("partition already existed, partitionID: %d", partition.GetPartitionID())
+		return merr.WrapErrPartitionNotInTarget(partition.GetPartitionID(), msg)
 	}
 	return nil
 }
@@ -97,7 +100,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 }
 
 func (job *SyncNewCreatedPartitionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrPartitionNotInTarget) {
+	if job.Error() != nil && !errors.Is(job.Error(), merr.ErrPartitionNotInTarget) {
 		releasePartitions(job.ctx, job.meta, job.cluster, true, job.req.GetCollectionID(), job.req.GetPartitionID())
 	}
 }

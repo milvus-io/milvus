@@ -22,14 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -362,18 +360,11 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 	return info, nil
 }
 
-func errCode(err error) commonpb.ErrorCode {
-	if errors.Is(err, job.ErrLoadParameterMismatched) {
-		return commonpb.ErrorCode_IllegalArgument
-	}
-	return commonpb.ErrorCode_UnexpectedError
-}
-
 func checkNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 	if info == nil {
-		return WrapErrNodeOffline(nodeID)
+		return merr.WrapErrNodeOffline(nodeID)
 	} else if time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
-		return WrapErrNodeHeartbeatOutdated(nodeID, info.LastHeartbeat())
+		return merr.WrapErrNodeHeartbeatOutdated(nodeID, info.LastHeartbeat())
 	}
 	return nil
 }

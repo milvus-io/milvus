@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -238,7 +239,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.ErrorIs(err, merr.ErrCollectionLoaded)
 	}
 
 	// Test load existed collection with different replica number
@@ -263,7 +264,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterToLoadMismatched)
 	}
 
 	// Test load partition while collection exists
@@ -290,7 +291,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.ErrorIs(err, merr.ErrCollectionLoaded)
 	}
 
 	suite.meta.ResourceManager.AddResourceGroup("rg1")
@@ -428,7 +429,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterToLoadMismatched)
 	}
 }
 
@@ -489,7 +490,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.ErrorIs(err, merr.ErrCollectionLoaded)
 	}
 
 	// Test load partition with different replica number
@@ -516,7 +517,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterToLoadMismatched)
 	}
 
 	// Test load partition with more partition
@@ -569,7 +570,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.ErrorIs(err, merr.ErrCollectionLoaded)
 	}
 
 	suite.meta.ResourceManager.AddResourceGroup("rg1")
@@ -682,7 +683,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 	job = newLoadPartJob(p0, p1, p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrCollectionLoaded)
+	suite.ErrorIs(err, merr.ErrCollectionLoaded)
 	suite.assertPartitionLoaded(collection)
 
 	// loaded: p0, p1
@@ -829,7 +830,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterToLoadMismatched)
 	}
 }
 
@@ -1194,7 +1195,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrPartitionNotInTarget)
+	suite.ErrorIs(err, merr.ErrPartitionNotInTarget)
 
 	// test collection loaded, but its loadType is loadPartition
 	req = &querypb.SyncNewCreatedPartitionRequest{
@@ -1209,7 +1210,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrPartitionNotInTarget)
+	suite.ErrorIs(err, merr.ErrPartitionNotInTarget)
 }
 
 func (suite *JobSuite) loadAll() {

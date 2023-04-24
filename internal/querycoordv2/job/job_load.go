@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -94,12 +95,12 @@ func (job *LoadCollectionJob) PreExecute() error {
 			job.meta.GetReplicaNumber(req.GetCollectionID()),
 		)
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterToLoadMismatched(req.GetReplicaNumber(), collection.GetReplicaNumber(), msg)
 	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
 		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
 			collection.GetFieldIndexID())
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterToLoadMismatched(req.GetFieldIndexID(), collection.GetFieldIndexID(), msg)
 	}
 
 	return nil
@@ -125,7 +126,7 @@ func (job *LoadCollectionJob) Execute() error {
 		return partID, !lo.Contains(loadedPartitionIDs, partID)
 	})
 	if len(lackPartitionIDs) == 0 {
-		return ErrCollectionLoaded
+		return merr.WrapErrCollectionLoaded(req.GetCollectionID(), "the length of lackpartitionIDs is 0")
 	}
 	job.undo.CollectionID = req.GetCollectionID()
 	job.undo.LackPartitions = lackPartitionIDs
@@ -212,7 +213,7 @@ func (job *LoadCollectionJob) Execute() error {
 }
 
 func (job *LoadCollectionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrCollectionLoaded) {
+	if job.Error() != nil && !errors.Is(job.Error(), merr.ErrCollectionLoaded) {
 		job.undo.RollBack()
 	}
 }
@@ -274,12 +275,12 @@ func (job *LoadPartitionJob) PreExecute() error {
 	if collection.GetReplicaNumber() != req.GetReplicaNumber() {
 		msg := "collection with different replica number existed, release this collection first before changing its replica number"
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterToLoadMismatched(req.GetReplicaNumber(), collection.GetReplicaNumber(), msg)
 	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
 		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
 			job.meta.GetFieldIndex(req.GetCollectionID()))
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterToLoadMismatched(req.GetFieldIndexID(), collection.GetFieldIndexID(), msg)
 	}
 
 	return nil
@@ -302,7 +303,7 @@ func (job *LoadPartitionJob) Execute() error {
 		return partID, !lo.Contains(loadedPartitionIDs, partID)
 	})
 	if len(lackPartitionIDs) == 0 {
-		return ErrCollectionLoaded
+		return merr.WrapErrCollectionLoaded(req.GetCollectionID())
 	}
 	job.undo.CollectionID = req.GetCollectionID()
 	job.undo.LackPartitions = lackPartitionIDs
@@ -395,7 +396,7 @@ func (job *LoadPartitionJob) Execute() error {
 }
 
 func (job *LoadPartitionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrCollectionLoaded) {
+	if job.Error() != nil && !errors.Is(job.Error(), merr.ErrCollectionLoaded) {
 		job.undo.RollBack()
 	}
 }

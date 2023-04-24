@@ -57,11 +57,13 @@ var (
 	// Collection related
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
 	ErrCollectionNotLoaded        = newMilvusError("collection not loaded", 101, false)
-	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 102, false)
+	ErrCollectionLoaded           = newMilvusError("collection loaded", 102, false)
+	ErrCollectionNumLimitExceeded = newMilvusError("exceeded the limit number of collections", 103, false)
 
 	// Partition related
-	ErrPartitionNotFound  = newMilvusError("partition not found", 202, false)
-	ErrPartitionNotLoaded = newMilvusError("partition not loaded", 203, false)
+	ErrPartitionNotFound    = newMilvusError("partition not found", 200, false)
+	ErrPartitionNotLoaded   = newMilvusError("partition not loaded", 201, false)
+	ErrPartitionNotInTarget = newMilvusError("partition not in target", 202, false)
 
 	// ResourceGroup related
 	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
@@ -84,17 +86,19 @@ var (
 	ErrIndexNotFound = newMilvusError("index not found", 700, false)
 
 	// Node related
-	ErrNodeNotFound = newMilvusError("node not found", 901, false)
-	ErrNodeOffline  = newMilvusError("node offline", 902, false)
-	ErrNodeLack     = newMilvusError("node lacks", 903, false)
-	ErrNodeNotMatch = newMilvusError("node not match", 904, false)
+	ErrNodeNotFound          = newMilvusError("node not found", 901, false)
+	ErrNodeOffline           = newMilvusError("node offline", 902, false)
+	ErrNodeLack              = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch          = newMilvusError("node not match", 904, false)
+	ErrNodeHeartbeatOutdated = newMilvusError("node heartbeat outdated", 905, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
 	ErrIoFailed      = newMilvusError("IO failed", 1001, false)
 
 	// Parameter related
-	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterInvalid          = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterToLoadMismatched = newMilvusError("load parameter mismatched", 1101, false)
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)

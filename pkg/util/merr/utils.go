@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -84,6 +85,8 @@ func oldCode(code int32) commonpb.ErrorCode {
 		return commonpb.ErrorCode_CollectionNotExists
 	case ErrNodeNotMatch.code():
 		return commonpb.ErrorCode_NodeIDNotMatch
+	case ErrParameterToLoadMismatched.code():
+		return commonpb.ErrorCode_IllegalArgument
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -177,6 +180,14 @@ func WrapErrCollectionNotLoaded(collection any, msg ...string) error {
 	return err
 }
 
+func WrapErrCollectionLoaded(collection any, msg ...string) error {
+	err := wrapWithField(ErrCollectionLoaded, "collection", collection)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrCollectionResourceLimitExceeded(msg ...string) error {
 	var err error = ErrCollectionNumLimitExceeded
 	if len(msg) > 0 {
@@ -196,6 +207,14 @@ func WrapErrPartitionNotFound(partition any, msg ...string) error {
 
 func WrapErrPartitionNotLoaded(partition any, msg ...string) error {
 	err := wrapWithField(ErrPartitionNotLoaded, "partition", partition)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrPartitionNotInTarget(partition any, msg ...string) error {
+	err := wrapWithField(ErrPartitionNotInTarget, "partition", partition)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -320,6 +339,14 @@ func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) erro
 	return err
 }
 
+func WrapErrNodeHeartbeatOutdated(id int64, lastHeartbeat time.Time, msg ...string) error {
+	err := errors.Wrapf(ErrNodeHeartbeatOutdated, "nodeID=%v, lastHeartbeat=%v", id, lastHeartbeat)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // IO related
 func WrapErrIoKeyNotFound(key string, msg ...string) error {
 	err := errors.Wrapf(ErrIoKeyNotFound, "key=%s", key)
@@ -348,6 +375,14 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := errors.Wrapf(ErrParameterInvalid, "expected in (%v, %v), actual=%v", lower, upper, actual)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrParameterToLoadMismatched[T any](expected, actual T, msg ...string) error {
+	err := errors.Wrapf(ErrParameterToLoadMismatched, "expected=%v, actual=%v", expected, actual)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
