@@ -456,7 +456,7 @@ def gen_invalid_field_types():
     return field_types
 
 
-def gen_invaild_search_params_type():
+def gen_invalid_search_params_type():
     invalid_search_key = 100
     search_params = []
     for index_type in ct.all_index_types:
