@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -272,20 +273,6 @@ func TestQuotaCenter(t *testing.T) {
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
 
-		// DiskQuota exceeded
-		quotaBackup := Params.QuotaConfig.DiskQuota
-		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100 * 1024 * 1024}
-		quotaCenter.writableCollections = []int64{1, 2, 3}
-		quotaCenter.resetAllCurrentRates()
-		err = quotaCenter.calculateWriteRates()
-		assert.NoError(t, err)
-		for _, collection := range quotaCenter.writableCollections {
-			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
-			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
-		}
-		Params.QuotaConfig.DiskQuota = quotaBackup
-
 		// force deny
 		forceBak := Params.QuotaConfig.ForceDenyWriting
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, "true")
@@ -350,26 +337,41 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
 	})
 
-	t.Run("test ifDiskQuotaExceeded", func(t *testing.T) {
+	t.Run("test checkDiskQuota", func(t *testing.T) {
 		qc := types.NewMockQueryCoord(t)
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.checkDiskQuota()
 
-		paramtable.Get().Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
-		ok := quotaCenter.ifDiskQuotaExceeded()
-		assert.False(t, ok)
-		paramtable.Get().Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
-
+		// total DiskQuota exceeded
 		quotaBackup := Params.QuotaConfig.DiskQuota
-		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, fmt.Sprintf("%f", 99.0/1024/1024))
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.ifDiskQuotaExceeded()
-		assert.True(t, ok)
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
+			TotalBinlogSize:      200 * 1024 * 1024,
+			CollectionBinlogSize: map[int64]int64{1: 100 * 1024 * 1024}}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.checkDiskQuota()
+		for _, collection := range quotaCenter.writableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+		}
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
 
-		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, fmt.Sprintf("%f", 101.0/1024/1024))
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.ifDiskQuotaExceeded()
-		assert.False(t, ok)
-		Params.QuotaConfig.DiskQuota = quotaBackup
+		// collection DiskQuota exceeded
+		colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "30")
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{CollectionBinlogSize: map[int64]int64{
+			1: 20 * 1024 * 1024, 2: 30 * 1024 * 1024, 3: 60 * 1024 * 1024}}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.checkDiskQuota()
+		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLInsert])
+		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLDelete])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLDelete])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLDelete])
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
@@ -411,5 +413,41 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch] = Limit(50)
 		quotaCenter.guaranteeMinRate(float64(minRate), internalpb.RateType_DQLSearch, 1)
 		assert.Equal(t, minRate, quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch])
+	})
+
+	t.Run("test diskAllowance", func(t *testing.T) {
+		tests := []struct {
+			name            string
+			totalDiskQuota  string
+			collDiskQuota   string
+			totalDiskUsage  int64 // in MB
+			collDiskUsage   int64 // in MB
+			expectAllowance int64 // in bytes
+		}{
+			{"test max", "-1", "-1", 100, 100, math.MaxInt64},
+			{"test total quota exceeded", "100", "-1", 100, 100, 0},
+			{"test coll quota exceeded", "-1", "20", 100, 20, 0},
+			{"test not exceeded", "100", "20", 80, 10, 10 * 1024 * 1024},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				collection := UniqueID(0)
+				quotaCenter := NewQuotaCenter(pcm, nil, &dataCoordMockForQuota{}, core.tsoAllocator)
+				quotaCenter.resetAllCurrentRates()
+				quotaBackup := Params.QuotaConfig.DiskQuota
+				colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, test.totalDiskQuota)
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, test.collDiskQuota)
+				quotaCenter.diskMu.Lock()
+				quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{}
+				quotaCenter.dataCoordMetrics.CollectionBinlogSize = map[int64]int64{collection: test.collDiskUsage * 1024 * 1024}
+				quotaCenter.totalBinlogSize = test.totalDiskUsage * 1024 * 1024
+				quotaCenter.diskMu.Unlock()
+				allowance := quotaCenter.diskAllowance(collection)
+				assert.Equal(t, float64(test.expectAllowance), allowance)
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
+				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
+			})
+		}
 	})
 }

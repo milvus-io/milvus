@@ -90,6 +90,7 @@ type quotaConfig struct {
 	QueryNodeMemoryHighWaterLevel ParamItem `refreshable:"true"`
 	DiskProtectionEnabled         ParamItem `refreshable:"true"`
 	DiskQuota                     ParamItem `refreshable:"true"`
+	DiskQuotaPerCollection        ParamItem `refreshable:"true"`
 
 	// limit reading
 	ForceDenyReading        ParamItem `refreshable:"true"`
@@ -677,6 +678,27 @@ When memory usage < memoryLowWaterLevel, no action.`,
 		Export: true,
 	}
 	p.DiskQuota.Init(base.mgr)
+
+	p.DiskQuotaPerCollection = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.diskProtection.diskQuotaPerCollection",
+		Version:      "2.2.8",
+		DefaultValue: quota,
+		Formatter: func(v string) string {
+			if !p.DiskProtectionEnabled.GetAsBool() {
+				return max
+			}
+			level := getAsFloat(v)
+			// (0, +inf)
+			if level <= 0 {
+				level = getAsFloat(quota)
+			}
+			// megabytes to bytes
+			return fmt.Sprintf("%f", megaBytes2Bytes(level))
+		},
+		Doc:    "MB, (0, +inf), default no limit",
+		Export: true,
+	}
+	p.DiskQuotaPerCollection.Init(base.mgr)
 
 	// limit reading
 	p.ForceDenyReading = ParamItem{

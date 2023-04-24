@@ -79,6 +79,7 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, defaultHighWaterLevel, qc.QueryNodeMemoryHighWaterLevel.GetAsFloat())
 		assert.Equal(t, true, qc.DiskProtectionEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.DiskQuota.GetAsFloat())
+		assert.Equal(t, defaultMax, qc.DiskQuotaPerCollection.GetAsFloat())
 	})
 
 	t.Run("test limit reading", func(t *testing.T) {
