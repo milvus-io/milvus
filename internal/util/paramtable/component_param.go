@@ -490,11 +490,11 @@ func (p *commonConfig) initClusterName() {
 }
 
 func (p *commonConfig) initSessionTTL() {
-	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 20)
+	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 30)
 }
 
 func (p *commonConfig) initSessionRetryTimes() {
-	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 30)
+	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 60)
 }
 
 func (p *commonConfig) initGrpcRetryTimes() {

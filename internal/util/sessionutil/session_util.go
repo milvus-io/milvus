@@ -80,11 +80,15 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveCh            <-chan bool
+	leaseKeepAliveCh  <-chan *clientv3.LeaseKeepAliveResponse
+	liveCh            chan bool
 	etcdCli           *clientv3.Client
 	leaseID           *clientv3.LeaseID
 	watchSessionKeyCh clientv3.WatchChan
 	wg                sync.WaitGroup
+
+	// when etcd leader fail, will retry register, ignore DELETE event during this period
+	registering atomic.Value
 
 	metaRoot string
 
@@ -186,8 +190,8 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		metaRoot:          metaRoot,
 		Version:           common.Version,
 		useCustomConfig:   false,
-		sessionTTL:        60,
-		sessionRetryTimes: 30,
+		sessionTTL:        GlobalParams.CommonCfg.SessionTTL,
+		sessionRetryTimes: GlobalParams.CommonCfg.SessionRetryTimes,
 	}
 
 	session.apply(opts...)
@@ -239,11 +243,13 @@ func (s *Session) String() string {
 
 // Register will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Register() {
-	ch, err := s.registerService()
+	ch, err := s.registerService(uint(s.sessionRetryTimes), false)
 	if err != nil {
 		panic(err)
 	}
-	s.liveCh = s.processKeepAliveResponse(ch)
+	s.leaseKeepAliveCh = ch
+	s.liveCh = make(chan bool)
+	s.processKeepAliveResponse()
 	s.UpdateRegistered(true)
 }
 
@@ -336,50 +342,66 @@ func (s *Session) initWatchSessionCh() {
 //
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
-func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (s *Session) registerService(retryTimes uint, reRegister bool) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	if s.enableActiveStandBy {
 		s.updateStandby(true)
 	}
 	completeKey := s.getCompleteKey()
-	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Info("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
-
-	ttl := s.sessionTTL
-	retryTimes := s.sessionRetryTimes
-	if !s.useCustomConfig {
-		ttl = GlobalParams.CommonCfg.SessionTTL
-		retryTimes = GlobalParams.CommonCfg.SessionRetryTimes
+	sessionJSON, jerr := json.Marshal(s)
+	if jerr != nil {
+		return nil, jerr
 	}
+	value := string(sessionJSON)
+	var ch <-chan *clientv3.LeaseKeepAliveResponse
+	log.With(zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
+	log.Info("service begin to register to etcd")
 
 	registerFn := func() error {
-		resp, err := s.etcdCli.Grant(s.ctx, ttl)
+		resp, err := s.etcdCli.Grant(s.ctx, s.sessionTTL)
 		if err != nil {
-			log.Error("register service", zap.Error(err))
+			log.Error("grant lease failed", zap.Error(err))
 			return err
+		}
+		if s.leaseID == nil {
+			log.Info("update lease ID", zap.Int64("after", int64(resp.ID)))
+		} else {
+			log.Info("update lease ID", zap.Int64("before", int64(*s.leaseID)), zap.Int64("after", int64(resp.ID)))
 		}
 		s.leaseID = &resp.ID
 
-		sessionJSON, err := json.Marshal(s)
-		if err != nil {
-			return err
+		if reRegister {
+			txn := s.etcdCli.Txn(s.ctx).
+				Then(clientv3.OpPut(completeKey, value, clientv3.WithLease(resp.ID)))
+			if s.enableActiveStandBy && !s.isStandby.Load().(bool) {
+				txn = txn.Then(clientv3.OpPut(s.activeKey, value, clientv3.WithLease(resp.ID)))
+			}
+			txnResp, err := txn.Commit()
+			if err != nil {
+				log.Warn("register session commit txn error", zap.Error(err))
+				return err
+			}
+			if !txnResp.Succeeded {
+				return fmt.Errorf("register session commit txn not succeed: %s-%d", s.ServerName, s.ServerID)
+			}
+		} else {
+			txnResp, err := s.etcdCli.Txn(s.ctx).If(
+				clientv3.Compare(
+					clientv3.Version(completeKey),
+					"=",
+					0)).
+				Then(clientv3.OpPut(completeKey, value, clientv3.WithLease(resp.ID))).Commit()
+			if err != nil {
+				log.Warn("compare and swap error, maybe the Key has already been registered", zap.Error(err))
+				return err
+			}
+
+			if !txnResp.Succeeded {
+				return fmt.Errorf("function CompareAndSwap error for compare is false for Key: %s", completeKey)
+			}
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Version(completeKey),
-				"=",
-				0)).
-			Then(clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
-
-		if err != nil {
-			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
-			return err
-		}
-
-		if !txnResp.Succeeded {
-			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
-		}
-		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
+		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", value),
+			zap.Any("lease", resp.ID))
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 		s.keepAliveCancel = func() {
@@ -393,7 +415,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(retryTimes)))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(retryTimes), retry.Sleep(time.Millisecond*200))
 	if err != nil {
 		return nil, err
 	}
@@ -402,8 +424,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
-	failCh := make(chan bool)
+func (s *Session) processKeepAliveResponse() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -415,22 +436,29 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					s.keepAliveCancel()
 				}
 				return
-			case resp, ok := <-ch:
-				if !ok {
-					log.Warn("session keepalive channel closed")
-					close(failCh)
-					return
+			case resp, ok := <-s.leaseKeepAliveCh:
+				s.registering.Store(true)
+				defer func() {
+					s.registering.Store(false)
+				}()
+				if !ok || resp == nil {
+					if !ok {
+						log.Warn("session keepalive channel closed")
+					} else {
+						log.Warn("session keepalive response failed")
+					}
+					// re-register
+					ch, err := s.registerService(uint(s.sessionRetryTimes), true)
+					if err != nil {
+						log.Error("re-register after keepalive channel close failed", zap.Error(err))
+						close(s.liveCh)
+						return
+					}
+					s.leaseKeepAliveCh = ch
 				}
-				if resp == nil {
-					log.Warn("session keepalive response failed")
-					close(failCh)
-					return
-				}
-				//failCh <- true
 			}
 		}
 	}()
-	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
@@ -739,6 +767,12 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					case mvccpb.PUT:
 						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 					case mvccpb.DELETE:
+						// if registering, keep alive channel close and then related keys delete. We try re-register service in this scenario.
+						// During this period, DELETE event should be ignored.
+						if s.registering.Load().(bool) {
+							log.Info("session key is deleted during re register, ignore this DELETE event", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+							return
+						}
 						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 						if s.keepAliveCancel != nil {
 							s.keepAliveCancel()
@@ -829,7 +863,6 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	//   2. revision: revision of the active_key
 	//   3. err: etcd error, should retry
 	registerActiveFn := func() (bool, int64, error) {
-		log.Info(fmt.Sprintf("try to register as ACTIVE %v service...", s.ServerName))
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
 			log.Error("json marshal error", zap.Error(err))
@@ -842,7 +875,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				0)).
 			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
 		if err != nil {
-			log.Error("register active key to etcd failed", zap.Error(err))
+			log.Error("register active key to etcd failed", zap.Int64("leaseID", int64(*s.leaseID)), zap.Error(err))
 			return false, -1, err
 		}
 		doRegistered := txnResp.Succeeded
