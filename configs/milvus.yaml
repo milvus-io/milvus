@@ -168,8 +168,6 @@ proxy:
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
-  taskMergeCap: 16
-  taskExecutionCap: 256
   autoHandoff: true # Enable auto handoff
   autoBalance: true # Enable auto balance
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
