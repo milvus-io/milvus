@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -970,6 +972,9 @@ func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntit
 	if !funcutil.IsRevoke(operateType) && !funcutil.IsGrant(operateType) {
 		return fmt.Errorf("the operate type in the grant entity is invalid")
 	}
+	if entity.DbName == "" {
+		entity.DbName = util.DefaultDBName
+	}
 
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -988,6 +993,9 @@ func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([
 
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
 		return entities, fmt.Errorf("the role entity in the grant entity is invalid")
+	}
+	if entity.DbName == "" {
+		entity.DbName = util.DefaultDBName
 	}
 
 	mt.permissionLock.RLock()
