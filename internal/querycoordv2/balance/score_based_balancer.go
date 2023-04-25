@@ -173,11 +173,11 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		return b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments), b.getStoppedChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
+		return b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments), b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
 	}
 
 	// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-	return b.getNormalSegmentPlan(replica, nodesSegments), b.getNormalChannelPlan(replica, lo.Keys(nodesSegments))
+	return b.getNormalSegmentPlan(replica, nodesSegments), b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)
 }
 
 func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
@@ -221,20 +221,6 @@ func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesS
 	}
 
 	return segmentPlans
-}
-
-func (b *ScoreBasedBalancer) getStoppedChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
-	channelPlans := make([]ChannelAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
-		plans := b.AssignChannel(dmChannels, onlineNodes)
-		for i := range plans {
-			plans[i].From = nodeID
-			plans[i].ReplicaID = replica.ID
-		}
-		channelPlans = append(channelPlans, plans...)
-	}
-	return channelPlans
 }
 
 func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
@@ -317,9 +303,4 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		// TODO swap segment between toNode and fromNode, see if the cluster becomes more balance
 	}
 	return segmentPlans
-}
-
-func (b *ScoreBasedBalancer) getNormalChannelPlan(replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
-	// TODO
-	return make([]ChannelAssignPlan, 0)
 }
