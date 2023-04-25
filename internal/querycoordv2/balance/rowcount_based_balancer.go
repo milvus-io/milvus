@@ -267,24 +267,30 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 		}
 
 		for start < end {
-			sourceNode := nodes[start]
-			targetNode := nodes[end]
+			// segment to move in
+			targetNode := nodes[start]
+			// segment to move out
+			sourceNode := nodes[end]
+
+			if len(channelsOnNode[targetNode]) >= averageChannel {
+				break
+			}
 
 			// remove channel from end node
-			selectChannel := channelsOnNode[targetNode][0]
-			channelsOnNode[targetNode] = channelsOnNode[targetNode][1:]
+			selectChannel := channelsOnNode[sourceNode][0]
+			channelsOnNode[sourceNode] = channelsOnNode[sourceNode][1:]
 
 			// add channel to start node
-			if channelsOnNode[sourceNode] == nil {
-				channelsOnNode[sourceNode] = make([]*meta.DmChannel, 0)
+			if channelsOnNode[targetNode] == nil {
+				channelsOnNode[targetNode] = make([]*meta.DmChannel, 0)
 			}
-			channelsOnNode[sourceNode] = append(channelsOnNode[sourceNode], selectChannel)
+			channelsOnNode[targetNode] = append(channelsOnNode[targetNode], selectChannel)
 
 			// generate channel plan
 			plan := ChannelAssignPlan{
 				Channel:   selectChannel,
-				From:      targetNode,
-				To:        sourceNode,
+				From:      sourceNode,
+				To:        targetNode,
 				ReplicaID: replica.ID,
 			}
 			channelPlans = append(channelPlans, plan)
