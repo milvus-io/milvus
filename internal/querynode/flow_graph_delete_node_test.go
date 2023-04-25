@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,9 +48,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = deleteNode.delete(deleteData, defaultSegmentID, wg)
+		err = deleteNode.delete(deleteData, defaultSegmentID)
 		assert.NoError(t, err)
 	})
 
@@ -73,10 +70,8 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
 		deleteData.deleteTimestamps[defaultSegmentID] = deleteData.deleteTimestamps[defaultSegmentID][:len(deleteData.deleteTimestamps)/2]
-		err = deleteNode.delete(deleteData, defaultSegmentID, wg)
+		err = deleteNode.delete(deleteData, defaultSegmentID)
 		assert.Error(t, err)
 	})
 
@@ -86,9 +81,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		deleteNode, err := newDeleteNode(historical, defaultCollectionID, defaultDeltaChannel)
 		require.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = deleteNode.delete(nil, defaultSegmentID, wg)
+		err = deleteNode.delete(nil, defaultSegmentID)
 		assert.Error(t, err)
 	})
 
@@ -107,9 +100,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			segmentTypeGrowing)
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = deleteNode.delete(&deleteData{}, defaultSegmentID, wg)
+		err = deleteNode.delete(&deleteData{}, defaultSegmentID)
 		assert.Error(t, err)
 	})
 }

@@ -20,13 +20,16 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -46,6 +49,7 @@ type deleteNode struct {
 	metaReplica   ReplicaInterface // historical
 	deltaVchannel Channel
 	dmlVchannel   Channel
+	pool          *concurrency.Pool
 }
 
 // Name returns the name of deleteNode
@@ -146,7 +150,8 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		segmentID := segmentID
 		wg.Add(1)
 		go func() {
-			err := dNode.delete(delData, segmentID, &wg)
+			defer wg.Done()
+			err := dNode.delete(delData, segmentID)
 			if err != nil {
 				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
 				log.Warn("failed to apply deletions to segment",
@@ -173,8 +178,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // delete will do delete operation at segment which id is segmentID
-func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) error {
-	defer wg.Done()
+func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID) error {
 	targetSegment, err := dNode.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 	if err != nil {
 		return WrapSegmentNotFound(segmentID)
@@ -188,7 +192,10 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, ids, timestamps)
+	_, err = dNode.pool.Submit(func() (any, error) {
+		err := targetSegment.segmentDelete(offset, ids, timestamps)
+		return nil, err
+	}).Await()
 	if err != nil {
 		return fmt.Errorf("segmentDelete failed, segmentID = %d, err=%w", segmentID, err)
 	}
@@ -215,11 +222,17 @@ func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, deltaVch
 		return nil, err
 	}
 
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false))
+	if err != nil {
+		return nil, err
+	}
+
 	return &deleteNode{
 		baseNode:      baseNode,
 		collectionID:  collectionID,
 		metaReplica:   metaReplica,
 		deltaVchannel: deltaVchannel,
 		dmlVchannel:   dmlVChannel,
+		pool:          pool,
 	}, nil
 }
