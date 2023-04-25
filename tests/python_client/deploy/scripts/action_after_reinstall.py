@@ -13,7 +13,7 @@ def task_1(data_size, host):
     get_collections(prefix)
     load_and_search(prefix)
     release_collection(prefix)
-    create_collections_and_insert_data(prefix,data_size)
+    create_collections_and_insert_data(prefix,count=data_size)
     load_and_search(prefix)
 
 
@@ -27,7 +27,7 @@ def task_2(data_zise, host):
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
     load_and_search(prefix)
-    create_collections_and_insert_data(prefix, data_zise)
+    create_collections_and_insert_data(prefix, count=data_size)
     release_collection(prefix)
     create_index(prefix)
     load_and_search(prefix)

@@ -15,7 +15,7 @@ def task_1(data_size, host):
     prefix = "task_1_"
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
-    create_collections_and_insert_data(prefix, data_size)
+    create_collections_and_insert_data(prefix, count=data_size)
     create_index(prefix)
     load_and_search(prefix)
 
@@ -29,7 +29,7 @@ def task_2(data_size, host):
     prefix = "task_2_"
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
-    create_collections_and_insert_data(prefix, data_size)
+    create_collections_and_insert_data(prefix, count=data_size)
     create_index(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, flush=False, count=data_size)
@@ -43,7 +43,7 @@ def task_3(data_size, host):
     prefix = "task_3_"
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
-    create_collections_and_insert_data(prefix, data_size)
+    create_collections_and_insert_data(prefix, count=data_size)
     create_index(prefix)
     load_and_search(prefix)
 
