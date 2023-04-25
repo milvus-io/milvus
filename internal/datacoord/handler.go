@@ -338,7 +338,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 		}
 		hasCollection = has
 		return nil
-	}, retry.Attempts(100000)); err != nil {
+	}, retry.Attempts(500)); err != nil {
 		log.Error("datacoord ServerHandler HasCollection finally failed")
 		panic("datacoord ServerHandler HasCollection finally failed")
 	}

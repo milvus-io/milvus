@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -433,6 +435,15 @@ func (m *mockRootCoordService) HasCollection(ctx context.Context, req *milvuspb.
 }
 
 func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	// return not exist
+	if req.CollectionID == -1 {
+		err := common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", req.CollectionID))
+		return &milvuspb.DescribeCollectionResponse{
+			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: err.Error()},
+		}, nil
+	}
+
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

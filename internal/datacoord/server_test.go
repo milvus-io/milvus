@@ -2191,6 +2191,17 @@ func TestGetChannelSeekPosition(t *testing.T) {
 	}
 }
 
+func TestDescribeCollection(t *testing.T) {
+
+	t.Run("TestNotExistCollections", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		has, err := svr.handler.(*ServerHandler).HasCollection(context.TODO(), -1)
+		assert.NoError(t, err)
+		assert.False(t, has)
+	})
+}
+
 func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)

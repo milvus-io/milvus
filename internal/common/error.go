@@ -19,6 +19,7 @@ package common
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
@@ -113,10 +114,12 @@ func IsCollectionNotExistError(e error) bool {
 	}
 	// cycle import: common -> funcutil -> types -> sessionutil -> common
 	// return funcutil.SliceContain(collectionNotExistCodes, statusError.GetErrorCode())
-	for _, code := range collectionNotExistCodes {
-		if code == statusError.GetErrorCode() {
-			return true
-		}
+	if statusError.Status.ErrorCode == commonpb.ErrorCode_CollectionNotExists {
+		return true
+	}
+
+	if (statusError.Status.ErrorCode == commonpb.ErrorCode_UnexpectedError) && strings.Contains(statusError.Status.Reason, "can't find collection") {
+		return true
 	}
 	return false
 }
