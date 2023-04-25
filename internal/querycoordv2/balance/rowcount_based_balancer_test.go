@@ -273,6 +273,28 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 		},
 		{
+			name:          "unbalance stable view",
+			nodes:         []int64{1, 2, 3},
+			segmentCnts:   []int{0, 0, 0},
+			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			shouldMock:    true,
+			distributions: map[int64][]*meta.Segment{},
+			distributionChannels: map[int64][]*meta.DmChannel{
+				1: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v1"}, Node: 2},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 2},
+				},
+				2: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2},
+				},
+				3: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v4"}, Node: 2},
+				},
+			},
+			expectPlans:        []SegmentAssignPlan{},
+			expectChannelPlans: []ChannelAssignPlan{},
+		},
+		{
 			name:            "already balanced",
 			nodes:           []int64{11, 22},
 			notExistedNodes: []int64{10},
