@@ -252,7 +252,6 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 			}, nil).Maybe()
 		}
 		suite.expectGetRecoverInfoByMockDataCoord(collection, mockDataCoord)
-
 	}
 	err = suite.server.SetRootCoord(mockRootCoord)
 	suite.NoError(err)
