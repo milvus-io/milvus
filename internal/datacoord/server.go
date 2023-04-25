@@ -966,6 +966,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 }
 
 // hasCollection communicates with RootCoord and check whether this collection exist from the user's perspective.
+// Notice: call with non-existing collection will return error
 func (s *Server) hasCollection(ctx context.Context, collectionID int64) (bool, error) {
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(

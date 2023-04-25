@@ -326,6 +326,7 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 }
 
 // HasCollection returns whether the collection exist from user's perspective.
+// Notice: call with non-existing collection will cause panic.
 func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID) (bool, error) {
 	var hasCollection bool
 	ctx2, cancel := context.WithTimeout(ctx, time.Minute*30)
@@ -366,7 +367,7 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string, collectionID Uniq
 		return true
 	}
 	// collectionID parse from channelName
-	has, err := h.HasCollection(h.s.ctx, collectionID)
+	has, err := h.s.hasCollectionInternal(h.s.ctx, collectionID)
 	if err != nil {
 		log.Info("datacoord ServerHandler CheckShouldDropChannel hasCollection failed", zap.Error(err))
 		return false
