@@ -57,6 +57,8 @@ func (suite *MapUtilSuite) TestGetMapKeys() {
 func (suite *MapUtilSuite) TestConcurrentMap() {
 	currMap := NewConcurrentMap[int64, string]()
 
+	suite.Equal(currMap.Len(), 0)
+
 	v, loaded := currMap.GetOrInsert(100, "v-100")
 	suite.Equal("v-100", v)
 	suite.Equal(false, loaded)
@@ -66,6 +68,8 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	v, loaded = currMap.GetOrInsert(100, "v-100")
 	suite.Equal("v-100", v)
 	suite.Equal(true, loaded)
+
+	suite.Equal(currMap.Len(), 1)
 
 	currMap.GetOrInsert(100, "v-100-new")
 	currMap.GetOrInsert(200, "v-200")

@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -49,44 +51,36 @@ func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
 // MultiRateLimiter includes multilevel rate limiters, such as global rateLimiter,
 // collection level rateLimiter and so on. It also implements Limiter interface.
 type MultiRateLimiter struct {
-	globalRateLimiter *rateLimiter
 	// TODO: add collection level rateLimiter
-	quotaStatesMu sync.RWMutex
-	quotaStates   map[milvuspb.QuotaState]commonpb.ErrorCode
+	quotaStatesMu      sync.RWMutex
+	collectionLimiters map[int64]*rateLimiter
 }
 
 // NewMultiRateLimiter returns a new MultiRateLimiter.
 func NewMultiRateLimiter() *MultiRateLimiter {
-	m := &MultiRateLimiter{}
-	m.globalRateLimiter = newRateLimiter()
+	m := &MultiRateLimiter{
+		collectionLimiters: make(map[int64]*rateLimiter, 0),
+	}
 	return m
 }
 
 // Check checks if request would be limited or denied.
-func (m *MultiRateLimiter) Check(rt internalpb.RateType, n int) commonpb.ErrorCode {
+func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n int) commonpb.ErrorCode {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return commonpb.ErrorCode_Success
 	}
-	limit, rate := m.globalRateLimiter.limit(rt, n)
+
+	limiter := m.collectionLimiters[collectionID]
+	if limiter == nil {
+		return commonpb.ErrorCode_Success
+	}
+
+	limit, rate := limiter.limit(rt, n)
 	if rate == 0 {
-		return m.GetErrorCode(rt)
+		return limiter.getErrorCode(rt)
 	}
 	if limit {
 		return commonpb.ErrorCode_RateLimit
-	}
-	return commonpb.ErrorCode_Success
-}
-
-func (m *MultiRateLimiter) GetErrorCode(rt internalpb.RateType) commonpb.ErrorCode {
-	switch rt {
-	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
-		m.quotaStatesMu.RLock()
-		defer m.quotaStatesMu.RUnlock()
-		return m.quotaStates[milvuspb.QuotaState_DenyToWrite]
-	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
-		m.quotaStatesMu.RLock()
-		defer m.quotaStatesMu.RUnlock()
-		return m.quotaStates[milvuspb.QuotaState_DenyToRead]
 	}
 	return commonpb.ErrorCode_Success
 }
@@ -95,34 +89,69 @@ func (m *MultiRateLimiter) GetErrorCode(rt internalpb.RateType) commonpb.ErrorCo
 func (m *MultiRateLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
-	states := make([]milvuspb.QuotaState, 0, len(m.quotaStates))
-	reasons := make([]string, 0, len(m.quotaStates))
-	for k, v := range m.quotaStates {
-		states = append(states, k)
-		reasons = append(reasons, GetQuotaErrorString(v))
+	serviceStates := make(map[milvuspb.QuotaState]typeutil.Set[commonpb.ErrorCode])
+
+	// deduplicate same (state, code) pair from different collection
+	for _, limiter := range m.collectionLimiters {
+		limiter.quotaStates.Range(func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+			if serviceStates[state] == nil {
+				serviceStates[state] = typeutil.NewSet[commonpb.ErrorCode]()
+			}
+			serviceStates[state].Insert(errCode)
+			return true
+		})
 	}
+
+	states := make([]milvuspb.QuotaState, 0)
+	reasons := make([]string, 0)
+	for state, errCodes := range serviceStates {
+		for errCode := range errCodes {
+			states = append(states, state)
+			reasons = append(reasons, GetQuotaErrorString(errCode))
+		}
+	}
+
 	return states, reasons
 }
 
 // SetQuotaStates sets quota states for MultiRateLimiter.
-func (m *MultiRateLimiter) SetQuotaStates(states []milvuspb.QuotaState, codes []commonpb.ErrorCode) {
+func (m *MultiRateLimiter) SetRates(rates []*proxypb.CollectionRate) error {
 	m.quotaStatesMu.Lock()
 	defer m.quotaStatesMu.Unlock()
-	m.quotaStates = make(map[milvuspb.QuotaState]commonpb.ErrorCode, len(states))
-	for i := 0; i < len(states); i++ {
-		m.quotaStates[states[i]] = codes[i]
+	collectionSet := typeutil.NewUniqueSet()
+	for _, collectionRates := range rates {
+		collectionSet.Insert(collectionRates.Collection)
+		rateLimiter, ok := m.collectionLimiters[collectionRates.GetCollection()]
+		if !ok {
+			rateLimiter = newRateLimiter()
+		}
+		err := rateLimiter.setRates(collectionRates)
+		if err != nil {
+			return err
+		}
+		m.collectionLimiters[collectionRates.GetCollection()] = rateLimiter
 	}
+
+	// remove dropped collection's rate limiter
+	for collectionID := range m.collectionLimiters {
+		if !collectionSet.Contain(collectionID) {
+			delete(m.collectionLimiters, collectionID)
+		}
+	}
+	return nil
 }
 
 // rateLimiter implements Limiter.
 type rateLimiter struct {
-	limiters *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
+	limiters    *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
+	quotaStates *typeutil.ConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]
 }
 
 // newRateLimiter returns a new RateLimiter.
 func newRateLimiter() *rateLimiter {
 	rl := &rateLimiter{
-		limiters: typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
+		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
+		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
 	}
 	rl.registerLimiters()
 	return rl
@@ -138,34 +167,67 @@ func (rl *rateLimiter) limit(rt internalpb.RateType, n int) (bool, float64) {
 	return !limit.AllowN(time.Now(), n), float64(limit.Limit())
 }
 
-// setRates sets new rates for the limiters.
-func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
-	for _, r := range rates {
+func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
+	log := log.Ctx(context.TODO()).WithRateGroup("proxy.rateLimiter", 1.0, 60.0).With(
+		zap.Int64("proxyNodeID", paramtable.GetNodeID()),
+		zap.Int64("CollectionID", collectionRate.Collection),
+	)
+	for _, r := range collectionRate.GetRates() {
 		if limit, ok := rl.limiters.Get(r.GetRt()); ok {
 			limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-			setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), r.GetR())
+			setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionRate.Collection, r.GetR())
 		} else {
 			return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
 		}
+		log.RatedInfo(30, "current collection rates in proxy",
+			zap.String("rateType", r.Rt.String()),
+			zap.String("rateLimit", ratelimitutil.Limit(r.GetR()).String()),
+		)
 	}
+
+	// clear old quota states
+	rl.quotaStates = typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
+	for i := 0; i < len(collectionRate.GetStates()); i++ {
+		rl.quotaStates.Insert(collectionRate.States[i], collectionRate.Codes[i])
+		log.RatedWarn(30, "Proxy set collection quota states",
+			zap.String("state", collectionRate.GetStates()[i].String()),
+			zap.String("reason", collectionRate.GetCodes()[i].String()),
+		)
+	}
+
 	return nil
 }
 
+func (rl *rateLimiter) getErrorCode(rt internalpb.RateType) commonpb.ErrorCode {
+	switch rt {
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
+			return errCode
+		}
+	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
+		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
+			return errCode
+		}
+	}
+	return commonpb.ErrorCode_Success
+}
+
 // setRateGaugeByRateType sets ProxyLimiterRate metrics.
-func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, rate float64) {
+func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, collectionID int64, rate float64) {
 	if ratelimitutil.Limit(rate) == ratelimitutil.Inf {
 		return
 	}
 	nodeIDStr := strconv.FormatInt(nodeID, 10)
+	collectionIDStr := strconv.FormatInt(collectionID, 10)
 	switch rateType {
 	case internalpb.RateType_DMLInsert:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.InsertLabel).Set(rate)
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.InsertLabel).Set(rate)
 	case internalpb.RateType_DMLDelete:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.DeleteLabel).Set(rate)
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.DeleteLabel).Set(rate)
 	case internalpb.RateType_DQLSearch:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.SearchLabel).Set(rate)
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.SearchLabel).Set(rate)
 	case internalpb.RateType_DQLQuery:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, metrics.QueryLabel).Set(rate)
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.QueryLabel).Set(rate)
 	}
 }
 
@@ -181,6 +243,7 @@ func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 
 // registerLimiters register limiter for all rate types.
 func (rl *rateLimiter) registerLimiters() {
+	log := log.Ctx(context.TODO()).WithRateGroup("proxy.rateLimiter", 1.0, 60.0)
 	quotaConfig := &Params.QuotaConfig
 	for rt := range internalpb.RateType_name {
 		var r *paramtable.ParamItem
@@ -228,9 +291,9 @@ func (rl *rateLimiter) registerLimiters() {
 			}
 		}(internalpb.RateType(rt))
 		paramtable.Get().Watch(r.Key, config.NewHandler(fmt.Sprintf("rateLimiter-%d", rt), onEvent))
-		log.Info("RateLimiter register for rateType",
+		log.RatedInfo(30, "RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[rt]),
-			zap.String("rate", ratelimitutil.Limit(r.GetAsFloat()).String()),
+			zap.String("rateLimit", ratelimitutil.Limit(r.GetAsFloat()).String()),
 			zap.String("burst", fmt.Sprintf("%v", burst)))
 	}
 }

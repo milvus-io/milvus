@@ -63,7 +63,12 @@ func TestProxyRpcLimit(t *testing.T) {
 			commonpbutil.WithMsgID(int64(0)),
 			commonpbutil.WithTimeStamp(0),
 		),
-		Rates: rates,
+		Rates: []*proxypb.CollectionRate{
+			{
+				Collection: 1,
+				Rates:      rates,
+			},
+		},
 	}
 	_, err = client.SetRates(ctx, req)
 	// should be limited because of the rpc limit

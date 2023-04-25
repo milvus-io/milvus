@@ -25,7 +25,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
@@ -33,19 +35,21 @@ import (
 )
 
 func TestMultiRateLimiter(t *testing.T) {
+	collectionID := int64(1)
 	t.Run("test multiRateLimiter", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
 		for _, rt := range internalpb.RateType_value {
-			multiLimiter.globalRateLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
+			multiLimiter.collectionLimiters[collectionID].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
 		for _, rt := range internalpb.RateType_value {
-			errCode := multiLimiter.Check(internalpb.RateType(rt), 1)
+			errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-			errCode = multiLimiter.Check(internalpb.RateType(rt), math.MaxInt)
+			errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-			errCode = multiLimiter.Check(internalpb.RateType(rt), math.MaxInt)
+			errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
 			assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
@@ -53,10 +57,11 @@ func TestMultiRateLimiter(t *testing.T) {
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
-			errCode := multiLimiter.Check(internalpb.RateType(rt), 1)
+			errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
@@ -69,7 +74,7 @@ func TestMultiRateLimiter(t *testing.T) {
 			multiLimiter := NewMultiRateLimiter()
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-			errCode := multiLimiter.Check(internalpb.RateType_DMLInsert, 1*1024*1024)
+			errCode := multiLimiter.Check(collectionID, internalpb.RateType_DMLInsert, 1*1024*1024)
 			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
 			Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 			Params.QuotaConfig.DMLMaxInsertRate = bakInsertRate
@@ -79,6 +84,69 @@ func TestMultiRateLimiter(t *testing.T) {
 		run(math.MaxFloat64 / 2)
 		run(math.MaxFloat64 / 3)
 		run(math.MaxFloat64 / 10000)
+	})
+
+	t.Run("test set rates", func(t *testing.T) {
+		multiLimiter := NewMultiRateLimiter()
+		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
+		for _, rt := range internalpb.RateType_value {
+			zeroRates = append(zeroRates, &internalpb.Rate{
+				Rt: internalpb.RateType(rt), R: 0,
+			})
+		}
+
+		err := multiLimiter.SetRates([]*proxypb.CollectionRate{
+			{
+				Collection: 1,
+				Rates:      zeroRates,
+			},
+			{
+				Collection: 2,
+				Rates:      zeroRates,
+			},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("test quota states", func(t *testing.T) {
+		multiLimiter := NewMultiRateLimiter()
+		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
+		for _, rt := range internalpb.RateType_value {
+			zeroRates = append(zeroRates, &internalpb.Rate{
+				Rt: internalpb.RateType(rt), R: 0,
+			})
+		}
+
+		err := multiLimiter.SetRates([]*proxypb.CollectionRate{
+			{
+				Collection: 1,
+				Rates:      zeroRates,
+				States: []milvuspb.QuotaState{
+					milvuspb.QuotaState_DenyToWrite,
+				},
+				Codes: []commonpb.ErrorCode{
+					commonpb.ErrorCode_DiskQuotaExhausted,
+				},
+			},
+			{
+				Collection: 2,
+				Rates:      zeroRates,
+
+				States: []milvuspb.QuotaState{
+					milvuspb.QuotaState_DenyToRead,
+				},
+				Codes: []commonpb.ErrorCode{
+					commonpb.ErrorCode_ForceDeny,
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		states, codes := multiLimiter.GetQuotaStates()
+		assert.Len(t, states, 2)
+		assert.Len(t, codes, 2)
+		assert.Contains(t, codes, GetQuotaErrorString(commonpb.ErrorCode_DiskQuotaExhausted))
+		assert.Contains(t, codes, GetQuotaErrorString(commonpb.ErrorCode_ForceDeny))
 	})
 }
 
@@ -110,7 +178,10 @@ func TestRateLimiter(t *testing.T) {
 				Rt: internalpb.RateType(rt), R: 0,
 			})
 		}
-		err := limiter.setRates(zeroRates)
+		err := limiter.setRates(&proxypb.CollectionRate{
+			Collection: 1,
+			Rates:      zeroRates,
+		})
 		assert.NoError(t, err)
 		for _, rt := range internalpb.RateType_value {
 			for i := 0; i < 100; i++ {
@@ -118,6 +189,50 @@ func TestRateLimiter(t *testing.T) {
 				assert.True(t, ok)
 			}
 		}
+
+		err = limiter.setRates(&proxypb.CollectionRate{
+			Collection: 1,
+			States:     []milvuspb.QuotaState{milvuspb.QuotaState_DenyToRead, milvuspb.QuotaState_DenyToWrite},
+			Codes:      []commonpb.ErrorCode{commonpb.ErrorCode_DiskQuotaExhausted, commonpb.ErrorCode_DiskQuotaExhausted},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, limiter.quotaStates.Len(), 2)
+
+		err = limiter.setRates(&proxypb.CollectionRate{
+			Collection: 1,
+			States:     []milvuspb.QuotaState{},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, limiter.quotaStates.Len(), 0)
+	})
+
+	t.Run("test get error code", func(t *testing.T) {
+		limiter := newRateLimiter()
+		for _, rt := range internalpb.RateType_value {
+			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
+		}
+
+		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
+		for _, rt := range internalpb.RateType_value {
+			zeroRates = append(zeroRates, &internalpb.Rate{
+				Rt: internalpb.RateType(rt), R: 0,
+			})
+		}
+		err := limiter.setRates(&proxypb.CollectionRate{
+			Collection: 1,
+			Rates:      zeroRates,
+			States: []milvuspb.QuotaState{
+				milvuspb.QuotaState_DenyToWrite,
+				milvuspb.QuotaState_DenyToRead,
+			},
+			Codes: []commonpb.ErrorCode{
+				commonpb.ErrorCode_DiskQuotaExhausted,
+				commonpb.ErrorCode_ForceDeny,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_ForceDeny, limiter.getErrorCode(internalpb.RateType_DQLQuery))
+		assert.Equal(t, commonpb.ErrorCode_DiskQuotaExhausted, limiter.getErrorCode(internalpb.RateType_DMLInsert))
 	})
 
 	t.Run("tests refresh rate by config", func(t *testing.T) {

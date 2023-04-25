@@ -41,7 +41,7 @@ type TimeTickProvider interface {
 // If Limit function return true, the request will be rejected.
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 type Limiter interface {
-	Check(rt internalpb.RateType, n int) commonpb.ErrorCode
+	Check(collectionID int64, rt internalpb.RateType, n int) commonpb.ErrorCode
 }
 
 // Component is the interface all services implement

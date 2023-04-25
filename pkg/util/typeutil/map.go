@@ -95,3 +95,7 @@ func (m *ConcurrentMap[K, V]) GetAndRemove(key K) (V, bool) {
 	m.len.Dec()
 	return value.(V), true
 }
+
+func (m *ConcurrentMap[K, V]) Len() int {
+	return int(m.len.Load())
+}

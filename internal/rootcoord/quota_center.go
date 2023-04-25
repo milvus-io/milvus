@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -58,6 +59,10 @@ var DefaultRateAllocateStrategy = Average
 const Inf = ratelimitutil.Inf
 
 type Limit = ratelimitutil.Limit
+
+type collectionRates = map[internalpb.RateType]Limit
+
+type collectionStates = map[milvuspb.QuotaState]commonpb.ErrorCode
 
 // QuotaCenter manages the quota and limitations of the whole cluster,
 // it receives metrics info from DataNodes, QueryNodes and Proxies, and
@@ -83,13 +88,15 @@ type QuotaCenter struct {
 	dataCoord  types.DataCoord
 
 	// metrics
-	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
-	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
-	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
-	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
+	queryNodeMetrics    map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
+	dataNodeMetrics     map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
+	proxyMetrics        map[UniqueID]*metricsinfo.ProxyQuotaMetrics
+	dataCoordMetrics    *metricsinfo.DataCoordQuotaMetrics
+	readableCollections []int64
+	writableCollections []int64
 
-	currentRates map[internalpb.RateType]Limit
-	quotaStates  map[milvuspb.QuotaState]commonpb.ErrorCode
+	currentRates map[int64]collectionRates
+	quotaStates  map[int64]collectionStates
 	tsoAllocator tso.Allocator
 
 	rateAllocateStrategy RateAllocateStrategy
@@ -101,12 +108,14 @@ type QuotaCenter struct {
 // NewQuotaCenter returns a new QuotaCenter.
 func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, dataCoord types.DataCoord, tsoAllocator tso.Allocator) *QuotaCenter {
 	return &QuotaCenter{
-		proxies:      proxies,
-		queryCoord:   queryCoord,
-		dataCoord:    dataCoord,
-		currentRates: make(map[internalpb.RateType]Limit),
-		quotaStates:  make(map[milvuspb.QuotaState]commonpb.ErrorCode),
-		tsoAllocator: tsoAllocator,
+		proxies:             proxies,
+		queryCoord:          queryCoord,
+		dataCoord:           dataCoord,
+		currentRates:        make(map[int64]map[internalpb.RateType]Limit),
+		quotaStates:         make(map[int64]map[milvuspb.QuotaState]commonpb.ErrorCode),
+		tsoAllocator:        tsoAllocator,
+		readableCollections: make([]int64, 0),
+		writableCollections: make([]int64, 0),
 
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
 		stopChan:             make(chan struct{}),
@@ -183,11 +192,15 @@ func (q *QuotaCenter) syncMetrics() error {
 		if err != nil {
 			return err
 		}
+
+		collections := typeutil.NewUniqueSet()
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
+				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
 		}
+		q.readableCollections = collections.Collect()
 		return nil
 	})
 	// get Data cluster metrics
@@ -204,11 +217,15 @@ func (q *QuotaCenter) syncMetrics() error {
 		if err != nil {
 			return err
 		}
+
+		collections := typeutil.NewUniqueSet()
 		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
 			if dataNodeMetric.QuotaMetrics != nil {
 				q.dataNodeMetrics[dataNodeMetric.ID] = dataNodeMetric.QuotaMetrics
+				collections.Insert(dataNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
 		}
+		q.writableCollections = collections.Collect()
 		if dataCoordTopology.Cluster.Self.QuotaMetrics != nil {
 			q.dataCoordMetrics = dataCoordTopology.Cluster.Self.QuotaMetrics
 		}
@@ -246,20 +263,36 @@ func (q *QuotaCenter) syncMetrics() error {
 }
 
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
-func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode) {
-	q.currentRates[internalpb.RateType_DMLInsert] = 0
-	q.currentRates[internalpb.RateType_DMLDelete] = 0
-	q.currentRates[internalpb.RateType_DMLBulkLoad] = 0
-	log.Warn("QuotaCenter force to deny writing", zap.String("reason", errorCode.String()))
-	q.quotaStates[milvuspb.QuotaState_DenyToWrite] = errorCode
+func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, collections ...int64) {
+	if len(collections) == 0 && len(q.writableCollections) != 0 {
+		// default to all writable collections
+		collections = q.writableCollections
+	}
+	for _, collection := range collections {
+		q.currentRates[collection][internalpb.RateType_DMLInsert] = 0
+		q.currentRates[collection][internalpb.RateType_DMLDelete] = 0
+		q.currentRates[collection][internalpb.RateType_DMLBulkLoad] = 0
+		q.quotaStates[collection][milvuspb.QuotaState_DenyToWrite] = errorCode
+	}
+	log.Warn("QuotaCenter force to deny writing",
+		zap.Int64s("collectionIDs", collections),
+		zap.String("reason", errorCode.String()))
 }
 
-// forceDenyWriting sets dql rates to 0 to reject all dql requests.
-func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode) {
-	q.currentRates[internalpb.RateType_DQLSearch] = 0
-	q.currentRates[internalpb.RateType_DQLQuery] = 0
-	log.Warn("QuotaCenter force to deny reading", zap.String("reason", errorCode.String()))
-	q.quotaStates[milvuspb.QuotaState_DenyToRead] = errorCode
+// forceDenyReading sets dql rates to 0 to reject all dql requests.
+func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, collections ...int64) {
+	if len(collections) == 0 {
+		// default to all readable collections
+		collections = q.readableCollections
+	}
+	for _, collection := range collections {
+		q.currentRates[collection][internalpb.RateType_DQLSearch] = 0
+		q.currentRates[collection][internalpb.RateType_DQLQuery] = 0
+		q.quotaStates[collection][milvuspb.QuotaState_DenyToRead] = errorCode
+	}
+	log.Warn("QuotaCenter force to deny reading",
+		zap.Int64s("collectionIDs", collections),
+		zap.String("reason", errorCode.String()))
 }
 
 // getRealTimeRate return real time rate in Proxy.
@@ -276,9 +309,11 @@ func (q *QuotaCenter) getRealTimeRate(rateType internalpb.RateType) float64 {
 }
 
 // guaranteeMinRate make sure the rate will not be less than the min rate.
-func (q *QuotaCenter) guaranteeMinRate(minRate float64, rateType internalpb.RateType) {
-	if minRate > 0 && q.currentRates[rateType] < Limit(minRate) {
-		q.currentRates[rateType] = Limit(minRate)
+func (q *QuotaCenter) guaranteeMinRate(minRate float64, rateType internalpb.RateType, collections ...int64) {
+	for _, collection := range collections {
+		if minRate > 0 && q.currentRates[collection][rateType] < Limit(minRate) {
+			q.currentRates[collection][rateType] = Limit(minRate)
+		}
 	}
 }
 
@@ -289,42 +324,87 @@ func (q *QuotaCenter) calculateReadRates() {
 		return
 	}
 
+	enableQueueProtection := Params.QuotaConfig.QueueProtectionEnabled.GetAsBool()
+	if !enableQueueProtection {
+		return
+	}
+
+	limitCollectionSet := typeutil.NewUniqueSet()
+
+	// query latency
+	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second)
+	// queueLatencyThreshold >= 0 means enable queue latency protection
+	if queueLatencyThreshold >= 0 {
+		for _, metric := range q.queryNodeMetrics {
+			searchLatency := metric.SearchQueue.AvgQueueDuration
+			queryLatency := metric.QueryQueue.AvgQueueDuration
+			if searchLatency >= queueLatencyThreshold || queryLatency >= queueLatencyThreshold {
+				limitCollectionSet.Insert(metric.Effect.CollectionIDs...)
+			}
+		}
+	}
+
+	// queue length
+	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold.GetAsInt64()
+	if nqInQueueThreshold >= 0 {
+		// >= 0 means enable queue length protection
+		sum := func(ri metricsinfo.ReadInfoInQueue) int64 {
+			return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
+		}
+		for _, metric := range q.queryNodeMetrics {
+			searchNQSum := sum(metric.SearchQueue)
+			queryTasksSum := sum(metric.QueryQueue)
+			nqInQueue := searchNQSum + queryTasksSum // We think of the NQ of query request as 1.
+			if nqInQueue >= nqInQueueThreshold {
+				limitCollectionSet.Insert(metric.Effect.CollectionIDs...)
+			}
+		}
+	}
+
+	// read result
+	enableResultProtection := Params.QuotaConfig.ResultProtectionEnabled.GetAsBool()
+	if enableResultProtection {
+		maxRate := Params.QuotaConfig.MaxReadResultRate.GetAsFloat()
+		rateCount := float64(0)
+		for _, metric := range q.proxyMetrics {
+			for _, rm := range metric.Rms {
+				if rm.Label == metricsinfo.ReadResultThroughput {
+					rateCount += rm.Rate
+				}
+			}
+		}
+		if rateCount >= maxRate {
+			limitCollectionSet.Insert(q.readableCollections...)
+		}
+	}
+
 	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64) {
-		if q.currentRates[internalpb.RateType_DQLSearch] != Inf && realTimeSearchRate > 0 {
-			q.currentRates[internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
+	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64, collections ...int64) {
+		for _, collection := range collections {
+			if q.currentRates[collection][internalpb.RateType_DQLSearch] != Inf && realTimeSearchRate > 0 {
+				q.currentRates[collection][internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
+				log.Warn("QuotaCenter cool read rates off done",
+					zap.Int64("collectionID", collection),
+					zap.Any("searchRate", q.currentRates[collection][internalpb.RateType_DQLSearch]))
+			}
+			if q.currentRates[collection][internalpb.RateType_DQLQuery] != Inf && realTimeQueryRate > 0 {
+				q.currentRates[collection][internalpb.RateType_DQLQuery] = Limit(realTimeQueryRate * coolOffSpeed)
+				log.Warn("QuotaCenter cool read rates off done",
+					zap.Int64("collectionID", collection),
+					zap.Any("queryRate", q.currentRates[collection][internalpb.RateType_DQLQuery]))
+			}
 		}
-		if q.currentRates[internalpb.RateType_DQLQuery] != Inf && realTimeSearchRate > 0 {
-			q.currentRates[internalpb.RateType_DQLQuery] = Limit(realTimeQueryRate * coolOffSpeed)
-		}
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate.GetAsFloat(), internalpb.RateType_DQLSearch)
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate.GetAsFloat(), internalpb.RateType_DQLQuery)
-		log.Warn("QuotaCenter cool read rates off done",
-			zap.Any("searchRate", q.currentRates[internalpb.RateType_DQLSearch]),
-			zap.Any("queryRate", q.currentRates[internalpb.RateType_DQLQuery]))
-		log.Info("QueryNodeMetrics when cool-off", zap.Any("metrics", q.queryNodeMetrics))
+
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate.GetAsFloat(), internalpb.RateType_DQLSearch, collections...)
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate.GetAsFloat(), internalpb.RateType_DQLQuery, collections...)
+		log.Info("QueryNodeMetrics when cool-off",
+			zap.Any("metrics", q.queryNodeMetrics))
 	}
 
 	// TODO: unify search and query?
 	realTimeSearchRate := q.getRealTimeRate(internalpb.RateType_DQLSearch)
 	realTimeQueryRate := q.getRealTimeRate(internalpb.RateType_DQLQuery)
-
-	queueLatencyFactor := q.getQueryLatencyFactor()
-	if Limit(queueLatencyFactor) == Limit(coolOffSpeed) {
-		coolOff(realTimeSearchRate, realTimeQueryRate)
-		return
-	}
-
-	queueLengthFactor := q.getNQInQueryFactor()
-	if Limit(queueLengthFactor) == Limit(coolOffSpeed) {
-		coolOff(realTimeSearchRate, realTimeQueryRate)
-		return
-	}
-
-	resultRateFactor := q.getReadResultFactor()
-	if Limit(resultRateFactor) == Limit(coolOffSpeed) {
-		coolOff(realTimeSearchRate, realTimeQueryRate)
-	}
+	coolOff(realTimeSearchRate, realTimeQueryRate, limitCollectionSet.Collect()...)
 }
 
 // calculateWriteRates calculates and sets dml rates.
@@ -340,40 +420,128 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		return nil
 	}
 
+	collectionFactor := map[int64]float64{}
+	for _, collection := range q.writableCollections {
+		collectionFactor[collection] = 1.0
+	}
+
 	ts, err := q.tsoAllocator.GenerateTSO(1)
 	if err != nil {
 		return err
 	}
-	ttFactor := q.getTimeTickDelayFactor(ts)
-	if ttFactor <= 0 {
-		q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay) // tt protection
-		return nil
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	curTs, _ := tsoutil.ParseTS(ts)
+	processTtDelay := func(role string, nodeID int64, vchannel string, minTs time.Time, delay time.Duration, effectedCollections []int64) {
+		log := log.With(zap.String("role", role),
+			zap.Int64("nodeID", nodeID),
+			zap.String("vchannel", vchannel),
+			zap.Time("curTs", curTs),
+			zap.Time("minTs", minTs),
+			zap.Duration("delay", delay),
+			zap.Duration("MaxDelay", maxDelay),
+			zap.Int64s("effectedCollections", effectedCollections),
+		)
+
+		factor := float64(maxDelay.Nanoseconds()-delay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
+
+		if factor <= 0 {
+			log.Warn("QuotaCenter: force deny writing due to long timeTick delay")
+			q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, effectedCollections...)
+		}
+
+		for _, collection := range effectedCollections {
+			if factor < collectionFactor[collection] {
+				collectionFactor[collection] = factor
+			}
+		}
+
 	}
 
-	memFactor := q.getMemoryFactor()
-	if memFactor <= 0 {
-		q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted) // memory protection
-		return nil
+	processMemUsage := func(role string, nodeID int64, hms metricsinfo.HardwareMetrics, memLowLevel float64, memHighLevel float64, effectedCollections []int64) {
+		memoryWaterLevel := float64(hms.MemoryUsage) / float64(hms.Memory)
+		log := log.With(
+			zap.String("role", role),
+			zap.Int64("nodeID", nodeID),
+			zap.Uint64("usedMem", hms.MemoryUsage),
+			zap.Uint64("totalMem", hms.Memory),
+			zap.Float64("memoryWaterLevel", memoryWaterLevel),
+			zap.Float64("memoryHighWaterLevel", memHighLevel),
+			zap.Int64s("effectedCollections", effectedCollections),
+		)
+
+		factor := (memHighLevel - memoryWaterLevel) / (memHighLevel - memLowLevel)
+
+		if factor <= 0 {
+			log.Warn("QuotaCenter: force deny writing due to memory reach high water")
+			q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted, effectedCollections...)
+		}
+
+		if factor < 0.9 {
+			log.Warn("QuotaCenter: Node memory to low water level, limit writing rate",
+				zap.Float64("factor", factor))
+		}
+
+		for _, collection := range effectedCollections {
+			if factor < collectionFactor[collection] {
+				collectionFactor[collection] = factor
+			}
+		}
 	}
 
-	if memFactor < ttFactor {
-		ttFactor = memFactor
+	enableTtProtection := Params.QuotaConfig.TtProtectionEnabled.GetAsBool()
+	enableMemProtection := Params.QuotaConfig.MemProtectionEnabled.GetAsBool()
+
+	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat()
+	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel.GetAsFloat()
+	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.GetAsFloat()
+	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat()
+
+	for nodeID, metric := range q.queryNodeMetrics {
+		if enableTtProtection && maxDelay >= 0 && metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
+			minTs, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
+			delay := curTs.Sub(minTs)
+			processTtDelay(typeutil.QueryNodeRole, nodeID, metric.Fgm.MinFlowGraphChannel, minTs, delay, metric.Effect.CollectionIDs)
+			metrics.RootCoordTtDelay.WithLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(delay.Milliseconds()))
+		}
+
+		if enableMemProtection {
+			processMemUsage(typeutil.QueryNodeRole, nodeID, metric.Hms, queryNodeMemoryLowWaterLevel, queryNodeMemoryHighWaterLevel, metric.Effect.CollectionIDs)
+		}
 	}
 
-	if q.currentRates[internalpb.RateType_DMLInsert] != Inf {
-		q.currentRates[internalpb.RateType_DMLInsert] *= Limit(ttFactor)
+	for nodeID, metric := range q.dataNodeMetrics {
+		if enableTtProtection && maxDelay >= 0 && metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
+			minTs, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
+			delay := curTs.Sub(minTs)
+			processTtDelay(typeutil.DataNodeRole, nodeID, metric.Fgm.MinFlowGraphChannel, minTs, delay, metric.Effect.CollectionIDs)
+			metrics.RootCoordTtDelay.WithLabelValues(typeutil.DataNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(delay.Milliseconds()))
+		}
+
+		if enableMemProtection {
+			processMemUsage(typeutil.QueryNodeRole, nodeID, metric.Hms, dataNodeMemoryLowWaterLevel, dataNodeMemoryHighWaterLevel, metric.Effect.CollectionIDs)
+		}
 	}
-	if q.currentRates[internalpb.RateType_DMLDelete] != Inf {
-		q.currentRates[internalpb.RateType_DMLDelete] *= Limit(ttFactor)
+
+	for collection, cf := range collectionFactor {
+		if q.currentRates[collection][internalpb.RateType_DMLInsert] != Inf && cf > 0 {
+			q.currentRates[collection][internalpb.RateType_DMLInsert] *= Limit(cf)
+		}
+		if q.currentRates[collection][internalpb.RateType_DMLDelete] != Inf && cf > 0 {
+			q.currentRates[collection][internalpb.RateType_DMLDelete] *= Limit(cf)
+		}
+		q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRate.GetAsFloat(), internalpb.RateType_DMLInsert)
+		q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRate.GetAsFloat(), internalpb.RateType_DMLDelete)
+		log.Warn("QuotaCenter cool write rates off done",
+			zap.Int64("collectionID", collection),
+			zap.Float64("factor", cf))
 	}
-	q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRate.GetAsFloat(), internalpb.RateType_DMLInsert)
-	q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRate.GetAsFloat(), internalpb.RateType_DMLDelete)
+
 	return nil
 }
 
 // calculateRates calculates target rates by different strategies.
 func (q *QuotaCenter) calculateRates() error {
-	q.resetCurrentRates()
+	q.resetAllCurrentRates()
 
 	err := q.calculateWriteRates()
 	if err != nil {
@@ -385,236 +553,45 @@ func (q *QuotaCenter) calculateRates() error {
 	return nil
 }
 
+func (q *QuotaCenter) resetAllCurrentRates() {
+	q.quotaStates = make(map[int64]map[milvuspb.QuotaState]commonpb.ErrorCode)
+	q.currentRates = map[int64]map[internalpb.RateType]ratelimitutil.Limit{}
+	for _, collection := range q.writableCollections {
+		q.resetCurrentRate(internalpb.RateType_DMLInsert, collection)
+		q.resetCurrentRate(internalpb.RateType_DMLDelete, collection)
+		q.resetCurrentRate(internalpb.RateType_DMLBulkLoad, collection)
+	}
+
+	for _, collection := range q.readableCollections {
+		q.resetCurrentRate(internalpb.RateType_DQLSearch, collection)
+		q.resetCurrentRate(internalpb.RateType_DQLQuery, collection)
+	}
+}
+
 // resetCurrentRates resets all current rates to configured rates.
-func (q *QuotaCenter) resetCurrentRates() {
-	for _, rateType := range internalpb.RateType_value {
-		rt := internalpb.RateType(rateType)
-		switch rt {
-		case internalpb.RateType_DMLInsert:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat())
-		case internalpb.RateType_DMLDelete:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat())
-		case internalpb.RateType_DMLBulkLoad:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat())
-		case internalpb.RateType_DQLSearch:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat())
-		case internalpb.RateType_DQLQuery:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat())
-		}
-		if q.currentRates[rt] < 0 {
-			q.currentRates[rt] = Inf // no limit
-		}
-	}
-	q.quotaStates = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
-}
-
-// getTimeTickDelayFactor gets time tick delay of DataNodes and QueryNodes,
-// and return the factor according to max tolerable time tick delay.
-func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
-	var curMaxDelay time.Duration
-	var role, vchannel string
-	var minTt time.Time
-
-	t1, _ := tsoutil.ParseTS(ts)
-	for nodeID, metric := range q.queryNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
-			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
-			delay := t1.Sub(t2)
-			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
-				curMaxDelay = delay
-				role = fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)
-				vchannel = metric.Fgm.MinFlowGraphChannel
-				minTt = t2
-			}
-			metrics.RootCoordTtDelay.WithLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
-		}
-	}
-	for nodeID, metric := range q.dataNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
-			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
-			delay := t1.Sub(t2)
-			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
-				curMaxDelay = delay
-				role = fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)
-				vchannel = metric.Fgm.MinFlowGraphChannel
-				minTt = t2
-			}
-			metrics.RootCoordTtDelay.WithLabelValues(typeutil.DataNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
-		}
+func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64) {
+	if q.currentRates[collection] == nil {
+		q.currentRates[collection] = make(map[internalpb.RateType]ratelimitutil.Limit)
 	}
 
-	if !Params.QuotaConfig.TtProtectionEnabled.GetAsBool() {
-		return 1
+	if q.quotaStates[collection] == nil {
+		q.quotaStates[collection] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
 	}
-
-	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
-	if maxDelay < 0 {
-		// < 0 means disable tt protection
-		return 1
+	switch rt {
+	case internalpb.RateType_DMLInsert:
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat())
+	case internalpb.RateType_DMLDelete:
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat())
+	case internalpb.RateType_DMLBulkLoad:
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat())
+	case internalpb.RateType_DQLSearch:
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat())
+	case internalpb.RateType_DQLQuery:
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat())
 	}
-
-	if curMaxDelay.Nanoseconds() >= maxDelay.Nanoseconds() {
-		log.Warn("QuotaCenter force deny writing due to long timeTick delay",
-			zap.String("node", role),
-			zap.String("vchannel", vchannel),
-			zap.Time("curTs", t1),
-			zap.Time("minTs", minTt),
-			zap.Duration("delay", curMaxDelay),
-			zap.Duration("MaxDelay", maxDelay))
-		log.Info("DataNode and QueryNode Metrics",
-			zap.Any("QueryNodeMetrics", q.queryNodeMetrics),
-			zap.Any("DataNodeMetrics", q.dataNodeMetrics))
-		return 0
+	if q.currentRates[collection][rt] < 0 {
+		q.currentRates[collection][rt] = Inf // no limit
 	}
-	factor := float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
-	if factor <= 0.9 {
-		log.Warn("QuotaCenter: limit writing due to long timeTick delay",
-			zap.String("node", role),
-			zap.String("vchannel", vchannel),
-			zap.Time("curTs", t1),
-			zap.Time("minTs", minTt),
-			zap.Duration("delay", curMaxDelay),
-			zap.Duration("MaxDelay", maxDelay),
-			zap.Float64("factor", factor))
-	}
-	return factor
-}
-
-// getNQInQueryFactor checks search&query nq in QueryNode,
-// and return the factor according to NQInQueueThreshold.
-func (q *QuotaCenter) getNQInQueryFactor() float64 {
-	if !Params.QuotaConfig.QueueProtectionEnabled.GetAsBool() {
-		return 1
-	}
-
-	sum := func(ri metricsinfo.ReadInfoInQueue) int64 {
-		return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
-	}
-
-	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold.GetAsInt64()
-	if nqInQueueThreshold < 0 {
-		// < 0 means disable queue length protection
-		return 1
-	}
-	for _, metric := range q.queryNodeMetrics {
-		searchNQSum := sum(metric.SearchQueue)
-		queryTasksSum := sum(metric.QueryQueue)
-		nqInQueue := searchNQSum + queryTasksSum // We think of the NQ of query request as 1.
-		if nqInQueue >= nqInQueueThreshold {
-			return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-		}
-	}
-	return 1
-}
-
-// getQueryLatencyFactor checks queueing latency in QueryNode for search&query requests,
-// and return the factor according to QueueLatencyThreshold.
-func (q *QuotaCenter) getQueryLatencyFactor() float64 {
-	if !Params.QuotaConfig.QueueProtectionEnabled.GetAsBool() {
-		return 1
-	}
-
-	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second)
-	if queueLatencyThreshold < 0 {
-		// < 0 means disable queue latency protection
-		return 1
-	}
-	for _, metric := range q.queryNodeMetrics {
-		searchLatency := metric.SearchQueue.AvgQueueDuration
-		queryLatency := metric.QueryQueue.AvgQueueDuration
-		if searchLatency >= queueLatencyThreshold || queryLatency >= queueLatencyThreshold {
-			return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-		}
-	}
-	return 1
-}
-
-// getReadResultFactor checks search result rate in Proxy,
-// and return the factor according to MaxReadResultRate.
-func (q *QuotaCenter) getReadResultFactor() float64 {
-	if !Params.QuotaConfig.ResultProtectionEnabled.GetAsBool() {
-		return 1
-	}
-
-	maxRate := Params.QuotaConfig.MaxReadResultRate.GetAsFloat()
-	rateCount := float64(0)
-	for _, metric := range q.proxyMetrics {
-		for _, rm := range metric.Rms {
-			if rm.Label == metricsinfo.ReadResultThroughput {
-				rateCount += rm.Rate
-			}
-		}
-	}
-	if rateCount >= maxRate {
-		return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-	}
-	return 1
-}
-
-// getMemoryFactor checks whether any node has memory resource issue,
-// and return the factor according to max memory water level.
-func (q *QuotaCenter) getMemoryFactor() float64 {
-	factor := float64(1)
-	if !Params.QuotaConfig.MemProtectionEnabled.GetAsBool() {
-		return 1
-	}
-
-	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat()
-	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel.GetAsFloat()
-	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.GetAsFloat()
-	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat()
-
-	for nodeID, metric := range q.queryNodeMetrics {
-		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
-		if memoryWaterLevel <= queryNodeMemoryLowWaterLevel {
-			continue
-		}
-		if memoryWaterLevel >= queryNodeMemoryHighWaterLevel {
-			log.Warn("QuotaCenter: QueryNode memory to high water level",
-				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
-				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
-				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("memoryWaterLevel", memoryWaterLevel),
-				zap.Float64("memoryHighWaterLevel", queryNodeMemoryHighWaterLevel))
-			return 0
-		}
-		p := (queryNodeMemoryHighWaterLevel - memoryWaterLevel) / (queryNodeMemoryHighWaterLevel - queryNodeMemoryLowWaterLevel)
-		if p < factor {
-			log.Warn("QuotaCenter: QueryNode memory to low water level, limit writing rate",
-				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
-				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
-				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("memoryWaterLevel", memoryWaterLevel),
-				zap.Float64("memoryLowWaterLevel", queryNodeMemoryLowWaterLevel))
-			factor = p
-		}
-	}
-	for nodeID, metric := range q.dataNodeMetrics {
-		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
-		if memoryWaterLevel <= dataNodeMemoryLowWaterLevel {
-			continue
-		}
-		if memoryWaterLevel >= dataNodeMemoryHighWaterLevel {
-			log.Warn("QuotaCenter: DataNode memory to high water level",
-				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)),
-				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
-				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("memoryWaterLevel", memoryWaterLevel),
-				zap.Float64("memoryHighWaterLevel", dataNodeMemoryHighWaterLevel))
-			return 0
-		}
-		p := (dataNodeMemoryHighWaterLevel - memoryWaterLevel) / (dataNodeMemoryHighWaterLevel - dataNodeMemoryLowWaterLevel)
-		if p < factor {
-			log.Warn("QuotaCenter: DataNode memory to low water level, limit writing rate",
-				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)),
-				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
-				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("memoryWaterLevel", memoryWaterLevel),
-				zap.Float64("memoryLowWaterLevel", dataNodeMemoryLowWaterLevel))
-			factor = p
-		}
-	}
-	return factor
 }
 
 // ifDiskQuotaExceeded checks if disk quota exceeded.
@@ -642,32 +619,38 @@ func (q *QuotaCenter) ifDiskQuotaExceeded() bool {
 func (q *QuotaCenter) setRates() error {
 	ctx, cancel := context.WithTimeout(context.Background(), SetRatesTimeout)
 	defer cancel()
-	var map2List func() []*internalpb.Rate
-	switch q.rateAllocateStrategy {
-	case Average:
-		map2List = func() []*internalpb.Rate {
+
+	toCollectionRate := func(collection int64, currentRates map[internalpb.RateType]ratelimitutil.Limit) *proxypb.CollectionRate {
+		rates := make([]*internalpb.Rate, 0, len(q.currentRates))
+		switch q.rateAllocateStrategy {
+		case Average:
 			proxyNum := q.proxies.GetProxyCount()
 			if proxyNum == 0 {
 				return nil
 			}
-			rates := make([]*internalpb.Rate, 0, len(q.currentRates))
-			for rt, r := range q.currentRates {
+			for rt, r := range currentRates {
 				if r == Inf {
 					rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r)})
 				} else {
 					rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r) / float64(proxyNum)})
 				}
 			}
-			return rates
+
+		case ByRateWeight:
+			// TODO: support ByRateWeight
 		}
-	case ByRateWeight:
-		// TODO: support ByRateWeight
+
+		return &proxypb.CollectionRate{
+			Collection: collection,
+			Rates:      rates,
+			States:     lo.Keys(q.quotaStates[collection]),
+			Codes:      lo.Values(q.quotaStates[collection]),
+		}
 	}
-	states := make([]milvuspb.QuotaState, 0, len(q.quotaStates))
-	codes := make([]commonpb.ErrorCode, 0, len(q.quotaStates))
-	for k, v := range q.quotaStates {
-		states = append(states, k)
-		codes = append(codes, v)
+
+	collectionRates := make([]*proxypb.CollectionRate, 0)
+	for collection, rates := range q.currentRates {
+		collectionRates = append(collectionRates, toCollectionRate(collection, rates))
 	}
 	timestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
 	req := &proxypb.SetRatesRequest{
@@ -675,9 +658,7 @@ func (q *QuotaCenter) setRates() error {
 			commonpbutil.WithMsgID(int64(timestamp)),
 			commonpbutil.WithTimeStamp(timestamp),
 		),
-		Rates:  map2List(),
-		States: states,
-		Codes:  codes,
+		Rates: collectionRates,
 	}
 	return q.proxies.SetRates(ctx, req)
 }
@@ -685,11 +666,13 @@ func (q *QuotaCenter) setRates() error {
 // recordMetrics records metrics of quota states.
 func (q *QuotaCenter) recordMetrics() {
 	record := func(errorCode commonpb.ErrorCode) {
-		for _, v := range q.quotaStates {
-			if v == errorCode {
-				metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(1)
-				return
+		for _, states := range q.quotaStates {
+			for _, state := range states {
+				if state == errorCode {
+					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(1)
+				}
 			}
+			return
 		}
 		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(0)
 	}

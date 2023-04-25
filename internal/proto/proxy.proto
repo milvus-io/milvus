@@ -50,9 +50,14 @@ message RefreshPolicyInfoCacheRequest {
   string opKey = 3;
 }
 
-message SetRatesRequest {
-  common.MsgBase base = 1;
+message CollectionRate {
+  int64 collection = 1;
   repeated internal.Rate rates = 2;
   repeated milvus.QuotaState states = 3;
   repeated common.ErrorCode codes = 4;
+}
+
+message SetRatesRequest {
+  common.MsgBase base = 1;
+  repeated CollectionRate rates = 2;
 }
