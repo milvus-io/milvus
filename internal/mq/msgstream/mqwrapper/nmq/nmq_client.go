@@ -60,7 +60,7 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
-		return nil, util.WrapError("failed to add/connect to jetstream", err)
+		return nil, util.WrapError("failed to add/connect to jetstream for producer", err)
 	}
 	rp := nmqProducer{js: js, topic: options.Topic}
 	return &rp, nil
@@ -80,7 +80,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		return nil, util.WrapError("failed to create jetstream context", err)
 	}
 	// TODO: do we allow passing in an existing natsChan from options?
-	// also, revisit the size.
+	// also, revisit the size or make it a user param
 	natsChan := make(chan *nats.Msg, 8192)
 	// TODO: do we allow subscribe to a topic that doesn't exist yet? Current logic allows it.
 	_, err = js.AddStream(&nats.StreamConfig{
@@ -88,7 +88,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
-		return nil, util.WrapError("failed to add/connect to jetstream", err)
+		return nil, util.WrapError("failed to add/connect to jetstream for consumer", err)
 	}
 	// TODO: do we only allow exclusive subscribe? Current logic allows double subscribe.
 	sub, err := js.ChanSubscribe(options.Topic, natsChan)

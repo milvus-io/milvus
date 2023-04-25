@@ -50,6 +50,10 @@ func (nc *Consumer) Subscription() string {
 
 // Chan returns a channel to read messages from natsmq
 func (nc *Consumer) Chan() <-chan mqwrapper.Message {
+	if nc.sub == nil {
+		log.Error("accessing Chan of an uninitialized subscription.", zap.String("topic", nc.topic), zap.String("groupName", nc.groupName))
+		panic("failed to chan a consumer without assign")
+	}
 	if nc.msgChan == nil {
 		nc.once.Do(func() {
 			nc.msgChan = make(chan mqwrapper.Message, 256)
@@ -74,7 +78,7 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 						}
 						nc.msgChan <- &nmqMessage{msg: Message{MsgID: meta.Sequence.Stream, Topic: nc.topic, Payload: data.Payload, Properties: data.Properties}}
 					case <-nc.closeChan:
-						nc.sub.Unsubscribe()
+						log.Info("close consumer ", zap.String("topic", nc.topic), zap.String("groupName", nc.groupName))
 						close(nc.msgChan)
 						close(nc.natsChan)
 						return
@@ -88,6 +92,9 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 
 // Seek is used to seek the position in natsmq topic
 func (nc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
+	if nc.sub != nil {
+		return fmt.Errorf("can not seek() on an initilized consumer")
+	}
 	msgID := id.(*nmqID).messageID
 	// skip the first message when consume
 	nc.skip = !inclusive
@@ -104,6 +111,7 @@ func (nc *Consumer) Ack(message mqwrapper.Message) {
 
 // Close is used to free the resounces of this consumer
 func (nc *Consumer) Close() {
+	nc.sub.Unsubscribe()
 	close(nc.closeChan)
 }
 

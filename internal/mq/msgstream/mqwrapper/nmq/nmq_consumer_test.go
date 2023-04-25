@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/natsmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
@@ -45,7 +47,7 @@ func TestNatsConsumer_Subscription(t *testing.T) {
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 		BufSize:                     1024,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -53,7 +55,7 @@ func TestNatsConsumer_Subscription(t *testing.T) {
 	assert.NotNil(t, str)
 }
 
-func Test_PatchEarliestMessageID(t *testing.T) {
+func Test_GetEarliestMessageID(t *testing.T) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
 	defer client.Close()
@@ -61,6 +63,23 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 
 	assert.NotNil(t, mid)
 	assert.Equal(t, mid.(*nmqID).messageID, MessageIDType(1))
+}
+
+func Test_BadEarliestMessageID(t *testing.T) {
+	topic := t.Name()
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	defer client.Close()
+
+	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:            topic,
+		SubscriptionName: topic,
+	})
+	assert.NoError(t, err)
+	consumer.Close()
+	id, err := consumer.GetLatestMsgID()
+	assert.Nil(t, id)
+	assert.Error(t, err)
 }
 
 func TestComsumeMessage(t *testing.T) {
@@ -110,7 +129,7 @@ func TestComsumeMessage(t *testing.T) {
 	assert.Equal(t, msg2, data2.Payload)
 	assert.True(t, reflect.DeepEqual(prop2, data2.Properties))
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
@@ -124,7 +143,7 @@ func TestNatsConsumer_Close(t *testing.T) {
 		Topic:            topic,
 		SubscriptionName: topic,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, c)
 
 	str := c.Subscription()
@@ -132,11 +151,11 @@ func TestNatsConsumer_Close(t *testing.T) {
 
 	c.Close()
 
-	// test double close
+	// Not allow double close.
 	assert.Panics(t, func() { c.Close() }, "Should panic on consumer double close")
 }
 
-func TestNatsClientUnsubscribeTwice(t *testing.T) {
+func TestNatsClientErrorOnUnsubscribeTwice(t *testing.T) {
 	topic := t.Name()
 	client, err := createNmqClient()
 	assert.NoError(t, err)
@@ -156,7 +175,7 @@ func TestNatsClientUnsubscribeTwice(t *testing.T) {
 	t.Log(err)
 }
 
-func TestCheckPreTopicValid(t *testing.T) {
+func TestCheckTopicValid(t *testing.T) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
 	defer client.Close()
@@ -166,7 +185,7 @@ func TestCheckPreTopicValid(t *testing.T) {
 		Topic:            topic,
 		SubscriptionName: topic,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
 	str := consumer.Subscription()
@@ -174,4 +193,138 @@ func TestCheckPreTopicValid(t *testing.T) {
 
 	err = consumer.CheckTopicValid(topic)
 	assert.NoError(t, err)
+
+	// Not allowed to check other topic's validness.
+	err = consumer.CheckTopicValid("BadTopic")
+	assert.Error(t, err)
+
+	consumer.Close()
+	err = consumer.CheckTopicValid(topic)
+	assert.Error(t, err)
+}
+
+func newTestConsumer(topic string, fromEarliest bool, fromLatest bool) (mqwrapper.Consumer, error) {
+	url := server.Nmq.ClientURL()
+	conn, err := nats.Connect(url)
+	if err != nil {
+		return nil, err
+	}
+	js, err := conn.JetStream()
+	if err != nil {
+		return nil, err
+	}
+	groupName := topic
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:     groupName,
+		Subjects: []string{topic},
+	})
+	if err != nil {
+		return nil, err
+	}
+	natsChan := make(chan *nats.Msg, 8192)
+	closeChan := make(chan struct{})
+	return &Consumer{
+		js:        js,
+		topic:     topic,
+		groupName: groupName,
+		natsChan:  natsChan,
+		closeChan: closeChan,
+		skip:      false,
+	}, nil
+}
+
+func newProducer(t *testing.T, topic string) (*nmqClient, mqwrapper.Producer) {
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	producer, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	assert.NoError(t, err)
+	return client, producer
+}
+
+func process(t *testing.T, msgs []string, p mqwrapper.Producer) {
+	for _, msg := range msgs {
+		_, err := p.Send(context.Background(), &mqwrapper.ProducerMessage{
+			Payload:    []byte(msg),
+			Properties: map[string]string{},
+		})
+		assert.NoError(t, err)
+	}
+}
+
+func TestNatsConsumer_SeekExclusive(t *testing.T) {
+	topic := t.Name()
+	c, p := newProducer(t, topic)
+	defer c.Close()
+	defer p.Close()
+
+	msgs := []string{"111", "222", "333", "444", "555"}
+	process(t, msgs, p)
+
+	msgID := &nmqID{messageID: 2}
+	consumer, err := newTestConsumer(topic, false, false)
+	assert.NoError(t, err)
+	defer consumer.Close()
+	err = consumer.Seek(msgID, false)
+	assert.NoError(t, err)
+
+	msg := <-consumer.Chan()
+	assert.Equal(t, "333", string(msg.Payload()))
+	msg = <-consumer.Chan()
+	assert.Equal(t, "444", string(msg.Payload()))
+}
+
+func TestNatsConsumer_SeekInclusive(t *testing.T) {
+	topic := t.Name()
+	c, p := newProducer(t, topic)
+	defer c.Close()
+	defer p.Close()
+
+	msgs := []string{"111", "222", "333", "444", "555"}
+	process(t, msgs, p)
+
+	msgID := &nmqID{messageID: 2}
+	consumer, err := newTestConsumer(topic, false, false)
+	assert.NoError(t, err)
+	defer consumer.Close()
+	err = consumer.Seek(msgID, true)
+	assert.NoError(t, err)
+
+	msg := <-consumer.Chan()
+	assert.Equal(t, "222", string(msg.Payload()))
+	msg = <-consumer.Chan()
+	assert.Equal(t, "333", string(msg.Payload()))
+}
+
+func TestNatsConsumer_NoDoubleSeek(t *testing.T) {
+	topic := t.Name()
+	c, p := newProducer(t, topic)
+	defer c.Close()
+	defer p.Close()
+
+	msgID := &nmqID{messageID: 2}
+	consumer, err := newTestConsumer(topic, false, false)
+	assert.NoError(t, err)
+	defer consumer.Close()
+	err = consumer.Seek(msgID, true)
+	assert.NoError(t, err)
+	err = consumer.Seek(msgID, true)
+	assert.Error(t, err)
+}
+
+func TestNatsConsumer_ChanWithNoAssign(t *testing.T) {
+	topic := t.Name()
+	c, p := newProducer(t, topic)
+	defer c.Close()
+	defer p.Close()
+
+	msgs := []string{"111", "222", "333", "444", "555"}
+	process(t, msgs, p)
+
+	consumer, err := newTestConsumer(topic, false, false)
+	assert.NoError(t, err)
+	defer consumer.Close()
+
+	assert.Panics(t, func() {
+		<-consumer.Chan()
+	})
 }
