@@ -92,7 +92,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	}
 	closeChan := make(chan struct{})
 
-	var sub *nats.Subscription = nil
+	var sub *nats.Subscription
 	position := options.SubscriptionInitialPosition
 	if position != mqwrapper.SubscriptionPositionUnknown {
 		// TODO: should we only allow exclusive subscribe? Current logic allows double subscribe.
