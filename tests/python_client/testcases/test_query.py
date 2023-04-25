@@ -2196,9 +2196,10 @@ class TestQueryCount(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
 
-        # init compact_segment_num_threshold segments
+        # init two segments
         tmp_nb = 100
-        for i in range(ct.compact_segment_num_threshold):
+        segment_num = 2
+        for i in range(segment_num):
             df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
             collection_w.insert(df)
             collection_w.flush()
@@ -2214,7 +2215,7 @@ class TestQueryCount(TestcaseBase):
         # count after compact
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{count: tmp_nb * ct.compact_segment_num_threshold}]})
+                           check_items={exp_res: [{count: tmp_nb * segment_num}]})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_compact_delete(self):
