@@ -327,7 +327,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
-        invalid_search_params = cf.gen_invaild_search_params_type()
+        invalid_search_params = cf.gen_invalid_search_params_type()
         message = "Search params check failed"
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
@@ -828,6 +828,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          ct.err_msg: "Field int63 not exist"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="Now support output vector field")
     @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"]])
     def test_search_output_field_vector(self, output_fields):
         """
@@ -843,6 +844,32 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("index, param", zip(ct.all_index_types[-2:], ct.default_index_params[-2:]))
+    def test_search_output_field_vector_after_gpu_index(self, index, param):
+        """
+        target: test search with vector as output field
+        method: 1. create a collection and insert data
+                2. create an index which doesn't output vectors
+                3. load and search
+        expected: raise exception and report the error
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
+
+        # 2. create an index which doesn't output vectors
+        default_index = {"index_type": index, "params": param, "metric_type": "L2"}
+        collection_w.create_index(field_name, default_index)
+
+        # 3. load and search
+        collection_w.load()
+        search_params = cf.gen_search_param(index)[0]
+        collection_w.search(vectors[:default_nq], field_name, search_params,
+                            default_limit, output_fields=[field_name],
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
@@ -2772,6 +2799,33 @@ class TestCollectionSearch(TestcaseBase):
         assert len(res[0][0].entity._row_data) != 0
         assert default_int64_field_name in res[0][0].entity._row_data
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_output_vector_field(self, auto_id, _async):
+        """
+        target: test search with output fields
+        method: search with one output_field
+        expected: search success
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      auto_id=auto_id)[0:4]
+        # 2. search
+        log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  default_search_exp, _async=_async,
+                                  output_fields=[field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "ids": insert_ids,
+                                               "limit": default_limit,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert len(res[0][0].entity._row_data) != 0
+        assert field_name in res[0][0].entity._row_data
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields(self, nb, nq, dim, auto_id, _async):
         """
@@ -2802,6 +2856,156 @@ class TestCollectionSearch(TestcaseBase):
             res = res.result()
         assert len(res[0][0].entity._row_data) != 0
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23601")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
+    def test_search_output_field_vector_after_different_index(self, index, params):
+        """
+        target: test search with output vector field after different index
+        method: 1. create a collection and insert data
+                2. create index and load
+                3. search with output field vector
+                4. check the result vectors should be equal to the inserted
+        expected: search success
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        data = cf.gen_default_dataframe_data()
+        collection_w.insert(data)
+
+        # 2. create index and load
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index(field_name, default_index)
+        collection_w.load()
+
+        # 3. search with output field vector
+        search_params = cf.gen_search_param(index)[0]
+        res = collection_w.search(vectors[:1], default_search_field,
+                                  search_params, 2, default_search_exp,
+                                  output_fields=[field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": 1,
+                                               "limit": 2})[0]
+
+        # 4. check the result vectors should be equal to the inserted
+        log.info(res[0][0].id)
+        log.info(res[0][0].entity.float_vector)
+        log.info(data['float_vector'][0])
+        assert res[0][0].entity.float_vector == data[field_name][res[0][0].id]
+        # log.info(data['float_vector'][1])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23661")
+    @pytest.mark.parametrize("index", ct.all_index_types[6:8])
+    def test_search_output_field_vector_after_binary_index(self, index):
+        """
+        target: test search with output vector field after binary index
+        method: 1. create a collection and insert data
+                2. create index and load
+                3. search with output field vector
+                4. check the result vectors should be equal to the inserted
+        expected: search success
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
+        data = cf.gen_default_binary_dataframe_data()[0]
+        collection_w.insert(data)
+
+        # 2. create index and load
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        collection_w.create_index(binary_field_name, default_index)
+        collection_w.load()
+
+        # 3. search with output field vector
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
+        binary_vectors = cf.gen_binary_vectors(1, default_dim)[1]
+        res = collection_w.search(binary_vectors, binary_field_name,
+                                  ct.default_search_binary_params, 2, default_search_exp,
+                                  output_fields=[binary_field_name])[0]
+
+        # 4. check the result vectors should be equal to the inserted
+        log.info(res[0][0].id)
+        log.info(res[0][0].entity.float_vector)
+        log.info(data['binary_vector'][0])
+        assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
+        # log.info(data['float_vector'][1])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [32, 128, 768])
+    def test_search_output_field_vector_with_different_dim(self, dim):
+        """
+        target: test search with output vector field after binary index
+        method: 1. create a collection and insert data
+                2. create index and load
+                3. search with output field vector
+                4. check the result vectors should be equal to the inserted
+        expected: search success
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
+        data = cf.gen_default_dataframe_data(dim=dim)
+        collection_w.insert(data)
+
+        # 2. create index and load
+        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", index_params)
+        collection_w.load()
+
+        # 3. search with output field vector
+        vectors = cf.gen_vectors(default_nq, dim=dim)
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit, default_search_exp,
+                                  output_fields=[field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "limit": default_limit})[0]
+
+        # 4. check the result vectors should be equal to the inserted
+        log.info(res[0][0].id)
+        log.info(res[0][0].entity.float_vector)
+        log.info(data['float_vector'][0])
+        for i in range(default_limit):
+            assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [32, 128, 768])
+    def test_search_output_field_vector_with_different_dim(self, dim):
+        """
+        target: test search with output vector field after binary index
+        method: 1. create a collection and insert data
+                2. create index and load
+                3. search with output field vector
+                4. check the result vectors should be equal to the inserted
+        expected: search success
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
+        data = cf.gen_default_dataframe_data(dim=dim)
+        collection_w.insert(data)
+
+        # 2. create index and load
+        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", index_params)
+        collection_w.load()
+
+        # 3. search with output field vector
+        vectors = cf.gen_vectors(default_nq, dim=dim)
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit, default_search_exp,
+                                  output_fields=[field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "limit": default_limit})[0]
+
+        # 4. check the result vectors should be equal to the inserted
+        log.info(res[0][0].id)
+        log.info(res[0][0].entity.float_vector)
+        log.info(data['float_vector'][0])
+        for i in range(default_limit):
+            assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
