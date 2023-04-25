@@ -76,10 +76,12 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         case DataType::JSON: {
             auto& json_data = FIELD_DATA(data, json);
-            std::vector<Json> data_raw(json_data.size());
+            std::vector<Json> data_raw{};
+            data_raw.reserve(json_data.size());
             for (auto& json_bytes : json_data) {
                 data_raw.emplace_back(simdjson::padded_string(json_bytes));
             }
+
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         default: {

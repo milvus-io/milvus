@@ -13,12 +13,15 @@
 
 #include <google/protobuf/text_format.h>
 
+#include <cstdint>
 #include <string>
 
 #include "ExprImpl.h"
 #include "common/VectorTrait.h"
+#include "exceptions/EasyAssert.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -107,8 +110,8 @@ ExtractBinaryRangeExprImpl(FieldId field_id,
         }
     };
     return std::make_unique<BinaryRangeExprImpl<T>>(
-        field_id,
-        data_type,
+        expr_proto.column_info(),
+        expr_proto.lower_value().val_case(),
         expr_proto.lower_inclusive(),
         expr_proto.upper_inclusive(),
         getValue(expr_proto.lower_value()),
@@ -137,11 +140,11 @@ ExtractBinaryArithOpEvalRangeExprImpl(
         }
     };
     return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
-        field_id,
-        data_type,
-        static_cast<ArithOpType>(expr_proto.arith_op()),
+        expr_proto.column_info(),
+        expr_proto.value().val_case(),
+        expr_proto.arith_op(),
         getValue(expr_proto.right_operand()),
-        static_cast<OpType>(expr_proto.op()),
+        expr_proto.op(),
         getValue(expr_proto.value()));
 }
 
@@ -342,6 +345,25 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
                 return ExtractBinaryRangeExprImpl<std::string>(
                     field_id, data_type, expr_pb);
             }
+            case DataType::JSON: {
+                switch (expr_pb.lower_value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        return ExtractBinaryRangeExprImpl<bool>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryRangeExprImpl<int64_t>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryRangeExprImpl<double>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractBinaryRangeExprImpl<std::string>(
+                            field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo("unknown data type in expression");
+                }
+            }
+
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -472,6 +494,20 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
             case DataType::DOUBLE: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<double>(
                     field_id, data_type, expr_pb);
+            }
+            case DataType::JSON: {
+                switch (expr_pb.value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(
+                            field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<double>(
+                            field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo(fmt::format(
+                            "unsupported data type {} in expression",
+                            expr_pb.value().val_case()));
+                }
             }
             default: {
                 PanicInfo("unsupported data type");

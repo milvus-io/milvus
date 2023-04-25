@@ -204,8 +204,8 @@ BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
         expr,
         "[ShowExprVisitor]BinaryRangeExpr cast to BinaryRangeExprImpl failed");
     Json res{{"expr_type", "BinaryRange"},
-             {"field_id", expr->field_id_.get()},
-             {"data_type", datatype_name(expr->data_type_)},
+             {"field_id", expr->column_.field_id.get()},
+             {"data_type", datatype_name(expr->column_.data_type)},
              {"lower_inclusive", expr->lower_inclusive_},
              {"upper_inclusive", expr->upper_inclusive_},
              {"lower_value", expr->lower_value_},
@@ -217,9 +217,9 @@ void
 ShowExprVisitor::visit(BinaryRangeExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.data_type_) == false,
+    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
-    switch (expr.data_type_) {
+    switch (expr.column_.data_type) {
         case DataType::BOOL:
             json_opt_ = BinaryRangeExtract<bool>(expr);
             return;
@@ -277,8 +277,8 @@ BinaryArithOpEvalRangeExtract(const BinaryArithOpEvalRangeExpr& expr_raw) {
                "BinaryArithOpEvalRangeExprImpl failed");
 
     Json res{{"expr_type", "BinaryArithOpEvalRange"},
-             {"field_offset", expr->field_id_.get()},
-             {"data_type", datatype_name(expr->data_type_)},
+             {"field_offset", expr->column_.field_id.get()},
+             {"data_type", datatype_name(expr->column_.data_type)},
              {"arith_op",
               ArithOpType_Name(static_cast<ArithOpType>(expr->arith_op_))},
              {"right_operand", expr->right_operand_},
@@ -291,9 +291,9 @@ void
 ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.data_type_) == false,
+    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
-    switch (expr.data_type_) {
+    switch (expr.column_.data_type) {
         case DataType::INT8:
             json_opt_ = BinaryArithOpEvalRangeExtract<int8_t>(expr);
             return;
