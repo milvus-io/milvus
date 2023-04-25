@@ -87,9 +87,6 @@ var _ types.DataNode = (*DataNode)(nil)
 // Params from config.yaml
 var Params paramtable.ComponentParam
 
-// rateCol is global rateCollector in DataNode.
-var rateCol *rateCollector
-
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
 //
@@ -215,8 +212,7 @@ func (node *DataNode) initSession() error {
 
 // initRateCollector creates and starts rateCollector in QueryNode.
 func (node *DataNode) initRateCollector() error {
-	var err error
-	rateCol, err = newRateCollector()
+	err := initGlobalRateCollector()
 	if err != nil {
 		return err
 	}
