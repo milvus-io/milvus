@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -751,11 +752,12 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.SearchRequest{
-			Req:             req.Req,
+			Req:             typeutil.Clone(req.Req),
 			DmlChannels:     []string{ch},
 			SegmentIDs:      req.SegmentIDs,
 			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
+			TotalChannelNum: req.TotalChannelNum,
 		}
 		runningGp.Go(func() error {
 			ret, err := node.searchWithDmlChannel(runningCtx, req, ch)
@@ -898,6 +900,45 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		errCluster        error
 	)
 	defer cancel()
+
+	// optimize search params
+	if req.Req.GetSerializedExprPlan() != nil && node.queryHook != nil {
+		channelNum := int(req.GetTotalChannelNum())
+		if channelNum <= 0 {
+			channelNum = 1
+		}
+		estSegmentNum := len(cluster.GetSegmentInfos()) * channelNum
+		log.Debug("estimate segment num:", zap.Int("estSegmentNum", estSegmentNum), zap.Int("channleNum", channelNum))
+		plan := &planpb.PlanNode{}
+		err = proto.Unmarshal(req.Req.GetSerializedExprPlan(), plan)
+		if err != nil {
+			failRet.Status.Reason = err.Error()
+			return failRet, nil
+		}
+		switch plan.GetNode().(type) {
+		case *planpb.PlanNode_VectorAnns:
+			qinfo := plan.GetVectorAnns().GetQueryInfo()
+			paramMap := map[string]interface{}{
+				common.TopKKey:        qinfo.GetTopk(),
+				common.SearchParamKey: qinfo.GetSearchParams(),
+				common.SegmentNumKey:  estSegmentNum,
+			}
+			err := node.queryHook.Run(paramMap)
+			if err != nil {
+				failRet.Status.Reason = err.Error()
+				return failRet, nil
+			}
+			qinfo.Topk = paramMap[common.TopKKey].(int64)
+			qinfo.SearchParams = paramMap[common.SearchParamKey].(string)
+
+			SerializedExprPlan, err := proto.Marshal(plan)
+			if err != nil {
+				failRet.Status.Reason = err.Error()
+				return failRet, nil
+			}
+			req.Req.SerializedExprPlan = SerializedExprPlan
+		}
+	}
 
 	// shard leader dispatches request to its shard cluster
 	var withStreamingFunc searchWithStreaming

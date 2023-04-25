@@ -42,7 +42,6 @@ type autoIndexConfig struct {
 
 	IndexType         string
 	AutoIndexTypeName string
-	Parser            *autoindex.Parser
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
@@ -70,7 +69,7 @@ func (p *autoIndexConfig) initParams() {
 	p.parseBuildParams(p.indexParamsStr)
 
 	p.SearchParamsYamlStr = p.Base.LoadWithDefault("autoIndex.params.search", "")
-	p.parseSearchParams(p.SearchParamsYamlStr)
+
 	p.AutoIndexTypeName = p.Base.LoadWithDefault("autoIndex.type", "")
 	p.extraParamsStr = p.Base.LoadWithDefault("autoIndex.params.extra", "")
 	p.parseExtraParams(p.extraParamsStr)
@@ -98,25 +97,4 @@ func (p *autoIndexConfig) parseExtraParams(paramsStr string) {
 		err2 := fmt.Errorf("parse auto index extra params failed:%w", err)
 		panic(err2)
 	}
-}
-
-func (p *autoIndexConfig) parseSearchParams(paramsStr string) {
-	p.Parser = autoindex.NewParser()
-	err := p.Parser.InitFromJSONStr(paramsStr)
-	if err != nil {
-		err2 := fmt.Errorf("parse autoindex search params failed:%w", err)
-		panic(err2)
-	}
-}
-
-// GetSearchParamStrCalculator return a method which can calculate searchParams
-func (p *autoIndexConfig) GetSearchParamStrCalculator(level int) autoindex.Calculator {
-	if !p.Enable {
-		return nil
-	}
-	m, ok := p.Parser.GetMethodByLevel(level)
-	if !ok {
-		return nil
-	}
-	return m
 }

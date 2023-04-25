@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"os"
 	"path"
+	"plugin"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -126,6 +127,40 @@ type QueryNode struct {
 	taskPool *concurrency.Pool
 
 	IsStandAlone bool
+
+	queryHook Hook
+}
+
+type Hook interface {
+	Run(map[string]interface{}) error
+	Init(string) error
+}
+
+func initHook() (Hook, error) {
+	path := Params.QueryNodeCfg.SoPath
+	if path == "" {
+		return nil, fmt.Errorf("fail to set the querynode plugin path")
+	}
+	log.Debug("start to load plugin", zap.String("path", path))
+
+	p, err := plugin.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("fail to open the plugin, error: %s", err.Error())
+	}
+	log.Debug("plugin open")
+
+	h, err := p.Lookup("QueryNodePlugin")
+	if err != nil {
+		return nil, fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+	}
+	hoo, ok := h.(Hook)
+	if !ok {
+		return nil, fmt.Errorf("fail to convert the `Hook` interface")
+	}
+	if err = hoo.Init(Params.AutoIndexConfig.SearchParamsYamlStr); err != nil {
+		return nil, fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+	}
+	return hoo, nil
 }
 
 var queryNode *QueryNode = nil
@@ -143,6 +178,16 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		queryNodeLoopCancel: cancel,
 		factory:             factory,
 		IsStandAlone:        os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode,
+	}
+
+	// init queryhook
+	var err error
+	queryNode.queryHook, err = initHook()
+	if err != nil {
+		log.Error("load queryhook failed", zap.Error(err))
+		if Params.AutoIndexConfig.Enable {
+			panic(err)
+		}
 	}
 
 	queryNode.tSafeReplica = newTSafeReplica()
