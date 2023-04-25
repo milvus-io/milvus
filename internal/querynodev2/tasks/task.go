@@ -207,7 +207,6 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	t.originTopks = append(t.originTopks, other.originTopks...)
 	t.originNqs = append(t.originNqs, other.originNqs...)
 	t.others = append(t.others, other)
-	t.others = append(t.others, other.others...)
 
 	return true
 }
@@ -218,7 +217,10 @@ func (t *SearchTask) Done(err error) {
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.originNqs[0]))
 		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.originTopks[0]))
 	}
-	t.notifier <- err
+	select {
+	case t.notifier <- err:
+	default:
+	}
 	for _, other := range t.others {
 		other.Done(err)
 	}
