@@ -65,15 +65,16 @@ func Test_GetEarliestMessageID(t *testing.T) {
 	assert.Equal(t, mid.(*nmqID).messageID, MessageIDType(1))
 }
 
-func Test_BadEarliestMessageID(t *testing.T) {
+func Test_BadLatestMessageID(t *testing.T) {
 	topic := t.Name()
 	client, err := createNmqClient()
 	assert.NoError(t, err)
 	defer client.Close()
 
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:            topic,
-		SubscriptionName: topic,
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	consumer.Close()
@@ -92,8 +93,9 @@ func TestComsumeMessage(t *testing.T) {
 	assert.NoError(t, err)
 
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:            topic,
-		SubscriptionName: topic,
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	defer c.Close()
@@ -140,8 +142,9 @@ func TestNatsConsumer_Close(t *testing.T) {
 
 	topic := t.Name()
 	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:            topic,
-		SubscriptionName: topic,
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, c)
@@ -151,7 +154,7 @@ func TestNatsConsumer_Close(t *testing.T) {
 
 	c.Close()
 
-	// Not allow double close.
+	// Disallow double close.
 	assert.Panics(t, func() { c.Close() }, "Should panic on consumer double close")
 }
 
@@ -162,8 +165,9 @@ func TestNatsClientErrorOnUnsubscribeTwice(t *testing.T) {
 	defer client.Close()
 
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:            topic,
-		SubscriptionName: topic,
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	defer consumer.Close()
@@ -182,8 +186,9 @@ func TestCheckTopicValid(t *testing.T) {
 
 	topic := t.Name()
 	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:            topic,
-		SubscriptionName: topic,
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -249,6 +254,108 @@ func process(t *testing.T, msgs []string, p mqwrapper.Producer) {
 		})
 		assert.NoError(t, err)
 	}
+}
+
+func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	defer client.Close()
+
+	topic := t.Name()
+	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	assert.NoError(t, err)
+
+	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.NoError(t, err)
+	defer c.Close()
+
+	latestMsgID, err := c.GetLatestMsgID()
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(0), latestMsgID.(*nmqID).messageID)
+
+	msgs := []string{"111", "222", "333", "444", "555"}
+	process(t, msgs, p)
+	latestMsgID, err = c.GetLatestMsgID()
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(5), latestMsgID.(*nmqID).messageID)
+}
+
+func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	defer client.Close()
+
+	topic := t.Name()
+	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	assert.NoError(t, err)
+
+	msgs := []string{"111", "222", "333"}
+	process(t, msgs, p)
+
+	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
+	})
+	assert.NoError(t, err)
+	defer c.Close()
+
+	msgs = []string{"444", "555"}
+	process(t, msgs, p)
+
+	msg := <-c.Chan()
+	assert.Equal(t, "333", string(msg.Payload()))
+	msg = <-c.Chan()
+	assert.Equal(t, "444", string(msg.Payload()))
+}
+
+func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	defer client.Close()
+
+	topic := t.Name()
+	p, err := client.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	assert.NoError(t, err)
+
+	msgs := []string{"111", "222"}
+	process(t, msgs, p)
+
+	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.NoError(t, err)
+	defer c.Close()
+
+	msgs = []string{"333", "444", "555"}
+	process(t, msgs, p)
+
+	msg := <-c.Chan()
+	assert.Equal(t, "111", string(msg.Payload()))
+	msg = <-c.Chan()
+	assert.Equal(t, "222", string(msg.Payload()))
+
+	c2, err := client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.NoError(t, err)
+	defer c2.Close()
+
+	msgs = []string{"777"}
+	process(t, msgs, p)
+
+	msg = <-c2.Chan()
+	assert.Equal(t, "111", string(msg.Payload()))
+	msg = <-c2.Chan()
+	assert.Equal(t, "222", string(msg.Payload()))
 }
 
 func TestNatsConsumer_SeekExclusive(t *testing.T) {

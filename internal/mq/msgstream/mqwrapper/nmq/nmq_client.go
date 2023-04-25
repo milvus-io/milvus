@@ -53,8 +53,8 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 	if err != nil {
 		return nil, util.WrapError("failed to create jetstream context", err)
 	}
-	// TODO: investigate on performance of multiple streams vs multiple topics.
-	// Note that addStream is idempotent.
+	// TODO: (1) investigate on performance of multiple streams vs multiple topics.
+	//       (2) investigate if we should have topics under the same stream.
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
 		Subjects: []string{options.Topic},
@@ -82,7 +82,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	// TODO: do we allow passing in an existing natsChan from options?
 	// also, revisit the size or make it a user param
 	natsChan := make(chan *nats.Msg, 8192)
-	// TODO: do we allow subscribe to a topic that doesn't exist yet? Current logic allows it.
+	// TODO: should we allow subscribe to a topic that doesn't exist yet? Current logic allows it.
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
 		Subjects: []string{options.Topic},
@@ -90,12 +90,30 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	if err != nil {
 		return nil, util.WrapError("failed to add/connect to jetstream for consumer", err)
 	}
-	// TODO: do we only allow exclusive subscribe? Current logic allows double subscribe.
-	sub, err := js.ChanSubscribe(options.Topic, natsChan)
-	if err != nil {
-		return nil, util.WrapError("failed to subscribe", err)
-	}
 	closeChan := make(chan struct{})
+
+	var sub *nats.Subscription = nil
+	position := options.SubscriptionInitialPosition
+	if position != mqwrapper.SubscriptionPositionUnknown {
+		// TODO: should we only allow exclusive subscribe? Current logic allows double subscribe.
+		sub, err = js.ChanSubscribe(options.Topic, natsChan)
+		if err != nil {
+			return nil, util.WrapError("failed to subscribe", err)
+		}
+		if position == mqwrapper.SubscriptionPositionLatest {
+			cinfo, err := sub.ConsumerInfo()
+			if err != nil {
+				return nil, util.WrapError("failed to get consumer info", err)
+			}
+			msgID := cinfo.Delivered.Stream
+			natsChan = make(chan *nats.Msg, 8192)
+			sub.Unsubscribe()
+			sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.StartSequence(msgID))
+			if err != nil {
+				return nil, util.WrapError("failed to subscribe from latest message", err)
+			}
+		}
+	}
 
 	return &Consumer{
 		js:        js,
