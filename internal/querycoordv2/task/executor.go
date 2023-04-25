@@ -142,6 +142,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	task := mergeTask.tasks[0]
 	action := task.Actions()[mergeTask.steps[0]]
 
+	var err error
 	defer func() {
 		canceled := task.canceled.Load()
 		for i := range mergeTask.tasks {
@@ -174,6 +175,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	if !ok {
 		msg := "no shard leader for the segment to execute loading"
 		task.SetErr(utils.WrapError(msg, ErrTaskStale))
+		task.Cancel()
 		log.Warn(msg, zap.String("shard", channel))
 		return
 	}
@@ -182,6 +184,8 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
 	if err != nil {
 		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
+		task.SetErr(err)
+		task.Cancel()
 		return
 	}
 	if status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
@@ -192,6 +196,8 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	}
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
+		task.SetErr(fmt.Errorf("failed to load segment: %s", status.GetReason()))
+		task.Cancel()
 		return
 	}
 	elapsed := time.Since(startTs)
@@ -340,10 +346,14 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	log.Info("release segment...")
 	status, err := ex.cluster.ReleaseSegments(ctx, dstNode, req)
 	if err != nil {
+		task.SetErr(err)
+		task.Cancel()
 		log.Warn("failed to release segment, it may be a false failure", zap.Error(err))
 		return
 	}
 	if status.ErrorCode != commonpb.ErrorCode_Success {
+		task.SetErr(fmt.Errorf("failed to release segment: %s", status.GetReason()))
+		task.Cancel()
 		log.Warn("failed to release segment", zap.String("reason", status.GetReason()))
 		return
 	}
