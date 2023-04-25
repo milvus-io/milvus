@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 type TargetScope = int32
@@ -116,7 +117,7 @@ func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partiti
 		zap.Int64s("partitionIDs", partitionIDs))
 
 	log.Debug("start to update next targets for collection")
-	newTarget, err := mgr.PullNextTarget(mgr.broker, collectionID, partitionIDs...)
+	newTarget, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
 	if err != nil {
 		log.Error("failed to get next targets for collection",
 			zap.Error(err))
@@ -184,7 +185,7 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, pa
 	return NewCollectionTarget(segments, dmChannels), nil
 }
 
-func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
+func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, partitionIDs ...int64) (*CollectionTarget, error) {
 	log.Debug("start to pull next targets for partition",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
@@ -198,6 +199,9 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, part
 
 		return target, nil
 	}
+
+	// sort for mock test, mock match rules require slice with same order
+	slices.Sort(partitionIDs)
 
 	channels := make(map[string]*DmChannel)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
