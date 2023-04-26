@@ -27,7 +27,7 @@ class ApiCollectionWrapper:
     def __init__(self, active_trace=False):
         self.active_trace = active_trace
 
-    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None,
+    def init_collection(self, name, schema=None, using="default", check_task=None, check_items=None,
                         active_trace=False, **kwargs):
         self.active_trace = active_trace
         consistency_level = kwargs.get("consistency_level", CONSISTENCY_STRONG)
@@ -35,10 +35,10 @@ class ApiCollectionWrapper:
 
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([Collection, name, schema, using, shards_num], **kwargs)
+        res, is_succ = api_request([Collection, name, schema, using], **kwargs)
         self.collection = res if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       name=name, schema=schema, using=using, shards_num=shards_num, **kwargs).run()
+                                       name=name, schema=schema, using=using, **kwargs).run()
         return res, check_result
 
     @property
@@ -72,8 +72,8 @@ class ApiCollectionWrapper:
         return self.collection.primary_field
 
     @property
-    def _shards_num(self):
-        return self.collection._shards_num
+    def shards_num(self):
+        return self.collection.shards_num
 
     @property
     def aliases(self):
