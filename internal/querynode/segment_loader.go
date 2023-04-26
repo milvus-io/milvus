@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/panjf2000/ants/v2"
+	"github.com/samber/lo"
 )
 
 const (
@@ -275,6 +276,11 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
 		}
+		// https://github.com/milvus-io/milvus/23654
+		// legacy entry num = 0
+		if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
+			return err
+		}
 	} else {
 		if err := segment.LoadMultiFieldData(loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
 			return err
@@ -294,6 +300,73 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 
 	log.Info("loading delta...", zap.Int64("segmentID", segmentID))
 	err = loader.loadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
+	return err
+}
+
+func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	var needReset bool
+	segment.indexedFieldInfos.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+		for _, info := range info.fieldBinlog.GetBinlogs() {
+			if info.GetEntriesNum() == 0 {
+				// before 2.2.1, entry num is zero in binlog
+				needReset = true
+				return false
+			}
+		}
+		return true
+	})
+
+	if !needReset {
+		return nil
+	}
+
+	log.Warn("legacy segment binlog found, start to patch entry num", zap.Int64("segmentID", segment.segmentID))
+
+	rowIDField := lo.FindOrElse(loadInfo.BinlogPaths, nil, func(binlog *datapb.FieldBinlog) bool {
+		return binlog.GetFieldID() == common.RowIDField
+	})
+
+	if rowIDField == nil {
+		return errors.New("rowID field binlog not found")
+	}
+
+	counts := make([]int64, 0, len(rowIDField.GetBinlogs()))
+	for _, binlog := range rowIDField.GetBinlogs() {
+		bs, err := loader.cm.Read(ctx, binlog.LogPath)
+		if err != nil {
+			return err
+		}
+
+		// get binlog entry num from rowID field
+		// since header does not store entry numb, we have to read all data here
+
+		reader, err := storage.NewBinlogReader(bs)
+		if err != nil {
+			return err
+		}
+		er, err := reader.NextEventReader()
+		if err != nil {
+			return err
+		}
+
+		rowIDs, err := er.GetInt64FromPayload()
+		if err != nil {
+			return err
+		}
+		counts = append(counts, int64(len(rowIDs)))
+	}
+
+	var err error
+	segment.indexedFieldInfos.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+		if len(info.fieldBinlog.GetBinlogs()) != len(counts) {
+			err = errors.New("rowID & index binlog number not matched")
+			return false
+		}
+		for i, binlog := range info.fieldBinlog.GetBinlogs() {
+			binlog.EntriesNum = counts[i]
+		}
+		return true
+	})
 	return err
 }
 
@@ -377,7 +450,6 @@ func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context, segment *
 
 func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Segment, indexInfo *querypb.FieldIndexInfo) error {
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-
 	for _, indexPath := range indexInfo.IndexFilePaths {
 		if path.Base(indexPath) != storage.IndexParamsKey {
 			filteredPaths = append(filteredPaths, indexPath)
