@@ -18,15 +18,16 @@
 
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_unordered_set.h>
-
 #include <nlohmann/json.hpp>
 #include <NamedType/named_type.hpp>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
+
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -35,10 +36,11 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
-#include "nlohmann/json.hpp"
+#include "simdjson.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "Json.h"
 
 namespace milvus {
 
@@ -79,7 +81,6 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
-using Json = nlohmann::json;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
@@ -153,5 +154,4 @@ struct LargeType {
     int64_t x, y, z;
 };
 static_assert(std::is_same_v<LargeType&, Parameter<LargeType>>);
-
 }  // namespace milvus

@@ -197,7 +197,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
             auto x = data[index];
             result[index] = element_func(x);
         }
-        AssertInfo(result.size() == this_size, "");
+
         results.emplace_back(std::move(result));
     }
     auto final_result = Assemble(results);

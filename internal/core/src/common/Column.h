@@ -75,22 +75,22 @@ class ColumnBase {
     uint64_t size_{0};
 };
 
-class FixedColumn : public ColumnBase {
+class Column : public ColumnBase {
  public:
-    FixedColumn(int64_t segment_id,
-                const FieldMeta& field_meta,
-                const LoadFieldDataInfo& info) {
+    Column(int64_t segment_id,
+           const FieldMeta& field_meta,
+           const LoadFieldDataInfo& info) {
         data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
         size_ = field_meta.get_sizeof() * info.row_count;
         row_count_ = info.row_count;
     }
 
-    FixedColumn(FixedColumn&& column) noexcept
+    Column(Column&& column) noexcept
         : ColumnBase(std::move(column)), row_count_(column.row_count_) {
         column.row_count_ = 0;
     }
 
-    ~FixedColumn() override = default;
+    ~Column() override = default;
 
     SpanBase
     span() const override {
@@ -107,11 +107,9 @@ class VariableColumn : public ColumnBase {
     using ViewType =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
-    template <typename Ctor>
     VariableColumn(int64_t segment_id,
                    const FieldMeta& field_meta,
-                   const LoadFieldDataInfo& info,
-                   Ctor&& ctor) {
+                   const LoadFieldDataInfo& info) {
         auto begin = FIELD_DATA(info.field_data, string).begin();
         auto end = FIELD_DATA(info.field_data, string).end();
         if constexpr (std::is_same_v<T, Json>) {
@@ -127,7 +125,7 @@ class VariableColumn : public ColumnBase {
         }
 
         data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
-        construct_views(std::forward<Ctor>(ctor));
+        construct_views();
     }
 
     VariableColumn(VariableColumn&& field) noexcept
@@ -162,16 +160,14 @@ class VariableColumn : public ColumnBase {
     }
 
  protected:
-    template <typename Ctor>
     void
-    construct_views(Ctor ctor) {
+    construct_views() {
         views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(
-                ctor(data_ + indices_[i], indices_[i + 1] - indices_[i]));
+            views_.emplace_back(data_ + indices_[i],
+                                indices_[i + 1] - indices_[i]);
         }
-        views_.emplace_back(
-            ctor(data_ + indices_.back(), size_ - indices_.back()));
+        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
     }
 
  private:

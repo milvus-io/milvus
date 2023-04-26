@@ -364,11 +364,7 @@ SegmentGrowingImpl::bulk_subscript_impl(const VectorBase& vec_raw,
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            if constexpr (std::is_same_v<S, Json>) {
-                output[i] = vec[offset].dump();
-            } else {
-                output[i] = vec[offset];
-            }
+            output[i] = vec[offset];
         }
     }
 }

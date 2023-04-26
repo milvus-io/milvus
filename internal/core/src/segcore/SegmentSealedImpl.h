@@ -235,7 +235,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, FixedColumn> fixed_fields_;
+    std::unordered_map<FieldId, Column> fixed_fields_;
     std::unordered_map<FieldId, std::unique_ptr<ColumnBase>> variable_fields_;
 };
 
