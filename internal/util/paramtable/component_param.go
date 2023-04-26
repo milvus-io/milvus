@@ -763,6 +763,7 @@ type queryCoordConfig struct {
 	Balancer                            string
 	GlobalRowCountFactor                float64
 	ScoreUnbalanceTolerationFactor      float64
+	ReverseUnbalanceTolerationFactor    float64
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
@@ -814,6 +815,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initBalancer()
 	p.initGlobalRowCountFactor()
 	p.initScoreUnbalanceTolerationFactor()
+	p.initReverseUnbalanceTolerationFactor()
 	p.initCheckResourceGroupInterval()
 	p.initEnableRGAutoRecover()
 
@@ -1005,20 +1007,33 @@ func (p *queryCoordConfig) initGlobalRowCountFactor() {
 }
 
 func (p *queryCoordConfig) initScoreUnbalanceTolerationFactor() {
-	factorStr := p.Base.LoadWithDefault("queryCoord.scoreUnbalanceTolerationFactor", "1.3")
+	factorStr := p.Base.LoadWithDefault("queryCoord.scoreUnbalanceTolerationFactor", "0.05")
 	scoreUnbalanceTolerationFactor, err := strconv.ParseFloat(factorStr, 64)
 	if err != nil {
 		panic(err)
 	}
-	if scoreUnbalanceTolerationFactor > 2.0 {
-		log.Warn("scoreUnbalanceTolerationFactor should not be more than 2.0, force set to 2.0")
-		scoreUnbalanceTolerationFactor = 2.0
-	}
-	if scoreUnbalanceTolerationFactor < 1.1 {
-		log.Warn("scoreUnbalanceTolerationFactor should not be less than 1.1, force set to 1.1")
-		scoreUnbalanceTolerationFactor = 1.1
+	if scoreUnbalanceTolerationFactor < 0 {
+		log.Warn("scoreUnbalanceTolerationFactor should not be less than 0, force set to 0.05")
+		scoreUnbalanceTolerationFactor = 0.05
 	}
 	p.ScoreUnbalanceTolerationFactor = scoreUnbalanceTolerationFactor
+}
+
+func (p *queryCoordConfig) initReverseUnbalanceTolerationFactor() {
+	factorStr := p.Base.LoadWithDefault("queryCoord.reverseUnBalanceTolerationFactor", "1.3")
+	reverseToleration, err := strconv.ParseFloat(factorStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	if reverseToleration > 2.0 {
+		log.Warn("reverseToleration should not be more than 2.0, force set to 2.0")
+		reverseToleration = 2.0
+	}
+	if reverseToleration < 1.1 {
+		log.Warn("reverseToleration should not be less than 1.1, force set to 1.1")
+		reverseToleration = 1.1
+	}
+	p.ReverseUnbalanceTolerationFactor = reverseToleration
 }
 
 func (p *queryCoordConfig) initCheckResourceGroupInterval() {

@@ -277,23 +277,25 @@ func TestComponentParam(t *testing.T) {
 		Params.initGlobalRowCountFactor()
 		assert.Equal(t, 0.4, Params.GlobalRowCountFactor)
 
-		//test unbalance factor legal range
-		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "50")
-		Params.initScoreUnbalanceTolerationFactor()
-		assert.Equal(t, float64(2), Params.ScoreUnbalanceTolerationFactor)
-
+		//test unbalance toleration factor legal range
 		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "-1")
 		Params.initScoreUnbalanceTolerationFactor()
-		assert.Equal(t, 1.1, Params.ScoreUnbalanceTolerationFactor)
+		assert.Equal(t, 0.05, Params.ScoreUnbalanceTolerationFactor)
 
-		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "1")
+		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "0.3")
 		Params.initScoreUnbalanceTolerationFactor()
-		assert.Equal(t, 1.1, Params.ScoreUnbalanceTolerationFactor)
+		assert.Equal(t, 0.3, Params.ScoreUnbalanceTolerationFactor)
 
-		Params.Base.Save("queryCoord.scoreUnbalanceTolerationFactor", "1.4")
-		Params.initScoreUnbalanceTolerationFactor()
-		assert.Equal(t, 1.4, Params.ScoreUnbalanceTolerationFactor)
+		//test reverse unbalance toleration factor legal range
+		Params.Base.Save("queryCoord.reverseUnBalanceTolerationFactor", "-1")
+		Params.initReverseUnbalanceTolerationFactor()
+		assert.Equal(t, 1.1, Params.ReverseUnbalanceTolerationFactor)
 
+		Params.Base.Save("queryCoord.reverseUnBalanceTolerationFactor", "5.3")
+		Params.initReverseUnbalanceTolerationFactor()
+		assert.Equal(t, 2.0, Params.ReverseUnbalanceTolerationFactor)
+
+		//test check health interval
 		Params.Base.Save("queryCoord.CheckHealthInterval", "10")
 		Params.initCheckHealthInterval()
 		assert.Equal(t, time.Duration(10)*time.Millisecond, Params.CheckHealthInterval)

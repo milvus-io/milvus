@@ -163,7 +163,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		return nil, nil
 	}
 	//print current distribution before generating plans
-	PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager)
+	PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	if len(stoppingNodesSegments) != 0 {
 		log.Info("Handle stopping nodes",
 			zap.Int64("collection", replica.CollectionID),
@@ -238,6 +238,13 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 		toNode := nodeItems[0]
 		fromNode := nodeItems[lastIdx]
 
+		fromPriority := fromNode.priority
+		toPriority := toNode.priority
+		unbalance := float64(fromPriority - toPriority)
+		if unbalance < float64(toPriority)*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor {
+			break
+		}
+
 		// sort the segments in asc order, try to mitigate to-from-unbalance
 		// TODO: segment infos inside dist manager may change in the process of making balance plan
 		fromSegments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, fromNode.nodeID)
@@ -258,9 +265,6 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			break
 		}
 
-		fromPriority := fromNode.priority
-		toPriority := toNode.priority
-		unbalance := fromPriority - toPriority
 		nextFromPriority := fromPriority - int(targetSegmentToMove.GetNumOfRows()) - int(float64(targetSegmentToMove.GetNumOfRows())*
 			params.Params.QueryCoordCfg.GlobalRowCountFactor)
 		nextToPriority := toPriority + int(targetSegmentToMove.GetNumOfRows()) + int(float64(targetSegmentToMove.GetNumOfRows())*
@@ -280,7 +284,7 @@ func (b *ScoreBasedBalancer) getNormalSegmentPlan(replica *meta.Replica, nodesSe
 			//only trigger following balance when the generated reverted balance
 			//is far smaller than the original unbalance
 			nextUnbalance := nextToPriority - nextFromPriority
-			if int(float64(nextUnbalance)*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor) < unbalance {
+			if float64(nextUnbalance)*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor < unbalance {
 				plan := SegmentAssignPlan{
 					ReplicaID: replica.GetID(),
 					From:      fromNode.nodeID,

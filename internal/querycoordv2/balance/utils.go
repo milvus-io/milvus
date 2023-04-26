@@ -133,7 +133,7 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []Se
 
 func PrintCurrentReplicaDist(replica *meta.Replica,
 	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
-	channelManager *meta.ChannelDistManager) {
+	channelManager *meta.ChannelDistManager, segmentDistMgr *meta.SegmentDistManager) {
 	distInfo := fmt.Sprintf("%s {collectionID:%d, replicaID:%d, ", DistInfoPrefix, replica.CollectionID, replica.GetID())
 	//1. print stopping nodes segment distribution
 	distInfo += "[stoppingNodesSegmentDist:"
@@ -148,23 +148,28 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	distInfo += "]"
 	//2. print normal nodes segment distribution
 	distInfo += "[normalNodesSegmentDist:"
-	for normalNodeID, normalNodeSegments := range nodeSegments {
+	for normalNodeID, normalNodeCollectionSegments := range nodeSegments {
 		distInfo += fmt.Sprintf("[nodeID:%d, ", normalNodeID)
 		distInfo += "loaded-segments:["
 		nodeRowSum := int64(0)
-		for _, normalSegment := range normalNodeSegments {
-			distInfo += fmt.Sprintf("[segmentID: %d, rowCount: %d] ",
-				normalSegment.GetID(), normalSegment.GetNumOfRows())
-			nodeRowSum += normalSegment.GetNumOfRows()
+		normalNodeSegments := segmentDistMgr.GetByNode(normalNodeID)
+		for _, normalNodeSegment := range normalNodeSegments {
+			nodeRowSum += normalNodeSegment.GetNumOfRows()
 		}
-		distInfo += fmt.Sprintf("] nodeRowSum:%d]", nodeRowSum)
+		nodeCollectionRowSum := int64(0)
+		for _, normalCollectionSegment := range normalNodeCollectionSegments {
+			distInfo += fmt.Sprintf("[segmentID: %d, rowCount: %d] ",
+				normalCollectionSegment.GetID(), normalCollectionSegment.GetNumOfRows())
+			nodeCollectionRowSum += normalCollectionSegment.GetNumOfRows()
+		}
+		distInfo += fmt.Sprintf("] nodeRowSum:%d nodeCollectionRowSum:%d]", nodeRowSum, nodeCollectionRowSum)
 	}
 	distInfo += "]"
 
 	//3. print stopping nodes channel distribution
 	distInfo += "[stoppingNodesChannelDist:"
 	for stoppingNodeID := range stoppingNodesSegments {
-		stoppingNodeChannels := channelManager.GetByNode(stoppingNodeID)
+		stoppingNodeChannels := channelManager.GetByCollectionAndNode(replica.GetCollectionID(), stoppingNodeID)
 		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", stoppingNodeID, len(stoppingNodeChannels))
 		distInfo += "channels:["
 		for _, stoppingChan := range stoppingNodeChannels {
@@ -177,7 +182,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	//4. print normal nodes channel distribution
 	distInfo += "[normalNodesChannelDist:"
 	for normalNodeID := range nodeSegments {
-		normalNodeChannels := channelManager.GetByNode(normalNodeID)
+		normalNodeChannels := channelManager.GetByCollectionAndNode(replica.GetCollectionID(), normalNodeID)
 		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", normalNodeID, len(normalNodeChannels))
 		distInfo += "channels:["
 		for _, normalNodeChan := range normalNodeChannels {
@@ -187,5 +192,5 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	}
 	distInfo += "]"
 
-	log.Info(distInfo)
+	log.RatedInfo(5, distInfo)
 }
