@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -306,7 +307,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum + 1) // no enough channels.
 		err = task.Prepare(context.Background())
 		assert.Error(t, err)
-		task.Req.ShardsNum = 1
+		task.Req.ShardsNum = common.DefaultShardsNum
 		err = task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})

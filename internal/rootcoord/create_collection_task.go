@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -153,7 +154,7 @@ func (t *createCollectionTask) prepareSchema() error {
 
 func (t *createCollectionTask) assignShardsNum() {
 	if t.Req.GetShardsNum() <= 0 {
-		t.Req.ShardsNum = 2
+		t.Req.ShardsNum = common.DefaultShardsNum
 	}
 }
 
