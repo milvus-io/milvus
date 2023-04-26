@@ -305,12 +305,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 	err = pipeline.ConsumeMsgStream(position)
 	if err != nil {
-		err = WrapErrInitPipelineFailed(err)
+		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),
 			zap.Int64("collectionID", channel.CollectionID),
 			zap.String("channel", channel.ChannelName),
 		)
-		return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, "", err), nil
+		return merr.Status(err), nil
 	}
 
 	// start pipeline
@@ -778,16 +778,14 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
-			zap.Error(WrapErrNodeUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status:        merr.Status(err),
 			Configuations: nil,
 		}, nil
 	}
@@ -814,16 +812,14 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(WrapErrNodeUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status:   merr.Status(err),
 			Response: "",
 		}, nil
 	}
@@ -888,14 +884,12 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 	)
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Error(WrapErrNodeUnhealthy(paramtable.GetNodeID())))
+			zap.Error(err))
 
 		return &querypb.GetDataDistributionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+			Status: merr.Status(err),
 		}, nil
 	}
 	defer node.lifetime.Done()

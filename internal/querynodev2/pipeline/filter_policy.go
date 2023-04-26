@@ -16,31 +16,37 @@
 
 package pipeline
 
-//MsgFilter will return error if Msg was invalid
+import (
+	"fmt"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
+)
+
+// MsgFilter will return error if Msg was invalid
 type InsertMsgFilter = func(n *filterNode, c *Collection, msg *InsertMsg) error
 
 type DeleteMsgFilter = func(n *filterNode, c *Collection, msg *DeleteMsg) error
 
-//Chack msg is aligned --
-//len of each kind of infos in InsertMsg should match each other
+// Chack msg is aligned --
+// len of each kind of infos in InsertMsg should match each other
 func InsertNotAligned(n *filterNode, c *Collection, msg *InsertMsg) error {
 	err := msg.CheckAligned()
 	if err != nil {
-		return WrapErrMsgNotAligned(err)
+		return err
 	}
 	return nil
 }
 
 func InsertEmpty(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return ErrMsgEmpty
+		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return WrapErrMsgNotTarget("Collection")
+		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
 	}
 
 	// all growing will be be in-memory to support dynamic partition load/release
@@ -53,7 +59,8 @@ func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
 		return nil
 	}
 	if msg.EndTimestamp <= segInfo.GetDmlPosition().GetTimestamp() {
-		return WrapErrMsgExcluded(msg.SegmentID)
+		m := fmt.Sprintf("Segment excluded, id: %d", msg.GetSegmentID())
+		return merr.WrapErrSegmentLack(msg.GetSegmentID(), m)
 	}
 	return nil
 }
@@ -61,21 +68,21 @@ func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
 func DeleteNotAligned(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	err := msg.CheckAligned()
 	if err != nil {
-		return WrapErrMsgNotAligned(err)
+		return err
 	}
 	return nil
 }
 
 func DeleteEmpty(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return ErrMsgEmpty
+		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return WrapErrMsgNotTarget("Collection")
+		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
 	}
 
 	// all growing will be be in-memory to support dynamic partition load/release

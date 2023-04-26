@@ -125,7 +125,8 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}()
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(paramtable.GetNodeID())
+		err := merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 	defer node.lifetime.Done()
@@ -167,8 +168,9 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		log.Warn("Query failed, failed to get query shard delegator", zap.Error(ErrGetDelegatorFailed))
-		failRet.Status.Reason = ErrGetDelegatorFailed.Error()
+		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
+		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 
@@ -330,7 +332,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		return nil, WrapErrNodeUnhealthy(paramtable.GetNodeID())
+		return nil, merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
 	}
 	defer node.lifetime.Done()
 
@@ -353,8 +355,9 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 		task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
 		if !node.scheduler.Add(task) {
-			log.Warn("failed to search channel", zap.Error(tasks.ErrTaskQueueFull))
-			return nil, tasks.ErrTaskQueueFull
+			err := merr.WrapErrTaskQueueFull()
+			log.Warn("failed to search channel", zap.Error(err))
+			return nil, err
 		}
 
 		err := task.Wait()
@@ -380,8 +383,9 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	// get delegator
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
-		log.Warn("Query failed, failed to get query shard delegator", zap.Error(ErrGetDelegatorFailed))
-		return nil, ErrGetDelegatorFailed
+		err := merr.WrapErrServiceUnavailable("failed to get query shard delegator")
+		log.Warn("Query failed, failed to get query shard delegator", zap.Error(err))
+		return nil, err
 	}
 	req, err := node.optimizeSearchParams(ctx, req, sd)
 	if err != nil {
