@@ -73,7 +73,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 	// some build params also exist in indexParams, which are useless during loading process
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
-		err = indexparams.SetDiskIndexLoadParams(indexParams, indexInfo.GetNumRows())
+		err = indexparams.SetDiskIndexLoadParams(&Params, indexParams, indexInfo.GetNumRows())
 		if err != nil {
 			return err
 		}

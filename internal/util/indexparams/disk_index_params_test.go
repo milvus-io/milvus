@@ -17,22 +17,25 @@
 package indexparams
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/autoindex"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func TestDiskIndexParams(t *testing.T) {
 	t.Run("fill index params with auto index", func(t *testing.T) {
 		var params paramtable.ComponentParam
+		params.Init()
 		params.AutoIndexConfig.Enable = true
 
 		mapString := make(map[string]string)
-		mapString[autoindex.BuildRatioKey] = "{\"pg_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.325, \"num_threads\": 2}"
 		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
 		extraParams, err := autoindex.NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
@@ -48,23 +51,29 @@ func TestDiskIndexParams(t *testing.T) {
 
 		pqCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.125, pqCodeBudgetGBRatio)
+		assert.Equal(t, 0.325, pqCodeBudgetGBRatio)
+		assert.NotEqual(t, params.CommonCfg.PQCodeBudgetGBRatio, pqCodeBudgetGBRatio)
 
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 1.0, buildNumThreadsRatio)
+		assert.Equal(t, 2.0, buildNumThreadsRatio)
+		assert.NotEqual(t, params.CommonCfg.BuildNumThreadsRatio, buildNumThreadsRatio)
 
-		searchCacheBudgetGBRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
+		// disable autoindex, use default config
+		params.AutoIndexConfig.Enable = false
+		indexParams = make(map[string]string)
+		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.225, searchCacheBudgetGBRatio)
 
-		loadNumThreadRatio, err := strconv.ParseFloat(indexParams[NumLoadThreadRatioKey], 64)
+		pqCodeBudgetGBRatio, err = strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 4.0, loadNumThreadRatio)
+		assert.NotEqual(t, 0.325, pqCodeBudgetGBRatio)
+		assert.Equal(t, params.CommonCfg.PQCodeBudgetGBRatio, pqCodeBudgetGBRatio)
 
-		beamWidthRatio, err := strconv.ParseFloat(indexParams[BeamWidthRatioKey], 64)
+		buildNumThreadsRatio, err = strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 4.0, beamWidthRatio)
+		assert.NotEqual(t, 2.0, buildNumThreadsRatio)
+		assert.Equal(t, params.CommonCfg.BuildNumThreadsRatio, buildNumThreadsRatio)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {
@@ -84,23 +93,79 @@ func TestDiskIndexParams(t *testing.T) {
 	})
 
 	t.Run("set disk index load params", func(t *testing.T) {
-		indexParams := make(map[string]string)
-		indexParams[SearchCacheBudgetRatioKey] = "0.125"
-		indexParams[NumLoadThreadRatioKey] = "8.0"
-		indexParams[BeamWidthRatioKey] = "4.0"
+		var params paramtable.ComponentParam
+		params.Init()
+		params.AutoIndexConfig.Enable = true
 
-		err := SetDiskIndexLoadParams(indexParams, 100)
+		mapString := make(map[string]string)
+		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.15, \"num_threads\": 4}"
+		extraParams, err := autoindex.NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
+		params.AutoIndexConfig.BigDataExtraParams = extraParams
+		params.AutoIndexConfig.IndexParams = make(map[string]string)
+		params.AutoIndexConfig.IndexParams["max_degree"] = "56"
+		params.AutoIndexConfig.IndexParams["search_list_size"] = "100"
+		params.AutoIndexConfig.IndexParams["index_type"] = "DISKANN"
+
+		indexParams := make(map[string]string)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
 		indexParams["dim"] = "128"
-		err = SetDiskIndexLoadParams(indexParams, 100)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.NoError(t, err)
 
 		_, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
-		_, ok = indexParams[NumLoadThreadKey]
+
+		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
-		_, ok = indexParams[BeamWidthKey]
+		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
+
+		numLoadThread, ok := indexParams[NumLoadThreadKey]
 		assert.True(t, ok)
+		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(extraParams.LoadNumThreadRatio))
+		if expectedNumLoadThread > MaxLoadThread {
+			expectedNumLoadThread = MaxLoadThread
+		}
+		indexParams[NumLoadThreadKey] = strconv.Itoa(expectedNumLoadThread)
+		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
+
+		beamWidth, ok := indexParams[BeamWidthKey]
+		assert.True(t, ok)
+		expectedBeamWidth := int(float32(hardware.GetCPUNum()) * float32(extraParams.BeamWidthRatio))
+		if expectedBeamWidth > MaxBeamWidth {
+			expectedBeamWidth = MaxBeamWidth
+		}
+		indexParams[BeamWidthKey] = strconv.Itoa(expectedBeamWidth)
+		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
+
+		// disable autoindex, use default config
+		params.AutoIndexConfig.Enable = false
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.NoError(t, err)
+
+		searchCacheBudget, ok = indexParams[SearchCacheBudgetKey]
+		assert.True(t, ok)
+		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(params.CommonCfg.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
+
+		numLoadThread, ok = indexParams[NumLoadThreadKey]
+		assert.True(t, ok)
+		expectedNumLoadThread = int(float32(hardware.GetCPUNum()) * float32(params.CommonCfg.LoadNumThreadRatio))
+		if expectedNumLoadThread > MaxLoadThread {
+			expectedNumLoadThread = MaxLoadThread
+		}
+		indexParams[NumLoadThreadKey] = strconv.Itoa(expectedNumLoadThread)
+		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
+
+		beamWidth, ok = indexParams[BeamWidthKey]
+		assert.True(t, ok)
+		expectedBeamWidth = int(float32(hardware.GetCPUNum()) * float32(params.CommonCfg.BeamWidthRatio))
+		if expectedBeamWidth > MaxBeamWidth {
+			expectedBeamWidth = MaxBeamWidth
+		}
+		indexParams[BeamWidthKey] = strconv.Itoa(expectedBeamWidth)
+		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
 	})
 }
