@@ -587,7 +587,8 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		Version: "2.2.1",
 		Doc: `The superusers will ignore some system check processes,
 like the old password verification when updating the credential`,
-		Export: true,
+		DefaultValue: "",
+		Export:       true,
 	}
 	p.SuperUsers.Init(base.mgr)
 

@@ -401,7 +401,7 @@ common:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: root
+    # superUsers: root
     tlsMode: 0
   session:
     ttl: 20 # ttl value when session granting a lease to register service
