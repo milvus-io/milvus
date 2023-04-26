@@ -2271,6 +2271,8 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
 
 		// super user
+		paramtable.Get().Save(Params.CommonCfg.SuperUsers.Key, "root")
+		defer paramtable.Get().Reset(Params.CommonCfg.SuperUsers.Key)
 		updateCredentialReq.OldPassword = crypto.Base64Encode("wrong_password")
 		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
 		updateResp, err = proxy.UpdateCredential(rootCtx, updateCredentialReq)
