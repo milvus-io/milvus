@@ -37,8 +37,10 @@ import (
 
 // getQuotaMetrics returns DataCoordQuotaMetrics.
 func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
+	total, colSizes := s.meta.GetCollectionBinlogSize()
 	return &metricsinfo.DataCoordQuotaMetrics{
-		TotalBinlogSize: s.meta.GetTotalBinlogSize(),
+		TotalBinlogSize:      total,
+		CollectionBinlogSize: colSizes,
 	}
 }
 

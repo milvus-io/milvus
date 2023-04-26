@@ -487,6 +487,7 @@ quotaAndLimits:
     diskProtection:
       enabled: true # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
       diskQuota: -1 # MB, (0, +inf), default no limit
+      diskQuotaPerCollection: -1 # MB, (0, +inf), default no limit
   limitReading:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.

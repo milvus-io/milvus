@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -88,10 +89,13 @@ type QuotaCenter struct {
 	dataCoord  types.DataCoord
 
 	// metrics
-	queryNodeMetrics    map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
-	dataNodeMetrics     map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
-	proxyMetrics        map[UniqueID]*metricsinfo.ProxyQuotaMetrics
-	dataCoordMetrics    *metricsinfo.DataCoordQuotaMetrics
+	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
+	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
+	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
+	diskMu           sync.Mutex // guards dataCoordMetrics and totalBinlogSize
+	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
+	totalBinlogSize  int64
+
 	readableCollections []int64
 	writableCollections []int64
 
@@ -226,9 +230,11 @@ func (q *QuotaCenter) syncMetrics() error {
 			}
 		}
 		q.writableCollections = collections.Collect()
+		q.diskMu.Lock()
 		if dataCoordTopology.Cluster.Self.QuotaMetrics != nil {
 			q.dataCoordMetrics = dataCoordTopology.Cluster.Self.QuotaMetrics
 		}
+		q.diskMu.Unlock()
 		return nil
 	})
 	// get Proxies metrics
@@ -414,11 +420,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		return nil
 	}
 
-	exceeded := q.ifDiskQuotaExceeded()
-	if exceeded {
-		q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted) // disk quota protection
-		return nil
-	}
+	q.checkDiskQuota()
 
 	collectionFactor := map[int64]float64{}
 	for _, collection := range q.writableCollections {
@@ -594,25 +596,39 @@ func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64)
 	}
 }
 
-// ifDiskQuotaExceeded checks if disk quota exceeded.
-func (q *QuotaCenter) ifDiskQuotaExceeded() bool {
+// checkDiskQuota checks if disk quota exceeded.
+func (q *QuotaCenter) checkDiskQuota() {
+	q.diskMu.Lock()
+	defer q.diskMu.Unlock()
 	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
-		return false
+		return
 	}
 	if q.dataCoordMetrics == nil {
-		return false
+		return
 	}
-	diskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
-	totalSize := q.dataCoordMetrics.TotalBinlogSize
-	if float64(totalSize) >= diskQuota {
-		log.Warn("QuotaCenter: disk quota exceeded",
-			zap.Int64("curDiskUsage", totalSize),
-			zap.Float64("diskQuota", diskQuota))
-		log.Info("DataCoordMetric",
-			zap.Any("metric", q.dataCoordMetrics))
-		return true
+	collections := typeutil.NewUniqueSet()
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	colDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	for collection, binlogSize := range q.dataCoordMetrics.CollectionBinlogSize {
+		if float64(binlogSize) >= colDiskQuota {
+			log.Warn("collection disk quota exceeded",
+				zap.Int64("collection", collection),
+				zap.Int64("coll disk usage", binlogSize),
+				zap.Float64("coll disk quota", colDiskQuota))
+			collections.Insert(collection)
+		}
 	}
-	return false
+	if collections.Len() > 0 {
+		q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, collections.Collect()...)
+	}
+	total := q.dataCoordMetrics.TotalBinlogSize
+	if float64(total) >= totalDiskQuota {
+		log.Warn("total disk quota exceeded",
+			zap.Int64("total disk usage", total),
+			zap.Float64("total disk quota", totalDiskQuota))
+		q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted)
+	}
+	q.totalBinlogSize = total
 }
 
 // setRates notifies Proxies to set rates for different rate types.
@@ -679,4 +695,23 @@ func (q *QuotaCenter) recordMetrics() {
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
 	record(commonpb.ErrorCode_DiskQuotaExhausted)
 	record(commonpb.ErrorCode_TimeTickLongDelay)
+}
+
+func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {
+	q.diskMu.Lock()
+	q.diskMu.Unlock()
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return math.MaxInt64
+	}
+	if q.dataCoordMetrics == nil {
+		return math.MaxInt64
+	}
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	colDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	allowance := float64(math.MaxInt64)
+	if binlogSize, ok := q.dataCoordMetrics.CollectionBinlogSize[collection]; ok {
+		allowance = math.Min(allowance, colDiskQuota-float64(binlogSize))
+	}
+	allowance = math.Min(allowance, totalDiskQuota-float64(q.totalBinlogSize))
+	return allowance
 }
