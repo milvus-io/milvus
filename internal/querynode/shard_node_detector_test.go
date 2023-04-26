@@ -404,3 +404,25 @@ func TestNodeDetectorHandleWithError(t *testing.T) {
 		})
 	})
 }
+
+func TestNodeDetectorRewatch(t *testing.T) {
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	suffix := funcutil.RandomString(6)
+	rootPath := fmt.Sprintf("qn_shard_node_detector_watch_%s", suffix)
+
+	nd := NewEtcdShardNodeDetector(client, rootPath, func() (map[int64]string, error) {
+		r := make(map[int64]string)
+		return r, nil
+	})
+
+	ch, ok, _ := nd.rewatch(1000, 500, 0)
+	assert.True(t, ok)
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			assert.FailNow(t, "rewatch return closed channel")
+		}
+	case <-time.After(time.Second):
+	}
+}
