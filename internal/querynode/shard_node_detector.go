@@ -178,8 +178,7 @@ func (nd *etcdShardNodeDetector) handleEvt(evt clientv3.WatchResponse, collectio
 }
 
 func (nd *etcdShardNodeDetector) rewatch(collectionID, replicaID, rev int64) (ch clientv3.WatchChan, ok bool, revision int64) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	revision = rev
 	err := retry.Do(ctx, func() error {
 		ch = nd.client.Watch(ctx, nd.path, clientv3.WithPrefix(), clientv3.WithRev(revision))

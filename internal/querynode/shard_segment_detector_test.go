@@ -301,3 +301,22 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 		})
 	}
 }
+
+func TestSegmentDetectorRewatch(t *testing.T) {
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	suffix := funcutil.RandomString(6)
+	rootPath := fmt.Sprintf("qn_shard_segment_detector_watch_%s", suffix)
+
+	sd := NewEtcdShardSegmentDetector(client, rootPath)
+
+	ch, ok, _ := sd.rewatch(1000, 500, "vchannel1", 0)
+	assert.True(t, ok)
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			assert.FailNow(t, "rewatch return closed channel")
+		}
+	case <-time.After(time.Second):
+	}
+}
