@@ -16,16 +16,23 @@
 
 #pragma once
 
+#include <algorithm>
+#include <boost/algorithm/string/join.hpp>
+#include <boost/algorithm/string/replace.hpp>
 #include <cstddef>
+#include <cstdlib>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "exceptions/EasyAssert.h"
 #include "simdjson.h"
 #include "fmt/core.h"
+#include "simdjson/dom/element.h"
+#include "simdjson/error.h"
 
 namespace milvus {
-
+using document = simdjson::ondemand::document;
 class Json {
  public:
     Json() = default;
@@ -73,25 +80,47 @@ class Json {
         data_ = data;
     }
 
-    auto
+    document
     doc() const {
         thread_local simdjson::ondemand::parser parser;
 
         // it's always safe to add the padding,
         // as we have allocated the memory with this padding
-        auto doc =
-            parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING);
-        return doc.get_object();
+        document doc;
+        auto err =
+            parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING)
+                .get(doc);
+        AssertInfo(err == simdjson::SUCCESS,
+                   fmt::format("failed to parse the json: {}", err));
+        return doc;
     }
 
-    auto
+    simdjson::ondemand::value
     operator[](const std::string_view field) const {
-        return doc()[field];
+        simdjson::ondemand::value result;
+        auto err = doc().get_value()[field].get(result);
+        AssertInfo(
+            err == simdjson::SUCCESS,
+            fmt::format("failed to access the field {}: {}", field, err));
+        return result;
     }
 
-    auto
-    at_pointer(const std::string_view pointer) const {
-        return doc().at_pointer(pointer);
+    simdjson::ondemand::value
+    operator[](std::vector<std::string> nested_path) const {
+        std::for_each(
+            nested_path.begin(), nested_path.end(), [](std::string& key) {
+                boost::replace_all(key, "~", "~0");
+                boost::replace_all(key, "/", "~1");
+            });
+        auto pointer = boost::algorithm::join(nested_path, "/");
+        simdjson::ondemand::value result;
+        auto err = doc().at_pointer(pointer).get(result);
+        AssertInfo(
+            err == simdjson::SUCCESS,
+            fmt::format("failed to access the field with json pointer {}: {}",
+                        pointer,
+                        err));
+        return result;
     }
 
     std::string_view
