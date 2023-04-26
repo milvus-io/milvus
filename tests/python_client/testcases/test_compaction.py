@@ -236,7 +236,15 @@ class TestCompactionParams(TestcaseBase):
 
         # Flush a new segment and meet condition 20% deleted entities, triggre compaction but no way to get plan
         collection_w.insert(cf.gen_default_dataframe_data(1, start=tmp_nb))
-        assert collection_w.num_entities == tmp_nb + 1
+
+        exp_num_entities_after_compact = tmp_nb - (tmp_nb // ct.compact_delta_ratio_reciprocal) + 1
+        start = time()
+        while True:
+            if collection_w.num_entities == exp_num_entities_after_compact:
+                break
+            if time() - start > 60:
+                raise MilvusException(1, "Auto delete ratio compaction cost more than 60s")
+            sleep(1)
 
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
