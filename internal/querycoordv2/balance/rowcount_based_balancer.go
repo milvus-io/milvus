@@ -245,65 +245,66 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 		channelPlans = append(channelPlans, plans...)
 	}
 
-	if len(channelPlans) == 0 && len(onlineNodes) > 1 {
-		// start to balance channels on all available nodes
-		channels := b.dist.ChannelDistManager.GetByCollection(replica.CollectionID)
-		channelsOnNode := lo.GroupBy(channels, func(channel *meta.DmChannel) int64 { return channel.Node })
+	// if len(channelPlans) == 0 && len(onlineNodes) > 1 {
+	// 	// start to balance channels on all available nodes
+	// 	channels := b.dist.ChannelDistManager.GetByCollection(replica.CollectionID)
+	// 	channelsOnNode := lo.GroupBy(channels, func(channel *meta.DmChannel) int64 { return channel.Node })
 
-		nodes := replica.GetNodes()
-		getChannelNum := func(node int64) int {
-			if channelsOnNode[node] == nil {
-				return 0
-			}
-			return len(channelsOnNode[node])
-		}
-		sort.Slice(nodes, func(i, j int) bool { return getChannelNum(nodes[i]) < getChannelNum(nodes[j]) })
+	// 	nodes := replica.GetNodes()
+	// 	getChannelNum := func(node int64) int {
+	// 		if channelsOnNode[node] == nil {
+	// 			return 0
+	// 		}
+	// 		return len(channelsOnNode[node])
+	// 	}
+	// 	sort.Slice(nodes, func(i, j int) bool { return getChannelNum(nodes[i]) < getChannelNum(nodes[j]) })
 
-		start := int64(0)
-		end := int64(len(nodes) - 1)
-		averageChannel := len(channels) / len(onlineNodes)
-		if averageChannel == 0 || getChannelNum(nodes[start]) >= getChannelNum(nodes[end]) {
-			return channelPlans
-		}
+	// 	start := int64(0)
+	// 	end := int64(len(nodes) - 1)
 
-		for start < end {
-			// segment to move in
-			targetNode := nodes[start]
-			// segment to move out
-			sourceNode := nodes[end]
+	// 	averageChannel := int(math.Ceil(float64(len(channels)) / float64(len(onlineNodes))))
+	// 	if averageChannel == 0 || getChannelNum(nodes[start]) >= getChannelNum(nodes[end]) {
+	// 		return channelPlans
+	// 	}
 
-			if len(channelsOnNode[targetNode]) >= averageChannel {
-				break
-			}
+	// 	for start < end {
+	// 		// segment to move in
+	// 		targetNode := nodes[start]
+	// 		// segment to move out
+	// 		sourceNode := nodes[end]
 
-			// remove channel from end node
-			selectChannel := channelsOnNode[sourceNode][0]
-			channelsOnNode[sourceNode] = channelsOnNode[sourceNode][1:]
+	// 		if len(channelsOnNode[sourceNode])-1 < averageChannel {
+	// 			break
+	// 		}
 
-			// add channel to start node
-			if channelsOnNode[targetNode] == nil {
-				channelsOnNode[targetNode] = make([]*meta.DmChannel, 0)
-			}
-			channelsOnNode[targetNode] = append(channelsOnNode[targetNode], selectChannel)
+	// 		// remove channel from end node
+	// 		selectChannel := channelsOnNode[sourceNode][0]
+	// 		channelsOnNode[sourceNode] = channelsOnNode[sourceNode][1:]
 
-			// generate channel plan
-			plan := ChannelAssignPlan{
-				Channel:   selectChannel,
-				From:      sourceNode,
-				To:        targetNode,
-				ReplicaID: replica.ID,
-			}
-			channelPlans = append(channelPlans, plan)
-			for end > 0 && getChannelNum(nodes[end]) <= averageChannel {
-				end--
-			}
+	// 		// add channel to start node
+	// 		if channelsOnNode[targetNode] == nil {
+	// 			channelsOnNode[targetNode] = make([]*meta.DmChannel, 0)
+	// 		}
+	// 		channelsOnNode[targetNode] = append(channelsOnNode[targetNode], selectChannel)
 
-			for start < end && getChannelNum(nodes[start]) >= averageChannel {
-				start++
-			}
-		}
+	// 		// generate channel plan
+	// 		plan := ChannelAssignPlan{
+	// 			Channel:   selectChannel,
+	// 			From:      sourceNode,
+	// 			To:        targetNode,
+	// 			ReplicaID: replica.ID,
+	// 		}
+	// 		channelPlans = append(channelPlans, plan)
+	// 		for end > 0 && getChannelNum(nodes[end]) <= averageChannel {
+	// 			end--
+	// 		}
 
-	}
+	// 		for start < end && getChannelNum(nodes[start]) >= averageChannel {
+	// 			start++
+	// 		}
+	// 	}
+
+	// }
 	return channelPlans
 }
 
