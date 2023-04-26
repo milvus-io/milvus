@@ -28,22 +28,45 @@ type SearchTaskSuite struct {
 }
 
 func (s *SearchTaskSuite) TestMerge() {
+	Params.Init()
+
 	plan := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{},
 	}
 
 	s1 := &searchTask{
 		NQ:   1,
-		TopK: 1000,
+		TopK: 1,
 		plan: plan,
 	}
 	s2 := &searchTask{
 		NQ:   1,
-		TopK: 1,
+		TopK: 5,
+		plan: plan,
+	}
+	s3 := &searchTask{
+		NQ:   1,
+		TopK: 25,
+		plan: plan,
+	}
+	s4 := &searchTask{
+		NQ:   5,
+		TopK: 40,
 		plan: plan,
 	}
 
 	s.Equal(s1.CanMergeWith(s2), s2.CanMergeWith(s1))
+
+	s.True(s1.CanMergeWith(s2))
+	s.True(s2.CanMergeWith(s3))
+	s.True(s3.CanMergeWith(s4))
+
+	// exceed the ratio (10)
+	s.False(s1.CanMergeWith(s3))
+
+	// merge s1, s2. now it's with nq=2, topk=10
+	s1.Merge(s2)
+	s.True(s1.CanMergeWith(s3))
 }
 
 func TestSearchTask(t *testing.T) {
