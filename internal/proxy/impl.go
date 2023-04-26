@@ -4400,7 +4400,16 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}, nil
 	}
 
-	if !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
+	skipPasswordVerify := false
+	if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
+		for _, s := range Params.CommonCfg.SuperUsers {
+			if s == currentUser {
+				skipPasswordVerify = true
+			}
+		}
+	}
+
+	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "old password is not correct:" + req.Username,
