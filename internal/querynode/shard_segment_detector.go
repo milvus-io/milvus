@@ -124,7 +124,7 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 		case evt, ok := <-ch:
 			if !ok {
 				log.Warn("SegmentDetector event channel closed, retry...")
-				watchCh, ok := sd.rewatch(collectionID, replicaID, vchannel, revision)
+				watchCh, ok, revision := sd.rewatch(collectionID, replicaID, vchannel, revision)
 				if !ok {
 					return
 				}
@@ -134,7 +134,7 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 			}
 			if err := evt.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
-					watchCh, ok := sd.rewatch(collectionID, replicaID, vchannel, evt.CompactRevision)
+					watchCh, ok, revision := sd.rewatch(collectionID, replicaID, vchannel, evt.CompactRevision)
 					if !ok {
 						return
 					}
@@ -151,9 +151,9 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 	}
 }
 
-func (sd *etcdShardSegmentDetector) rewatch(collectionID int64, replicaID int64, vchannel string, revision int64) (ch clientv3.WatchChan, ok bool) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (sd *etcdShardSegmentDetector) rewatch(collectionID int64, replicaID int64, vchannel string, rev int64) (ch clientv3.WatchChan, ok bool, revision int64) {
+	ctx := context.Background()
+	revision = rev
 	err := retry.Do(ctx, func() error {
 		ch = sd.client.Watch(ctx, sd.path, clientv3.WithPrefix(), clientv3.WithRev(revision))
 		select {
@@ -182,13 +182,13 @@ func (sd *etcdShardSegmentDetector) rewatch(collectionID int64, replicaID int64,
 	if err != nil {
 		select {
 		case <-sd.closeCh:
-			return nil, false
+			return nil, false, revision
 		default:
 			panic(err)
 		}
 	}
 
-	return ch, true
+	return ch, true, revision
 }
 
 func (sd *etcdShardSegmentDetector) handleEvt(evt clientv3.WatchResponse, collectionID int64, replicaID int64, vchannel string) {
