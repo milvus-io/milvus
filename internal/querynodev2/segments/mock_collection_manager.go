@@ -5,6 +5,7 @@ package segments
 import (
 	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -61,8 +62,8 @@ func (_c *MockCollectionManager_Get_Call) Return(_a0 *Collection) *MockCollectio
 }
 
 // Put provides a mock function with given fields: collectionID, schema, loadMeta
-func (_m *MockCollectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) {
-	_m.Called(collectionID, schema, loadMeta)
+func (_m *MockCollectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+	_m.Called(collectionID, schema, meta, loadMeta)
 }
 
 // MockCollectionManager_Put_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Put'
@@ -74,13 +75,13 @@ type MockCollectionManager_Put_Call struct {
 //   - collectionID int64
 //   - schema *schemapb.CollectionSchema
 //   - loadMeta *querypb.LoadMetaInfo
-func (_e *MockCollectionManager_Expecter) Put(collectionID interface{}, schema interface{}, loadMeta interface{}) *MockCollectionManager_Put_Call {
-	return &MockCollectionManager_Put_Call{Call: _e.mock.On("Put", collectionID, schema, loadMeta)}
+func (_e *MockCollectionManager_Expecter) Put(collectionID interface{}, schema interface{}, meta interface{}, loadMeta interface{}) *MockCollectionManager_Put_Call {
+	return &MockCollectionManager_Put_Call{Call: _e.mock.On("Put", collectionID, schema, meta, loadMeta)}
 }
 
-func (_c *MockCollectionManager_Put_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_Put_Call {
+func (_c *MockCollectionManager_Put_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)) *MockCollectionManager_Put_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*querypb.LoadMetaInfo))
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(*segcorepb.CollectionIndexMeta), args[3].(*querypb.LoadMetaInfo))
 	})
 	return _c
 }

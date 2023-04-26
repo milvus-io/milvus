@@ -57,7 +57,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     schema->AddDebugField("age", DataType::INT32);
     int N = 100 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->PreDelete(N);
 }
@@ -75,7 +75,7 @@ TEST(SegmentCoreTest, MockTest2) {
 
     int N = 10000;  // number of records
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto reserved_begin = segment->PreInsert(N);
     segment->Insert(reserved_begin,
                     N,

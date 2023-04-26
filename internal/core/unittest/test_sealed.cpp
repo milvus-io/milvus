@@ -65,7 +65,7 @@ TEST(Sealed, without_predicate) {
         vec_col.push_back(0);
     }
     auto query_ptr = vec_col.data() + BIAS * dim;
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -182,7 +182,7 @@ TEST(Sealed, with_predicate) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

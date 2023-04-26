@@ -32,6 +32,7 @@ set(SEGCORE_FILES
         load_index_c.cpp
         SegmentInterface.cpp
         SegcoreConfig.cpp
+        IndexConfigGenerator.cpp
         segcore_init_c.cpp
         ScalarIndex.cpp
         TimestampIndex.cpp

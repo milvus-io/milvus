@@ -33,7 +33,7 @@ TEST(Span, Naive) {
 
     auto dataset = DataGen(schema, N);
     auto seg_conf = SegcoreConfig::default_config();
-    auto segment = CreateGrowingSegment(schema, -1, seg_conf);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, -1, seg_conf);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

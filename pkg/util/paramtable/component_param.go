@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -1389,10 +1388,11 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize ParamItem `refreshable:"false"`
-	ChunkRows              ParamItem `refreshable:"false"`
-	SmallIndexNlist        ParamItem `refreshable:"false"`
-	SmallIndexNProbe       ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
+	ChunkRows                 ParamItem `refreshable:"false"`
+	EnableGrowingSegmentIndex ParamItem `refreshable:"false"`
+	GrowingIndexNlist         ParamItem `refreshable:"false"`
+	GrowingIndexNProbe        ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1499,51 +1499,42 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.ChunkRows.Init(base.mgr)
 
-	p.SmallIndexNlist = ParamItem{
-		Key:     "queryNode.segcore.smallIndex.nlist",
-		Version: "2.0.0",
-		Formatter: func(v string) string {
-			rows := p.ChunkRows.GetAsInt64()
-			var defaultNList int64
-			for i := int64(0); i < rows; i++ {
-				if math.Pow(2.0, float64(i)) > math.Sqrt(float64(rows)) {
-					defaultNList = int64(math.Pow(2, float64(i)))
-					break
-				}
-			}
-
-			nlist := getAsInt64(v)
-			if nlist == 0 {
-				nlist = defaultNList
-			}
-			if nlist > rows/8 {
-				return strconv.FormatInt(rows/8, 10)
-			}
-			return strconv.FormatInt(nlist, 10)
-		},
-		Doc:    "small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
-		Export: true,
+	p.EnableGrowingSegmentIndex = ParamItem{
+		Key:          "queryNode.segcore.growing.enableIndex",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable segment growing with index to accelerate vector search.",
+		Export:       true,
 	}
-	p.SmallIndexNlist.Init(base.mgr)
+	p.EnableGrowingSegmentIndex.Init(base.mgr)
 
-	p.SmallIndexNProbe = ParamItem{
-		Key:     "queryNode.segcore.smallIndex.nprobe",
+	p.GrowingIndexNlist = ParamItem{
+		Key:          "queryNode.segcore.growing.nlist",
+		Version:      "2.0.0",
+		DefaultValue: "128",
+		Doc:          "growing index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
+		Export:       true,
+	}
+	p.GrowingIndexNlist.Init(base.mgr)
+
+	p.GrowingIndexNProbe = ParamItem{
+		Key:     "queryNode.segcore.growing.nprobe",
 		Version: "2.0.0",
 		Formatter: func(v string) string {
-			defaultNprobe := p.SmallIndexNlist.GetAsInt64() / 16
+			defaultNprobe := p.GrowingIndexNlist.GetAsInt64() / 8
 			nprobe := getAsInt64(v)
 			if nprobe == 0 {
 				nprobe = defaultNprobe
 			}
-			if nprobe > p.SmallIndexNlist.GetAsInt64() {
-				return p.SmallIndexNlist.GetValue()
+			if nprobe > p.GrowingIndexNlist.GetAsInt64() {
+				return p.GrowingIndexNlist.GetValue()
 			}
 			return strconv.FormatInt(nprobe, 10)
 		},
 		Doc:    "nprobe to search small index, based on your accuracy requirement, must smaller than nlist",
 		Export: true,
 	}
-	p.SmallIndexNProbe.Init(base.mgr)
+	p.GrowingIndexNProbe.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

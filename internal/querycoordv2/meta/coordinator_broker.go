@@ -45,6 +45,7 @@ type Broker interface {
 	GetCollectionSchema(ctx context.Context, collectionID UniqueID) (*schemapb.CollectionSchema, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
+	DescribeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
@@ -225,4 +226,21 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	}
 
 	return indexes, nil
+}
+
+func (broker *CoordinatorBroker) DescribeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
+	defer cancel()
+
+	resp, err := broker.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+	})
+
+	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Error("failed to fetch index meta",
+			zap.Int64("collection", collectionID),
+			zap.Error(err))
+		return nil, err
+	}
+	return resp.IndexInfos, nil
 }

@@ -287,7 +287,7 @@ TEST(StringExpr, Term) {
         {4, {vec_2k_3k}},
     };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -385,7 +385,7 @@ TEST(StringExpr, Compare) {
              }},
         };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     std::vector<std::string> another_str_col;
@@ -488,7 +488,7 @@ TEST(StringExpr, UnaryRange) {
              [](std::string val) { return PrefixMatch(val, "a"); }},
         };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -592,7 +592,7 @@ TEST(StringExpr, BinaryRange) {
             {true, true, "2000", "1000", [](std::string val) { return false; }},
         };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -649,8 +649,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto str_col =
         dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto query_ptr = vec_col.data();
-    auto segment = CreateGrowingSegment(schema);
-    segment->disable_small_index();  // brute-force search.
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -716,8 +715,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
     auto str_col =
         dataset.get_col(str_meta.get_id())->scalars().string_data().data();
-    auto segment = CreateGrowingSegment(schema);
-    segment->disable_small_index();  // brute-force search.
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

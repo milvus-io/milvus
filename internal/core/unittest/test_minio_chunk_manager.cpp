@@ -30,7 +30,8 @@ class MinioChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        chunk_manager_ = std::make_unique<MinioChunkManager>(get_default_storage_config());
+        chunk_manager_ =
+            std::make_unique<MinioChunkManager>(get_default_storage_config());
     }
 
  protected:
@@ -48,7 +49,15 @@ get_google_cloud_storage_config() {
     auto iamEndPoint = "";
     auto bucketName = "gcp-zilliz-infra-test";
 
-    return StorageConfig{endpoint, bucketName, accessKey, accessValue, rootPath, "minio", iamEndPoint, useSSL, useIam};
+    return StorageConfig{endpoint,
+                         bucketName,
+                         accessKey,
+                         accessValue,
+                         rootPath,
+                         "minio",
+                         iamEndPoint,
+                         useSSL,
+                         useIam};
 }
 
 StorageConfig
@@ -62,7 +71,15 @@ get_aliyun_cloud_storage_config() {
     auto iamEndPoint = "";
     auto bucketName = "vdc-infra-poc";
 
-    return StorageConfig{endpoint, bucketName, accessKey, accessValue, rootPath, "minio", iamEndPoint, useSSL, useIam};
+    return StorageConfig{endpoint,
+                         bucketName,
+                         accessKey,
+                         accessValue,
+                         rootPath,
+                         "minio",
+                         iamEndPoint,
+                         useSSL,
+                         useIam};
 }
 
 class AliyunChunkManagerTest : public testing::Test {
@@ -74,7 +91,8 @@ class AliyunChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        chunk_manager_ = std::make_unique<MinioChunkManager>(get_aliyun_cloud_storage_config());
+        chunk_manager_ = std::make_unique<MinioChunkManager>(
+            get_aliyun_cloud_storage_config());
     }
 
  protected:

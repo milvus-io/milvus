@@ -18,6 +18,7 @@ package querynodev2
 
 import (
 	"context"
+
 	"testing"
 
 	"github.com/samber/lo"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -42,6 +44,7 @@ type LocalWorkerTestSuite struct {
 	partitionIDs   []int64
 	segmentIDs     []int64
 	schema         *schemapb.CollectionSchema
+	indexMeta      *segcorepb.CollectionIndexMeta
 
 	// dependency
 	node       *QueryNode
@@ -89,12 +92,13 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	suite.NoError(err)
 
 	suite.schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
-	collection := segments.NewCollection(suite.collectionID, suite.schema, querypb.LoadType_LoadCollection)
+	suite.indexMeta = segments.GenTestIndexMeta(suite.collectionID, suite.schema)
+	collection := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, querypb.LoadType_LoadCollection)
 	loadMata := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 	}
-	suite.node.manager.Collection.Put(suite.collectionID, collection.Schema(), loadMata)
+	suite.node.manager.Collection.Put(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
 	suite.worker = NewLocalWorker(suite.node)
 }
 

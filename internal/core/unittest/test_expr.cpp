@@ -306,7 +306,7 @@ TEST(Expr, TestRange) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -395,7 +395,7 @@ TEST(Expr, TestTerm) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -510,7 +510,7 @@ TEST(Expr, TestSimpleDsl) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     std::vector<int64_t> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
@@ -592,7 +592,7 @@ TEST(Expr, TestCompare) {
     auto i64_fid = schema->AddDebugField("age2", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age1_col;
     std::vector<int64_t> age2_col;
@@ -1009,7 +1009,7 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int8_t> age8_col;
     std::vector<int16_t> age16_col;

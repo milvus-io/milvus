@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
@@ -111,6 +112,31 @@ func (s *DelegatorSuite) SetupTest() {
 					{
 						Key:   "dim",
 						Value: "128",
+					},
+				},
+			},
+		},
+	}, &segcorepb.CollectionIndexMeta{
+		MaxIndexRowCount: 100,
+		IndexMetas: []*segcorepb.FieldIndexMeta{
+			{
+				FieldID:      101,
+				CollectionID: s.collectionID,
+				IndexName:    "binary_index",
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "dim",
+						Value: "128",
+					},
+				},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "index_type",
+						Value: "BIN_IVF_FLAT",
+					},
+					{
+						Key:   "metric_type",
+						Value: "TANIMOTO",
 					},
 				},
 			},

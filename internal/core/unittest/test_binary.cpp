@@ -23,7 +23,7 @@ TEST(Binary, Insert) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N, 10);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto offset = segment->PreInsert(N);
     segment->Insert(offset,
                     N,

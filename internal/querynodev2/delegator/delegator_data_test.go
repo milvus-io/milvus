@@ -96,6 +96,31 @@ func (s *DelegatorDataSuite) SetupTest() {
 				},
 			},
 		},
+	}, &segcorepb.CollectionIndexMeta{
+		MaxIndexRowCount: 100,
+		IndexMetas: []*segcorepb.FieldIndexMeta{
+			{
+				FieldID:      101,
+				CollectionID: s.collectionID,
+				IndexName:    "binary_index",
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "dim",
+						Value: "128",
+					},
+				},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "index_type",
+						Value: "BIN_IVF_FLAT",
+					},
+					{
+						Key:   "metric_type",
+						Value: "TANIMOTO",
+					},
+				},
+			},
+		},
 	}, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})

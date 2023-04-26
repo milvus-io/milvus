@@ -63,7 +63,7 @@ auto ph_group = [] {
 }();
 
 static void
-Search_SmallIndex(benchmark::State& state) {
+Search_GrowingIndex(benchmark::State& state) {
     // schema->AddDebugField("age", DataType::FLOAT);
 
     static int64_t N = 1024 * 32;
@@ -72,14 +72,24 @@ Search_SmallIndex(benchmark::State& state) {
         return dataset_;
     }();
 
-    auto is_small_index = state.range(0);
     auto chunk_rows = state.range(1) * 1024;
     auto segconf = SegcoreConfig::default_config();
     segconf.set_chunk_rows(chunk_rows);
-    auto segment = CreateGrowingSegment(schema, -1, segconf);
-    if (!is_small_index) {
-        segment->disable_small_index();
-    }
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(schema->get_field_id(FieldName("fakevec")),
+                                  std::move(index_params),
+                                  std::move(type_params));
+    segconf.set_enable_growing_segment_index(true);
+    std::map<FieldId, FieldIndexMeta> filedMap = {
+        {schema->get_field_id(FieldName("fakevec")), fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+
+    auto segment = CreateGrowingSegment(schema, metaPtr, -1, segconf);
+
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -94,7 +104,7 @@ Search_SmallIndex(benchmark::State& state) {
     }
 }
 
-BENCHMARK(Search_SmallIndex)
+BENCHMARK(Search_GrowingIndex)
     ->MinTime(5)
     ->ArgsProduct({{true, false}, {8, 16, 32}});
 

@@ -25,6 +25,7 @@ package segments
 import "C"
 
 import (
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"sync"
 	"unsafe"
 
@@ -37,7 +38,7 @@ import (
 
 type CollectionManager interface {
 	Get(collectionID int64) *Collection
-	Put(collectionID int64, schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo)
+	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
 }
 
 type collectionManager struct {
@@ -58,7 +59,7 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -66,7 +67,7 @@ func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionS
 		return
 	}
 
-	collection := NewCollection(collectionID, schema, loadMeta.GetLoadType())
+	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
 	collection.AddPartition(loadMeta.GetPartitionIDs()...)
 	m.collections[collectionID] = collection
 }
@@ -118,7 +119,7 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, loadType querypb.LoadType) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadType querypb.LoadType) *Collection {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -128,6 +129,13 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, loadTy
 	defer C.free(unsafe.Pointer(cSchemaBlob))
 
 	collection := C.NewCollection(cSchemaBlob)
+
+	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
+		indexMetaBlob := proto.MarshalTextString(indexMeta)
+		cIndexMetaBlob := C.CString(indexMetaBlob)
+		C.SetIndexMeta(collection, cIndexMetaBlob)
+	}
+
 	return &Collection{
 		collectionPtr: collection,
 		id:            collectionID,

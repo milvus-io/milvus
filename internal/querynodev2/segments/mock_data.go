@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -280,6 +281,56 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 		field.FieldID = 100 + int64(i)
 	}
 	return &schema
+}
+
+func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	maxIndexRecordPerSegment := int64(0)
+	if err != nil || sizePerRecord == 0 {
+		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+	} else {
+		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
+	}
+
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+		CollectionID: collectionID,
+		FieldID:      simpleFloatVecField.id,
+		IndexName:    "querynode-test",
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   dimKey,
+				Value: strconv.Itoa(simpleFloatVecField.dim),
+			},
+		},
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   metricTypeKey,
+				Value: simpleFloatVecField.metricType,
+			},
+			{
+				Key:   common.IndexTypeKey,
+				Value: IndexFaissIVFFlat,
+			},
+			{
+				Key:   "nlist",
+				Value: "128",
+			},
+		},
+		IsAutoIndex: false,
+		UserIndexParams: []*commonpb.KeyValuePair{
+			{},
+		},
+	})
+
+	indexMeta := segcorepb.CollectionIndexMeta{
+		MaxIndexRowCount: maxIndexRecordPerSegment,
+		IndexMetas:       fieldIndexMetas,
+	}
+
+	return &indexMeta
 }
 
 // ---------- unittest util functions ----------
