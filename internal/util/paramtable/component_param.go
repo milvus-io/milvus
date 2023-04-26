@@ -1374,6 +1374,7 @@ type dataCoordConfig struct {
 	MaxSegmentToMerge                 int
 	SegmentSmallProportion            float64
 	SegmentCompactableProportion      float64
+	SegmentExpansionRate              float64
 	CompactionTimeoutInSeconds        int32
 	CompactionCheckIntervalInSeconds  int64
 	SingleCompactionRatioThreshold    float32
@@ -1413,6 +1414,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initCompactionMinSegment()
 	p.initCompactionMaxSegment()
 	p.initSegmentProportion()
+	p.initSegmentExpansionRate()
 	p.initCompactionTimeoutInSeconds()
 	p.initCompactionCheckIntervalInSeconds()
 	p.initSingleCompactionRatioThreshold()
@@ -1468,6 +1470,12 @@ func (p *dataCoordConfig) initSegmentMaxIdleTime() {
 func (p *dataCoordConfig) initSegmentMinSizeFromIdleToSealed() {
 	p.SegmentMinSizeFromIdleToSealed = p.Base.ParseFloatWithDefault("dataCoord.segment.minSizeFromIdleToSealed", 16.0)
 	log.Info("init segment min size from idle to sealed", zap.Float64("value", p.SegmentMinSizeFromIdleToSealed))
+}
+
+func (p *dataCoordConfig) initSegmentExpansionRate() {
+	p.SegmentExpansionRate = p.Base.ParseFloatWithDefault("dataCoord.segment.expansionRate", 1.25)
+	log.Info("init segment expansion rate", zap.Float64("value", p.SegmentExpansionRate))
+
 }
 
 func (p *dataCoordConfig) initSegmentMaxBinlogFileNumber() {
