@@ -73,6 +73,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
+        sdk_options_.httpOptions.installSigPipeHandler = true;
 #ifdef BUILD_GCP
         if (type == STORAGE_GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
