@@ -137,3 +137,16 @@ func getTravelTs(req TimeTravelRequest) Timestamp {
 func isMaxTs(ts Timestamp) bool {
 	return ts == typeutil.MaxTimestamp
 }
+
+func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
+	chanNames := typeutil.NewSet[string]()
+	for _, chanName := range chanMap {
+		chanNames.Insert(chanName...)
+	}
+
+	ret := chanNames.Len()
+	if setNum > chanNames.Len() {
+		ret = setNum
+	}
+	return ret
+}
