@@ -132,14 +132,10 @@ func (cit *createIndexTask) parseIndexParams() error {
 	if isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		if Params.AutoIndexConfig.Enable.GetAsBool() {
-			if exist {
-				if specifyIndexType != AutoIndexName {
-					return fmt.Errorf("IndexType should be %s", AutoIndexName)
-				}
-			}
-			log.Debug("create index trigger AutoIndex",
-				zap.String("type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
-			// override params
+			log.Info("create index trigger AutoIndex",
+				zap.String("original type", specifyIndexType),
+				zap.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
+			// override params by autoindex
 			for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
 				indexParamsMap[k] = v
 			}

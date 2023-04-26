@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -357,5 +358,102 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "128",
 				},
 			}, cit.newTypeParams)
+	})
+
+	cit2 := &createIndexTask{
+		Condition: nil,
+		req: &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         "",
+			CollectionName: "",
+			FieldName:      "",
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "index_type",
+					Value: "IVF_FLAT",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "L2",
+				},
+				{
+					Key:   "params",
+					Value: "{\"nlist\": 100}",
+				},
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			},
+			IndexName: "",
+		},
+		ctx:            nil,
+		rootCoord:      nil,
+		queryCoord:     nil,
+		result:         nil,
+		isAutoIndex:    false,
+		newIndexParams: nil,
+		newTypeParams:  nil,
+		collectionID:   0,
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         "FieldID",
+			IsPrimaryKey: false,
+			Description:  "field no.1",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "L2",
+				},
+			}},
+	}
+	t.Run("parse index params 2", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		indexParams := map[string]any{
+			"index_type":     "HNSW",
+			"M":              10,
+			"efConstruction": 100,
+		}
+		indexParamsStr, err := json.Marshal(indexParams)
+		assert.NoError(t, err)
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, string(indexParamsStr))
+		err = cit2.parseIndexParams()
+		assert.NoError(t, err)
+
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   "index_type",
+					Value: "HNSW",
+				},
+				{
+					Key:   MetricTypeKey,
+					Value: "L2",
+				},
+				{
+					Key:   "M",
+					Value: "10",
+				},
+				{
+					Key:   "efConstruction",
+					Value: "100",
+				},
+				{
+					Key:   "nlist",
+					Value: "100",
+				},
+			}, cit2.newIndexParams)
+		assert.ElementsMatch(t,
+			[]*commonpb.KeyValuePair{
+				{
+					Key:   DimKey,
+					Value: "128",
+				},
+			}, cit2.newTypeParams)
 	})
 }
