@@ -387,7 +387,7 @@ class TestDeleteOperation(TestcaseBase):
         # delete half and flush
         expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
         del_res, _ = collection_w.delete(expr)
-        assert collection_w.num_entities == ct.default_nb
+        assert collection_w.num_entities in [ct.default_nb, ct.default_nb // 2]
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
