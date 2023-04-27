@@ -52,8 +52,9 @@ type Segment struct {
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
-	lastSyncTs Timestamp
-	startPos   *internalpb.MsgPosition // TODO readonly
+	lastSyncTs           Timestamp
+	startPos             *internalpb.MsgPosition // TODO readonly
+	isCompactedGenerated bool
 }
 
 type addSegmentReq struct {

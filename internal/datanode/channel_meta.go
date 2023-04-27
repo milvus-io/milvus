@@ -683,7 +683,7 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *internalpb.MsgPosition) *inter
 		if seg.curInsertBuf != nil && seg.curInsertBuf.startPos != nil && seg.curInsertBuf.startPos.Timestamp < channelCP.Timestamp {
 			channelCP = seg.curInsertBuf.startPos
 		}
-		if seg.curDeleteBuf != nil && seg.curDeleteBuf.startPos != nil && seg.curDeleteBuf.startPos.Timestamp < channelCP.Timestamp {
+		if !seg.isCompactedGenerated && seg.curDeleteBuf != nil && seg.curDeleteBuf.startPos != nil && seg.curDeleteBuf.startPos.Timestamp < channelCP.Timestamp {
 			channelCP = seg.curDeleteBuf.startPos
 		}
 		for _, ib := range seg.historyInsertBuf {
