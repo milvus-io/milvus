@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -112,14 +113,19 @@ type Server struct {
 	// Active-standby
 	enableActiveStandBy bool
 	activateFunc        func() error
+
+	nodeUpEventChan chan int64
+	notifyNodeUp    chan struct{}
 }
 
 func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:     ctx,
-		cancel:  cancel,
-		factory: factory,
+		ctx:             ctx,
+		cancel:          cancel,
+		factory:         factory,
+		nodeUpEventChan: make(chan int64, 10240),
+		notifyNodeUp:    make(chan struct{}),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return server, nil
@@ -386,7 +392,9 @@ func (s *Server) startQueryCoord() error {
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
-	s.wg.Add(1)
+
+	s.wg.Add(2)
+	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
 	log.Info("start recovering dist and target")
@@ -617,9 +625,8 @@ func (s *Server) watchNodes(revision int64) {
 					zap.String("nodeAddr", addr),
 				)
 				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
-				s.handleNodeUp(nodeID)
-				s.metricsCacheManager.InvalidateSystemInfoMetrics()
-				s.checkerController.Check()
+				s.nodeUpEventChan <- nodeID
+				s.notifyNodeUp <- struct{}{}
 
 			case sessionutil.SessionUpdateEvent:
 				nodeID := event.Session.ServerID
@@ -638,6 +645,50 @@ func (s *Server) watchNodes(revision int64) {
 				s.handleNodeDown(nodeID)
 				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
+		}
+	}
+}
+
+func (s *Server) handleNodeUpLoop() {
+	log := log.Ctx(s.ctx).WithRateGroup("qcv2.Server", 1, 60)
+	defer s.wg.Done()
+	ticker := time.NewTicker(Params.QueryCoordCfg.CheckHealthInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Info("close check node health due to context done")
+			return
+		case <-s.notifyNodeUp:
+			s.tryHandleNodeUp()
+		case <-ticker.C:
+			s.tryHandleNodeUp()
+		}
+	}
+}
+
+func (s *Server) tryHandleNodeUp() {
+	ctx, cancel := context.WithTimeout(s.ctx, Params.QueryCoordCfg.CheckHealthRPCTimeout)
+	defer cancel()
+	reasons, err := s.checkNodeHealth(ctx)
+	if err != nil {
+		log.RatedWarn(10, "unhealthy node exist, node up will be delayed",
+			zap.Int("delayedNodeUpEvents", len(s.nodeUpEventChan)),
+			zap.Int("unhealthyNodeNum", len(reasons)),
+			zap.Strings("unhealthyReason", reasons))
+		return
+	}
+
+	for len(s.nodeUpEventChan) > 0 {
+		nodeID := <-s.nodeUpEventChan
+		if s.nodeMgr.Get(nodeID) != nil {
+			// only if all nodes are healthy, node up event will be handled
+			s.handleNodeUp(nodeID)
+			s.metricsCacheManager.InvalidateSystemInfoMetrics()
+			s.checkerController.Check()
+		} else {
+			log.Warn("node already down",
+				zap.Int64("nodeID", nodeID))
 		}
 	}
 }

@@ -779,6 +779,8 @@ type queryCoordConfig struct {
 	CheckNodeInReplicaInterval time.Duration
 	CheckResourceGroupInterval time.Duration
 	EnableRGAutoRecover        bool
+	CheckHealthInterval        time.Duration
+	CheckHealthRPCTimeout      time.Duration
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -814,6 +816,10 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initScoreUnbalanceTolerationFactor()
 	p.initCheckResourceGroupInterval()
 	p.initEnableRGAutoRecover()
+
+	// Check QN Health
+	p.initCheckHealthInterval()
+	p.initCheckHealthRPCTimeout()
 }
 
 func (p *queryCoordConfig) initTaskRetryNum() {
@@ -1026,6 +1032,24 @@ func (p *queryCoordConfig) initCheckResourceGroupInterval() {
 
 func (p *queryCoordConfig) initEnableRGAutoRecover() {
 	p.EnableRGAutoRecover = p.Base.ParseBool("queryCoord.enableRGAutoRecover", true)
+}
+
+func (p *queryCoordConfig) initCheckHealthInterval() {
+	interval := p.Base.LoadWithDefault("queryCoord.checkHealthInterval", "3000")
+	checkHealthInterval, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.CheckHealthInterval = time.Duration(checkHealthInterval) * time.Millisecond
+}
+
+func (p *queryCoordConfig) initCheckHealthRPCTimeout() {
+	interval := p.Base.LoadWithDefault("queryCoord.checkHealthRPCTimeout", "100")
+	checkHealthRPCTimeout, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.CheckHealthRPCTimeout = time.Duration(checkHealthRPCTimeout) * time.Millisecond
 }
 
 // /////////////////////////////////////////////////////////////////////////////
