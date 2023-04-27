@@ -949,7 +949,7 @@ So adjust at your risk!`,
 
 	p.MaxShardNum = ParamItem{
 		Key:          "proxy.maxShardNum",
-		DefaultValue: "64",
+		DefaultValue: "16",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
 		Doc:          "Maximum number of shards in a collection",
