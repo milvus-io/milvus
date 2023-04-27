@@ -934,11 +934,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	// oneSegment is definitely in the channel, guaranteed by the check before.
 	collID, partID, _ := channel.getCollectionAndPartitionID(oneSegment)
 	targetSeg := &Segment{
-		collectionID: collID,
-		partitionID:  partID,
-		segmentID:    req.GetCompactedTo(),
-		numRows:      req.GetNumOfRows(),
-		lastSyncTs:   tsoutil.GetCurrentTime(),
+		collectionID:         collID,
+		partitionID:          partID,
+		segmentID:            req.GetCompactedTo(),
+		numRows:              req.GetNumOfRows(),
+		lastSyncTs:           tsoutil.GetCurrentTime(),
+		isCompactedGenerated: true,
 	}
 
 	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
