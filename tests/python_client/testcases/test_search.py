@@ -53,7 +53,7 @@ entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
 index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
+index_name2 = cf.gen_unique_str("varchar")
 half_nb = ct.default_nb // 2
 
 
@@ -2858,7 +2858,6 @@ class TestCollectionSearch(TestcaseBase):
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23601")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
@@ -2884,18 +2883,22 @@ class TestCollectionSearch(TestcaseBase):
         # 3. search with output field vector
         search_params = cf.gen_search_param(index)[0]
         res = collection_w.search(vectors[:1], default_search_field,
-                                  search_params, 2, default_search_exp,
+                                  search_params, default_limit, default_search_exp,
                                   output_fields=[field_name],
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": 1,
-                                               "limit": 2})[0]
+                                               "limit": default_limit})[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['float_vector'][0])
-        assert res[0][0].entity.float_vector == data[field_name][res[0][0].id]
-        # log.info(data['float_vector'][1])
+        for _id in range(default_limit):
+            for i in range(default_dim):
+                vectorInsert = float(format(data[field_name][res[0][_id].id][i], '.5f'))
+                vectorRes = float(format(res[0][_id].entity.float_vector[i], '.5f'))
+                if vectorInsert != vectorRes:
+                    log.info(data[field_name][res[0][_id].id][i])
+                    log.info(res[0][_id].entity.float_vector[i])
+                    # assert False
+                assert vectorInsert == vectorRes
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23661")
@@ -2970,11 +2973,11 @@ class TestCollectionSearch(TestcaseBase):
         for i in range(default_limit):
             assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [32, 128, 768])
-    def test_search_output_field_vector_with_different_dim(self, dim):
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metrics", ct.float_metrics)
+    def test_search_output_field_vector_different_metric_type(self, metrics):
         """
-        target: test search with output vector field after binary index
+        target: test search with output vector field
         method: 1. create a collection and insert data
                 2. create index and load
                 3. search with output field vector
@@ -2982,18 +2985,18 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. create a collection and insert data
-        collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
-        data = cf.gen_default_dataframe_data(dim=dim)
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        data = cf.gen_default_dataframe_data()
         collection_w.insert(data)
 
         # 2. create index and load
-        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        index_params = {"index_type": "FLAT", "params": {"nlist": 128}, "metric_type": metrics}
         collection_w.create_index("float_vector", index_params)
         collection_w.load()
 
         # 3. search with output field vector
-        vectors = cf.gen_vectors(default_nq, dim=dim)
-        res = collection_w.search(vectors[:default_nq], default_search_field,
+        search_vectors = cf.gen_vectors(default_nq, dim=default_dim)
+        res = collection_w.search(search_vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit, default_search_exp,
                                   output_fields=[field_name],
                                   check_task=CheckTasks.check_search_results,
@@ -3001,11 +3004,17 @@ class TestCollectionSearch(TestcaseBase):
                                                "limit": default_limit})[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['float_vector'][0])
         for i in range(default_limit):
             assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
+        for _id in range(default_limit):
+            for i in range(default_dim):
+                vectorInsert = float(format(data[field_name][res[0][_id].id][i], '.5f'))
+                vectorRes = float(format(res[0][_id].entity.float_vector[i], '.5f'))
+                if vectorInsert != vectorRes:
+                    log.info(data[field_name][res[0][_id].id][i])
+                    log.info(res[0][_id].entity.float_vector[i])
+                    # assert False
+                assert vectorInsert == vectorRes
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
@@ -4504,10 +4513,9 @@ class TestSearchPagination(TestcaseBase):
         # 1. create a collection
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search pagination with offset
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, limit,
+                                         search_params, limit,
                                          default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
@@ -4539,11 +4547,10 @@ class TestSearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         output_fields = [default_string_field_name, default_float_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, default_limit,
+                                         search_params, default_limit,
                                          default_search_string_exp,
                                          output_fields=output_fields,
                                          _async=_async,
@@ -4578,10 +4585,10 @@ class TestSearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, is_binary=True, auto_id=auto_id, dim=default_dim)[0:4]
         # 2. search
-        search_param = {"metric_type": "JACCARD", "params": {"nprobe": 10}, "offset": offset}
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}, "offset": offset}
         binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)[1]
         search_res = collection_w.search(binary_vectors[:default_nq], "binary_vector",
-                                         search_param, default_limit,
+                                         search_params, default_limit,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
                                                       "ids": insert_ids,
@@ -4610,10 +4617,9 @@ class TestSearchPagination(TestcaseBase):
         offset = topK - limit
         collection_w = self.init_collection_general(prefix, True, nb=20000, auto_id=auto_id, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, limit,
+                                         search_params, limit,
                                          default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
@@ -4660,10 +4666,10 @@ class TestSearchPagination(TestcaseBase):
             limit = 0
         elif len(filter_ids) - offset < default_limit:
             limit = len(filter_ids) - offset
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                            search_param, default_limit, expression,
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                            search_params, default_limit, expression,
                                             _async=_async,
                                             check_task=CheckTasks.check_search_results,
                                             check_items={"nq": default_nq,
@@ -4699,7 +4705,6 @@ class TestSearchPagination(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       is_index=False)[0:4]
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -4707,9 +4712,9 @@ class TestSearchPagination(TestcaseBase):
         # 3. search through partitions
         par = collection_w.partitions
         limit = 100
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, limit, default_search_exp,
+                                         search_params, limit, default_search_exp,
                                          [par[0].name, par[1].name], _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
@@ -4784,10 +4789,9 @@ class TestSearchPagination(TestcaseBase):
         collection_w.insert(data)
         collection_w.load()
         # 3. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, default_limit,
+                                         search_params, default_limit,
                                          default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
@@ -4815,8 +4819,8 @@ class TestSearchPagination(TestcaseBase):
         # 1. initialize without data
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search collection without data
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        search_res = collection_w.search([], default_search_field, search_param,
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_res = collection_w.search([], default_search_field, search_params,
                                          default_limit, default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": 0,
@@ -4837,10 +4841,9 @@ class TestSearchPagination(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  search_param, default_limit,
+                                  search_params, default_limit,
                                   default_search_exp,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": default_nq,
@@ -4925,10 +4928,9 @@ class TestSearchPaginationInvalid(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, default_limit,
+                            search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
@@ -4945,10 +4947,9 @@ class TestSearchPaginationInvalid(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, default_limit,
+                            search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
@@ -4970,7 +4971,7 @@ class TestSearchDiskann(TestcaseBase):
     def auto_id(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[False ,True])
+    @pytest.fixture(scope="function", params=[False, True])
     def _async(self, request):
         yield request.param
 
@@ -5026,7 +5027,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
@@ -5091,11 +5092,11 @@ class TestSearchDiskann(TestcaseBase):
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
-        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, limit, 
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, limit,
                             default_search_exp,
                             output_fields=output_fields,
                             travel_timestamp=0,
@@ -5121,11 +5122,11 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         search_list = 20
-        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             travel_timestamp=0,
@@ -5160,11 +5161,11 @@ class TestSearchDiskann(TestcaseBase):
         assert del_res.delete_count == half_nb
 
         collection_w.delete(tmp_expr)
-        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"search_list": 30}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -5206,11 +5207,11 @@ class TestSearchDiskann(TestcaseBase):
         assert del_res.delete_count == half_nb
 
         collection_w.delete(tmp_expr)
-        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"search_list": 30}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -5248,21 +5249,21 @@ class TestSearchDiskann(TestcaseBase):
 
         limit = 4
 
-        default_search_params ={"metric_type": "L2", "params": {"nprobe": 64}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 64}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
-        search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                default_search_params, limit, 
-                                default_expr,
-                                output_fields=output_fields,
-                                _async=_async,
-                                travel_timestamp=0,
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": default_nq,
-                                            "ids": ids,
-                                            "limit": limit,
-                                            "_async": _async}  
-                                )
+        search_res = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                         search_params, limit,
+                                         default_expr,
+                                         output_fields=output_fields,
+                                         _async=_async,
+                                         travel_timestamp=0,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": ids,
+                                                      "limit": limit,
+                                                      "_async": _async}
+                                         )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [10, 100, 1000])
@@ -5284,9 +5285,9 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.load()
 
         search_params = {"metric_type": "L2", "params": {"search_list": limit}}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
+        collection_w.search(search_vectors[:default_nq], default_search_field,
                             search_params, limit,
                             default_search_exp,
                             output_fields=output_fields,
@@ -5296,6 +5297,41 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
+                                         "_async": _async}
+                            )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #23672")
+    def test_search_diskann_search_list_up_to_min(self, dim, auto_id, _async):
+        """
+        target: test search diskann index when search_list up to min
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index ,  then load
+                3.search
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
+                                                                      dim=dim, is_index=False)[0:4]
+
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+
+        search_params = {"metric_type": "L2", "params": {"k": 200, "search_list":201}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
                                          "_async": _async}
                             )
 

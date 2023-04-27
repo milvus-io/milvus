@@ -197,6 +197,7 @@ binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]
 delete_support = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 ivf = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 skip_pq = ["IVF_PQ"]
+float_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
