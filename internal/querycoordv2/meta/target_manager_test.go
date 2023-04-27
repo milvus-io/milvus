@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/samber/lo"
@@ -224,6 +225,12 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID)
 	suite.Error(err)
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
+	suite.NoError(err)
+
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, int64(1)).Return(nil, nil, errors.New("fake error")).Times(1)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetSegments, nil)
+	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
 	suite.NoError(err)
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -190,38 +191,43 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, pa
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
 
-	tryPullNextTargetV1 := func() (*CollectionTarget, error) {
-		// for rolling  upgrade, when call GetRecoveryInfoV2 failed, back to retry GetRecoveryInfo
-		target, err := mgr.PullNextTargetV1(broker, collectionID, partitionIDs...)
+	var target *CollectionTarget
+	getRecoveryInfo := func() error {
+		var err error
+
+		// sort for mock test, mock match rules require slice with same order
+		slices.Sort(partitionIDs)
+
+		channels := make(map[string]*DmChannel)
+		segments := make(map[int64]*datapb.SegmentInfo, 0)
+		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID, partitionIDs...)
 		if err != nil {
-			return nil, err
+			if funcutil.IsGrpcErr(err) {
+				// for rolling  upgrade, when call GetRecoveryInfoV2 failed, back to retry GetRecoveryInfo
+				target, err = mgr.PullNextTargetV1(broker, collectionID, partitionIDs...)
+				return err
+			}
+			return err
 		}
 
-		return target, nil
+		for _, segmentInfo := range segmentInfos {
+			segments[segmentInfo.GetID()] = segmentInfo
+		}
+
+		for _, info := range vChannelInfos {
+			channels[info.GetChannelName()] = DmChannelFromVChannel(info)
+		}
+
+		target = NewCollectionTarget(segments, channels)
+		return nil
 	}
 
-	// sort for mock test, mock match rules require slice with same order
-	slices.Sort(partitionIDs)
-
-	channels := make(map[string]*DmChannel)
-	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID, partitionIDs...)
+	err := retry.Do(context.TODO(), getRecoveryInfo, retry.Attempts(10))
 	if err != nil {
-		if funcutil.IsGrpcErr(err) {
-			return tryPullNextTargetV1()
-		}
 		return nil, err
 	}
 
-	for _, segmentInfo := range segmentInfos {
-		segments[segmentInfo.GetID()] = segmentInfo
-	}
-
-	for _, info := range vChannelInfos {
-		channels[info.GetChannelName()] = DmChannelFromVChannel(info)
-	}
-
-	return NewCollectionTarget(segments, channels), nil
+	return target, nil
 }
 
 func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
