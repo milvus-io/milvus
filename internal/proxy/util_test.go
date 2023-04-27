@@ -711,7 +711,7 @@ func TestIsDefaultRole(t *testing.T) {
 	assert.Equal(t, false, IsDefaultRole("manager"))
 }
 
-func GetContext(ctx context.Context, originValue string) context.Context {
+func getContextWithAuthorization(ctx context.Context, originValue string) context.Context {
 	authKey := strings.ToLower(util.HeaderAuthorize)
 	authValue := crypto.Base64Encode(originValue)
 	contextMap := map[string]string{
@@ -740,12 +740,12 @@ func TestGetCurUserFromContext(t *testing.T) {
 	_, err = GetCurUserFromContext(metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{})))
 	assert.NotNil(t, err)
 
-	_, err = GetCurUserFromContext(GetContext(context.Background(), "123456"))
+	_, err = GetCurUserFromContext(getContextWithAuthorization(context.Background(), "123456"))
 	assert.NotNil(t, err)
 
 	root := "root"
 	password := "123456"
-	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	username, err := GetCurUserFromContext(getContextWithAuthorization(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
 	assert.Nil(t, err)
 	assert.Equal(t, "root", username)
 }

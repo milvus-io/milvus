@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -255,7 +256,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("translate output fields", zap.Int64("msgID", t.ID()),
 		zap.Strings("output fields", t.request.GetOutputFields()))
 
-	//fetch search_growing from search param
+	// fetch search_growing from search param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetSearchParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
@@ -379,6 +380,11 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 	log := log.Ctx(ctx)
+
+	// Add user name into context if it's exists.
+	if username, _ := GetCurUserFromContext(ctx); username != "" {
+		ctx = contextutil.WithUserInGrpcMetadata(ctx, username)
+	}
 
 	executeSearch := func() error {
 		shard2Leaders, err := globalMetaCache.GetShards(ctx, true, t.collectionName)
@@ -723,7 +729,7 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 			return ret, err
 		}
-		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
+		// printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
 	var (

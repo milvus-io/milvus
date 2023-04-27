@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 
 	"github.com/golang/protobuf/proto"
@@ -875,13 +876,19 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 			metrics.SearchLabel).Observe(float64(historicalTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.SearchLabel).Observe(float64(historicalTask.reduceDur.Milliseconds()))
+		// In queue latency per user.
+		metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
+			fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel,
+			contextutil.GetUserFromGrpcMetadata(historicalTask.Ctx()),
+		).Observe(float64(historicalTask.queueDur.Milliseconds()))
 		latency := tr.ElapseSpan()
 		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 		return historicalTask.Ret, nil
 	}
 
-	//from Proxy
+	// from Proxy
 	tr := timerecord.NewTimeRecorder("SearchShard")
 	log.Ctx(ctx).Debug("start do search",
 		zap.String("vChannel", dmlChannel),
@@ -900,6 +907,8 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		errCluster        error
 	)
 	defer cancel()
+	// Passthrough username across grpc.
+	searchCtx = contextutil.PassthroughUserInGrpcMetadata(searchCtx)
 
 	// optimize search params
 	if req.Req.GetSerializedExprPlan() != nil && node.queryHook != nil {
@@ -1046,6 +1055,12 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 			metrics.QueryLabel).Observe(float64(queryTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(queryTask.reduceDur.Milliseconds()))
+		// In queue latency per user.
+		metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
+			fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel,
+			contextutil.GetUserFromGrpcMetadata(queryTask.Ctx()),
+		).Observe(float64(queryTask.queueDur.Milliseconds()))
 		latency := tr.ElapseSpan()
 		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
@@ -1062,6 +1077,9 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	// add cancel when error occurs
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Passthrough username across grpc.
+	queryCtx = contextutil.PassthroughUserInGrpcMetadata(queryCtx)
 
 	var results []*internalpb.RetrieveResults
 	var errCluster error

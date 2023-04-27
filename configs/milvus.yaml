@@ -242,6 +242,18 @@ queryNode:
     # if the lag is larger than this config, scheduler will return error without waiting.
     # the valid value is [3600, infinite)
     maxTimestampLag: 86400
+    # read task schedule policy: fifo(by default), user-task-polling.
+    scheduleReadPolicy: 
+      # fifo: A FIFO queue support the schedule.
+      # user-task-polling: 
+      #     The user's tasks will be polled one by one and scheduled. 
+      #     Scheduling is fair on task granularity.
+      #     The policy is based on the username for authentication.
+      #     And an empty username is considered the same user. 
+      #     When there are no multi-users, the policy decay into FIFO
+      name: fifo
+      # user-task-polling configure:
+      taskQueueExpire: 60 # 1 min by default, expire time of inner user task queue since queue is empty.
 
   grouping:
     enabled: true
