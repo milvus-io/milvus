@@ -78,6 +78,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
+        sdk_options_.httpOptions.installSigPipeHandler = true;
         Aws::InitAPI(sdk_options_);
     }
 }

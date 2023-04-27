@@ -143,7 +143,7 @@ class MinioChunkManager : public RemoteChunkManager {
                            const Aws::Client::ClientConfiguration& config);
 
  private:
-    const Aws::SDKOptions sdk_options_;
+    Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
     std::shared_ptr<Aws::S3::S3Client> client_;
