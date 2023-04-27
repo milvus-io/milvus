@@ -138,6 +138,52 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		type ttCase struct {
+			maxTtDelay     time.Duration
+			curTt          time.Time
+			fgTt           time.Time
+			expectedFactor float64
+		}
+		t0 := time.Now()
+		ttCases := []ttCase{
+			{10 * time.Second, t0, t0.Add(1 * time.Second), 1},
+			{10 * time.Second, t0, t0, 1},
+			{10 * time.Second, t0.Add(1 * time.Second), t0, 0.9},
+			{10 * time.Second, t0.Add(2 * time.Second), t0, 0.8},
+			{10 * time.Second, t0.Add(5 * time.Second), t0, 0.5},
+			{10 * time.Second, t0.Add(7 * time.Second), t0, 0.3},
+			{10 * time.Second, t0.Add(9 * time.Second), t0, 0.1},
+			{10 * time.Second, t0.Add(10 * time.Second), t0, 0},
+			{10 * time.Second, t0.Add(100 * time.Second), t0, 0},
+		}
+
+		backup := Params.QuotaConfig.MaxTimeTickDelay
+
+		for _, c := range ttCases {
+			paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, fmt.Sprintf("%f", c.maxTtDelay.Seconds()))
+			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Fgm: metricsinfo.FlowGraphMetric{
+						NumFlowGraph:        1,
+						MinFlowGraphTt:      fgTs,
+						MinFlowGraphChannel: "dml",
+					},
+				},
+			}
+			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
+			factors := quotaCenter.getTimeTickDelayFactor(curTs)
+			for _, factor := range factors {
+				assert.True(t, math.Abs(factor-c.expectedFactor) < 0.01)
+			}
+		}
+
+		Params.QuotaConfig.MaxTimeTickDelay = backup
+	})
+
 	t.Run("test TimeTickDelayFactor factors", func(t *testing.T) {
 		qc := types.NewMockQueryCoord(t)
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
@@ -329,8 +375,11 @@ func TestQuotaCenter(t *testing.T) {
 					},
 				},
 			}
-			quotaCenter.resetAllCurrentRates()
-			quotaCenter.calculateWriteRates()
+			factors := quotaCenter.getMemoryFactor()
+
+			for _, factor := range factors {
+				assert.True(t, math.Abs(factor-c.expectedFactor) < 0.01)
+			}
 		}
 
 		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
