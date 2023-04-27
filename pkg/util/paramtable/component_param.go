@@ -1603,7 +1603,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.MaxReadConcurrency = ParamItem{
 		Key:          "queryNode.scheduler.maxReadConcurrentRatio",
 		Version:      "2.0.0",
-		DefaultValue: "2.0",
+		DefaultValue: "1.0",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			cpuNum := int64(runtime.GOMAXPROCS(0))
@@ -1635,7 +1635,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "50000",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
@@ -1643,7 +1643,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.TopKMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.topKMergeRatio",
 		Version:      "2.0.0",
-		DefaultValue: "10.0",
+		DefaultValue: "20.0",
 		Export:       true,
 	}
 	p.TopKMergeRatio.Init(base.mgr)

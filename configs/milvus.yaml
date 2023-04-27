@@ -216,8 +216,8 @@ queryNode:
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
   grouping:
     enabled: true
-    maxNQ: 1000
-    topKMergeRatio: 10
+    maxNQ: 50000
+    topKMergeRatio: 20
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
@@ -226,7 +226,7 @@ queryNode:
     # It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
     # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
     # (0, 100]
-    maxReadConcurrentRatio: 2
+    maxReadConcurrentRatio: 1
     cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
   gracefulStopTimeout: 30

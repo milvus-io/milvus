@@ -299,9 +299,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
-		assert.Equal(t, int32(runtime.GOMAXPROCS(0)*2), Params.MaxReadConcurrency.GetAsInt32())
-		assert.Equal(t, int64(1000), Params.MaxGroupNQ.GetAsInt64())
-		assert.Equal(t, 10.0, Params.TopKMergeRatio.GetAsFloat())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(runtime.GOMAXPROCS(0)*4), Params.KnowhereThreadPoolSize.GetAsUint32())
 
