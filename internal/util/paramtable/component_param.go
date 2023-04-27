@@ -1251,7 +1251,7 @@ func (p *queryNodeConfig) initMaxReadConcurrency() {
 }
 
 func (p *queryNodeConfig) initMaxGroupNQ() {
-	p.MaxGroupNQ = p.Base.ParseInt64WithDefault("queryNode.grouping.maxNQ", 1000)
+	p.MaxGroupNQ = p.Base.ParseInt64WithDefault("queryNode.grouping.maxNQ", 50000)
 }
 
 func (p *queryNodeConfig) initTopKMergeRatio() {

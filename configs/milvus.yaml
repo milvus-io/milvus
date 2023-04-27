@@ -241,7 +241,7 @@ queryNode:
 
   grouping:
     enabled: true
-    maxNQ: 1000
+    maxNQ: 50000
     topKMergeRatio: 10.0
 
 indexCoord:

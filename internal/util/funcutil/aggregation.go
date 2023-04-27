@@ -1,5 +1,7 @@
 package funcutil
 
+import "golang.org/x/exp/constraints"
+
 /*
 type aggFunc[T constraints.Ordered] func(t1, t2 T) T
 
@@ -48,9 +50,16 @@ func Sum[T constraints.Ordered](s ...T) T {
 
 */
 
-func Min(t1, t2 uint64) uint64 {
-	if t1 < t2 {
-		return t1
+func Min[T constraints.Ordered](first T, values ...T) T {
+	index := -1
+	for i := range values {
+		if values[i] < first {
+			index = i
+		}
 	}
-	return t2
+	if index == -1 {
+		return first
+	}
+
+	return values[index]
 }

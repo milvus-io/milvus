@@ -347,27 +347,24 @@ func (s *searchTask) CanMergeWith(t readTask) bool {
 		return false
 	}
 
-	pre := s.NQ * s.TopK
-	if s2.NQ*s2.TopK < pre {
-		pre = s2.NQ * s2.TopK
-	}
-
-	maxTopk := s.TopK
-	if maxTopk < s2.TopK {
-		maxTopk = s2.TopK
-	}
-	after := (s.NQ + s2.NQ) * maxTopk
-
-	if pre == 0 {
-		return false
-	}
-	ratio := float64(after) / float64(pre)
-	if ratio > Params.QueryNodeCfg.TopKMergeRatio {
-		return false
-	}
 	if s.NQ+s2.NQ > Params.QueryNodeCfg.MaxGroupNQ {
 		return false
 	}
+
+	if s.TopK != s2.TopK {
+		maxTopk := s.TopK
+		if maxTopk < s2.TopK {
+			maxTopk = s2.TopK
+		}
+
+		totalCost := (s.NQ + s2.NQ) * maxTopk
+		minCost := funcutil.Min(s.NQ*s.TopK, s2.NQ*s2.TopK)
+		ratio := float64(totalCost) / float64(minCost)
+		if ratio > Params.QueryNodeCfg.TopKMergeRatio {
+			return false
+		}
+	}
+
 	return true
 }
 
