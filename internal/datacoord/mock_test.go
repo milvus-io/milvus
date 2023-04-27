@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -448,6 +450,14 @@ func (m *mockRootCoordService) HasCollection(ctx context.Context, req *milvuspb.
 }
 
 func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	// return not exist
+	if req.CollectionID == -1 {
+		err := common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", req.CollectionID))
+		return &milvuspb.DescribeCollectionResponse{
+			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: err.Error()},
+		}, nil
+	}
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

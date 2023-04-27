@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -1035,33 +1036,11 @@ func (s *Server) hasCollection(ctx context.Context, collectionID int64) (bool, e
 	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
 		return true, nil
 	}
-
-	if resp.Status.ErrorCode == commonpb.ErrorCode_CollectionNotExists {
+	statusErr := common.NewStatusError(resp.Status.ErrorCode, resp.Status.Reason)
+	if common.IsCollectionNotExistError(statusErr) {
 		return false, nil
 	}
-	return false, fmt.Errorf("code:%s, reason:%s", resp.Status.GetErrorCode().String(), resp.Status.GetReason())
-}
-
-// hasCollectionInternal communicates with RootCoord and check whether this collection's meta exist in rootcoord.
-func (s *Server) hasCollectionInternal(ctx context.Context, collectionID int64) (bool, error) {
-	resp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		DbName:       "",
-		CollectionID: collectionID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if resp == nil {
-		return false, errNilResponse
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return false, nil
-	}
-	return true, nil
+	return false, statusErr
 }
 
 func (s *Server) reCollectSegmentStats(ctx context.Context) {

@@ -55,7 +55,7 @@ func Test_IsCollectionNotExistError(t *testing.T) {
 	assert.False(t, IsCollectionNotExistError(nil))
 	assert.False(t, IsCollectionNotExistError(errors.New("not status error")))
 	for _, code := range collectionNotExistCodes {
-		err := NewStatusError(code, "collection not exist")
+		err := NewStatusError(code, "can't find collection")
 		assert.True(t, IsCollectionNotExistError(err))
 	}
 	assert.True(t, IsCollectionNotExistError(NewCollectionNotExistError("collection not exist")))
