@@ -8,6 +8,7 @@ from chaos.checker import (CreateChecker,
                            QueryChecker,
                            IndexChecker,
                            DeleteChecker,
+                           DropChecker,
                            Op)
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
@@ -56,6 +57,7 @@ class TestOperations(TestBase):
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
+            Op.drop:DropChecker(collection_name=c_name)
         }
         self.health_checkers = checkers
 
