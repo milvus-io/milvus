@@ -182,6 +182,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		otherTopk = other.req.GetReq().GetTopk()
 	)
 
+	diffTopk := topk != otherTopk
 	pre := funcutil.Min(nq*topk, otherNq*otherTopk)
 	maxTopk := funcutil.Max(topk, otherTopk)
 	after := (nq + otherNq) * maxTopk
@@ -194,7 +195,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
 		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||
-		ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat() ||
+		diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat() ||
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
