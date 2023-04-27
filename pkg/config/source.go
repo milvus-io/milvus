@@ -29,6 +29,7 @@ type Source interface {
 	GetPriority() int
 	GetSourceName() string
 	SetEventHandler(eh EventHandler)
+	UpdateOptions(opt Options)
 	Close()
 }
 

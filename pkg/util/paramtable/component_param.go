@@ -183,7 +183,7 @@ type commonConfig struct {
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
-	DefaultIndexName     ParamItem `refreshable:"false"`
+	DefaultIndexName     ParamItem `refreshable:"true"`
 	RetentionDuration    ParamItem `refreshable:"true"`
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
@@ -413,7 +413,6 @@ func (p *commonConfig) init(base *BaseTable) {
 		Key:          "common.defaultIndexName",
 		Version:      "2.0.0",
 		DefaultValue: "_default_idx",
-		Forbidden:    true,
 		Doc:          "default index name",
 		Export:       true,
 	}

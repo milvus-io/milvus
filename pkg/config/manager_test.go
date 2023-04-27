@@ -75,3 +75,6 @@ func (ErrSource) GetSourceName() string {
 func (e ErrSource) SetEventHandler(eh EventHandler) {
 
 }
+
+func (e ErrSource) UpdateOptions(opt Options) {
+}

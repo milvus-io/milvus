@@ -86,6 +86,10 @@ func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 	})
 }
 
+func (gp *BaseTable) UpdateSourceOpiotns(opts ...config.Option) {
+	gp.mgr.UpdateSourceOptions(opts...)
+}
+
 // init initializes the param table.
 // if refreshInterval greater than 0 will auto refresh config from source
 func (gp *BaseTable) init(refreshInterval int) {
