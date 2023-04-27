@@ -287,6 +287,15 @@ func IsIntegerType(dataType schemapb.DataType) bool {
 	}
 }
 
+func IsJSONType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Array, schemapb.DataType_JSON:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {

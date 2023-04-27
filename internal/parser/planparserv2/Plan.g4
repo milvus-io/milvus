@@ -6,6 +6,7 @@ expr:
 	| BooleanConstant										                # Boolean
 	| StringLiteral											                # String
 	| Identifier											                # Identifier
+	| JsonFiled                                                             # JSON
 	| '(' expr ')'											                # Parens
 	| expr LIKE StringLiteral                                               # Like
 	| expr POW expr											                # Power
@@ -16,15 +17,16 @@ expr:
 	| expr op = (SHL | SHR) expr							                # Shift
 	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                  # Term
 	| expr op = (IN | NIN) EmptyTerm                                        # EmptyTerm
-	| expr op1 = (LT | LE) Identifier op2 = (LT | LE) expr		            # Range
-	| expr op1 = (GT | GE) Identifier op2 = (GT | GE) expr                  # ReverseRange
+	| expr op1 = (LT | LE) (Identifier | JsonFiled) op2 = (LT | LE) expr	# Range
+	| expr op1 = (GT | GE) (Identifier | JsonFiled) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                # Relational
 	| expr op = (EQ | NE) expr								                # Equality
 	| expr BAND expr										                # BitAnd
 	| expr BXOR expr										                # BitXor
 	| expr BOR expr											                # BitOr
 	| expr AND expr											                # LogicalAnd
-	| expr OR expr											                # LogicalOr;
+	| expr OR expr											                # LogicalOr
+	| EXISTS expr                                                           # Exists;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
@@ -44,6 +46,7 @@ EQ: '==';
 NE: '!=';
 
 LIKE: 'like' | 'LIKE';
+EXISTS: 'exists' | 'EXISTS';
 
 ADD: '+';
 SUB: '-';
@@ -82,6 +85,7 @@ FloatingConstant:
 Identifier: Nondigit (Nondigit | Digit)*;
 
 StringLiteral: EncodingPrefix? '"' SCharSequence? '"';
+JsonFiled: Identifier('[' (StringLiteral | IntegerConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

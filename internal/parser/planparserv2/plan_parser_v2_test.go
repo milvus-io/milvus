@@ -55,7 +55,7 @@ func TestExpr_Term(t *testing.T) {
 
 	exprStrs := []string{
 		`BoolField in [true, false]`,
-		`Int8Field in [1, 2]`,
+		`Int8Field in [1]`,
 		`Int16Field in [3, 4]`,
 		`Int32Field in [5, 6]`,
 		`Int64Field in [7, 8]`,
@@ -226,6 +226,7 @@ func TestExpr_Identifier(t *testing.T) {
 		`DoubleField`,
 		`StringField`,
 		`VarCharField`,
+		`JSONField`,
 	}
 	for _, exprStr := range exprStrs {
 		expr := handleExpr(helper, exprStr)
@@ -534,4 +535,162 @@ func Test_handleExpr_17126(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func Test_JSONExpr(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	// search
+	expr = `JSONField["A"] > 90`
+	_, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] < 10`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] <= 5`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] >= 95`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] == 5`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] != 95`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `(JSONField["A"] > 90) && (JSONField["B"] < 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `(JSONField["A"] > 95) || (JSONField["B"] < 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `not (JSONField["A"] == 95)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] in [90, 91, 95, 97]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] not in [90, 91, 95, 97]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["C"]["0"] in [90, 91, 95, 97]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["C"]["0"] not in [90, 91, 95, 97]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `0 <= JSONField["A"] < 5`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField["A"] + 5 == 10`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `exists JSONField["A"]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `ArrayField[0] > 0`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
 }
