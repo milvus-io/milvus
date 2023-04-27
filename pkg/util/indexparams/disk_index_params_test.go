@@ -18,12 +18,13 @@ package indexparams
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDiskIndexParams(t *testing.T) {
@@ -42,18 +43,6 @@ func TestDiskIndexParams(t *testing.T) {
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
-
-		searchCacheBudgetGBRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 0.10, searchCacheBudgetGBRatio)
-
-		loadNumThreadRatio, err := strconv.ParseFloat(indexParams[NumLoadThreadRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 8.0, loadNumThreadRatio)
-
-		beamWidthRatio, err := strconv.ParseFloat(indexParams[BeamWidthRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 4.0, beamWidthRatio)
 	})
 
 	t.Run("fill index params with auto index", func(t *testing.T) {
@@ -87,18 +76,6 @@ func TestDiskIndexParams(t *testing.T) {
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
-
-		searchCacheBudgetGBRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 0.225, searchCacheBudgetGBRatio)
-
-		loadNumThreadRatio, err := strconv.ParseFloat(indexParams[NumLoadThreadRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 4.0, loadNumThreadRatio)
-
-		beamWidthRatio, err := strconv.ParseFloat(indexParams[BeamWidthRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 4.0, beamWidthRatio)
 	})
 
 	t.Run("fill index params with wrong auto index param", func(t *testing.T) {
@@ -161,25 +138,144 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("set disk index load params", func(t *testing.T) {
+	t.Run("set disk index load params without auto index param", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init()
 		indexParams := make(map[string]string)
-		indexParams[SearchCacheBudgetRatioKey] = "0.125"
-		indexParams[NumLoadThreadRatioKey] = "8.0"
-		indexParams[BeamWidthRatioKey] = "4.0"
 
-		err := SetDiskIndexLoadParams(indexParams, 100)
+		err := SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
 		indexParams["dim"] = "128"
-		err = SetDiskIndexLoadParams(indexParams, 100)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.NoError(t, err)
 
-		_, ok := indexParams[SearchCacheBudgetKey]
+		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
-		_, ok = indexParams[NumLoadThreadKey]
+		searchCacheBudgetRatio, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
+
+		numLoadThread, ok := indexParams[NumLoadThreadKey]
 		assert.True(t, ok)
-		_, ok = indexParams[BeamWidthKey]
+		numLoadThreadRatio, err := strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
+		assert.NoError(t, err)
+		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(numLoadThreadRatio))
+		if expectedNumLoadThread > MaxLoadThread {
+			expectedNumLoadThread = MaxLoadThread
+		}
+		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
+
+		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)
+		beamWidthRatio, err := strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
+		assert.NoError(t, err)
+		expectedBeamWidth := int(float32(hardware.GetCPUNum()) * float32(beamWidthRatio))
+		if expectedBeamWidth > MaxBeamWidth {
+			expectedBeamWidth = MaxBeamWidth
+		}
+		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
+
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "w1")
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.1")
+		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "w1")
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "8.0")
+		params.Save(params.CommonCfg.BeamWidthRatio.Key, "w1")
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+	})
+
+	t.Run("set disk index load params with auto index param", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init()
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		mapString := make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+
+		str, err := json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		assert.NoError(t, err)
+
+		indexParams := make(map[string]string)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		indexParams["dim"] = "128"
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.NoError(t, err)
+
+		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
+		assert.True(t, ok)
+		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
+
+		numLoadThread, ok := indexParams[NumLoadThreadKey]
+		assert.True(t, ok)
+		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(extraParams.LoadNumThreadRatio))
+		if expectedNumLoadThread > MaxLoadThread {
+			expectedNumLoadThread = MaxLoadThread
+		}
+		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
+
+		beamWidth, ok := indexParams[BeamWidthKey]
+		assert.True(t, ok)
+		expectedBeamWidth := int(float32(hardware.GetCPUNum()) * float32(extraParams.BeamWidthRatio))
+		if expectedBeamWidth > MaxBeamWidth {
+			expectedBeamWidth = MaxBeamWidth
+		}
+		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
+	})
+
+	t.Run("set disk index load params with wrong autoindex param", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init()
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		// ExtraParams wrong
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
+		indexParams := make(map[string]string)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		indexParams["index_type"] = "DISKANN"
+		str, err := json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		indexParams["dim"] = "128"
+
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		indexParams = make(map[string]string)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
+
+		// IndexParams wrong
+		mapString := make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+
+		str, err = json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+
+		indexParams = make(map[string]string)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list"] = "100" // should be search_list_size
+		indexParams["index_type"] = "DISKANN"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams = make(map[string]string)
+		err = SetDiskIndexLoadParams(&params, indexParams, 100)
+		assert.Error(t, err)
 	})
 }
 
@@ -220,7 +316,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"num_threads\": 2"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		_, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.Error(t, err)
 	})
 
@@ -248,7 +344,7 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString = make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225"
-		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		_, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.Error(t, err)
 	})
 

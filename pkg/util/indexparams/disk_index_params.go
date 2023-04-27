@@ -152,10 +152,6 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
 	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio.GetValue()
 
-	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
-	loadNumThreadRatio := params.CommonCfg.LoadNumThreadRatio.GetValue()
-	beamWidthRatio := params.CommonCfg.BeamWidthRatio.GetValue()
-
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 		var ok bool
@@ -173,18 +169,12 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
-		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
-		loadNumThreadRatio = fmt.Sprintf("%f", extraParams.LoadNumThreadRatio)
-		beamWidthRatio = fmt.Sprintf("%f", extraParams.BeamWidthRatio)
 	}
 
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
-	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
-	indexParams[NumLoadThreadRatioKey] = loadNumThreadRatio
-	indexParams[BeamWidthRatioKey] = beamWidthRatio
 
 	return nil
 }
@@ -229,7 +219,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 
 // SetDiskIndexLoadParams set disk index load params with ratio params on queryNode
 // QueryNode cal load params with ratio params ans cpu count...
-func SetDiskIndexLoadParams(indexParams map[string]string, numRows int64) error {
+func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string, numRows int64) error {
 	dimStr, ok := indexParams["dim"]
 	if !ok {
 		// type param dim has been put into index params before build index
@@ -240,29 +230,32 @@ func SetDiskIndexLoadParams(indexParams map[string]string, numRows int64) error 
 		return err
 	}
 
-	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
-	if !ok {
-		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
-	}
-	searchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
-	if err != nil {
-		return err
-	}
-	loadNumThreadRatioStr, ok := indexParams[NumLoadThreadRatioKey]
-	if !ok {
-		return fmt.Errorf("index param loadNumThreadRatio not exist")
-	}
-	loadNumThreadRatio, err := strconv.ParseFloat(loadNumThreadRatioStr, 64)
-	if err != nil {
-		return err
-	}
-	beamWidthRatioStr, ok := indexParams[BeamWidthRatioKey]
-	if !ok {
-		return fmt.Errorf("index param beamWidthRatio not exist")
-	}
-	beamWidthRatio, err := strconv.ParseFloat(beamWidthRatioStr, 64)
-	if err != nil {
-		return err
+	var searchCacheBudgetGBRatio float64
+	var loadNumThreadRatio float64
+	var beamWidthRatio float64
+
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return err
+		}
+		searchCacheBudgetGBRatio = extraParams.SearchCacheBudgetGBRatio
+		loadNumThreadRatio = extraParams.LoadNumThreadRatio
+		beamWidthRatio = extraParams.BeamWidthRatio
+	} else {
+		searchCacheBudgetGBRatio, err = strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		if err != nil {
+			return err
+		}
+		loadNumThreadRatio, err = strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
+		if err != nil {
+			return err
+		}
+		beamWidthRatio, err = strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",

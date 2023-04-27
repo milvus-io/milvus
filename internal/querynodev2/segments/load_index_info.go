@@ -105,7 +105,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 
 	// some build params also exist in indexParams, which are useless during loading process
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	indexparams.SetDiskIndexLoadParams(indexParams, indexInfo.GetNumRows())
+	indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows())
 
 	jsonIndexParams, err := json.Marshal(indexParams)
 	if err != nil {
