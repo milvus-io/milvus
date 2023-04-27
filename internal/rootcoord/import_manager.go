@@ -76,19 +76,21 @@ type importManager struct {
 	startOnce sync.Once
 
 	idAllocator               func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	callImportService         func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-	getCollectionName         func(collID, partitionID typeutil.UniqueID) (string, string, error)
-	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
-	callUnsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
+	callImportService         ImportFunc
+	getCollectionName         GetCollectionNameFunc
+	callGetSegmentStates      GetSegmentStatesFunc
+	callUnsetIsImportingState UnsetIsImportingStateFunc
+	callCheckDiskQuota        CheckDiskQuotaFunc
 }
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.TxnKV,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
-	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
-	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
-	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error),
-	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)) *importManager {
+	importService ImportFunc,
+	getSegmentStates GetSegmentStatesFunc,
+	getCollectionName GetCollectionNameFunc,
+	unsetIsImportingState UnsetIsImportingStateFunc,
+	checkDiskQuota CheckDiskQuotaFunc) *importManager {
 	mgr := &importManager{
 		ctx:                       ctx,
 		taskStore:                 client,
@@ -104,6 +106,7 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 		callGetSegmentStates:      getSegmentStates,
 		getCollectionName:         getCollectionName,
 		callUnsetIsImportingState: unsetIsImportingState,
+		callCheckDiskQuota:        checkDiskQuota,
 	}
 	return mgr
 }
@@ -399,6 +402,14 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 	if req == nil || len(req.Files) == 0 {
 		return returnErrorFunc("import request is empty")
+	}
+
+	// check the disk quota of the collection, return error immediately if the files size exceeds quota limit
+	if m.callCheckDiskQuota != nil {
+		quotaErr := m.callCheckDiskQuota(ctx, cID, req.Files)
+		if quotaErr != nil {
+			return returnErrorFunc(quotaErr.Error())
+		}
 	}
 
 	if m.callImportService == nil {

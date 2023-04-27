@@ -18,8 +18,7 @@ package rootcoord
 
 import (
 	"context"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -32,18 +31,16 @@ type GetCollectionNameFunc func(collID, partitionID UniqueID) (string, string, e
 type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
-type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
-type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 type UnsetIsImportingStateFunc func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
+type CheckDiskQuotaFunc func(ctx context.Context, collID UniqueID, files []string) error
 
 type ImportFactory interface {
 	NewGetCollectionNameFunc() GetCollectionNameFunc
 	NewIDAllocator() IDAllocator
 	NewImportFunc() ImportFunc
 	NewGetSegmentStatesFunc() GetSegmentStatesFunc
-	NewDescribeIndexFunc() DescribeIndexFunc
-	NewGetSegmentIndexStateFunc() GetSegmentIndexStateFunc
 	NewUnsetIsImportingStateFunc() UnsetIsImportingStateFunc
+	NewCheckDiskQuotaFunc() CheckDiskQuotaFunc
 }
 
 type ImportFactoryImpl struct {
@@ -66,16 +63,12 @@ func (f ImportFactoryImpl) NewGetSegmentStatesFunc() GetSegmentStatesFunc {
 	return GetSegmentStatesWithCore(f.c)
 }
 
-func (f ImportFactoryImpl) NewDescribeIndexFunc() DescribeIndexFunc {
-	return DescribeIndexWithCore(f.c)
-}
-
-func (f ImportFactoryImpl) NewGetSegmentIndexStateFunc() GetSegmentIndexStateFunc {
-	return GetSegmentIndexStateWithCore(f.c)
-}
-
 func (f ImportFactoryImpl) NewUnsetIsImportingStateFunc() UnsetIsImportingStateFunc {
 	return UnsetIsImportingStateWithCore(f.c)
+}
+
+func (f ImportFactoryImpl) NewCheckDiskQuotaFunc() CheckDiskQuotaFunc {
+	return CheckDiskQuotaWithCore(f.c)
 }
 
 func NewImportFactory(c *Core) ImportFactory {
@@ -117,20 +110,32 @@ func GetSegmentStatesWithCore(c *Core) GetSegmentStatesFunc {
 	}
 }
 
-func DescribeIndexWithCore(c *Core) DescribeIndexFunc {
-	return func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-		return c.broker.DescribeIndex(ctx, colID)
-	}
-}
-
-func GetSegmentIndexStateWithCore(c *Core) GetSegmentIndexStateFunc {
-	return func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
-		return c.broker.GetSegmentIndexState(ctx, collID, indexName, segIDs)
-	}
-}
-
 func UnsetIsImportingStateWithCore(c *Core) UnsetIsImportingStateFunc {
 	return func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 		return c.broker.UnsetIsImportingState(ctx, req)
+	}
+}
+
+func CheckDiskQuotaWithCore(c *Core) CheckDiskQuotaFunc {
+	return func(ctx context.Context, collID UniqueID, files []string) error {
+		var totalSize float64
+		for i := 0; i < len(files); i++ {
+			filePath := files[i]
+			fileSize, err := c.chunkManager.Size(ctx, filePath)
+			if err != nil {
+				log.Warn("Core failed to get file size", zap.String("filePath", filePath), zap.Error(err))
+				return fmt.Errorf("failed to get file size of '%s', error:%w", filePath, err)
+			}
+			totalSize += float64(fileSize)
+		}
+
+		quotaLimit := c.quotaCenter.diskAllowance(collID)
+		log.Info("Compare file size with disk quota limit", zap.Float64("totalSize", totalSize),
+			zap.Float64("quotaLimit", quotaLimit))
+		if totalSize > quotaLimit {
+			return fmt.Errorf("file total size '%f' bytes, exceeds disk quota limit '%f' bytes", totalSize, quotaLimit)
+		}
+
+		return nil
 	}
 }

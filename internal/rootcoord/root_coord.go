@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -130,6 +131,7 @@ type Core struct {
 
 	factory dependency.Factory
 
+	chunkManager  storage.ChunkManager
 	importManager *importManager
 
 	enableActiveStandBy bool
@@ -397,6 +399,7 @@ func (c *Core) initImportManager() error {
 		f.NewGetSegmentStatesFunc(),
 		f.NewGetCollectionNameFunc(),
 		f.NewUnsetIsImportingStateFunc(),
+		f.NewCheckDiskQuotaFunc(),
 	)
 	c.importManager.init(c.ctx)
 
@@ -444,6 +447,14 @@ func (c *Core) initInternal() error {
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator)
 	log.Debug("RootCoord init QuotaCenter done")
+
+	// here we declare a chunkManager for ImportManager
+	// once we decide to move ImportManager to DataCoord, remember to remove this line
+	chunkManager, err := c.factory.NewPersistentStorageChunkManager(c.ctx)
+	if err != nil {
+		return err
+	}
+	c.chunkManager = chunkManager
 
 	if err := c.initImportManager(); err != nil {
 		return err

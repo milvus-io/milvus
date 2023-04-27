@@ -989,7 +989,7 @@ func TestCore_GetImportState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode())
-		c.importManager = newImportManager(ctx, mockKv, nil, nil, nil, nil, nil)
+		c.importManager = newImportManager(ctx, mockKv, nil, nil, nil, nil, nil, nil)
 		resp, err := c.GetImportState(ctx, &milvuspb.GetImportStateRequest{
 			Task: 100,
 		})
@@ -1073,7 +1073,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode(), withMeta(meta))
-		c.importManager = newImportManager(ctx, mockKv, nil, nil, nil, nil, nil)
+		c.importManager = newImportManager(ctx, mockKv, nil, nil, nil, nil, nil, nil)
 
 		// list all tasks
 		resp, err := c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{})
@@ -1233,7 +1233,7 @@ func TestCore_ReportImport(t *testing.T) {
 	t.Run("report complete import with task not found", func(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode())
-		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callGetSegmentStates, nil, nil)
+		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callGetSegmentStates, nil, nil, nil)
 		resp, err := c.ReportImport(ctx, &rootcoordpb.ImportResult{
 			TaskId: 101,
 			State:  commonpb.ImportState_ImportCompleted,
@@ -1251,7 +1251,8 @@ func TestCore_ReportImport(t *testing.T) {
 			withTtSynchronizer(ticker),
 			withDataCoord(dc))
 		c.broker = newServerBroker(c)
-		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callGetSegmentStates, nil, callUnsetIsImportingState)
+		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callGetSegmentStates, nil,
+			callUnsetIsImportingState, nil)
 		c.importManager.loadFromTaskStore(true)
 		c.importManager.sendOutTasks(ctx)
 
