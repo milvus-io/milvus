@@ -420,11 +420,11 @@ func TestQuotaCenter(t *testing.T) {
 			name            string
 			totalDiskQuota  string
 			collDiskQuota   string
-			totalDiskUsage  int64 // in MB
-			collDiskUsage   int64 // in MB
-			expectAllowance int64 // in bytes
+			totalDiskUsage  int64   // in MB
+			collDiskUsage   int64   // in MB
+			expectAllowance float64 // in bytes
 		}{
-			{"test max", "-1", "-1", 100, 100, math.MaxInt64},
+			{"test max", "-1", "-1", 100, 100, math.MaxFloat64},
 			{"test total quota exceeded", "100", "-1", 100, 100, 0},
 			{"test coll quota exceeded", "-1", "20", 100, 20, 0},
 			{"test not exceeded", "100", "20", 80, 10, 10 * 1024 * 1024},
@@ -444,7 +444,7 @@ func TestQuotaCenter(t *testing.T) {
 				quotaCenter.totalBinlogSize = test.totalDiskUsage * 1024 * 1024
 				quotaCenter.diskMu.Unlock()
 				allowance := quotaCenter.diskAllowance(collection)
-				assert.Equal(t, float64(test.expectAllowance), allowance)
+				assert.Equal(t, test.expectAllowance, allowance)
 				paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
 				paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
 			})
