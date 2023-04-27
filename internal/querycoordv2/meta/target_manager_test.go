@@ -19,6 +19,7 @@ package meta
 import (
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -216,10 +217,18 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 
 	suite.broker.ExpectedCalls = nil
+	// test getRecoveryInfoV2 failed , then back to getRecoveryInfo succeed
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, status.Errorf(codes.NotFound, "fake not found"))
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
 	err := suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
+	suite.NoError(err)
+
+	suite.broker.ExpectedCalls = nil
+	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
 	suite.NoError(err)
 
 	err = suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID)
