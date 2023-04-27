@@ -150,3 +150,22 @@ func Test_isMaxTs(t *testing.T) {
 		})
 	}
 }
+
+func Test_GetNeedChanNum(t *testing.T) {
+	chanMap := map[typeutil.UniqueID][]string{
+		int64(1): {"rootcoord-dml_101"},
+		int64(2): {"rootcoord-dml_102"},
+		int64(3): {"rootcoord-dml_103"},
+	}
+
+	num := getNeedChanNum(2, chanMap)
+	assert.Equal(t, num, 3)
+
+	chanMap = map[typeutil.UniqueID][]string{
+		int64(1): {"rootcoord-dml_101", "rootcoord-dml_102"},
+		int64(2): {"rootcoord-dml_102", "rootcoord-dml_101"},
+		int64(3): {"rootcoord-dml_103", "rootcoord-dml_102"},
+	}
+	num = getNeedChanNum(2, chanMap)
+	assert.Equal(t, num, 3)
+}
