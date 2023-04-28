@@ -163,7 +163,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		return nil, nil
 	}
 	//print current distribution before generating plans
-	PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
+	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(stoppingNodesSegments) != 0 {
 		log.Info("Handle stopping nodes",
 			zap.Int64("collection", replica.CollectionID),
@@ -173,11 +173,18 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 			zap.Any("available nodes", maps.Keys(nodesSegments)),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		return b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments), b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
+		segmentPlans = append(segmentPlans, b.getStoppedSegmentPlan(replica, nodesSegments, stoppingNodesSegments)...)
+		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))...)
+	} else {
+		// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
+		segmentPlans = append(segmentPlans, b.getNormalSegmentPlan(replica, nodesSegments)...)
+		channelPlans = append(channelPlans, b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)...)
+	}
+	if len(segmentPlans) != 0 || len(channelPlans) != 0 {
+		PrintCurrentReplicaDist(replica, stoppingNodesSegments, nodesSegments, b.dist.ChannelDistManager, b.dist.SegmentDistManager)
 	}
 
-	// normal balance, find segments from largest score nodes and transfer to smallest score nodes.
-	return b.getNormalSegmentPlan(replica, nodesSegments), b.genChannelPlan(replica, lo.Keys(nodesSegments), nil)
+	return segmentPlans, channelPlans
 }
 
 func (b *ScoreBasedBalancer) getStoppedSegmentPlan(replica *meta.Replica, nodesSegments map[int64][]*meta.Segment, stoppingNodesSegments map[int64][]*meta.Segment) []SegmentAssignPlan {

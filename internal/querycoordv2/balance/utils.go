@@ -192,5 +192,5 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	}
 	distInfo += "]"
 
-	log.RatedInfo(5, distInfo)
+	log.Info(distInfo)
 }
