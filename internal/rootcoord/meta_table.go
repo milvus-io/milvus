@@ -547,9 +547,8 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 
 			switch state {
 			case pb.PartitionState_PartitionCreated:
-				log.Ctx(ctx).Warn("[should not happen] change partition to created",
-					zap.String("collection", coll.Name), zap.Int64("collection id", coll.CollectionID),
-					zap.String("partition", clone.PartitionName), zap.Int64("partition id", clone.PartitionID))
+				// support Dynamic load/release partitions
+				metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 			default:
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			}
