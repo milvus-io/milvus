@@ -311,10 +311,10 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 }
 
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
-	nodeIDs := typeutil.NewUniqueSet(replica.GetNodes()...)
 	info := &milvuspb.ReplicaInfo{
 		ReplicaID:         replica.GetID(),
 		CollectionID:      replica.GetCollectionID(),
+		NodeIds:           replica.GetNodes(),
 		ResourceGroupName: replica.GetResourceGroup(),
 		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(replica),
 	}
@@ -355,8 +355,7 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 				}
 				return 0, false
 			})
-			nodeIDs.Insert(shardNodes...)
-			shard.NodeIds = nodeIDs.Collect()
+			shard.NodeIds = typeutil.NewUniqueSet(shardNodes...).Collect()
 		}
 		info.ShardReplicas = append(info.ShardReplicas, shard)
 	}

@@ -1380,7 +1380,12 @@ func (suite *ServiceSuite) TestGetReplicas() {
 			for _, shardReplica := range replica.GetShardReplicas() {
 				gotNodeIDsSet := typeutil.NewUniqueSet(shardReplica.GetNodeIds()...)
 				suite.Equal(len(shardReplica.GetNodeIds()), gotNodeIDsSet.Len())
+				if len(resp.GetReplicas()) > 0 {
+					suite.True(gotNodeIDsSet.Len() < len(replica.GetNodeIds()))
+				}
 			}
+
+			suite.Equal(len(replica.GetNodeIds()), len(suite.meta.ReplicaManager.Get(replica.ReplicaID).GetNodes()))
 		}
 	}
 
