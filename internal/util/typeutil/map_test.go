@@ -121,6 +121,20 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	assert.EqualValues(suite.T(), 0, currMap.Len())
 }
 
+func (suite *MapUtilSuite) TestConcurrentMapInsert() {
+	src := NewConcurrentMap[string, string]()
+	src.Insert("a", "a")
+	src.Insert("b", "b")
+
+	count := 0
+	src.Range(func(key, value string) bool {
+		count++
+		return true
+	})
+
+	suite.Equal(2, count)
+}
+
 func TestMapUtil(t *testing.T) {
 	suite.Run(t, new(MapUtilSuite))
 }

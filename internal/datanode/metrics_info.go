@@ -48,6 +48,17 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 	if err != nil {
 		return nil, err
 	}
+
+	getAllCollections := func() []int64 {
+		collectionSet := typeutil.UniqueSet{}
+		node.flowgraphManager.flowgraphs.Range(func(key, value any) bool {
+			fg := value.(*dataSyncService)
+			collectionSet.Insert(fg.channel.getCollectionID())
+			return true
+		})
+
+		return collectionSet.Collect()
+	}
 	minFGChannel, minFGTt := rateCol.getMinFlowGraphTt()
 	return &metricsinfo.DataNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
@@ -57,10 +68,14 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 			MinFlowGraphTt:      minFGTt,
 			NumFlowGraph:        node.flowgraphManager.getFlowGraphNum(),
 		},
+		Effect: metricsinfo.NodeEffect{
+			NodeID:        node.session.ServerID,
+			CollectionIDs: getAllCollections(),
+		},
 	}, nil
 }
 
-//getComponentConfigurations returns the configurations of dataNode matching req.Pattern
+// getComponentConfigurations returns the configurations of dataNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "datanode."
 	matchedConfig := Params.DataNodeCfg.Base.GetByPattern(prefix + req.Pattern)

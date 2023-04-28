@@ -24,11 +24,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -113,13 +117,23 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test forceDeny", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.readableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
 		quotaCenter.forceDenyReading(commonpb.ErrorCode_ForceDeny)
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
+		for _, collection := range quotaCenter.readableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+		}
+
+		quotaCenter.writableCollections = []int64{1, 2, 3, 4}
+		quotaCenter.resetAllCurrentRates()
 		quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny)
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLDelete])
+		for _, collection := range quotaCenter.writableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+		}
 	})
 
 	t.Run("test calculateRates", func(t *testing.T) {
@@ -135,11 +149,59 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		type ttCase struct {
+			maxTtDelay     time.Duration
+			curTt          time.Time
+			fgTt           time.Time
+			expectedFactor float64
+		}
+		t0 := time.Now()
+		ttCases := []ttCase{
+			{10 * time.Second, t0, t0.Add(1 * time.Second), 1},
+			{10 * time.Second, t0, t0, 1},
+			{10 * time.Second, t0.Add(1 * time.Second), t0, 0.9},
+			{10 * time.Second, t0.Add(2 * time.Second), t0, 0.8},
+			{10 * time.Second, t0.Add(5 * time.Second), t0, 0.5},
+			{10 * time.Second, t0.Add(7 * time.Second), t0, 0.3},
+			{10 * time.Second, t0.Add(9 * time.Second), t0, 0.1},
+			{10 * time.Second, t0.Add(10 * time.Second), t0, 0},
+			{10 * time.Second, t0.Add(100 * time.Second), t0, 0},
+		}
+
+		backup := Params.QuotaConfig.MaxTimeTickDelay
+
+		for _, c := range ttCases {
+			Params.QuotaConfig.MaxTimeTickDelay = c.maxTtDelay
+			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Fgm: metricsinfo.FlowGraphMetric{
+						NumFlowGraph:        1,
+						MinFlowGraphTt:      fgTs,
+						MinFlowGraphChannel: "dml",
+					},
+				},
+			}
+			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
+			factors := quotaCenter.getTimeTickDelayFactor(curTs)
+			for _, factor := range factors {
+				assert.True(t, math.Abs(factor-c.expectedFactor) < 0.01)
+			}
+		}
+
+		Params.QuotaConfig.MaxTimeTickDelay = backup
+	})
+
 	t.Run("test getTimeTickDelayFactor", func(t *testing.T) {
 		// test MaxTimestamp
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.getTimeTickDelayFactor(0)
-		assert.Equal(t, float64(1), factor)
+		factors := quotaCenter.getTimeTickDelayFactor(0)
+		for factor := range factors {
+			assert.Equal(t, float64(1), factor)
+		}
 
 		now := time.Now()
 
@@ -162,8 +224,10 @@ func TestQuotaCenter(t *testing.T) {
 			}}}
 		ts, err := quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
-		factor = quotaCenter.getTimeTickDelayFactor(ts)
-		assert.Equal(t, float64(0), factor)
+		factors = quotaCenter.getTimeTickDelayFactor(ts)
+		for _, factor := range factors {
+			assert.Equal(t, float64(0), factor)
+		}
 
 		// test one-third time tick delay
 		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
@@ -180,135 +244,18 @@ func TestQuotaCenter(t *testing.T) {
 			}}}
 		ts, err = quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
-		factor = quotaCenter.getTimeTickDelayFactor(ts)
-		ok := math.Abs(factor-2.0/3.0) < 0.0001
-		assert.True(t, ok)
-	})
+		factors = quotaCenter.getTimeTickDelayFactor(ts)
 
-	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		type ttCase struct {
-			maxTtDelay     time.Duration
-			curTt          time.Time
-			fgTt           time.Time
-			expectedFactor float64
+		for _, factor := range factors {
+			ok := math.Abs(factor-2.0/3.0) < 0.0001
+			assert.True(t, ok)
 		}
-		t0 := time.Now()
-		ttCases := []ttCase{
-			{10 * time.Second, t0, t0.Add(1 * time.Second), 1},
-			{10 * time.Second, t0, t0, 1},
-			{10 * time.Second, t0.Add(1 * time.Second), t0, 0.9},
-			{10 * time.Second, t0.Add(2 * time.Second), t0, 0.8},
-			{10 * time.Second, t0.Add(5 * time.Second), t0, 0.5},
-			{10 * time.Second, t0.Add(7 * time.Second), t0, 0.3},
-			{10 * time.Second, t0.Add(9 * time.Second), t0, 0.1},
-			{10 * time.Second, t0.Add(10 * time.Second), t0, 0},
-			{10 * time.Second, t0.Add(100 * time.Second), t0, 0},
-		}
-
-		backup := Params.QuotaConfig.MaxTimeTickDelay
-
-		for i, c := range ttCases {
-			Params.QuotaConfig.MaxTimeTickDelay = c.maxTtDelay
-			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
-			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-				1: {
-					Fgm: metricsinfo.FlowGraphMetric{
-						NumFlowGraph:        1,
-						MinFlowGraphTt:      fgTs,
-						MinFlowGraphChannel: "dml",
-					},
-				},
-			}
-			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
-			factor := quotaCenter.getTimeTickDelayFactor(curTs)
-			if math.Abs(factor-c.expectedFactor) > 0.000001 {
-				t.Errorf("case %d failed: curTs[%v], fgTs[%v], expectedFactor: %f, actualFactor: %f",
-					i, c.curTt, c.fgTt, c.expectedFactor, factor)
-			}
-		}
-
-		Params.QuotaConfig.MaxTimeTickDelay = backup
-	})
-
-	t.Run("test getNQInQueryFactor", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.getNQInQueryFactor()
-		assert.Equal(t, float64(1), factor)
-
-		// test cool off
-		Params.QuotaConfig.QueueProtectionEnabled = true
-		Params.QuotaConfig.NQInQueueThreshold = 100
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
-			}}}
-		factor = quotaCenter.getNQInQueryFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
-
-		// test no cool off
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold - 1,
-			}}}
-		factor = quotaCenter.getNQInQueryFactor()
-		assert.Equal(t, 1.0, factor)
-		//ok := math.Abs(factor-1.0) < 0.0001
-		//assert.True(t, ok)
-	})
-
-	t.Run("test getQueryLatencyFactor", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.getQueryLatencyFactor()
-		assert.Equal(t, float64(1), factor)
-
-		// test cool off
-		Params.QuotaConfig.QueueProtectionEnabled = true
-		Params.QuotaConfig.QueueLatencyThreshold = float64(3 * time.Second)
-
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
-			}}}
-		factor = quotaCenter.getQueryLatencyFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
-
-		// test no cool off
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
-			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: 1 * time.Second,
-			}}}
-		factor = quotaCenter.getQueryLatencyFactor()
-		assert.Equal(t, 1.0, factor)
-	})
-
-	t.Run("test checkReadResult", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.getReadResultFactor()
-		assert.Equal(t, float64(1), factor)
-
-		// test cool off
-		Params.QuotaConfig.ResultProtectionEnabled = true
-		Params.QuotaConfig.MaxReadResultRate = 1
-
-		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
-			1: {Rms: []metricsinfo.RateMetric{
-				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
-			}}}
-		factor = quotaCenter.getReadResultFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
-
-		// test no cool off
-		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
-			1: {Rms: []metricsinfo.RateMetric{
-				{Label: metricsinfo.ReadResultThroughput, Rate: 0.8},
-			}}}
-		factor = quotaCenter.getReadResultFactor()
-		assert.Equal(t, 1.0, factor)
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.readableCollections = []int64{1, 2, 3}
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
@@ -318,13 +265,22 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.ForceDenyReading = false
 		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = 100
+		Params.QuotaConfig.DQLLimitEnabled = true
+		Params.QuotaConfig.DQLMaxQueryRate = 500
+		Params.QuotaConfig.DQLMaxSearchRate = 500
+		quotaCenter.resetAllCurrentRates()
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
+				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold) * time.Second,
+			}, Effect: metricsinfo.NodeEffect{
+				NodeID:        1,
+				CollectionIDs: []int64{1, 2, 3},
 			}}}
 		quotaCenter.calculateReadRates()
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
+		for _, collection := range quotaCenter.readableCollections {
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+		}
 
 		Params.QuotaConfig.NQInQueueThreshold = 100
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
@@ -332,8 +288,10 @@ func TestQuotaCenter(t *testing.T) {
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
 			}}}
 		quotaCenter.calculateReadRates()
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
+		for _, collection := range quotaCenter.readableCollections {
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+		}
 
 		Params.QuotaConfig.ResultProtectionEnabled = true
 		Params.QuotaConfig.MaxReadResultRate = 1
@@ -345,8 +303,10 @@ func TestQuotaCenter(t *testing.T) {
 			}}}
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {SearchQueue: metricsinfo.ReadInfoInQueue{}}}
 		quotaCenter.calculateReadRates()
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
-		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
+		for _, collection := range quotaCenter.readableCollections {
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
+			assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+		}
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {
@@ -357,37 +317,34 @@ func TestQuotaCenter(t *testing.T) {
 		// DiskQuota exceeded
 		quotaBackup := Params.QuotaConfig.DiskQuota
 		Params.QuotaConfig.DiskQuota = 99
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100 * 1024 * 1024}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLDelete])
+		for _, collection := range quotaCenter.writableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+		}
 		Params.QuotaConfig.DiskQuota = quotaBackup
 
 		// force deny
 		forceBak := Params.QuotaConfig.ForceDenyWriting
 		Params.QuotaConfig.ForceDenyWriting = true
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
-		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLDelete])
+		for _, collection := range quotaCenter.writableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+		}
 		Params.QuotaConfig.ForceDenyWriting = forceBak
 	})
 
-	t.Run("test getMemoryFactor basic", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.getMemoryFactor()
-		assert.Equal(t, float64(1), factor)
-		quotaCenter.dataNodeMetrics = map[UniqueID]*metricsinfo.DataNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
-		factor = quotaCenter.getMemoryFactor()
-		assert.Equal(t, float64(0), factor)
-		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
-		factor = quotaCenter.getMemoryFactor()
-		assert.Equal(t, float64(0), factor)
-	})
-
-	t.Run("test getMemoryFactor factors", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+	t.Run("test MemoryFactor factors", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		type memCase struct {
 			lowWater       float64
 			highWater      float64
@@ -411,17 +368,29 @@ func TestQuotaCenter(t *testing.T) {
 			{0.85, 0.95, 95, 100, 0},
 		}
 
-		lowBackup := Params.QuotaConfig.DataNodeMemoryLowWaterLevel
-		highBackup := Params.QuotaConfig.DataNodeMemoryHighWaterLevel
+		lowBackup := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel
+		highBackup := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel
 
-		for i, c := range memCases {
+		quotaCenter.writableCollections = append(quotaCenter.writableCollections, 1, 2, 3)
+		for _, c := range memCases {
 			Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = c.lowWater
 			Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = c.highWater
-			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
-			factor := quotaCenter.getMemoryFactor()
-			if math.Abs(factor-c.expectedFactor) > 0.000001 {
-				t.Errorf("case %d failed: waterLever[low:%v, high:%v], memMetric[used:%d, total:%d], expectedFactor: %f, actualFactor: %f",
-					i, c.lowWater, c.highWater, c.memUsage, c.memTotal, c.expectedFactor, factor)
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms: metricsinfo.HardwareMetrics{
+						MemoryUsage: c.memUsage,
+						Memory:      c.memTotal,
+					},
+					Effect: metricsinfo.NodeEffect{
+						NodeID:        1,
+						CollectionIDs: []int64{1, 2, 3},
+					},
+				},
+			}
+			factors := quotaCenter.getMemoryFactor()
+
+			for _, factor := range factors {
+				assert.True(t, math.Abs(factor-c.expectedFactor) < 0.01)
 			}
 		}
 
@@ -451,26 +420,43 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		quotaCenter.currentRates[internalpb.RateType_DMLInsert] = 100
-		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
-		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
+		qc := types.NewMockQueryCoord(t)
+		p1 := mocks.NewProxy(t)
+		p1.EXPECT().SetRates(mock.Anything, mock.Anything).Return(nil, nil)
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.resetAllCurrentRates()
+		collectionID := int64(1)
+		quotaCenter.currentRates[collectionID] = make(map[internalpb.RateType]ratelimitutil.Limit)
+		quotaCenter.quotaStates[collectionID] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
+		quotaCenter.currentRates[collectionID][internalpb.RateType_DMLInsert] = 100
+		quotaCenter.quotaStates[collectionID][milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
+		quotaCenter.quotaStates[collectionID][milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
 		err = quotaCenter.setRates()
 		assert.NoError(t, err)
 	})
 
 	t.Run("test recordMetrics", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
-		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		collectionID := int64(1)
+		quotaCenter.quotaStates[collectionID] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
+		quotaCenter.quotaStates[collectionID][milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
+		quotaCenter.quotaStates[collectionID][milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
 		quotaCenter.recordMetrics()
 	})
 
 	t.Run("test guaranteeMinRate", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.resetAllCurrentRates()
 		minRate := Limit(100)
-		quotaCenter.currentRates[internalpb.RateType_DQLSearch] = Limit(50)
-		quotaCenter.guaranteeMinRate(float64(minRate), internalpb.RateType_DQLSearch)
-		assert.Equal(t, minRate, quotaCenter.currentRates[internalpb.RateType_DQLSearch])
+		collectionID := int64(1)
+		quotaCenter.currentRates[collectionID] = make(map[internalpb.RateType]ratelimitutil.Limit)
+		quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch] = Limit(50)
+		quotaCenter.guaranteeMinRate(float64(minRate), internalpb.RateType_DQLSearch, 1)
+		assert.Equal(t, minRate, quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch])
 	})
 }

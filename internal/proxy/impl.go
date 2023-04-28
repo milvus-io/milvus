@@ -4788,18 +4788,11 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		return resp, nil
 	}
 
-	err := node.multiRateLimiter.globalRateLimiter.setRates(request.GetRates())
+	err := node.multiRateLimiter.SetRates(request.GetRates())
 	// TODO: set multiple rate limiter rates
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, nil
-	}
-	node.multiRateLimiter.SetQuotaStates(request.GetStates(), request.GetCodes())
-	log.Info("current rates in proxy", zap.Int64("proxyNodeID", Params.ProxyCfg.GetNodeID()), zap.Any("rates", request.GetRates()))
-	if len(request.GetStates()) != 0 {
-		for i := range request.GetStates() {
-			log.Warn("Proxy set quota states", zap.String("state", request.GetStates()[i].String()), zap.String("reason", request.GetCodes()[i].String()))
-		}
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
