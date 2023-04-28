@@ -127,9 +127,11 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 	for _, rid := range replicaIDs {
 		replica := b.meta.ReplicaManager.Get(rid)
 		sPlans, cPlans := b.Balance.BalanceReplica(replica)
-		balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
+		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
+			balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
+		}
 	}
 	return segmentPlans, channelPlans
 }
