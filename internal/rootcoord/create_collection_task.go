@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -288,6 +289,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
+	// check collection number quota for the entire the instance
 	existedCollInfos, err := t.core.meta.ListCollections(ctx, typeutil.MaxTimestamp)
 	if err != nil {
 		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
@@ -295,8 +297,17 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if len(existedCollInfos) >= maxCollectionNum {
-		log.Error("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
 		return merr.WrapErrCollectionResourceLimitExceeded(fmt.Sprintf("Failed to create collection, limit={%d}", maxCollectionNum))
+	}
+	// check collection number quota for DB
+	existedColsInDB := lo.Filter(existedCollInfos, func(collection *model.Collection, _ int) bool {
+		return t.Req.GetDbName() != "" && collection.DBName == t.Req.GetDbName()
+	})
+	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB.GetAsInt()
+	if len(existedColsInDB) >= maxColNumPerDB {
+		log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+		return merr.WrapErrCollectionResourceLimitExceeded(fmt.Sprintf("Failed to create collection, maxCollectionNumPerDB={%d}", maxColNumPerDB))
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
