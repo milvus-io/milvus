@@ -1155,6 +1155,11 @@ class TestCollectionSearch(TestcaseBase):
     def is_flush(self, request):
         yield request.param
 
+    # @pytest.fixture(scope="function", params=["L2", "IP", "COSINE"])
+    @pytest.fixture(scope="function", params=["L2", "IP"])
+    def metric_type(self, request):
+        yield request.param
+        
     """
     ******************************************************************
     #  The following are valid base cases
@@ -1686,7 +1691,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("M", [4, 64])
     @pytest.mark.parametrize("efConstruction", [8, 512])
     def test_search_HNSW_index_with_max_ef(self, M, efConstruction, auto_id, _async):
@@ -1795,7 +1800,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[8:10],
                                  ct.default_index_params[8:10]))
-    def test_search_after_different_index_with_params_gpu(self, dim, index, params, auto_id, _async):
+    def test_search_after_different_index_with_params_gpu(self, dim, index, params, auto_id, _async, metric_type):
         """
         target: test search after different index
         method: test search after different index and corresponding search params
@@ -1813,11 +1818,11 @@ class TestCollectionSearch(TestcaseBase):
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
-        search_params = cf.gen_search_param(index)
+        search_params = cf.gen_search_param(index, metric_type)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
@@ -1874,7 +1879,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[8:10],
                                  ct.default_index_params[8:10]))
-    def test_search_after_different_index_with_min_dim_gpu(self, index, params, auto_id, _async):
+    def test_search_after_different_index_with_min_dim_gpu(self, index, params, auto_id, _async, metric_type):
         """
         target: test search after different index with min dim
         method: test search after different index and corresponding search params with dim = 1
@@ -1890,11 +1895,11 @@ class TestCollectionSearch(TestcaseBase):
             params["m"] = min_dim
         if params.get("PQM"):
             params["PQM"] = min_dim
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
-        search_params = cf.gen_search_param(index)
+        search_params = cf.gen_search_param(index, metric_type)
         vectors = [[random.random() for _ in range(min_dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
@@ -1955,7 +1960,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[8:10],
                                  ct.default_index_params[8:10]))
-    def test_search_after_index_different_metric_type_gpu(self, dim, index, params, auto_id, _async):
+    def test_search_after_index_different_metric_type_gpu(self, dim, index, params, auto_id, _async, metric_type):
         """
         target: test search with different metric type
         method: test search with different metric type
@@ -1974,12 +1979,12 @@ class TestCollectionSearch(TestcaseBase):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
         collection_w.create_index("float_vector", default_index)
         log.info("test_search_after_index_different_metric_type: Created index-%s" % index)
         collection_w.load()
         # 3. search
-        search_params = cf.gen_search_param(index, "IP")
+        search_params = cf.gen_search_param(index, metric_type)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))

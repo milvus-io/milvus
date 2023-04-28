@@ -42,3 +42,5 @@ loguru==0.6.0
 
 # util
 psutil==5.9.4
+
+pytest-forked

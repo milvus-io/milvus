@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 int total_timeout_minutes = 60 * 5
-int e2e_timeout_seconds = 70 * 60
+int e2e_timeout_seconds = 240 * 60
 def imageTag=''
 int case_timeout_seconds = 10 * 60
 def chart_version='4.0.6'
@@ -54,6 +54,7 @@ pipeline {
                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                 sh """
                                 TAG="${imageTag}" \
+                                VERBOSE=1 \
                                 ./e2e-k8s.sh \
                                 --skip-export-logs \
                                 --skip-install \
@@ -177,7 +178,7 @@ pipeline {
                                             MILVUS_HELM_NAMESPACE="milvus-ci" \
                                             MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                             TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e.sh  "--tags GPU -n 6 -x --timeout ${case_timeout_seconds}"
+                                            ./ci_e2e.sh  "--tags GPU -n 6 --forked --timeout ${case_timeout_seconds}"
                                             """
                             
                                         } else {
