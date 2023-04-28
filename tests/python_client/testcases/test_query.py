@@ -2049,6 +2049,7 @@ class TestQueryCount(TestcaseBase):
                            )
 
         # drop p1 partition
+        p1.release()
         p1.drop()
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output],
                            partition_names=[p1.name],
