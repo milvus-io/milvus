@@ -985,7 +985,7 @@ func (p *queryCoordConfig) initCheckNodeInReplicaInterval() {
 }
 
 func (p *queryCoordConfig) initBalancer() {
-	balancer := p.Base.LoadWithDefault("queryCoord.balancer", "RowCountBasedBalancer")
+	balancer := p.Base.LoadWithDefault("queryCoord.balancer", "ScoreBasedBalancer")
 	p.Balancer = balancer
 }
 
