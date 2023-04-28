@@ -708,7 +708,7 @@ func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {
 	}
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	colDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
-	allowance := float64(math.MaxInt64)
+	allowance := math.Min(totalDiskQuota, colDiskQuota)
 	if binlogSize, ok := q.dataCoordMetrics.CollectionBinlogSize[collection]; ok {
 		allowance = math.Min(allowance, colDiskQuota-float64(binlogSize))
 	}
