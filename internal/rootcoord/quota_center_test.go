@@ -326,6 +326,21 @@ func TestQuotaCenter(t *testing.T) {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 		}
 		Params.QuotaConfig.ForceDenyWriting = forceBak
+
+		// disable tt delay protection
+		disableTtBak := Params.QuotaConfig.TtProtectionEnabled
+		Params.QuotaConfig.TtProtectionEnabled = false
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics)
+		quotaCenter.queryNodeMetrics[0] = &metricsinfo.QueryNodeQuotaMetrics{
+			Hms: metricsinfo.HardwareMetrics{
+				Memory:      100,
+				MemoryUsage: 100,
+			},
+			Effect: metricsinfo.NodeEffect{CollectionIDs: []int64{1, 2, 3}},
+		}
+		err = quotaCenter.calculateWriteRates()
+		Params.QuotaConfig.TtProtectionEnabled = disableTtBak
 	})
 
 	t.Run("test MemoryFactor factors", func(t *testing.T) {
