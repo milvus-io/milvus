@@ -66,7 +66,8 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test limits", func(t *testing.T) {
-		assert.Equal(t, 65535, qc.MaxCollectionNum)
+		assert.Equal(t, 65536, qc.MaxCollectionNum)
+		assert.Equal(t, 64, qc.MaxCollectionNumPerDB)
 	})
 
 	t.Run("test limit writing", func(t *testing.T) {

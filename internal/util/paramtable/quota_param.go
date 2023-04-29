@@ -79,7 +79,8 @@ type quotaConfig struct {
 	DQLMinQueryRate  float64
 
 	// limits
-	MaxCollectionNum int
+	MaxCollectionNum      int
+	MaxCollectionNumPerDB int
 
 	// limit writing
 	ForceDenyWriting              bool
@@ -139,6 +140,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 
 	// limits
 	p.initMaxCollectionNum()
+	p.initMaxCollectionNumPerDB()
 
 	// limit writing
 	p.initForceDenyWriting()
@@ -425,7 +427,11 @@ func (p *quotaConfig) initDQLMinQueryRate() {
 }
 
 func (p *quotaConfig) initMaxCollectionNum() {
-	p.MaxCollectionNum = p.Base.ParseIntWithDefault("quotaAndLimits.limits.collection.maxNum", 65535)
+	p.MaxCollectionNum = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNum", 65536)
+}
+
+func (p *quotaConfig) initMaxCollectionNumPerDB() {
+	p.MaxCollectionNumPerDB = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNumPerDB", 64)
 }
 
 func (p *quotaConfig) initForceDenyWriting() {
