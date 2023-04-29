@@ -93,6 +93,7 @@ type quotaConfig struct {
 	QueryNodeMemoryHighWaterLevel float64
 	DiskProtectionEnabled         bool
 	DiskQuota                     float64
+	DiskQuotaPerCollection        float64
 
 	// limit reading
 	ForceDenyReading        bool
@@ -153,6 +154,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initQueryNodeMemoryHighWaterLevel()
 	p.initDiskProtectionEnabled()
 	p.initDiskQuota()
+	p.initDiskQuotaPerCollection()
 
 	// limit reading
 	p.initForceDenyReading()
@@ -539,6 +541,25 @@ func (p *quotaConfig) initDiskQuota() {
 	}
 	// megabytes to bytes
 	p.DiskQuota = megaBytes2Bytes(p.DiskQuota)
+}
+
+func (p *quotaConfig) initDiskQuotaPerCollection() {
+	if !p.DiskProtectionEnabled {
+		p.DiskQuotaPerCollection = defaultMax
+		return
+	}
+	p.DiskQuotaPerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.DiskQuotaPerCollection", defaultDiskQuotaInMB)
+	// (0, +inf)
+	if p.DiskQuotaPerCollection <= 0 {
+		p.DiskQuotaPerCollection = defaultDiskQuotaInMB
+	}
+	if p.DiskQuotaPerCollection < defaultDiskQuotaInMB {
+		log.Info("init disk quota per DB", zap.String("diskQuotaPerCollection(MB)", fmt.Sprintf("%v", p.DiskQuotaPerCollection)))
+	} else {
+		log.Info("init disk quota per DB", zap.String("diskQuotaPerCollection(MB)", "+inf"))
+	}
+	// megabytes to bytes
+	p.DiskQuotaPerCollection = megaBytes2Bytes(p.DiskQuotaPerCollection)
 }
 
 func (p *quotaConfig) initForceDenyReading() {

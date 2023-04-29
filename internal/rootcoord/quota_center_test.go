@@ -314,20 +314,6 @@ func TestQuotaCenter(t *testing.T) {
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
 
-		// DiskQuota exceeded
-		quotaBackup := Params.QuotaConfig.DiskQuota
-		Params.QuotaConfig.DiskQuota = 99
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100 * 1024 * 1024}
-		quotaCenter.writableCollections = []int64{1, 2, 3}
-		quotaCenter.resetAllCurrentRates()
-		err = quotaCenter.calculateWriteRates()
-		assert.NoError(t, err)
-		for _, collection := range quotaCenter.writableCollections {
-			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
-			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
-		}
-		Params.QuotaConfig.DiskQuota = quotaBackup
-
 		// force deny
 		forceBak := Params.QuotaConfig.ForceDenyWriting
 		Params.QuotaConfig.ForceDenyWriting = true
@@ -398,25 +384,41 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = highBackup
 	})
 
-	t.Run("test ifDiskQuotaExceeded", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+	t.Run("test checkDiskQuota", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.checkDiskQuota()
 
-		Params.QuotaConfig.DiskProtectionEnabled = false
-		ok := quotaCenter.ifDiskQuotaExceeded()
-		assert.False(t, ok)
-		Params.QuotaConfig.DiskProtectionEnabled = true
-
+		// total DiskQuota exceeded
 		quotaBackup := Params.QuotaConfig.DiskQuota
-		Params.QuotaConfig.DiskQuota = 99
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.ifDiskQuotaExceeded()
-		assert.True(t, ok)
-
-		Params.QuotaConfig.DiskQuota = 101
-		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.ifDiskQuotaExceeded()
-		assert.False(t, ok)
+		Params.QuotaConfig.DiskQuota = 99 * 1024 * 1024
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
+			TotalBinlogSize:      200 * 1024 * 1024,
+			CollectionBinlogSize: map[int64]int64{1: 100 * 1024 * 1024}}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.checkDiskQuota()
+		for _, collection := range quotaCenter.writableCollections {
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+		}
 		Params.QuotaConfig.DiskQuota = quotaBackup
+
+		// collection DiskQuota exceeded
+		colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+		Params.QuotaConfig.DiskQuotaPerCollection = 30 * 1024 * 1024
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{CollectionBinlogSize: map[int64]int64{
+			1: 20 * 1024 * 1024, 2: 30 * 1024 * 1024, 3: 60 * 1024 * 1024}}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.checkDiskQuota()
+		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLInsert])
+		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLDelete])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLDelete])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLDelete])
+		Params.QuotaConfig.DiskQuotaPerCollection = colQuotaBackup
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
@@ -458,5 +460,41 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch] = Limit(50)
 		quotaCenter.guaranteeMinRate(float64(minRate), internalpb.RateType_DQLSearch, 1)
 		assert.Equal(t, minRate, quotaCenter.currentRates[collectionID][internalpb.RateType_DQLSearch])
+	})
+
+	t.Run("test diskAllowance", func(t *testing.T) {
+		tests := []struct {
+			name            string
+			totalDiskQuota  float64
+			collDiskQuota   float64
+			totalDiskUsage  int64   // in MB
+			collDiskUsage   int64   // in MB
+			expectAllowance float64 // in bytes
+		}{
+			{"test max", math.MaxFloat64, math.MaxFloat64, 100, 100, math.MaxFloat64},
+			{"test total quota exceeded", 100 * 1024 * 1024, math.MaxFloat64, 100, 100, 0},
+			{"test coll quota exceeded", math.MaxFloat64, 20 * 1024 * 1024, 100, 20, 0},
+			{"test not exceeded", 100 * 1024 * 1024, 20 * 1024 * 1024, 80, 10, 10 * 1024 * 1024},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				collection := UniqueID(0)
+				quotaCenter := NewQuotaCenter(pcm, nil, &dataCoordMockForQuota{}, core.tsoAllocator)
+				quotaCenter.resetAllCurrentRates()
+				quotaBackup := Params.QuotaConfig.DiskQuota
+				colQuotaBackup := Params.QuotaConfig.DiskQuotaPerCollection
+				Params.QuotaConfig.DiskQuota = test.totalDiskQuota
+				Params.QuotaConfig.DiskQuotaPerCollection = test.collDiskQuota
+				quotaCenter.diskMu.Lock()
+				quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{}
+				quotaCenter.dataCoordMetrics.CollectionBinlogSize = map[int64]int64{collection: test.collDiskUsage * 1024 * 1024}
+				quotaCenter.totalBinlogSize = test.totalDiskUsage * 1024 * 1024
+				quotaCenter.diskMu.Unlock()
+				allowance := quotaCenter.diskAllowance(collection)
+				assert.Equal(t, test.expectAllowance, allowance)
+				Params.QuotaConfig.DiskQuota = quotaBackup
+				Params.QuotaConfig.DiskQuotaPerCollection = colQuotaBackup
+			})
+		}
 	})
 }
