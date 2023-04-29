@@ -297,8 +297,9 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 					}
 					if err := t.sendTimeTickToChannel([]string{chanName}, mints); err != nil {
 						log.Warn("SendTimeTickToChannel fail", zap.Error(err))
+					} else {
+						t.syncedTtHistogram.update(chanName, mints)
 					}
-					t.syncedTtHistogram.update(chanName, mints)
 					wg.Done()
 				}(chanName, ts)
 			}
