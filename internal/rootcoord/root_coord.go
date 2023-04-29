@@ -228,6 +228,7 @@ func (c *Core) startTimeTickLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
+			log.Info("rootcoord's timetick loop quit!")
 			return
 		case <-ticker.C:
 			c.sendMinDdlTsAsTt()
@@ -252,6 +253,7 @@ func (c *Core) tsLoop() {
 			metrics.RootCoordTimestampSaved.Set(float64(ts.Unix()))
 
 		case <-ctx.Done():
+			log.Info("rootcoord's ts loop quit!")
 			return
 		}
 	}
