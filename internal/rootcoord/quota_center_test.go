@@ -320,7 +320,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.NoError(t, err)
 
 		// force deny
-		forceBak := Params.QuotaConfig.ForceDenyWriting
+		forceBak := Params.QuotaConfig.ForceDenyWriting.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, "true")
 		quotaCenter.writableCollections = []int64{1, 2, 3}
 		quotaCenter.resetAllCurrentRates()
@@ -330,7 +330,22 @@ func TestQuotaCenter(t *testing.T) {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 		}
-		Params.QuotaConfig.ForceDenyWriting = forceBak
+		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, forceBak)
+
+		// disable tt delay protection
+		disableTtBak := Params.QuotaConfig.TtProtectionEnabled.GetValue()
+		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, "false")
+		quotaCenter.resetAllCurrentRates()
+		quotaCenter.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics)
+		quotaCenter.queryNodeMetrics[0] = &metricsinfo.QueryNodeQuotaMetrics{
+			Hms: metricsinfo.HardwareMetrics{
+				Memory:      100,
+				MemoryUsage: 100,
+			},
+			Effect: metricsinfo.NodeEffect{CollectionIDs: []int64{1, 2, 3}},
+		}
+		err = quotaCenter.calculateWriteRates()
+		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, disableTtBak)
 	})
 
 	t.Run("test MemoryFactor factors", func(t *testing.T) {

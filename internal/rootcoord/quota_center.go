@@ -454,13 +454,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if !Params.QuotaConfig.TtProtectionEnabled.GetAsBool() {
-		return nil
+		return make(map[int64]float64)
 	}
 
 	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
 	if maxDelay < 0 {
 		// < 0 means disable tt protection
-		return nil
+		return make(map[int64]float64)
 	}
 
 	collectionsMaxDelay := make(map[int64]time.Duration)
@@ -526,7 +526,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if !Params.QuotaConfig.MemProtectionEnabled.GetAsBool() {
-		return nil
+		return make(map[int64]float64)
 	}
 
 	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat()
