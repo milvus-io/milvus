@@ -26,11 +26,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
 
-//go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord
+//go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord --filename=garbage_collector.go --with-expecter --testonly
 type GarbageCollector interface {
 	ReDropCollection(collMeta *model.Collection, ts Timestamp)
 	RemoveCreatingCollection(collMeta *model.Collection)
 	ReDropPartition(pChannels []string, partition *model.Partition, ts Timestamp)
+	RemoveCreatingPartition(partition *model.Partition, ts Timestamp)
 	GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error)
 	GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error)
 }
@@ -145,6 +146,26 @@ func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *mode
 
 	// err is ignored since no sync steps will be executed.
 	_ = redo.Execute(context.Background())
+}
+
+func (c *bgGarbageCollector) RemoveCreatingPartition(partition *model.Partition, ts Timestamp) {
+	redoTask := newBaseRedoTask(c.s.stepExecutor)
+
+	redoTask.AddAsyncStep(&releasePartitionsStep{
+		baseStep:     baseStep{core: c.s},
+		collectionID: partition.CollectionID,
+		partitionIDs: []int64{partition.PartitionID},
+	})
+
+	redoTask.AddAsyncStep(&removePartitionMetaStep{
+		baseStep:     baseStep{core: c.s},
+		collectionID: partition.CollectionID,
+		partitionID:  partition.PartitionID,
+		ts:           ts,
+	})
+
+	// err is ignored since no sync steps will be executed.
+	_ = redoTask.Execute(context.Background())
 }
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {

@@ -77,26 +77,35 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
+
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
 	}, &nullStep{})
+
 	undoTask.AddStep(&addPartitionMetaStep{
 		baseStep:  baseStep{core: t.core},
 		partition: partition,
-	}, &nullStep{}) // adding partition is atomic enough.
+	}, &removePartitionMetaStep{
+		baseStep:     baseStep{core: t.core},
+		collectionID: partition.CollectionID,
+		partitionID:  partition.PartitionID,
+		ts:           t.GetTs(),
+	})
+
+	undoTask.AddStep(&nullStep{}, &releasePartitionsStep{
+		baseStep:     baseStep{core: t.core},
+		collectionID: t.collMeta.CollectionID,
+		partitionIDs: []int64{partID},
+	})
 
 	undoTask.AddStep(&syncNewCreatedPartitionStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
-	}, &releasePartitionsStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: t.collMeta.CollectionID,
-		partitionIDs: []int64{partID},
-	})
+	}, &nullStep{})
 
 	undoTask.AddStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},
