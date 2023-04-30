@@ -1747,6 +1747,37 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("M", [4, 64])
     @pytest.mark.parametrize("efConstruction", [8, 512])
+    def test_search_HNSW_index_with_redundant_param(self, M, efConstruction, auto_id, _async):
+        """
+        target: test search HNSW index with redundant param
+        method: connect milvus, create collection , insert, create index, load and search
+        expected: search successfully
+        """
+        dim = M * 4
+        self._connect()
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=False)[0:5]
+        HNSW_index_params = {"M": M, "efConstruction": efConstruction, "nlist": 100}  # nlist is of no use
+        HNSW_index = {"index_type": "HNSW", "params": HNSW_index_params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", HNSW_index)
+        collection_w.load()
+        search_param = {"metric_type": "L2", "params": {"ef": 32768, "nprobe": 10}}  # nprobe is of no use
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, default_limit,
+                            default_search_exp, _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("M", [4, 64])
+    @pytest.mark.parametrize("efConstruction", [8, 512])
     @pytest.mark.parametrize("limit", [1, 10, 3000])
     def test_search_HNSW_index_with_min_ef(self, M, efConstruction, limit, auto_id, _async):
         """
