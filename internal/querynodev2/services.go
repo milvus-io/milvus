@@ -373,16 +373,26 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 
 	log.Info("received load partitions request")
 	// check node healthy
-	if !node.lifetime.Add(commonpbutil.IsHealthy) {
-		return merr.Status(merr.WrapErrServiceNotReady(node.lifetime.GetState().String())), nil
+	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
+		return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 	}
+	defer node.lifetime.Done()
 
 	collection := node.manager.Collection.Get(req.GetCollectionID())
-	if collection == nil {
+	if collection != nil {
+		collection.AddPartition(req.GetPartitionIDs()...)
+		return merr.Status(nil), nil
+	}
+
+	if req.GetSchema() == nil {
 		return merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID(), "failed to load partitions")), nil
 	}
-	collection.AddPartition(req.GetPartitionIDs()...)
-
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, &querypb.LoadMetaInfo{
+		CollectionID: req.GetCollectionID(),
+		PartitionIDs: req.GetPartitionIDs(),
+		LoadType:     querypb.LoadType_LoadCollection, // TODO: dyh, remove loadType in querynode
+	})
 	return merr.Status(nil), nil
 }
 

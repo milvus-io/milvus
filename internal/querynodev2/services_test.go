@@ -1394,6 +1394,41 @@ func (suite *ServiceSuite) TestDelete_Failed() {
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestLoadPartition() {
+	ctx := context.Background()
+	req := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}
+
+	// node not healthy
+	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	status, err := suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// collection not exist and schema is nil
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// collection not exist and schema is not nil
+	req.Schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+
+	// collection existed
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+}
+
 func TestQueryNodeService(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }

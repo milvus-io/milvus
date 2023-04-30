@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -56,8 +57,13 @@ func waitCollectionReleased(dist *meta.DistributionManager, collection int64, pa
 	}
 }
 
-func loadPartitions(ctx context.Context, meta *meta.Meta, cluster session.Cluster,
-	ignoreErr bool, collection int64, partitions ...int64) error {
+func loadPartitions(ctx context.Context,
+	meta *meta.Meta,
+	cluster session.Cluster,
+	schema *schemapb.CollectionSchema,
+	ignoreErr bool,
+	collection int64,
+	partitions ...int64) error {
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	loadReq := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -65,6 +71,7 @@ func loadPartitions(ctx context.Context, meta *meta.Meta, cluster session.Cluste
 		},
 		CollectionID: collection,
 		PartitionIDs: partitions,
+		Schema:       schema,
 	}
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {
@@ -83,8 +90,12 @@ func loadPartitions(ctx context.Context, meta *meta.Meta, cluster session.Cluste
 	return nil
 }
 
-func releasePartitions(ctx context.Context, meta *meta.Meta, cluster session.Cluster,
-	ignoreErr bool, collection int64, partitions ...int64) error {
+func releasePartitions(ctx context.Context,
+	meta *meta.Meta,
+	cluster session.Cluster,
+	ignoreErr bool,
+	collection int64,
+	partitions ...int64) error {
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	releaseReq := &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
