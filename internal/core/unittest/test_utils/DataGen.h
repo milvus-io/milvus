@@ -15,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include <string>
 #include <google/protobuf/text_format.h>
 
 #include "Constants.h"
@@ -152,6 +153,13 @@ struct GeneratedData {
                         target_field_data.scalars().string_data().data();
                     std::copy(src_data.begin(), src_data.end(), ret_data);
 
+                    break;
+                }
+                case DataType::JSON: {
+                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
+                    auto src_data =
+                        target_field_data.scalars().json_data().data();
+                    std::copy(src_data.begin(), src_data.end(), ret_data);
                     break;
                 }
                 default: {
@@ -306,10 +314,10 @@ DataGen(SchemaPtr schema,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = R"({"key":)" + std::to_string(er()) + "}";
-                    for (int j = 0; j < repeat_count; j++) {
-                        data[i * repeat_count + j] = str;
-                    }
+                    auto str = R"({"int":)" + std::to_string(er()) +
+                               R"(,"double":)" +
+                               std::to_string(static_cast<double>(er())) + "}";
+                    data[i] = str;
                 }
                 insert_cols(data, N, field_meta);
                 break;

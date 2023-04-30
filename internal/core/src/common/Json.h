@@ -33,15 +33,14 @@
 
 namespace milvus {
 using document = simdjson::ondemand::document;
+template <typename T>
+using value_result = simdjson::simdjson_result<T>;
 class Json {
  public:
     Json() = default;
 
     explicit Json(simdjson::padded_string data) : own_data_(std::move(data)) {
         data_ = own_data_.value();
-    }
-
-    explicit Json(simdjson::padded_string_view data) : data_(data) {
     }
 
     Json(const char* data, size_t len, size_t cap) : data_(data, len) {
@@ -58,26 +57,38 @@ class Json {
     Json(const char* data, size_t len) : data_(data, len) {
     }
 
-    Json(Json&& json) = default;
+    Json(const Json& json) {
+        if (json.own_data_.has_value()) {
+            own_data_ = simdjson::padded_string(
+                json.own_data_.value().data(), json.own_data_.value().length());
+            data_ = own_data_.value();
+        } else {
+            data_ = json.data_;
+        }
+    };
+    Json(Json&& json) noexcept {
+        if (json.own_data_.has_value()) {
+            own_data_ = std::move(json.own_data_);
+            data_ = own_data_.value();
+        } else {
+            data_ = json.data_;
+        }
+    }
 
     Json&
     operator=(const Json& json) {
         if (json.own_data_.has_value()) {
             own_data_ = simdjson::padded_string(
                 json.own_data_.value().data(), json.own_data_.value().length());
+            data_ = own_data_.value();
+        } else {
+            data_ = json.data_;
         }
-
-        data_ = json.data_;
         return *this;
     }
 
     operator std::string_view() const {
         return data_;
-    }
-
-    void
-    parse(simdjson::padded_string_view data) {
-        data_ = data;
     }
 
     document
@@ -91,36 +102,33 @@ class Json {
             parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING)
                 .get(doc);
         AssertInfo(err == simdjson::SUCCESS,
-                   fmt::format("failed to parse the json: {}", err));
+                   fmt::format("failed to parse the json {}: {}",
+                               data_,
+                               simdjson::error_message(err)));
         return doc;
     }
 
-    simdjson::ondemand::value
-    operator[](const std::string_view field) const {
-        simdjson::ondemand::value result;
-        auto err = doc().get_value()[field].get(result);
-        AssertInfo(
-            err == simdjson::SUCCESS,
-            fmt::format("failed to access the field {}: {}", field, err));
-        return result;
-    }
-
-    simdjson::ondemand::value
-    operator[](std::vector<std::string> nested_path) const {
+    bool
+    exist(std::vector<std::string> nested_path) const {
         std::for_each(
             nested_path.begin(), nested_path.end(), [](std::string& key) {
                 boost::replace_all(key, "~", "~0");
                 boost::replace_all(key, "/", "~1");
             });
-        auto pointer = boost::algorithm::join(nested_path, "/");
-        simdjson::ondemand::value result;
-        auto err = doc().at_pointer(pointer).get(result);
-        AssertInfo(
-            err == simdjson::SUCCESS,
-            fmt::format("failed to access the field with json pointer {}: {}",
-                        pointer,
-                        err));
-        return result;
+        auto pointer = "/" + boost::algorithm::join(nested_path, "/");
+        return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
+    }
+
+    template <typename T>
+    value_result<T>
+    at(std::vector<std::string> nested_path) const {
+        std::for_each(
+            nested_path.begin(), nested_path.end(), [](std::string& key) {
+                boost::replace_all(key, "~", "~0");
+                boost::replace_all(key, "/", "~1");
+            });
+        auto pointer = "/" + boost::algorithm::join(nested_path, "/");
+        return doc().at_pointer(pointer).get<T>();
     }
 
     std::string_view
@@ -130,7 +138,7 @@ class Json {
 
  private:
     std::optional<simdjson::padded_string>
-        own_data_;  // this could be empty, then the Json will be just s view on bytes
-    simdjson::padded_string_view data_;
+        own_data_{};  // this could be empty, then the Json will be just s view on bytes
+    simdjson::padded_string_view data_{};
 };
 }  // namespace milvus

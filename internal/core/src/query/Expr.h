@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "common/Schema.h"
+#include "common/Types.h"
 #include "pb/plan.pb.h"
 
 namespace milvus::query {
@@ -32,6 +33,27 @@ namespace milvus::query {
 using optype = proto::plan::OpType;
 
 class ExprVisitor;
+
+struct ColumnInfo {
+    FieldId field_id;
+    DataType data_type;
+    std::vector<std::string> nested_path;
+
+    ColumnInfo(const proto::plan::ColumnInfo& column_info)
+        : field_id(column_info.field_id()),
+          data_type(static_cast<DataType>(column_info.data_type())),
+          nested_path(column_info.nested_path().begin(),
+                      column_info.nested_path().end()) {
+    }
+
+    ColumnInfo(FieldId field_id,
+               DataType data_type,
+               std::vector<std::string> nested_path = {})
+        : field_id(field_id),
+          data_type(data_type),
+          nested_path(std::move(nested_path)) {
+    }
+};
 
 // Base of all Exprs
 struct Expr {
@@ -132,8 +154,8 @@ static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
 };
 
 struct BinaryArithOpEvalRangeExpr : Expr {
-    const FieldId field_id_;
-    const DataType data_type_;
+    const ColumnInfo column_;
+    const proto::plan::GenericValue::ValCase val_case_;
     const OpType op_type_;
     const ArithOpType arith_op_;
 
@@ -141,12 +163,13 @@ struct BinaryArithOpEvalRangeExpr : Expr {
     // prevent accidental instantiation
     BinaryArithOpEvalRangeExpr() = delete;
 
-    BinaryArithOpEvalRangeExpr(const FieldId field_id,
-                               const DataType data_type,
-                               const OpType op_type,
-                               const ArithOpType arith_op)
-        : field_id_(field_id),
-          data_type_(data_type),
+    BinaryArithOpEvalRangeExpr(
+        ColumnInfo column,
+        const proto::plan::GenericValue::ValCase val_case,
+        const OpType op_type,
+        const ArithOpType arith_op)
+        : column_(std::move(column)),
+          val_case_(val_case),
           op_type_(op_type),
           arith_op_(arith_op) {
     }
@@ -189,8 +212,8 @@ struct UnaryRangeExpr : Expr {
 };
 
 struct BinaryRangeExpr : Expr {
-    const FieldId field_id_;
-    const DataType data_type_;
+    const ColumnInfo column_;
+    const proto::plan::GenericValue::ValCase val_case_;
     const bool lower_inclusive_;
     const bool upper_inclusive_;
 
@@ -198,12 +221,12 @@ struct BinaryRangeExpr : Expr {
     // prevent accidental instantiation
     BinaryRangeExpr() = delete;
 
-    BinaryRangeExpr(const FieldId field_id,
-                    const DataType data_type,
+    BinaryRangeExpr(ColumnInfo column,
+                    const proto::plan::GenericValue::ValCase val_case,
                     const bool lower_inclusive,
                     const bool upper_inclusive)
-        : field_id_(field_id),
-          data_type_(data_type),
+        : column_(std::move(column)),
+          val_case_(val_case),
           lower_inclusive_(lower_inclusive),
           upper_inclusive_(upper_inclusive) {
     }

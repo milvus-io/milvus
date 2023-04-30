@@ -14,6 +14,7 @@
 // DO NOT EDIT
 #include <optional>
 #include <boost/variant.hpp>
+#include <type_traits>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -78,10 +79,20 @@ class ExecExprVisitor : public ExprVisitor {
     auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
+    template <typename ExprValueType>
+    auto
+    ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
+        BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
     template <typename T>
     auto
     ExecBinaryArithOpEvalRangeVisitorDispatcher(
         BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
+        -> BitsetType;
 
     template <typename T>
     auto
