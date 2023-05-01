@@ -20,14 +20,16 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metrics"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type dmlMsgStream struct {
@@ -308,4 +310,33 @@ func (d *dmlChannels) removeChannels(names ...string) {
 
 func genChannelName(prefix string, idx int64) string {
 	return fmt.Sprintf("%s_%d", prefix, idx)
+}
+
+func parseChannelNameIndex(channeName string) int {
+	index := strings.LastIndex(channeName, "_")
+	if index < 0 {
+		log.Error("invalid channel name", zap.String("chanName", channeName))
+		panic("invalid channel name: " + channeName)
+	}
+	index, err := strconv.Atoi(channeName[index+1:])
+	if err != nil {
+		log.Error("invalid channel name", zap.String("chanName", channeName), zap.Error(err))
+		panic("invalid channel name: " + channeName)
+	}
+	return index
+}
+
+func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
+	// find the largest number of current channel usage
+	maxChanUsed := setNum
+	for _, chanNames := range chanMap {
+		for _, chanName := range chanNames {
+			index := parseChannelNameIndex(chanName)
+			if maxChanUsed < index+1 {
+				maxChanUsed = index + 1
+			}
+		}
+	}
+
+	return maxChanUsed
 }
