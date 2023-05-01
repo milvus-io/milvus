@@ -132,7 +132,7 @@ func (job *LoadCollectionJob) Execute() error {
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
 	// 2. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, false, req.GetCollectionID(), lackPartitionIDs...)
+	err = loadPartitions(job.ctx, job.meta, job.cluster, nil, false, req.GetCollectionID(), lackPartitionIDs...)
 	if err != nil {
 		return err
 	}
@@ -309,7 +309,7 @@ func (job *LoadPartitionJob) Execute() error {
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
 	// 2. loadPartitions on QueryNodes
-	err := loadPartitions(job.ctx, job.meta, job.cluster, false, req.GetCollectionID(), lackPartitionIDs...)
+	err := loadPartitions(job.ctx, job.meta, job.cluster, nil, false, req.GetCollectionID(), lackPartitionIDs...)
 	if err != nil {
 		return err
 	}

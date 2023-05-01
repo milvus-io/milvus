@@ -163,12 +163,12 @@ func (job *ReleasePartitionJob) Execute() error {
 	} else {
 		err := releasePartitions(job.ctx, job.meta, job.cluster, false, req.GetCollectionID(), toRelease...)
 		if err != nil {
-			loadPartitions(job.ctx, job.meta, job.cluster, true, req.GetCollectionID(), toRelease...)
+			loadPartitions(job.ctx, job.meta, job.cluster, nil, true, req.GetCollectionID(), toRelease...)
 			return err
 		}
 		err = job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
-			loadPartitions(job.ctx, job.meta, job.cluster, true, req.GetCollectionID(), toRelease...)
+			loadPartitions(job.ctx, job.meta, job.cluster, nil, true, req.GetCollectionID(), toRelease...)
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
 			return utils.WrapError(msg, err)

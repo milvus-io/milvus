@@ -121,10 +121,21 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
 	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partitionID", partitionID))
 	log.Info("begin to sync new partition")
+	collection, err := b.s.meta.GetCollectionByID(ctx, collectionID, typeutil.MaxTimestamp, false)
+	if err != nil {
+		return err
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:        collection.Name,
+		Description: collection.Description,
+		AutoID:      collection.AutoID,
+		Fields:      model.MarshalFieldModels(collection.Fields),
+	}
 	resp, err := b.s.queryCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
 		CollectionID: collectionID,
 		PartitionID:  partitionID,
+		Schema:       schema,
 	})
 	if err != nil {
 		return err

@@ -199,6 +199,7 @@ message SyncNewCreatedPartitionRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
+  schema.CollectionSchema schema = 4;
 }
 
 //-----------------query node grpc request and response proto----------------

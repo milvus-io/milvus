@@ -72,7 +72,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		zap.Int64("partitionID", req.GetPartitionID()),
 	)
 
-	err := loadPartitions(job.ctx, job.meta, job.cluster, false, req.GetCollectionID(), req.GetPartitionID())
+	err := loadPartitions(job.ctx, job.meta, job.cluster, req.GetSchema(), false, req.GetCollectionID(), req.GetPartitionID())
 	if err != nil {
 		return err
 	}
