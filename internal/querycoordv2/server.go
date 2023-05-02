@@ -630,7 +630,10 @@ func (s *Server) watchNodes(revision int64) {
 				)
 				s.nodeMgr.Add(session.NewNodeInfo(nodeID, addr))
 				s.nodeUpEventChan <- nodeID
-				s.notifyNodeUp <- struct{}{}
+				select {
+				case s.notifyNodeUp <- struct{}{}:
+				default:
+				}
 
 			case sessionutil.SessionUpdateEvent:
 				nodeID := event.Session.ServerID

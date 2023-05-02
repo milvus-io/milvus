@@ -113,10 +113,10 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// if the old channels number used by the user is greater than the set default value currently
 	// keep the old channels
-	defaultChanNum := getNeedChanNum(Params.RootCoordCfg.DmlChannelNum.GetAsInt(), chanMap)
+	chanNum := getNeedChanNum(Params.RootCoordCfg.DmlChannelNum.GetAsInt(), chanMap)
 
 	// initialize dml channels used for insert
-	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml.GetValue(), int64(defaultChanNum))
+	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml.GetValue(), int64(chanNum))
 
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {

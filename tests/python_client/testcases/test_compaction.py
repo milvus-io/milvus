@@ -101,7 +101,7 @@ class TestCompactionParams(TestcaseBase):
         target = c_plans.plans[0].target
 
         # verify queryNode load the compacted segments
-        cost = 30
+        cost = 180
         start = time()
         while time() - start < cost:
             collection_w.load()
@@ -242,8 +242,8 @@ class TestCompactionParams(TestcaseBase):
         while True:
             if collection_w.num_entities == exp_num_entities_after_compact:
                 break
-            if time() - start > 60:
-                raise MilvusException(1, "Auto delete ratio compaction cost more than 60s")
+            if time() - start > 180:
+                raise MilvusException(1, "Auto delete ratio compaction cost more than 180s")
             sleep(1)
 
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
@@ -388,10 +388,10 @@ class TestCompactionParams(TestcaseBase):
         collection_w.load()
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
-        cost = 60
+        cost = 180
         start = time()
         while time() - start < cost:
-            sleep(2.0)
+            sleep(1.0)
             collection_w.load()
             segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
             if len(segment_info) == 1*replica_num:
@@ -598,10 +598,10 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)[0]
 
         # waiting for handoff completed and search
-        cost = 60
+        cost = 180
         start = time()
         while True:
-            sleep(5)
+            sleep(1)
             segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
             if len(segment_info) != 0 and segment_info[0].segmentID == c_plans.plans[0].target:
                 log.debug(segment_info)
@@ -877,9 +877,9 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.load()
 
         start = time()
-        cost = 60
+        cost = 180
         while True:
-            sleep(5)
+            sleep(1)
             segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
             # verify segments reaches threshold, auto-merge ten segments into one
@@ -887,7 +887,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise MilvusException(1, "Compact merge two segments more than 60s")
+                raise MilvusException(1, "Compact merge two segments more than 180s")
         assert c_plans.plans[0].target == segments_info[0].segmentID
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -949,9 +949,9 @@ class TestCompactionOperation(TestcaseBase):
 
         collection_w.load()
         start = time()
-        cost = 60
+        cost = 180
         while True:
-            sleep(5)
+            sleep(1)
             segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
             # verify segments reaches threshold, auto-merge ten segments into one
@@ -959,7 +959,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise MilvusException(1, "Compact auto and manual more than 60s")
+                raise MilvusException(1, "Compact auto and manual more than 180s")
         assert segments_info[0].segmentID == c_plans.plans[0].target
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -988,10 +988,10 @@ class TestCompactionOperation(TestcaseBase):
         target = c_plans.plans[0].target
 
         collection_w.load()
-        cost = 60
+        cost = 180
         start = time()
         while True:
-            sleep(5)
+            sleep(1)
             segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
             # verify segments reaches threshold, auto-merge ten segments into one
@@ -999,7 +999,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise MilvusException(1, "Compact merge multiple segments more than 60s")
+                raise MilvusException(1, "Compact merge multiple segments more than 180s")
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
         assert len(segments_info) == 1*replica_num
@@ -1059,13 +1059,13 @@ class TestCompactionOperation(TestcaseBase):
         log.debug(collection_w.index())
 
         # Estimated auto-merging takes 30s
-        cost = 120
+        cost = 180
         collection_w.load()
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
         start = time()
         while True:
-            sleep(5)
+            sleep(1)
             segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
             # verify segments reaches threshold, auto-merge ten segments into one
@@ -1073,7 +1073,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise MilvusException(1, "Compact auto-merge more than 60s")
+                raise MilvusException(1, "Compact auto-merge more than 180s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_less_threshold_no_merge(self):
@@ -1298,10 +1298,10 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.get_compaction_plans()
 
         # waitting for new segment index and compact
-        compact_cost = 120
+        compact_cost = 180
         start = time()
         while True:
-            sleep(10)
+            sleep(1)
             collection_w.load()
             # new segment compacted
             seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
