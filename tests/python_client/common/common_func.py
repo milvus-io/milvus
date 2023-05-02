@@ -47,6 +47,7 @@ def gen_str_by_length(length=8, letters_only=False):
     if letters_only:
         return "".join(random.choice(string.ascii_letters) for _ in range(length))
 
+
 def gen_unique_unicode_str(str_value=None):
     s = "test_" if str_value is None else str_value
     for i in range(8):
@@ -474,7 +475,7 @@ def gen_invalid_search_param(index_type, metric_type="L2"):
         for search_list in ["-1"]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
-    
+
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -511,6 +512,7 @@ def gen_normal_expressions():
     ]
     return expressions
 
+
 def gen_field_compare_expressions():
     expressions = [
         "int64_1 | int64_2 == 1",
@@ -525,6 +527,7 @@ def gen_field_compare_expressions():
         "int64_1 + int64_2 >= 10"
     ]
     return expressions
+
 
 def gen_normal_string_expressions(field):
     expressions = [
@@ -796,6 +799,7 @@ def gen_grant_list(collection_name):
                   {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
     return grant_list
 
+
 def install_milvus_operator_specific_config(namespace, milvus_mode, release_name, image,
                                             rate_limit_enable, collection_rate_limit):
     """
@@ -829,7 +833,7 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 
     if milvus_mode not in ["standalone", "cluster"]:
         log.error("[milvus_mode] is not 'standalone' or 'cluster'")
-    
+
     if rate_limit_enable not in ["true", "false"]:
         log.error("[rate_limit_enable] is not 'true' or 'false'")
 
@@ -850,5 +854,5 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
         host = mic.endpoint(release_name, NAMESPACE).split(':')[0]
     else:
         raise MilvusException(message=f'Milvus healthy timeout 1800s')
-    
+
     return host
