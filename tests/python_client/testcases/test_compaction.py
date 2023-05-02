@@ -370,7 +370,7 @@ class TestCompactionOperation(TestcaseBase):
                 3.delete and flush (new insert)
                 4.compact
                 5.load and search
-        expected: Triggre two types compaction
+        expected: Trigger two types compaction
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
         ids = []
@@ -545,10 +545,10 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)[0]
 
         # waiting for handoff completed and search
-        cost = 60
+        cost = 180
         start = time()
         while True:
-            sleep(5)
+            sleep(1)
             segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
             if len(segment_info) != 0 and segment_info[0].segmentID == c_plans.plans[0].target:
                 log.debug(segment_info)
