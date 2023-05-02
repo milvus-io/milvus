@@ -723,11 +723,29 @@ class ColumnInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kNestedPathFieldNumber = 5,
     kFieldIdFieldNumber = 1,
     kDataTypeFieldNumber = 2,
     kIsPrimaryKeyFieldNumber = 3,
     kIsAutoIDFieldNumber = 4,
   };
+  // repeated string nested_path = 5;
+  int nested_path_size() const;
+  void clear_nested_path();
+  const std::string& nested_path(int index) const;
+  std::string* mutable_nested_path(int index);
+  void set_nested_path(int index, const std::string& value);
+  void set_nested_path(int index, std::string&& value);
+  void set_nested_path(int index, const char* value);
+  void set_nested_path(int index, const char* value, size_t size);
+  std::string* add_nested_path();
+  void add_nested_path(const std::string& value);
+  void add_nested_path(std::string&& value);
+  void add_nested_path(const char* value);
+  void add_nested_path(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& nested_path() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_nested_path();
+
   // int64 field_id = 1;
   void clear_field_id();
   ::PROTOBUF_NAMESPACE_ID::int64 field_id() const;
@@ -753,6 +771,7 @@ class ColumnInfo :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> nested_path_;
   ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   int data_type_;
   bool is_primary_key_;
@@ -3463,6 +3482,71 @@ inline void ColumnInfo::set_is_autoid(bool value) {
   
   is_autoid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.is_autoID)
+}
+
+// repeated string nested_path = 5;
+inline int ColumnInfo::nested_path_size() const {
+  return nested_path_.size();
+}
+inline void ColumnInfo::clear_nested_path() {
+  nested_path_.Clear();
+}
+inline const std::string& ColumnInfo::nested_path(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ColumnInfo.nested_path)
+  return nested_path_.Get(index);
+}
+inline std::string* ColumnInfo::mutable_nested_path(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.ColumnInfo.nested_path)
+  return nested_path_.Mutable(index);
+}
+inline void ColumnInfo::set_nested_path(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.nested_path)
+  nested_path_.Mutable(index)->assign(value);
+}
+inline void ColumnInfo::set_nested_path(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.nested_path)
+  nested_path_.Mutable(index)->assign(std::move(value));
+}
+inline void ColumnInfo::set_nested_path(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  nested_path_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline void ColumnInfo::set_nested_path(int index, const char* value, size_t size) {
+  nested_path_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline std::string* ColumnInfo::add_nested_path() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.plan.ColumnInfo.nested_path)
+  return nested_path_.Add();
+}
+inline void ColumnInfo::add_nested_path(const std::string& value) {
+  nested_path_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline void ColumnInfo::add_nested_path(std::string&& value) {
+  nested_path_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline void ColumnInfo::add_nested_path(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  nested_path_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline void ColumnInfo::add_nested_path(const char* value, size_t size) {
+  nested_path_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.plan.ColumnInfo.nested_path)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+ColumnInfo::nested_path() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.plan.ColumnInfo.nested_path)
+  return nested_path_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+ColumnInfo::mutable_nested_path() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.plan.ColumnInfo.nested_path)
+  return &nested_path_;
 }
 
 // -------------------------------------------------------------------

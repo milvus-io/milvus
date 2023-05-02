@@ -29,6 +29,7 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
 
+#include "common/type_c.h"
 #include "exceptions/EasyAssert.h"
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
@@ -101,7 +102,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
     num_chunk_index(FieldId field_id) const final {
-        return indexing_record_.get_finished_ack();
+        return indexing_record_.get_finished_ack(field_id);
     }
 
     // count of chunk that has raw data
@@ -143,7 +144,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_active_count(Timestamp ts) const override;
 
     // for scalar vectors
-    template <typename T>
+    template <typename S, typename T = S>
     void
     bulk_subscript_impl(const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, void* output_raw) const;
 

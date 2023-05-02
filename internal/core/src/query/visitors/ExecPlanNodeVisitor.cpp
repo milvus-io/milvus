@@ -99,6 +99,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     segment->mask_with_timestamps(*bitset_holder, timestamp_);
 
     segment->mask_with_delete(*bitset_holder, active_count, timestamp_);
+
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder->all()) {
         search_result_opt_ = empty_search_result(num_queries, node.search_info_);

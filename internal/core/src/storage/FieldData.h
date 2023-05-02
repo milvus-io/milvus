@@ -19,6 +19,7 @@
 #include <string>
 #include <memory>
 
+#include "common/Json.h"
 #include "storage/FieldDataInterface.h"
 
 namespace milvus::storage {
@@ -34,6 +35,15 @@ class FieldData : public FieldDataImpl<Type, true> {
 
 template <>
 class FieldData<std::string> : public FieldDataStringImpl {
+ public:
+    static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
+    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+        : FieldDataStringImpl(data_type, buffered_num_rows) {
+    }
+};
+
+template <>
+class FieldData<milvus::Json> : public FieldDataStringImpl {
  public:
     static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
     explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
@@ -67,5 +77,4 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
 };
 
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
-
 }  // namespace milvus::storage

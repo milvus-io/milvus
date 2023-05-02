@@ -19,11 +19,13 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -305,6 +307,7 @@ class ConcurrentVectorImpl : public VectorBase {
         AssertInfo(chunk_id < chunk_max_size, "chunk_id=" + std::to_string(chunk_id));
         Chunk& chunk = chunks_[chunk_id];
         auto ptr = chunk.data();
+
         std::copy_n(source + source_offset * Dim, element_count * Dim, ptr + chunk_offset * Dim);
     }
 

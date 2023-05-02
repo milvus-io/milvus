@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "common/Schema.h"
+#include "common/Types.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
@@ -208,6 +209,15 @@ struct InsertRecord {
                     this->append_field_data<std::string>(field_id, size_per_chunk);
                     break;
                 }
+                case DataType::JSON: {
+                    this->append_field_data<Json>(field_id, size_per_chunk);
+                    break;
+                }
+                // case DataType::ARRAY: {
+                //     this->append_field_data<std::string>(field_id,
+                //                                          size_per_chunk);
+                //     break;
+                // }
                 default: {
                     PanicInfo("unsupported");
                 }

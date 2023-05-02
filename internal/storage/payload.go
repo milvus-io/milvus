@@ -29,6 +29,7 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -45,6 +46,8 @@ type PayloadWriterInterface interface {
 	AddFloatToPayload(msgs []float32) error
 	AddDoubleToPayload(msgs []float64) error
 	AddOneStringToPayload(msgs string) error
+	AddOneArrayToPayload(msg *schemapb.ScalarField) error
+	AddOneJSONToPayload(msg []byte) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
 	FinishPayloadWriter() error
@@ -66,6 +69,8 @@ type PayloadReaderInterface interface {
 	GetFloatFromPayload() ([]float32, error)
 	GetDoubleFromPayload() ([]float64, error)
 	GetStringFromPayload() ([]string, error)
+	GetArrayFromPayload() ([]*schemapb.ScalarField, error)
+	GetJSONFromPayload() ([][]byte, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetPayloadLengthFromReader() (int, error)
@@ -149,6 +154,18 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddOneStringToPayload(val)
+		case schemapb.DataType_Array:
+			val, ok := msgs.(*schemapb.ScalarField)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddOneArrayToPayload(val)
+		case schemapb.DataType_JSON:
+			val, ok := msgs.([]byte)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddOneJSONToPayload(val)
 		default:
 			return errors.New("incorrect datatype")
 		}
@@ -287,6 +304,31 @@ func (w *PayloadWriter) AddOneStringToPayload(msg string) error {
 	// the C.AddOneStringToPayload can handle empty string
 	status := C.AddOneStringToPayload(w.payloadWriterPtr, cmsg, clength)
 	return HandleCStatus(&status, "AddOneStringToPayload failed")
+}
+
+func (w *PayloadWriter) AddOneArrayToPayload(msg *schemapb.ScalarField) error {
+	bytes, err := proto.Marshal(msg)
+	if err != nil {
+		return errors.New("Marshal ListValue failed")
+	}
+
+	length := len(bytes)
+	cmsg := (*C.uint8_t)(unsafe.Pointer(&bytes[0]))
+	clength := C.int(length)
+	// defer C.free(unsafe.Pointer(cmsg))
+
+	status := C.AddOneArrayToPayload(w.payloadWriterPtr, cmsg, clength)
+	return HandleCStatus(&status, "AddOneArrayToPayload failed")
+}
+
+func (w *PayloadWriter) AddOneJSONToPayload(msg []byte) error {
+	bytes := msg
+	length := len(bytes)
+	cmsg := (*C.uint8_t)(unsafe.Pointer(&bytes[0]))
+	clength := C.int(length)
+
+	status := C.AddOneJSONToPayload(w.payloadWriterPtr, cmsg, clength)
+	return HandleCStatus(&status, "AddOneJSONToPayload failed")
 }
 
 // AddBinaryVectorToPayload dimension > 0 && (%8 == 0)

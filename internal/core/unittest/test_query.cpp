@@ -185,7 +185,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
-    Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -263,7 +263,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
-    Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
 
@@ -317,7 +317,7 @@ TEST(Query, ExecWithPredicate) {
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
-    Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -806,7 +806,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
-    Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
     // ASSERT_EQ(json.dump(2), ref.dump(2));
 }

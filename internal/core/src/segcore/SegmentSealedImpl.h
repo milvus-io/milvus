@@ -28,6 +28,8 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "index/ScalarIndex.h"
+#include "common/Column.h"
+#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 
@@ -123,6 +125,10 @@ class SegmentSealedImpl : public SegmentSealed {
     static void
     bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
 
+    template <typename S, typename T = S>
+    static void
+    bulk_subscript_impl(const ColumnBase* field, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+
     static void
     bulk_subscript_impl(
         int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
@@ -201,6 +207,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
+    std::unordered_map<FieldId, Column> fixed_fields_;
+    std::unordered_map<FieldId, std::unique_ptr<ColumnBase>> variable_fields_;
 };
 
 inline SegmentSealedPtr

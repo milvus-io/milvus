@@ -935,7 +935,7 @@ func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDat
 	panic("implement me")
 }
 
-func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
 	//TODO implement me
 	panic("implement me")
 }

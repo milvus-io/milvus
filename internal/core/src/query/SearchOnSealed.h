@@ -29,7 +29,7 @@ SearchOnSealedIndex(const Schema& schema,
 
 void
 SearchOnSealed(const Schema& schema,
-               const segcore::InsertRecord<true>& record,
+               const void* vec_data,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,

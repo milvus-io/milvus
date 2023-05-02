@@ -14,6 +14,9 @@
 #include "Utils.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/Column.h"
+#include "log/Log.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -159,8 +162,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_datas) {
-    int64_t size = storage::GetTotalNumRowsForFieldDatas(field_datas);
+SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_data) {
+    int64_t size = storage::GetTotalNumRowsForFieldDatas(field_data);
     if (row_count_opt_.has_value()) {
         AssertInfo(row_count_opt_.value() == size, "field (" + std::to_string(field_id.get()) +
                                                        ") data has different row count (" + std::to_string(size) +
@@ -173,7 +176,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
         if (system_field_type == SystemFieldType::Timestamp) {
             std::vector<Timestamp> timestamps(size);
             int64_t offset = 0;
-            for (auto& data : field_datas) {
+            for (auto& data : field_data) {
                 int64_t row_count = data->get_num_rows();
                 std::copy_n(static_cast<const Timestamp*>(data->Data()), row_count, timestamps.data() + offset);
                 offset += row_count;
@@ -188,7 +191,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
             // use special index
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-            insert_record_.timestamps_.fill_chunk_data(field_datas);
+            insert_record_.timestamps_.fill_chunk_data(field_data);
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
         } else {
@@ -196,7 +199,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
             // write data under lock
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
-            insert_record_.row_ids_.fill_chunk_data(field_datas);
+            insert_record_.row_ids_.fill_chunk_data(field_data);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
         }
         ++system_ready_count_;
@@ -204,20 +207,40 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, const std::vector<storage::Fi
         // write data under lock
         std::unique_lock lck(mutex_);
 
+        auto& field_meta = (*schema_)[field_id];
+        auto data_type = field_meta.get_data_type();
+
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id), "field data can't be loaded when indexing exists");
-        auto field_data = insert_record_.get_field_data_base(field_id);
-        AssertInfo(field_data->empty(), "already exists");
 
-        // insert data to insertRecord
-        field_data->fill_chunk_data(field_datas);
-        AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
+        size_t size = 0;
+        if (datatype_is_variable(data_type)) {
+            std::unique_ptr<ColumnBase> column{};
+            switch (data_type) {
+                case milvus::DataType::STRING:
+                case milvus::DataType::VARCHAR: {
+                    column = std::make_unique<VariableColumn<std::string>>(get_segment_id(), field_meta, field_data);
+                    break;
+                }
+                case milvus::DataType::JSON: {
+                    column = std::make_unique<VariableColumn<Json>>(get_segment_id(), field_meta, field_data);
+                }
+                default: {
+                }
+            }
+            size = column->size();
+            variable_fields_.emplace(field_id, std::move(column));
+        } else {
+            auto column = Column(get_segment_id(), field_meta, field_data);
+            size = column.size();
+            fixed_fields_.emplace(field_id, std::move(column));
+        }
 
         // set pks to offset
         if (schema_->get_primary_field_id() == field_id) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
-            insert_record_.insert_pks(field_datas);
+            insert_record_.insert_pks(field_data);
             insert_record_.seal_pks();
         }
 
@@ -260,9 +283,7 @@ SegmentSealedImpl::num_chunk_index(FieldId field_id) const {
 
 int64_t
 SegmentSealedImpl::num_chunk_data(FieldId field_id) const {
-    auto field_data = insert_record_.get_field_data_base(field_id);
-    AssertInfo(field_data != nullptr, "null field data ptr");
-    return field_data->num_chunk();
+    return get_bit(field_data_ready_bitset_, field_id) ? 1 : 0;
 }
 
 int64_t
@@ -282,6 +303,14 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
                "Can't get bitset element at " + std::to_string(field_id.get()));
     auto& field_meta = schema_->operator[](field_id);
     auto element_sizeof = field_meta.get_sizeof();
+    if (auto it = fixed_fields_.find(field_id); it != fixed_fields_.end()) {
+        auto& field_data = it->second;
+        return field_data.span();
+    }
+    if (auto it = variable_fields_.find(field_id); it != variable_fields_.end()) {
+        auto& field = it->second;
+        return field->span();
+    }
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
@@ -326,6 +355,7 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Tim
     if (del_barrier == 0) {
         return;
     }
+
     auto bitmap_holder = get_deleted_bitmap(del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
@@ -356,7 +386,8 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                    "Field Data is not loaded: " + std::to_string(field_id.get()));
         AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
         auto row_count = row_count_opt_.value();
-        query::SearchOnSealed(*schema_, insert_record_, search_info, query_data, query_count, row_count, bitset,
+        auto& vec_data = fixed_fields_.at(field_id);
+        query::SearchOnSealed(*schema_, vec_data.data(), search_info, query_data, query_count, row_count, bitset,
                               output);
     }
 }
@@ -464,6 +495,22 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw, const int64_t* seg_o
     }
 }
 
+template <typename S, typename T>
+void
+SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
+                                       const int64_t* seg_offsets,
+                                       int64_t count,
+                                       void* dst_raw) {
+    auto field = reinterpret_cast<const VariableColumn<S>*>(column);
+    auto dst = reinterpret_cast<T*>(dst_raw);
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset != INVALID_SEG_OFFSET) {
+            dst[i] = T(field->raw_at(offset));
+        }
+    }
+}
+
 // for vector
 void
 SegmentSealedImpl::bulk_subscript_impl(
@@ -512,10 +559,30 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, 
     }
 
     Assert(get_bit(field_data_ready_bitset_, field_id));
-    auto field_data = insert_record_.get_field_data_base(field_id);
-    AssertInfo(field_data->num_chunk() == 1, std::string("num chunk not equal to 1 for sealed segment, num_chunk: ") +
-                                                 std::to_string(field_data->num_chunk()));
-    auto src_vec = field_data->get_chunk_data(0);
+
+    if (datatype_is_variable(field_meta.get_data_type())) {
+        switch (field_meta.get_data_type()) {
+            case DataType::VARCHAR:
+            case DataType::STRING: {
+                FixedVector<std::string> output(count);
+                bulk_subscript_impl<std::string>(variable_fields_.at(field_id).get(), seg_offsets, count,
+                                                 output.data());
+                return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            }
+
+            case DataType::JSON: {
+                FixedVector<std::string> output(count);
+                bulk_subscript_impl<Json, std::string>(variable_fields_.at(field_id).get(), seg_offsets, count,
+                                                       output.data());
+                return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            }
+
+            default:
+                PanicInfo("unsupported data type: " + datatype_name(field_meta.get_data_type()));
+        }
+    }
+
+    auto src_vec = fixed_fields_.at(field_id).data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);
@@ -550,11 +617,6 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, 
         case DataType::DOUBLE: {
             FixedVector<double> output(count);
             bulk_subscript_impl<double>(src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::VARCHAR: {
-            FixedVector<std::string> output(count);
-            bulk_subscript_impl<std::string>(src_vec, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
 

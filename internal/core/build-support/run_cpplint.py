@@ -40,6 +40,7 @@ _filters = '''
 -build/c++11
 -runtime/references
 -build/include_order
+-build/include_subdir
 '''.split()
 
 
