@@ -25,6 +25,19 @@ func genEmptyIntFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 		FieldName: field.GetName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: nil}},
+			},
+		},
+		FieldId: field.GetFieldID(),
+	}
+}
+
+func genEmptyLongFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: nil}},
 			},
 		},
@@ -142,8 +155,10 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 	switch dataType {
 	case schemapb.DataType_Bool:
 		return genEmptyBoolFieldData(field), nil
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		return genEmptyIntFieldData(field), nil
+	case schemapb.DataType_Int64:
+		return genEmptyLongFieldData(field), nil
 	case schemapb.DataType_Float:
 		return genEmptyFloatFieldData(field), nil
 	case schemapb.DataType_Double:
