@@ -243,9 +243,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	if len(loaded) != len(newSegments) {
 		// Free the memory of segments which failed to load
 		for _, segment := range newSegments {
-			if !loadedSegments.Contain(segment) {
-				DeleteSegment(segment)
-			}
+			DeleteSegment(segment)
 		}
 		debug.FreeOSMemory()
 
@@ -255,7 +253,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Info("partial segments are loaded", zap.Int64s("loadedSegments", loadedIDs))
 	}
 
-	return lo.Map(loaded, func(segment *LocalSegment, _ int) Segment { return segment }), nil
+	return lo.Map(loaded, func(segment *LocalSegment, _ int) Segment { return segment }), err
 }
 
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
