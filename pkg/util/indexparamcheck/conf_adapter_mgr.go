@@ -22,56 +22,53 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// ConfAdapterMgr manages the conf adapter.
-type ConfAdapterMgr interface {
-	// GetAdapter gets the conf adapter by the index type.
-	GetAdapter(indexType string) (ConfAdapter, error)
+type IndexCheckerMgr interface {
+	GetChecker(indexType string) (IndexChecker, error)
 }
 
-// ConfAdapterMgrImpl implements ConfAdapter.
-type ConfAdapterMgrImpl struct {
-	adapters map[IndexType]ConfAdapter
+// indexCheckerMgrImpl implements IndexChecker.
+type indexCheckerMgrImpl struct {
+	checkers map[IndexType]IndexChecker
 	once     sync.Once
 }
 
-// GetAdapter gets the conf adapter by the index type.
-func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
-	mgr.once.Do(mgr.registerConfAdapter)
+func (mgr *indexCheckerMgrImpl) GetChecker(indexType string) (IndexChecker, error) {
+	mgr.once.Do(mgr.registerIndexChecker)
 
-	adapter, ok := mgr.adapters[indexType]
+	adapter, ok := mgr.checkers[indexType]
 	if ok {
 		return adapter, nil
 	}
 	return nil, errors.New("Can not find conf adapter: " + indexType)
 }
 
-func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
-	mgr.adapters[IndexRaftIvfFlat] = newIVFConfAdapter()
-	mgr.adapters[IndexRaftIvfPQ] = newRaftIVFPQConfAdapter()
-	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
-	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
-	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
-	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
-	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
-	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
+func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
+	mgr.checkers[IndexRaftIvfFlat] = newIVFBaseChecker()
+	mgr.checkers[IndexRaftIvfPQ] = newRaftIVFPQChecker()
+	mgr.checkers[IndexFaissIDMap] = newBaseChecker()
+	mgr.checkers[IndexFaissIvfFlat] = newIVFBaseChecker()
+	mgr.checkers[IndexFaissIvfPQ] = newIVFPQChecker()
+	mgr.checkers[IndexFaissIvfSQ8] = newIVFSQChecker()
+	mgr.checkers[IndexFaissBinIDMap] = newBinFlatChecker()
+	mgr.checkers[IndexFaissBinIvfFlat] = newBinIVFFlatChecker()
+	mgr.checkers[IndexHNSW] = newHnswChecker()
+	mgr.checkers[IndexDISKANN] = newDiskannChecker()
 }
 
-func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
-	return &ConfAdapterMgrImpl{
-		adapters: make(map[IndexType]ConfAdapter),
+func newIndexCheckerMgr() *indexCheckerMgrImpl {
+	return &indexCheckerMgrImpl{
+		checkers: make(map[IndexType]IndexChecker),
 	}
 }
 
-var confAdapterMgr ConfAdapterMgr
+var indexCheckerMgr IndexCheckerMgr
 
-var getConfAdapterMgrOnce sync.Once
+var getIndexCheckerMgrOnce sync.Once
 
-// GetConfAdapterMgrInstance gets the instance of ConfAdapterMgr.
-func GetConfAdapterMgrInstance() ConfAdapterMgr {
-	getConfAdapterMgrOnce.Do(func() {
-		confAdapterMgr = newConfAdapterMgrImpl()
+// GetIndexCheckerMgrInstance gets the instance of IndexCheckerMgr.
+func GetIndexCheckerMgrInstance() IndexCheckerMgr {
+	getIndexCheckerMgrOnce.Do(func() {
+		indexCheckerMgr = newIndexCheckerMgr()
 	})
-	return confAdapterMgr
+	return indexCheckerMgr
 }

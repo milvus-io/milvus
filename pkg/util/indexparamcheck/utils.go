@@ -17,6 +17,7 @@
 package indexparamcheck
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -56,4 +57,8 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 	}
 
 	return funcutil.SliceContain(container, value)
+}
+
+func errOutOfRange(x interface{}, lb interface{}, ub interface{}) error {
+	return fmt.Errorf("%v out of range: [%v, %v]", x, lb, ub)
 }

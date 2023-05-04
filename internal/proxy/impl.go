@@ -1645,7 +1645,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		zap.String("field", request.FieldName),
 		zap.Any("extra_params", request.ExtraParams))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cit); err != nil {
 		log.Warn(
@@ -1661,7 +1661,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.Uint64("BeginTs", cit.BeginTs()),
 		zap.Uint64("EndTs", cit.EndTs()))
@@ -1682,7 +1682,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTs", cit.BeginTs()),
 		zap.Uint64("EndTs", cit.EndTs()))

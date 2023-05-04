@@ -242,9 +242,9 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)
 	}
 
-	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
+	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
-		log.Warn("Failed to get conf adapter", zap.String(common.IndexTypeKey, indexType))
+		log.Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
@@ -252,16 +252,14 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return err
 	}
 
-	ok := adapter.CheckValidDataType(field.GetDataType())
-	if !ok {
-		log.Warn("Field data type don't support the index build type", zap.String("fieldDataType", field.GetDataType().String()), zap.String("indexType", indexType))
-		return fmt.Errorf("field data type %s don't support the index build type %s", field.GetDataType().String(), indexType)
+	if err := checker.CheckValidDataType(field.GetDataType()); err != nil {
+		log.Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
+		return err
 	}
 
-	ok = adapter.CheckTrain(indexParams)
-	if !ok {
-		log.Warn("Create index with invalid params", zap.Any("index_params", indexParams))
-		return fmt.Errorf("invalid index params: %v", indexParams)
+	if err := checker.CheckTrain(indexParams); err != nil {
+		log.Info("create index with invalid parameters", zap.Error(err))
+		return err
 	}
 
 	return nil
