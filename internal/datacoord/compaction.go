@@ -308,7 +308,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		stateResult, ok := planStates[task.plan.PlanID]
 		state := stateResult.GetState()
 		planID := task.plan.PlanID
-		// check wether the state of CompactionPlan is working
+		// check whether the state of CompactionPlan is working
 		if ok {
 			if state == commonpb.CompactionState_Completed {
 				log.Info("compaction completed", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID))

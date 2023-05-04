@@ -272,6 +272,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3000, checkHealthInterval)
 		checkHealthRPCTimeout := Params.CheckHealthRPCTimeout.GetAsInt()
 		assert.Equal(t, 100, checkHealthRPCTimeout)
+
+		assert.Equal(t, 0.1, Params.GlobalRowCountFactor.GetAsFloat())
+		params.Save("queryCoord.globalRowCountFactor", "0.4")
+		assert.Equal(t, 0.4, Params.GlobalRowCountFactor.GetAsFloat())
+
+		assert.Equal(t, 0.05, Params.ScoreUnbalanceTolerationFactor.GetAsFloat())
+		params.Save("queryCoord.scoreUnbalanceTolerationFactor", "0.4")
+		assert.Equal(t, 0.4, Params.ScoreUnbalanceTolerationFactor.GetAsFloat())
+
+		assert.Equal(t, 1.3, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
+		params.Save("queryCoord.reverseUnBalanceTolerationFactor", "1.5")
+		assert.Equal(t, 1.5, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

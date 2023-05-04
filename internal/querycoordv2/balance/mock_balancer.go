@@ -101,13 +101,13 @@ func (_c *MockBalancer_AssignSegment_Call) Return(_a0 []SegmentAssignPlan) *Mock
 	return _c
 }
 
-// Balance provides a mock function with given fields:
-func (_m *MockBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	ret := _m.Called()
+// BalanceReplica provides a mock function with given fields: replica
+func (_m *MockBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	ret := _m.Called(replica)
 
 	var r0 []SegmentAssignPlan
-	if rf, ok := ret.Get(0).(func() []SegmentAssignPlan); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(*meta.Replica) []SegmentAssignPlan); ok {
+		r0 = rf(replica)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]SegmentAssignPlan)
@@ -115,8 +115,8 @@ func (_m *MockBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	}
 
 	var r1 []ChannelAssignPlan
-	if rf, ok := ret.Get(1).(func() []ChannelAssignPlan); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(*meta.Replica) []ChannelAssignPlan); ok {
+		r1 = rf(replica)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]ChannelAssignPlan)
@@ -126,24 +126,25 @@ func (_m *MockBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	return r0, r1
 }
 
-// MockBalancer_Balance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Balance'
-type MockBalancer_Balance_Call struct {
+// MockBalancer_BalanceReplica_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BalanceReplica'
+type MockBalancer_BalanceReplica_Call struct {
 	*mock.Call
 }
 
-// Balance is a helper method to define mock.On call
-func (_e *MockBalancer_Expecter) Balance() *MockBalancer_Balance_Call {
-	return &MockBalancer_Balance_Call{Call: _e.mock.On("Balance")}
+// BalanceReplica is a helper method to define mock.On call
+//   - replica *meta.Replica
+func (_e *MockBalancer_Expecter) BalanceReplica(replica interface{}) *MockBalancer_BalanceReplica_Call {
+	return &MockBalancer_BalanceReplica_Call{Call: _e.mock.On("BalanceReplica", replica)}
 }
 
-func (_c *MockBalancer_Balance_Call) Run(run func()) *MockBalancer_Balance_Call {
+func (_c *MockBalancer_BalanceReplica_Call) Run(run func(replica *meta.Replica)) *MockBalancer_BalanceReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(*meta.Replica))
 	})
 	return _c
 }
 
-func (_c *MockBalancer_Balance_Call) Return(_a0 []SegmentAssignPlan, _a1 []ChannelAssignPlan) *MockBalancer_Balance_Call {
+func (_c *MockBalancer_BalanceReplica_Call) Return(_a0 []SegmentAssignPlan, _a1 []ChannelAssignPlan) *MockBalancer_BalanceReplica_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

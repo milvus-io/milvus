@@ -248,7 +248,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	return nil
 }
 
-// check checks whether the task is valid to add,
+// check whether the task is valid to add,
 // must hold lock
 func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
@@ -736,7 +736,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 
 		case ActionTypeReduce:
 			// Do nothing here,
-			// the task should succeeded if the segment not exists
+			// the task should succeed if the segment not exists
 		}
 	}
 	return nil
@@ -761,7 +761,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 
 		case ActionTypeReduce:
 			// Do nothing here,
-			// the task should succeeded if the channel not exists
+			// the task should succeed if the channel not exists
 		}
 	}
 	return nil

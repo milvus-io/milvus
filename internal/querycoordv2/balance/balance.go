@@ -58,7 +58,7 @@ var (
 type Balance interface {
 	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
-	Balance() ([]SegmentAssignPlan, []ChannelAssignPlan)
+	BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
 
 type RoundRobinBalancer struct {
@@ -112,6 +112,11 @@ func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []i
 	return ret
 }
 
+func (b *RoundRobinBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
+	//TODO by chun.han
+	return nil, nil
+}
+
 func (b *RoundRobinBalancer) getNodes(nodes []int64) []*session.NodeInfo {
 	ret := make([]*session.NodeInfo, 0, len(nodes))
 	for _, n := range nodes {
@@ -121,11 +126,6 @@ func (b *RoundRobinBalancer) getNodes(nodes []int64) []*session.NodeInfo {
 		}
 	}
 	return ret
-}
-
-func (b *RoundRobinBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	// TODO(sunby)
-	return nil, nil
 }
 
 func NewRoundRobinBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager) *RoundRobinBalancer {

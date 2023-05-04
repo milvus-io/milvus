@@ -50,8 +50,6 @@ func TestFlowGraphManager(t *testing.T) {
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
 	require.Nil(t, err)
-	err = node.Start()
-	require.Nil(t, err)
 
 	fm := newFlowgraphManager()
 	defer func() {
