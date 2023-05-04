@@ -923,8 +923,8 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_shards_num: default_shards_num})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [-256, 0, 1, 10, 31, 63])
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("shards_num", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
     def test_collection_shards_num_with_not_default_value(self, shards_num):
         """
         target:test collection with shards_num
@@ -939,21 +939,22 @@ class TestCollectionParams(TestcaseBase):
         assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [65, 257])
+    @pytest.mark.parametrize("shards_num", [ct.max_shards_num + 1, 257])
     def test_collection_shards_num_invalid(self, shards_num):
         """
         target:test collection with invalid shards_num
-        method:create collection with shards_num out of [1,64]
+        method:create collection with shards_num out of [1, 16]
         expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "shard num (%s) exceeds limit (64)" % shards_num}
+        error = {ct.err_code: 1, ct.err_msg: f"maximum shards's number should be limited to {ct.max_shards_num}"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=shards_num,
                                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_shards_num_with_error_type(self):
+    @pytest.mark.parametrize("error_type_shards_num", [1.0, "2"])
+    def test_collection_shards_num_with_error_type(self, error_type_shards_num):
         """
         target:test collection with error type shards_num
         method:create collection with error type shards_num
@@ -961,7 +962,6 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error_type_shards_num = "2"  # suppose to be int rather than str
         error = {ct.err_code: 1, ct.err_msg: f"expected one of: int, long"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=error_type_shards_num,
                                              check_task=CheckTasks.err_res,
