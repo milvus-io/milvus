@@ -1662,6 +1662,7 @@ type dataNodeConfig struct {
 	FlushDeleteBufferBytes int64
 	BinLogMaxSize          int64
 	SyncPeriod             time.Duration
+	CpLagPeriod            time.Duration
 
 	Alias string // Different datanode in one machine
 
@@ -1698,6 +1699,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initFlushDeleteBufferSize()
 	p.initBinlogMaxSize()
 	p.initSyncPeriod()
+	p.initCpLagPeriod()
 	p.initIOConcurrency()
 	p.initDataNodeTimeTickInterval()
 
@@ -1753,6 +1755,11 @@ func (p *dataNodeConfig) initBinlogMaxSize() {
 func (p *dataNodeConfig) initSyncPeriod() {
 	syncPeriodInSeconds := p.Base.ParseInt64WithDefault("datanode.segment.syncPeriod", 600)
 	p.SyncPeriod = time.Duration(syncPeriodInSeconds) * time.Second
+}
+
+func (p *dataNodeConfig) initCpLagPeriod() {
+	cpLagPeriod := p.Base.ParseInt64WithDefault("datanode.segment.cpLagPeriod", 600)
+	p.CpLagPeriod = time.Duration(cpLagPeriod) * time.Second
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {

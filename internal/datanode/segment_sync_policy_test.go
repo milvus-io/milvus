@@ -20,10 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/atomic"
-
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/stretchr/testify/assert"
+
+	"go.uber.org/atomic"
 )
 
 func TestSyncPeriodically(t *testing.T) {
@@ -90,6 +91,74 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 			}
 			segs := policy(segments, 0, atomic.NewBool(test.needToSync))
 			assert.ElementsMatch(t, segs, test.shouldSyncSegs)
+		})
+	}
+}
+
+func TestSyncCpLagBehindTooMuch(t *testing.T) {
+	Params.DataNodeCfg.CpLagPeriod = time.Duration(60) * time.Second
+	nowTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+	laggedTs := tsoutil.AddPhysicalDurationOnTs(nowTs, -2*Params.DataNodeCfg.CpLagPeriod)
+	tests := []struct {
+		testName  string
+		segments  []*Segment
+		idsToSync []int64
+	}{
+		{"test_current_buf_lag_behind",
+			[]*Segment{
+				{
+					segmentID: 1,
+					curInsertBuf: &BufferData{
+						startPos: &internalpb.MsgPosition{
+							Timestamp: laggedTs,
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					curDeleteBuf: &DelDataBuf{
+						startPos: &internalpb.MsgPosition{
+							Timestamp: laggedTs,
+						},
+					},
+				},
+			},
+			[]int64{1, 2},
+		},
+		{"test_history_buf_lag_behind",
+			[]*Segment{
+				{
+					segmentID: 1,
+					historyInsertBuf: []*BufferData{
+						{
+							startPos: &internalpb.MsgPosition{
+								Timestamp: laggedTs,
+							},
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &internalpb.MsgPosition{
+								Timestamp: laggedTs,
+							},
+						},
+					},
+				},
+				{
+					segmentID: 3,
+				},
+			},
+			[]int64{1, 2},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			policy := syncCPLagTooBehind()
+			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
+			assert.ElementsMatch(t, test.idsToSync, ids)
 		})
 	}
 }
