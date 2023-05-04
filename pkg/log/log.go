@@ -91,6 +91,10 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 	if err != nil {
 		return nil, nil, err
 	}
+	// add node id to logger
+	if cfg.NodeID > 0 {
+		debugL = debugL.With(zap.Int64("node_id", cfg.NodeID))
+	}
 	replaceLeveledLoggers(debugL)
 	level := zapcore.DebugLevel
 	if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {

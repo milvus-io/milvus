@@ -204,6 +204,7 @@ func (mr *MilvusRoles) setupLogger() {
 			MaxDays:    params.LogCfg.MaxAge.GetAsInt(),
 			MaxBackups: params.LogCfg.MaxBackups.GetAsInt(),
 		},
+		NodeID: paramtable.GetNodeID(),
 	}
 	id := paramtable.GetNodeID()
 	roleName := paramtable.GetRole()
