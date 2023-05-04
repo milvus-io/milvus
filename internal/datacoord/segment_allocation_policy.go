@@ -117,6 +117,13 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	}
 }
 
+// sealBySizePolicy get segmentSealPolicy with segment size policy
+func sealBySizePolicy(size int64) segmentSealPolicy {
+	return func(segment *SegmentInfo, ts Timestamp) bool {
+		return segment.size >= size
+	}
+}
+
 // sealByMaxBinlogSizePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
 func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
