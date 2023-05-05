@@ -1,6 +1,8 @@
 metrics:
   serviceMonitor:
     enabled: true
+log:
+  level: debug    
 proxy:
   resources:
     requests:
