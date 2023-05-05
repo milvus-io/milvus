@@ -199,6 +199,7 @@ ivf = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 skip_pq = ["IVF_PQ"]
 binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
+all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 
 
 class CheckTasks:
