@@ -20,11 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -37,7 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -96,6 +100,8 @@ type Channel interface {
 	// getTotalMemorySize returns the sum of memory sizes of segments.
 	getTotalMemorySize() int64
 	forceToSync()
+
+	close()
 }
 
 // ChannelMeta contains channel meta and the latest segments infos of the channel.
@@ -113,6 +119,9 @@ type ChannelMeta struct {
 
 	metaService  *metaService
 	chunkManager storage.ChunkManager
+	workerPool   *conc.Pool[struct{}]
+
+	closed *atomic.Bool
 }
 
 type addSegmentReq struct {
@@ -130,6 +139,8 @@ var _ Channel = &ChannelMeta{}
 func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(rc, collID)
 
+	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0), ants.WithPreAlloc(false), ants.WithNonblocking(false))
+
 	channel := ChannelMeta{
 		collectionID: collID,
 		collSchema:   schema,
@@ -145,6 +156,8 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		metaService:  metaService,
 		chunkManager: cm,
+		workerPool:   pool,
+		closed:       atomic.NewBool(false),
 	}
 
 	return &channel
@@ -306,13 +319,72 @@ func (c *ChannelMeta) filterSegments(partitionID UniqueID) []*Segment {
 }
 
 func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
+	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		// mark segment lazy loading
+		s.setLoadingLazy(true)
+		c.submitLoadStatsTask(s, statsBinlogs, ts)
+		return nil
+	}
+	return c.initPKstats(ctx, s, statsBinlogs, ts)
+}
+
+func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) {
+	log := log.Ctx(context.TODO()).With(
+		zap.Int64("segmentID", s.segmentID),
+		zap.Int64("collectionID", s.collectionID),
+	)
+	if c.closed.Load() {
+		// stop retry and resubmit if channel meta closed
+		return
+	}
+	// do submitting in a goroutine in case of task pool is full
+	go func() {
+		c.workerPool.Submit(func() (struct{}, error) {
+			stats, err := c.loadStats(context.Background(), s.segmentID, s.collectionID, statsBinlogs, ts)
+			if err != nil {
+				// TODO if not retryable, add rebuild statslog logic
+				log.Warn("failed to lazy load statslog for segment", zap.Error(err))
+				if c.retryableLoadError(err) {
+					log.Info("retry load statslog")
+					c.submitLoadStatsTask(s, statsBinlogs, ts)
+				}
+				return struct{}{}, err
+			}
+			// get segment lock here
+			// it's ok that segment is dropped here
+			c.segMu.Lock()
+			defer c.segMu.Unlock()
+			s.historyStats = append(s.historyStats, stats...)
+			s.setLoadingLazy(false)
+
+			log.Info("lazy loading segment statslog complete")
+
+			return struct{}{}, nil
+		})
+	}()
+}
+
+func (c *ChannelMeta) retryableLoadError(err error) bool {
+	switch {
+	case errors.Is(err, merr.ErrParameterInvalid):
+		// statslog corrupted
+		return false
+	case errors.Is(err, storage.ErrNoSuchKey):
+		// statslog not found
+		return false
+	default:
+		return true
+	}
+}
+
+func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collectionID int64, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) ([]*storage.PkStatistics, error) {
 	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", s.segmentID))
-	log.Info("begin to init pk bloom filter", zap.Int("stats bin logs", len(statsBinlogs)))
-	schema, err := c.getCollectionSchema(s.collectionID, ts)
+	log := log.With(zap.Int64("segmentID", segmentID))
+	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))
+	schema, err := c.getCollectionSchema(collectionID, ts)
 	if err != nil {
 		log.Warn("failed to initPKBloomFilter, get schema return error", zap.Error(err))
-		return err
+		return nil, err
 	}
 
 	// get pkfield id
@@ -338,14 +410,14 @@ func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs 
 	// no stats log to parse, initialize a new BF
 	if len(bloomFilterFiles) == 0 {
 		log.Warn("no stats files to load")
-		return nil
+		return nil, nil
 	}
 
 	// read historical PK filter
 	values, err := c.chunkManager.MultiRead(ctx, bloomFilterFiles)
 	if err != nil {
 		log.Warn("failed to load bloom filter files", zap.Error(err))
-		return err
+		return nil, err
 	}
 	blobs := make([]*Blob, 0)
 	for i := 0; i < len(values); i++ {
@@ -355,9 +427,10 @@ func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs 
 	stats, err := storage.DeserializeStats(blobs)
 	if err != nil {
 		log.Warn("failed to deserialize bloom filter files", zap.Error(err))
-		return err
+		return nil, merr.WrapErrParameterInvalid("valid statslog", "corrupted statslog", err.Error())
 	}
 	var size uint
+	result := make([]*storage.PkStatistics, 0, len(stats))
 	for _, stat := range stats {
 		pkStat := &storage.PkStatistics{
 			PkFilter: stat.BF,
@@ -365,9 +438,19 @@ func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs 
 			MaxPK:    stat.MaxPk,
 		}
 		size += stat.BF.Cap()
-		s.historyStats = append(s.historyStats, pkStat)
+		result = append(result, pkStat)
 	}
+
 	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
+	return result, nil
+}
+
+func (c *ChannelMeta) initPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
+	stats, err := c.loadStats(ctx, s.segmentID, s.collectionID, statsBinlogs, ts)
+	if err != nil {
+		return err
+	}
+	s.historyStats = stats
 
 	return nil
 }
@@ -828,4 +911,8 @@ func (c *ChannelMeta) getTotalMemorySize() int64 {
 		res += segment.memorySize
 	}
 	return res
+}
+
+func (c *ChannelMeta) close() {
+	c.closed.Store(true)
 }

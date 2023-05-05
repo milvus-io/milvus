@@ -50,8 +50,21 @@ type Segment struct {
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
-	lastSyncTs Timestamp
-	startPos   *msgpb.MsgPosition // TODO readonly
+	lastSyncTs  Timestamp
+	startPos    *msgpb.MsgPosition // TODO readonly
+	lazyLoading atomic.Value
+}
+
+func (s *Segment) isLoadingLazy() bool {
+	b, ok := s.lazyLoading.Load().(bool)
+	if !ok {
+		return false
+	}
+	return b
+}
+
+func (s *Segment) setLoadingLazy(b bool) {
+	s.lazyLoading.Store(b)
 }
 
 func (s *Segment) isValid() bool {
@@ -90,6 +103,10 @@ func (s *Segment) InitCurrentStat() {
 
 // check if PK exists is current
 func (s *Segment) isPKExist(pk primaryKey) bool {
+	// for integrity, report false positive while lazy loading
+	if s.isLoadingLazy() {
+		return true
+	}
 	s.statLock.Lock()
 	defer s.statLock.Unlock()
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
