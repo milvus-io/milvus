@@ -27,7 +27,7 @@ jobs:
   mac:
     name: Code Checker MacOS 12
     runs-on: macos-12
-    timeout-minutes: 180
+    timeout-minutes: 300 
     steps:
       - name: Checkout
         uses: actions/checkout@v2
