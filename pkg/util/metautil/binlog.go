@@ -54,9 +54,17 @@ func getSegmentIDFromPath(logPath string, segmentIndex int) typeutil.UniqueID {
 
 // JoinIDPath joins ids to path format.
 func JoinIDPath(ids ...typeutil.UniqueID) string {
-	idStr := make([]string, 0, len(ids))
-	for _, id := range ids {
-		idStr = append(idStr, strconv.FormatInt(id, 10))
+	var b strings.Builder
+
+	// Allocate bytes for the max positive int64 value plus the separator:
+	b.Grow(len(ids) * 20)
+
+	for n, id := range ids {
+		if n > 0 {
+			b.WriteByte('/')
+		}
+		b.WriteString(strconv.FormatInt(id, 10))
 	}
-	return path.Join(idStr...)
+
+	return b.String()
 }
