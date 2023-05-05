@@ -31,6 +31,15 @@ func (el ErrorList) Error() string {
 	return builder.String()
 }
 
+func (el ErrorList) Is(err error) bool {
+	for _, item := range el {
+		if errors.Is(item, err) {
+			return true
+		}
+	}
+	return false
+}
+
 func UnhealthyStatus(code commonpb.StateCode) *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,

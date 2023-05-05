@@ -161,6 +161,7 @@ func (dsService *dataSyncService) close() {
 		close(dsService.flushCh)
 		dsService.flushManager.close()
 		dsService.cancelFn()
+		dsService.channel.close()
 	})
 }
 

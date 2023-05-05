@@ -28,6 +28,8 @@ import (
 var (
 	// errSegmentStatsNotChanged error stands for segment stats not changed.
 	errSegmentStatsNotChanged = errors.New("segment stats not changed")
+	// errBinlogCorrupted error stands for any binlog(data, stats or delta) cannot be parsed correctly.
+	errBinlogCorrupted = errors.New("binlog corrupted")
 )
 
 func msgDataNodeIsUnhealthy(nodeID UniqueID) string {
@@ -36,6 +38,10 @@ func msgDataNodeIsUnhealthy(nodeID UniqueID) string {
 
 func errDataNodeIsUnhealthy(nodeID UniqueID) error {
 	return errors.New(msgDataNodeIsUnhealthy(nodeID))
+}
+
+func WrapBinlogCorruptedErr(path string) error {
+	return fmt.Errorf("%w(path=%s)", errBinlogCorrupted, path)
 }
 
 func setNotServingStatus(status *commonpb.Status, stateCode commonpb.StateCode) {
