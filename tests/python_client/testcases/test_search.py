@@ -5,6 +5,8 @@ import numpy
 import threading
 import pytest
 import pandas as pd
+import decimal
+from decimal import Decimal, getcontext
 from time import sleep
 
 from base.client_base import TestcaseBase
@@ -2889,11 +2891,11 @@ class TestCollectionSearch(TestcaseBase):
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23601")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
-    def test_search_output_field_vector_after_different_index(self, index, params):
+    @pytest.mark.parametrize("metrics", ct.float_metrics)
+    def test_search_output_field_vector_after_different_index_metrics(self, index, params, metrics):
         """
         target: test search with output vector field after different index
         method: 1. create a collection and insert data
@@ -2908,25 +2910,28 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 2. create index and load
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": metrics}
         collection_w.create_index(field_name, default_index)
         collection_w.load()
 
         # 3. search with output field vector
-        search_params = cf.gen_search_param(index)[0]
+        search_params = cf.gen_search_param(index, metrics)[0]
         res = collection_w.search(vectors[:1], default_search_field,
-                                  search_params, 2, default_search_exp,
+                                  search_params, default_limit, default_search_exp,
                                   output_fields=[field_name],
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": 1,
-                                               "limit": 2})[0]
+                                               "limit": default_limit})[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['float_vector'][0])
-        assert res[0][0].entity.float_vector == data[field_name][res[0][0].id]
-        # log.info(data['float_vector'][1])
+        for _id in range(default_limit):
+            for i in range(default_dim):
+                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
+                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
+                if vectorInsert != vectorRes:
+                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
+                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
+                assert str(vectorInsert) == vectorRes
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23661")
@@ -2995,17 +3000,39 @@ class TestCollectionSearch(TestcaseBase):
                                                "limit": default_limit})[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['float_vector'][0])
         for i in range(default_limit):
             assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [32, 128, 768])
-    def test_search_output_field_vector_with_different_dim(self, dim):
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_output_vector_field_and_scalar_field(self):
         """
-        target: test search with output vector field after binary index
+        target: test search with output vector field and scalar field
+        method: 1. initialize a collection
+                2. search with output field vector
+                3. check no field missing
+        expected: search success
+        """
+        # 1. initialize a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. search with output field vector
+        res = collection_w.search(vectors[:1], default_search_field,
+                                  default_search_params, default_limit, default_search_exp,
+                                  output_fields=[default_float_field_name,
+                                                 default_string_field_name,
+                                                 default_search_field],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": 1,
+                                               "limit": default_limit})[0]
+
+        # 3. check the result
+        assert default_float_field_name, default_string_field_name in res[0][0].entity._row_data
+        assert default_search_field in res[0][0].entity._row_data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_output_field_vector_with_partition(self):
+        """
+        target: test search with output vector field
         method: 1. create a collection and insert data
                 2. create index and load
                 3. search with output field vector
@@ -3013,30 +3040,32 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. create a collection and insert data
-        collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
-        data = cf.gen_default_dataframe_data(dim=dim)
-        collection_w.insert(data)
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        partition_w = self.init_partition_wrap(collection_w)
+        data = cf.gen_default_dataframe_data()
+        partition_w.insert(data)
 
         # 2. create index and load
-        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", index_params)
+        collection_w.create_index(field_name, default_index_params)
         collection_w.load()
 
         # 3. search with output field vector
-        vectors = cf.gen_vectors(default_nq, dim=dim)
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit, default_search_exp,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "limit": default_limit})[0]
+        res = partition_w.search(vectors[:1], default_search_field,
+                                 default_search_params, default_limit, default_search_exp,
+                                 output_fields=[field_name],
+                                 check_task=CheckTasks.check_search_results,
+                                 check_items={"nq": 1,
+                                              "limit": default_limit})[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['float_vector'][0])
-        for i in range(default_limit):
-            assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
+        for _id in range(default_limit):
+            for i in range(default_dim):
+                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
+                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
+                if vectorInsert != vectorRes:
+                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
+                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
+                assert str(vectorInsert) == vectorRes
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
@@ -5329,6 +5358,40 @@ class TestSearchDiskann(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async}
                             )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #23672")
+    def test_search_diskann_search_list_up_to_min(self, dim, auto_id, _async):
+        """
+        target: test search diskann index when search_list up to min
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index ,  then load
+                3.search
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
+                                                                      dim=dim, is_index=False)[0:4]
+
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+
+        search_params = {"metric_type": "L2", "params": {"k": 200, "search_list": 201}}
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        collection_w.search(search_vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
 
 
 class TestCollectionRangeSearch(TestcaseBase):
