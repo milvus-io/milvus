@@ -305,11 +305,6 @@ func (dct *dropCollectionTask) PreExecute(ctx context.Context) error {
 func (dct *dropCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	dct.result, err = dct.rootCoord.DropCollection(ctx, dct.DropCollectionRequest)
-	if common.IsCollectionNotExistError(err) {
-		// make dropping collection idempotent.
-		dct.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		return nil
-	}
 	return err
 }
 
