@@ -36,7 +36,8 @@ set(STORAGE_FILES
     InsertData.cpp
     Event.cpp
     ThreadPool.cpp
-    storage_c.cpp)
+    storage_c.cpp
+    AwsSegcoreLogger.cpp)
 
 if(BUILD_DISK_ANN STREQUAL "ON")
     set(STORAGE_FILES
