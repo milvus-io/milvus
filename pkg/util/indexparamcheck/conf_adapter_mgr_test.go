@@ -19,122 +19,122 @@ import (
 )
 
 func Test_GetConfAdapterMgrInstance(t *testing.T) {
-	adapterMgr := GetConfAdapterMgrInstance()
+	adapterMgr := GetIndexCheckerMgrInstance()
 
-	var adapter ConfAdapter
+	var adapter IndexChecker
 	var err error
 	var ok bool
 
-	adapter, err = adapterMgr.GetAdapter("invalid")
+	adapter, err = adapterMgr.GetChecker("invalid")
 	assert.NotEqual(t, nil, err)
 	assert.Equal(t, nil, adapter)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIDMap)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BaseConfAdapter)
+	_, ok = adapter.(*baseChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfFlat)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfFlat)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFConfAdapter)
+	_, ok = adapter.(*ivfBaseChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfPQ)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfPQ)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFPQConfAdapter)
+	_, ok = adapter.(*ivfPQChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfSQ8)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfSQ8)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFSQConfAdapter)
+	_, ok = adapter.(*ivfSQChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIDMap)
+	adapter, err = adapterMgr.GetChecker(IndexFaissBinIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BinIDMAPConfAdapter)
+	_, ok = adapter.(*binFlatChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIvfFlat)
+	adapter, err = adapterMgr.GetChecker(IndexFaissBinIvfFlat)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BinIVFConfAdapter)
+	_, ok = adapter.(*binIVFFlatChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexHNSW)
+	adapter, err = adapterMgr.GetChecker(IndexHNSW)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*HNSWConfAdapter)
+	_, ok = adapter.(*hnswChecker)
 	assert.Equal(t, true, ok)
 }
 
 func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
-	adapterMgr := newConfAdapterMgrImpl()
+	adapterMgr := newIndexCheckerMgr()
 
-	var adapter ConfAdapter
+	var adapter IndexChecker
 	var err error
 	var ok bool
 
-	adapter, err = adapterMgr.GetAdapter("invalid")
+	adapter, err = adapterMgr.GetChecker("invalid")
 	assert.NotEqual(t, nil, err)
 	assert.Equal(t, nil, adapter)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIDMap)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BaseConfAdapter)
+	_, ok = adapter.(*baseChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfFlat)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfFlat)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFConfAdapter)
+	_, ok = adapter.(*ivfBaseChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfPQ)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfPQ)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFPQConfAdapter)
+	_, ok = adapter.(*ivfPQChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfSQ8)
+	adapter, err = adapterMgr.GetChecker(IndexFaissIvfSQ8)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFSQConfAdapter)
+	_, ok = adapter.(*ivfSQChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIDMap)
+	adapter, err = adapterMgr.GetChecker(IndexFaissBinIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BinIDMAPConfAdapter)
+	_, ok = adapter.(*binFlatChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIvfFlat)
+	adapter, err = adapterMgr.GetChecker(IndexFaissBinIvfFlat)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*BinIVFConfAdapter)
+	_, ok = adapter.(*binIVFFlatChecker)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexHNSW)
+	adapter, err = adapterMgr.GetChecker(IndexHNSW)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*HNSWConfAdapter)
+	_, ok = adapter.(*hnswChecker)
 	assert.Equal(t, true, ok)
 }
 
 func TestConfAdapterMgrImpl_GetAdapter_multiple_threads(t *testing.T) {
 	num := 4
-	mgr := newConfAdapterMgrImpl()
+	mgr := newIndexCheckerMgr()
 	var wg sync.WaitGroup
 	for i := 0; i < num; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			adapter, err := mgr.GetAdapter(IndexHNSW)
+			adapter, err := mgr.GetChecker(IndexHNSW)
 			assert.NoError(t, err)
 			assert.NotNil(t, adapter)
 		}()
