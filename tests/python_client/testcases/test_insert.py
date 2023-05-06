@@ -479,7 +479,7 @@ class TestInsertOperation(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_name = cf.gen_unique_str(prefix)
-        partition_w1 = self.init_partition_wrap(collection_w, partition_name=partition_name)
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
         assert mutation_res.insert_count == ct.default_nb
@@ -992,7 +992,7 @@ class TestInsertBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         partition_name = cf.gen_unique_str(prefix)
-        partition_w1 = self.init_partition_wrap(collection_w, partition_name=partition_name)
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
         mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
         assert mutation_res.insert_count == ct.default_nb
 
