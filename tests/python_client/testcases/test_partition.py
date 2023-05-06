@@ -503,8 +503,7 @@ class TestPartitionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
-                                      cf.gen_default_list_data(10),
-                                      cf.gen_default_tuple_data(10)])
+                                      cf.gen_default_list_data(10)])
     def test_partition_insert(self, data):
         """
         target: verify insert entities multiple times

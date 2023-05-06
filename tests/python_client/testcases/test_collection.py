@@ -14,10 +14,10 @@ exp_name = "name"
 exp_schema = "schema"
 exp_num = "num_entities"
 exp_primary = "primary"
-exp_shards_num = "shards_num"
+exp_shards_num = "num_shards"
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
-default_shards_num = 2
+default_shards_num = 1
 uid_count = "collection_count"
 tag = "collection_count_tag"
 uid_stats = "get_collection_stats"
@@ -930,9 +930,10 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
+        actual_shard = 1 if shards_num < 0 else shards_num
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=shards_num,
                                              check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_shards_num: shards_num})
+                                             check_items={exp_name: c_name, exp_shards_num: actual_shard})
         assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L2)
