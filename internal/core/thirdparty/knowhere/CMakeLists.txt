@@ -13,6 +13,7 @@
 
 set( KNOWHERE_VERSION 743bb3e )
 
+
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
