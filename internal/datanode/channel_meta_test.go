@@ -22,16 +22,19 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -989,4 +992,219 @@ func (s *ChannelMetaSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
 
 func TestChannelMetaSuite(t *testing.T) {
 	suite.Run(t, new(ChannelMetaSuite))
+}
+
+type ChannelMetaMockSuite struct {
+	suite.Suite
+	channel *ChannelMeta
+
+	collID    UniqueID
+	partID    UniqueID
+	vchanName string
+	cm        *mocks.ChunkManager
+}
+
+func (s *ChannelMetaMockSuite) SetupTest() {
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
+	s.cm = mocks.NewChunkManager(s.T())
+	s.collID = 1
+	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
+	s.vchanName = "channel"
+}
+
+func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
+	Params.Save(Params.DataNodeCfg.SkipBFStatsLoad.Key, "true")
+	defer func() {
+		Params.Save(Params.DataNodeCfg.SkipBFStatsLoad.Key, "false")
+	}()
+
+	s.Run("success_load", func() {
+		defer s.SetupTest()
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return([][]byte{}, nil)
+
+		err := s.channel.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_Flushed,
+			segID:       100,
+			collID:      s.collID,
+			partitionID: s.partID,
+			statsBinLogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 106,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "rootPath/stats/1/0/100/10001"},
+					},
+				},
+			},
+		})
+
+		s.NoError(err)
+
+		seg, ok := s.getSegmentByID(100)
+		s.Require().True(ok)
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+
+		close(ch)
+		s.Eventually(func() bool {
+			return !seg.isLoadingLazy()
+		}, time.Second, time.Millisecond*100)
+	})
+
+	s.Run("fail_nosuchkey", func() {
+		defer s.SetupTest()
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return(nil, storage.WrapErrNoSuchKey("rootPath/stats/1/0/100/10001"))
+
+		err := s.channel.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_Flushed,
+			segID:       100,
+			collID:      s.collID,
+			partitionID: s.partID,
+			statsBinLogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 106,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "rootPath/stats/1/0/100/10001"},
+					},
+				},
+			},
+		})
+
+		s.NoError(err)
+
+		seg, ok := s.getSegmentByID(100)
+		s.Require().True(ok)
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+
+		close(ch)
+
+		// cannot wait here, since running will not reduce immediately
+		/*
+			s.Eventually(func() bool {
+				//			s.T().Log(s.channel.workerpool)
+				return s.channel.workerPool.Running() == 0
+			}, time.Second, time.Millisecond*100)*/
+
+		// still return false positive
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	})
+
+	s.Run("fail_corrupted", func() {
+		defer s.SetupTest()
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return([][]byte{
+			[]byte("ABC"),
+		}, nil)
+
+		err := s.channel.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_Flushed,
+			segID:       100,
+			collID:      s.collID,
+			partitionID: s.partID,
+			statsBinLogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 106,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "rootPath/stats/1/0/100/10001"},
+					},
+				},
+			},
+		})
+
+		s.NoError(err)
+
+		seg, ok := s.getSegmentByID(100)
+		s.Require().True(ok)
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+
+		close(ch)
+		// cannot wait here, since running will not reduce immediately
+		/*
+			s.Eventually(func() bool {
+				// not retryable
+				return s.channel.workerPool.Running() == 0
+			}, time.Second, time.Millisecond*100)*/
+
+		// still return false positive
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	})
+
+	s.Run("transient_error", func() {
+		defer s.SetupTest()
+		ch := make(chan struct{})
+		counter := 0
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).Call.
+			Return(func(_ context.Context, arg []string) [][]byte {
+				if counter == 0 {
+					return nil
+				}
+				return [][]byte{}
+			}, func(_ context.Context, arg []string) error {
+				if counter == 0 {
+					counter++
+					return errors.New("transient error")
+				}
+				return nil
+			})
+
+		err := s.channel.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_Flushed,
+			segID:       100,
+			collID:      s.collID,
+			partitionID: s.partID,
+			statsBinLogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 106,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "rootPath/stats/1/0/100/10001"},
+					},
+				},
+			},
+		})
+
+		s.NoError(err)
+
+		seg, ok := s.getSegmentByID(100)
+		s.Require().True(ok)
+		s.True(seg.isLoadingLazy())
+		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+
+		close(ch)
+		s.Eventually(func() bool {
+			return !seg.isLoadingLazy()
+		}, time.Second, time.Millisecond*100)
+	})
+}
+
+func (s *ChannelMetaMockSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
+	s.channel.segMu.RLock()
+	defer s.channel.segMu.RUnlock()
+
+	seg, ok := s.channel.segments[id]
+	if ok && seg.isValid() {
+		return seg, true
+	}
+
+	return nil, false
+}
+
+func TestChannelMetaMock(t *testing.T) {
+	suite.Run(t, new(ChannelMetaMockSuite))
 }
