@@ -178,8 +178,8 @@ class ResponseChecker:
             assert collection.num_entities == check_items.get("num_entities")
         if check_items.get("primary", None):
             assert collection.primary_field.name == check_items.get("primary")
-        if check_items.get("shards_num", None):
-            assert collection._shards_num == check_items.get("shards_num")
+        if check_items.get("num_shards", None):
+            assert collection.num_shards == check_items.get("num_shards")
         return True
 
     @staticmethod
