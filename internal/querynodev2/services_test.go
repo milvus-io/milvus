@@ -689,10 +689,18 @@ func (suite *ServiceSuite) TestReleaseCollection_Failed() {
 
 func (suite *ServiceSuite) TestReleasePartitions_Normal() {
 	ctx := context.Background()
-	req := &querypb.ReleasePartitionsRequest{}
+	suite.TestLoadPartition()
+	req := &querypb.ReleasePartitionsRequest{
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}
 	status, err := suite.node.ReleasePartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	collection := suite.node.manager.Collection.Get(suite.collectionID)
+	for _, partition := range suite.partitionIDs {
+		suite.False(collection.ExistPartition(partition))
+	}
 }
 
 func (suite *ServiceSuite) TestReleasePartitions_Failed() {
