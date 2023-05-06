@@ -216,7 +216,7 @@ class TestCompactionParams(TestcaseBase):
         # Travel time currently does not support travel back to retention ago, so just verify search is available.
         assert len(res[0]) == ct.default_limit
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_compact_delete_ratio(self):
         """
         target: test delete entities reaches ratio and auto-compact

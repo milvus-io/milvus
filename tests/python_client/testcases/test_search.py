@@ -2728,6 +2728,39 @@ class TestCollectionSearch(TestcaseBase):
                in res[0][0].entity._row_data
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #23646")
+    @pytest.mark.parametrize("field", ct.all_scalar_data_types[:3])
+    def test_search_expression_different_data_type(self, field):
+        """
+        target: test search expression using different supported data types
+        method: search using different supported data types
+        expected: search success
+        """
+        # 1. initialize with data
+        num = int(field[3:])
+        offset = 2 ** (num - 1)
+        default_schema = cf.gen_collection_schema_all_datatype()
+        collection_w = self.init_collection_wrap(schema=default_schema)
+        collection_w = cf.insert_data(collection_w, is_all_data_type=True, insert_offset=offset-1000)[0]
+
+        # 2. create index and load
+        collection_w.create_index(field_name, default_index_params)
+        collection_w.load()
+
+        # 3. search
+        log.info("test_search_expression_different_data_type: Searching collection %s" % collection_w.name)
+        expression = f"{field} >= {offset}"
+        res = collection_w.search(vectors, default_search_field, default_search_params,
+                                  default_limit, expression, output_fields=[field],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "limit": default_limit})[0]
+
+        # 4. check the result
+        for ids in res[0].ids:
+            assert ids >= offset
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_comparative_expression(self, _async):
         """
         target: test search with expression comparing two fields
