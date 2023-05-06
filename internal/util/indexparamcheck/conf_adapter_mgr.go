@@ -21,61 +21,59 @@ import (
 	"sync"
 )
 
-// ConfAdapterMgr manages the conf adapter.
-type ConfAdapterMgr interface {
-	// GetAdapter gets the conf adapter by the index type.
-	GetAdapter(indexType string) (ConfAdapter, error)
+type IndexCheckerMgr interface {
+	GetChecker(indexType string) (IndexChecker, error)
 }
 
-// ConfAdapterMgrImpl implements ConfAdapter.
-type ConfAdapterMgrImpl struct {
-	adapters map[IndexType]ConfAdapter
+// indexCheckerMgrImpl implements IndexChecker.
+type indexCheckerMgrImpl struct {
+	checkers map[IndexType]IndexChecker
 	once     sync.Once
 }
 
-// GetAdapter gets the conf adapter by the index type.
-func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
-	mgr.once.Do(mgr.registerConfAdapter)
+func (mgr *indexCheckerMgrImpl) GetChecker(indexType string) (IndexChecker, error) {
+	mgr.once.Do(mgr.registerIndexChecker)
 
-	adapter, ok := mgr.adapters[indexType]
+	checker, ok := mgr.checkers[indexType]
 	if ok {
-		return adapter, nil
+		return checker, nil
 	}
-	return nil, errors.New("Can not find conf adapter: " + indexType)
+	return nil, errors.New("Can not find index checker: " + indexType)
 }
 
-func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
-	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
-	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
-	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
-	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
-	mgr.adapters[IndexNSG] = newNSGConfAdapter()
-	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
-	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
-	mgr.adapters[IndexRHNSWFlat] = newRHNSWFlatConfAdapter()
-	mgr.adapters[IndexRHNSWPQ] = newRHNSWPQConfAdapter()
-	mgr.adapters[IndexRHNSWSQ] = newRHNSWSQConfAdapter()
-	mgr.adapters[IndexNGTPANNG] = newNGTPANNGConfAdapter()
-	mgr.adapters[IndexNGTONNG] = newNGTONNGConfAdapter()
-	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
+func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
+	mgr.checkers[IndexFaissIDMap] = newBaseChecker()
+	mgr.checkers[IndexFaissIvfFlat] = newIVFBaseChecker()
+	mgr.checkers[IndexFaissIvfPQ] = newIVFPQChecker()
+	mgr.checkers[IndexFaissIvfSQ8] = newIVFSQChecker()
+	mgr.checkers[IndexFaissIvfSQ8H] = newIVFSQChecker()
+	mgr.checkers[IndexFaissBinIDMap] = newBinFlatChecker()
+	mgr.checkers[IndexFaissBinIvfFlat] = newBinIVFFlatChecker()
+	mgr.checkers[IndexNSG] = newNsgChecker()
+	mgr.checkers[IndexHNSW] = newHnswChecker()
+	mgr.checkers[IndexANNOY] = newAnnoyChecker()
+	mgr.checkers[IndexRHNSWFlat] = newRHnswFlatChecker()
+	mgr.checkers[IndexRHNSWPQ] = newRHnswPQChecker()
+	mgr.checkers[IndexRHNSWSQ] = newRHnswSQChecker()
+	mgr.checkers[IndexNGTPANNG] = newNgtPANNGChecker()
+	mgr.checkers[IndexNGTONNG] = newNgtONNGChecker()
+	mgr.checkers[IndexDISKANN] = newDiskannChecker()
 }
 
-func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
-	return &ConfAdapterMgrImpl{
-		adapters: make(map[IndexType]ConfAdapter),
+func newIndexCheckerMgr() *indexCheckerMgrImpl {
+	return &indexCheckerMgrImpl{
+		checkers: make(map[IndexType]IndexChecker),
 	}
 }
 
-var confAdapterMgr ConfAdapterMgr
-var getConfAdapterMgrOnce sync.Once
+var indexCheckerMgr IndexCheckerMgr
 
-// GetConfAdapterMgrInstance gets the instance of ConfAdapterMgr.
-func GetConfAdapterMgrInstance() ConfAdapterMgr {
-	getConfAdapterMgrOnce.Do(func() {
-		confAdapterMgr = newConfAdapterMgrImpl()
+var getIndexCheckerMgrOnce sync.Once
+
+// GetIndexCheckerMgrInstance gets the instance of IndexCheckerMgr.
+func GetIndexCheckerMgrInstance() IndexCheckerMgr {
+	getIndexCheckerMgrOnce.Do(func() {
+		indexCheckerMgr = newIndexCheckerMgr()
 	})
-	return confAdapterMgr
+	return indexCheckerMgr
 }
