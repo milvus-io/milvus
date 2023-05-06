@@ -416,6 +416,11 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	return s.dataCoord.DescribeIndex(ctx, req)
 }
 
+// GetIndexStatistics get the information of index..
+func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return s.dataCoord.GetIndexStatistics(ctx, req)
+}
+
 // DropIndex sends the drop index request to DataCoord.
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.dataCoord.DropIndex(ctx, request)

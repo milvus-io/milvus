@@ -1114,6 +1114,20 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("get index statistics", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			IndexName:      "",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		indexName = resp.IndexDescriptions[0].IndexName
+	})
+
+	wg.Add(1)
 	t.Run("get index build progress", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetIndexBuildProgress(ctx, &milvuspb.GetIndexBuildProgressRequest{
@@ -2518,6 +2532,14 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("GetIndexStatistics fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("DropIndex fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DropIndex(ctx, &milvuspb.DropIndexRequest{})
@@ -2867,6 +2889,14 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("GetIndexStatistics fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("DropIndex fail, dd queue full", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DropIndex(ctx, &milvuspb.DropIndexRequest{})
@@ -3133,6 +3163,14 @@ func TestProxy(t *testing.T) {
 	t.Run("DescribeIndex fail, timeout", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DescribeIndex(shortCtx, &milvuspb.DescribeIndexRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("GetIndexStatistics fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetIndexStatistics(shortCtx, &milvuspb.GetIndexStatisticsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})

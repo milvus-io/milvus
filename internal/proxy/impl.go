@@ -1782,12 +1782,82 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 
 // GetIndexStatistics get the information of index.
 func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
-	// bank implement
-	return &milvuspb.GetIndexStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}, nil
+	if !node.checkHealthy() {
+		return &milvuspb.GetIndexStatisticsResponse{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexStatistics")
+	defer sp.End()
+
+	dit := &getIndexStatisticsTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		GetIndexStatisticsRequest: request,
+		datacoord:                 node.dataCoord,
+	}
+
+	method := "GetIndexStatistics"
+	// avoid data race
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method,
+		metrics.TotalLabel).Inc()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("index name", request.IndexName))
+
+	log.Debug(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method,
+			metrics.AbandonLabel).Inc()
+
+		return &milvuspb.GetIndexStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", dit.BeginTs()),
+		zap.Uint64("EndTs", dit.EndTs()))
+
+	if err := dit.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", dit.BeginTs()), zap.Uint64("EndTs", dit.EndTs()))
+		errCode := commonpb.ErrorCode_UnexpectedError
+		if dit.result != nil {
+			errCode = dit.result.Status.GetErrorCode()
+		}
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method, metrics.FailLabel).Inc()
+		return &milvuspb.GetIndexStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: errCode,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.Uint64("BeginTs", dit.BeginTs()),
+		zap.Uint64("EndTs", dit.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return dit.result, nil
 }
 
 // DropIndex drop the index of collection.

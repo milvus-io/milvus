@@ -208,6 +208,11 @@ func (m *GrpcDataCoordClient) DescribeIndex(ctx context.Context, req *indexpb.De
 	return &indexpb.DescribeIndexResponse{}, m.Err
 }
 
+// GetIndexStatistics get the information of index.
+func (m *GrpcDataCoordClient) GetIndexStatistics(ctx context.Context, in *indexpb.GetIndexStatisticsRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStatisticsResponse, error) {
+	return &indexpb.GetIndexStatisticsResponse{}, m.Err
+}
+
 // GetIndexBuildProgress get the index building progress by num rows.
 func (m *GrpcDataCoordClient) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{}, m.Err

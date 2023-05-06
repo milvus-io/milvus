@@ -34,7 +34,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
+
+func TestServerId(t *testing.T) {
+	s := &Server{session: &sessionutil.Session{ServerID: 0}}
+	assert.Equal(t, int64(0), s.serverID())
+}
 
 func TestServer_CreateIndex(t *testing.T) {
 	var (
@@ -936,6 +942,288 @@ func TestServer_DescribeIndex(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 
 		resp, err := s.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestServer_GetIndexStatistics(t *testing.T) {
+	var (
+		collID       = UniqueID(1)
+		partID       = UniqueID(2)
+		fieldID      = UniqueID(10)
+		indexID      = UniqueID(100)
+		segID        = UniqueID(1000)
+		invalidSegID = UniqueID(1001)
+		buildID      = UniqueID(10000)
+		indexName    = "default_idx"
+		typeParams   = []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		}
+		indexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   "index_type",
+				Value: "IVF_FLAT",
+			},
+		}
+		createTS = uint64(1000)
+		ctx      = context.Background()
+		req      = &indexpb.GetIndexStatisticsRequest{
+			CollectionID: collID,
+			IndexName:    "",
+		}
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("AlterIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
+	s := &Server{
+		meta: &meta{
+			catalog: catalog,
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					//finished
+					indexID: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID,
+						IndexID:         indexID,
+						IndexName:       indexName,
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					// deleted
+					indexID + 1: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID + 1,
+						IndexID:         indexID + 1,
+						IndexName:       indexName + "_1",
+						IsDeleted:       true,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					// unissued
+					indexID + 2: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID + 2,
+						IndexID:         indexID + 2,
+						IndexName:       indexName + "_2",
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					// inProgress
+					indexID + 3: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID + 3,
+						IndexID:         indexID + 3,
+						IndexName:       indexName + "_3",
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					// failed
+					indexID + 4: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID + 4,
+						IndexID:         indexID + 4,
+						IndexName:       indexName + "_4",
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					// unissued
+					indexID + 5: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID + 5,
+						IndexID:         indexID + 5,
+						IndexName:       indexName + "_5",
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
+				invalidSegID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							// timesamp > index start time, will be filtered out
+							Timestamp: createTS + 1,
+						},
+					},
+				},
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS,
+						},
+					},
+					segmentIndexes: map[UniqueID]*model.SegmentIndex{
+						indexID: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       10000,
+							IndexID:       indexID,
+							BuildID:       buildID,
+							NodeID:        0,
+							IndexVersion:  1,
+							IndexState:    commonpb.IndexState_Finished,
+							FailReason:    "",
+							IsDeleted:     false,
+							CreateTime:    createTS,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+							WriteHandoff:  false,
+						},
+						indexID + 1: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       10000,
+							IndexID:       indexID + 1,
+							BuildID:       buildID + 1,
+							NodeID:        0,
+							IndexVersion:  1,
+							IndexState:    commonpb.IndexState_Finished,
+							FailReason:    "",
+							IsDeleted:     false,
+							CreateTime:    createTS,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+							WriteHandoff:  false,
+						},
+						indexID + 3: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       10000,
+							IndexID:       indexID + 3,
+							BuildID:       buildID + 3,
+							NodeID:        0,
+							IndexVersion:  1,
+							IndexState:    commonpb.IndexState_InProgress,
+							FailReason:    "",
+							IsDeleted:     false,
+							CreateTime:    createTS,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+							WriteHandoff:  false,
+						},
+						indexID + 4: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       10000,
+							IndexID:       indexID + 4,
+							BuildID:       buildID + 4,
+							NodeID:        0,
+							IndexVersion:  1,
+							IndexState:    commonpb.IndexState_Failed,
+							FailReason:    "mock failed",
+							IsDeleted:     false,
+							CreateTime:    createTS,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+							WriteHandoff:  false,
+						},
+						indexID + 5: {
+							SegmentID:     segID,
+							CollectionID:  collID,
+							PartitionID:   partID,
+							NumRows:       10000,
+							IndexID:       indexID + 5,
+							BuildID:       buildID + 5,
+							NodeID:        0,
+							IndexVersion:  1,
+							IndexState:    commonpb.IndexState_Unissued,
+							FailReason:    "",
+							IsDeleted:     false,
+							CreateTime:    createTS,
+							IndexFileKeys: nil,
+							IndexSize:     0,
+							WriteHandoff:  false,
+						},
+					},
+				},
+			}},
+		},
+		allocator:       newMockAllocator(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+
+	t.Run("server not available", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
+	})
+
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	t.Run("success", func(t *testing.T) {
+		resp, err := s.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+	})
+
+	t.Run("describe after drop index", func(t *testing.T) {
+		status, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: nil,
+			IndexName:    "",
+			DropAll:      true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+		resp, err := s.GetIndexStatistics(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetStatus().GetErrorCode())
 	})

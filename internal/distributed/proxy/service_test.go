@@ -479,6 +479,10 @@ func (m *MockDataCoord) DescribeIndex(ctx context.Context, req *indexpb.Describe
 	return nil, nil
 }
 
+func (m *MockDataCoord) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return nil, nil
 }

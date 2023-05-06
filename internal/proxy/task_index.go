@@ -443,6 +443,121 @@ func (dit *describeIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type getIndexStatisticsTask struct {
+	Condition
+	*milvuspb.GetIndexStatisticsRequest
+	ctx       context.Context
+	datacoord types.DataCoord
+	result    *milvuspb.GetIndexStatisticsResponse
+
+	nodeID       int64
+	collectionID UniqueID
+}
+
+func (dit *getIndexStatisticsTask) TraceCtx() context.Context {
+	return dit.ctx
+}
+
+func (dit *getIndexStatisticsTask) ID() UniqueID {
+	return dit.Base.MsgID
+}
+
+func (dit *getIndexStatisticsTask) SetID(uid UniqueID) {
+	dit.Base.MsgID = uid
+}
+
+func (dit *getIndexStatisticsTask) Name() string {
+	return DescribeIndexTaskName
+}
+
+func (dit *getIndexStatisticsTask) Type() commonpb.MsgType {
+	return dit.Base.MsgType
+}
+
+func (dit *getIndexStatisticsTask) BeginTs() Timestamp {
+	return dit.Base.Timestamp
+}
+
+func (dit *getIndexStatisticsTask) EndTs() Timestamp {
+	return dit.Base.Timestamp
+}
+
+func (dit *getIndexStatisticsTask) SetTs(ts Timestamp) {
+	dit.Base.Timestamp = ts
+}
+
+func (dit *getIndexStatisticsTask) OnEnqueue() error {
+	dit.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
+	dit.Base.MsgType = commonpb.MsgType_GetIndexStatistics
+	dit.Base.SourceID = dit.nodeID
+
+	if err := validateCollectionName(dit.CollectionName); err != nil {
+		return err
+	}
+
+	collID, err := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	if err != nil {
+		return err
+	}
+	dit.collectionID = collID
+	return nil
+}
+
+func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetCollectionName())
+	if err != nil {
+		log.Error("failed to get collection schema", zap.Error(err))
+		return fmt.Errorf("failed to get collection schema: %s", err)
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Error("failed to parse collection schema", zap.Error(err))
+		return fmt.Errorf("failed to parse collection schema: %s", err)
+	}
+
+	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
+		CollectionID: dit.collectionID, IndexName: dit.IndexName})
+	if err != nil || resp == nil {
+		return err
+	}
+	dit.result = &milvuspb.GetIndexStatisticsResponse{}
+	dit.result.Status = resp.GetStatus()
+	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(dit.result.Status.Reason)
+	}
+	for _, indexInfo := range resp.IndexInfos {
+		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		if err != nil {
+			log.Error("failed to get collection field", zap.Error(err))
+			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
+		}
+		params := indexInfo.GetUserIndexParams()
+		if params == nil {
+			params = indexInfo.GetIndexParams()
+		}
+		desc := &milvuspb.IndexDescription{
+			IndexName:            indexInfo.GetIndexName(),
+			IndexID:              indexInfo.GetIndexID(),
+			FieldName:            field.Name,
+			Params:               params,
+			IndexedRows:          indexInfo.GetIndexedRows(),
+			TotalRows:            indexInfo.GetTotalRows(),
+			State:                indexInfo.GetState(),
+			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
+		}
+		dit.result.IndexDescriptions = append(dit.result.IndexDescriptions, desc)
+	}
+	return err
+}
+
+func (dit *getIndexStatisticsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
 type dropIndexTask struct {
 	Condition
 	ctx context.Context
