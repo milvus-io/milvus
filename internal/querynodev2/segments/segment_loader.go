@@ -375,6 +375,11 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo); err != nil {
 			return err
 		}
+		// https://github.com/milvus-io/milvus/23654
+		// legacy entry num = 0
+		if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
+			return err
+		}
 	} else {
 		if err := loader.loadGrowingSegmentFields(ctx, segment, loadInfo.BinlogPaths); err != nil {
 			return err
@@ -777,6 +782,71 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment *LocalSe
 		return err
 	}
 	return nil
+}
+
+func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
+	var needReset bool
+
+	segment.fieldIndexes.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+		for _, info := range info.FieldBinlog.GetBinlogs() {
+			if info.GetEntriesNum() == 0 {
+				needReset = true
+				return false
+			}
+		}
+		return true
+	})
+	if !needReset {
+		return nil
+	}
+
+	log.Warn("legacy segment binlog found, start to patch entry num", zap.Int64("segmentID", segment.segmentID))
+	rowIDField := lo.FindOrElse(loadInfo.BinlogPaths, nil, func(binlog *datapb.FieldBinlog) bool {
+		return binlog.GetFieldID() == common.RowIDField
+	})
+
+	if rowIDField == nil {
+		return errors.New("rowID field binlog not found")
+	}
+
+	counts := make([]int64, 0, len(rowIDField.GetBinlogs()))
+	for _, binlog := range rowIDField.GetBinlogs() {
+		bs, err := loader.cm.Read(ctx, binlog.LogPath)
+		if err != nil {
+			return err
+		}
+
+		// get binlog entry num from rowID field
+		// since header does not store entry numb, we have to read all data here
+
+		reader, err := storage.NewBinlogReader(bs)
+		if err != nil {
+			return err
+		}
+		er, err := reader.NextEventReader()
+		if err != nil {
+			return err
+		}
+
+		rowIDs, err := er.GetInt64FromPayload()
+		if err != nil {
+			return err
+		}
+		counts = append(counts, int64(len(rowIDs)))
+	}
+
+	var err error
+	segment.fieldIndexes.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+		if len(info.FieldBinlog.GetBinlogs()) != len(counts) {
+			err = errors.New("rowID & index binlog number not matched")
+			return false
+		}
+		for i, binlog := range info.FieldBinlog.GetBinlogs() {
+			binlog.EntriesNum = counts[i]
+		}
+		return true
+	})
+	return err
 }
 
 // JoinIDPath joins ids to path format.

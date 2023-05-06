@@ -353,6 +353,61 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	suite.NoError(err)
 }
 
+func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
+	ctx := context.Background()
+
+	segmentID := suite.segmentID
+	binlogs, statsLogs, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		100,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
+	indexInfo, err := GenAndSaveIndex(
+		suite.collectionID,
+		suite.partitionID,
+		segmentID,
+		vecFields[0],
+		100,
+		IndexFaissIVFFlat,
+		L2,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
+	}
+
+	// mock legacy binlog entry num is zero case
+	for _, fieldLog := range binlogs {
+		for _, binlog := range fieldLog.GetBinlogs() {
+			binlog.EntriesNum = 0
+		}
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.Require().NoError(err)
+	suite.Require().Equal(1, len(segments))
+
+	segment := segments[0]
+	info := segment.GetIndex(vecFields[0])
+	suite.Require().NotNil(info)
+
+	for _, binlog := range info.FieldBinlog.GetBinlogs() {
+		suite.Greater(binlog.EntriesNum, int64(0))
+	}
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 }
