@@ -419,13 +419,17 @@ func TestDataSyncService_Close(t *testing.T) {
 	}
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
+	channel.syncPolicies = []segmentSyncPolicy{
+		syncPeriodically(),
+		syncMemoryTooHigh(),
+	}
+	syncService, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
 	assert.Nil(t, err)
 
-	sync.flushListener = make(chan *segmentFlushPack, 10)
-	defer close(sync.flushListener)
+	syncService.flushListener = make(chan *segmentFlushPack, 10)
+	defer close(syncService.flushListener)
 
-	sync.start()
+	syncService.start()
 
 	var (
 		dataFactory = NewDataFactory()
@@ -508,26 +512,26 @@ func TestDataSyncService_Close(t *testing.T) {
 	assert.NoError(t, err)
 
 	// wait for delete, no auto flush leads to all data in buffer.
-	require.Eventually(t, func() bool { return sync.delBufferManager.GetEntriesNum(1) == 1 },
+	require.Eventually(t, func() bool { return syncService.delBufferManager.GetEntriesNum(1) == 1 },
 		5*time.Second, 100*time.Millisecond)
-	assert.Equal(t, 0, len(sync.flushListener))
+	assert.Equal(t, 0, len(syncService.flushListener))
 
 	// close will trigger a force sync
-	sync.close()
-	assert.Eventually(t, func() bool { return len(sync.flushListener) == 1 },
+	syncService.close()
+	assert.Eventually(t, func() bool { return len(syncService.flushListener) == 1 },
 		5*time.Second, 100*time.Millisecond)
-	flushPack, ok := <-sync.flushListener
+	flushPack, ok := <-syncService.flushListener
 	assert.True(t, ok)
 	assert.Equal(t, UniqueID(1), flushPack.segmentID)
 	assert.True(t, len(flushPack.insertLogs) == 12)
 	assert.True(t, len(flushPack.statsLogs) == 1)
 	assert.True(t, len(flushPack.deltaLogs) == 1)
 
-	<-sync.ctx.Done()
+	<-syncService.ctx.Done()
 
 	// Double close is safe
-	sync.close()
-	<-sync.ctx.Done()
+	syncService.close()
+	<-syncService.ctx.Done()
 }
 
 func genBytes() (rawData []byte) {
