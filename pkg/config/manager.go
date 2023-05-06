@@ -219,6 +219,20 @@ func (m *Manager) ForbidUpdate(key string) {
 	m.forbiddenKeys.Insert(formatKey(key))
 }
 
+func (m *Manager) UpdateSourceOptions(opts ...Option) {
+	m.Lock()
+	defer m.Unlock()
+
+	var options Options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	for _, source := range m.sources {
+		source.UpdateOptions(options)
+	}
+}
+
 // Do not use it directly, only used when add source and unittests.
 func (m *Manager) pullSourceConfigs(source string) error {
 	configSource, ok := m.sources[source]

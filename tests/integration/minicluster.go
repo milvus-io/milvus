@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -106,7 +107,6 @@ type MiniCluster struct {
 	proxy     types.ProxyComponent
 	dataCoord types.DataCoordComponent
 	rootCoord types.RootCoordComponent
-	//indexCoord types.IndexCoordComponent
 
 	queryCoord types.QueryCoordComponent
 	queryNodes []types.QueryNodeComponent
@@ -116,7 +116,7 @@ type MiniCluster struct {
 	metaWatcher MetaWatcher
 }
 
-var Params *paramtable.ComponentParam = paramtable.Get()
+var params *paramtable.ComponentParam = paramtable.Get()
 
 type Option func(cluster *MiniCluster)
 
@@ -124,16 +124,19 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	cluster = &MiniCluster{
 		ctx: ctx,
 	}
-	//Params.InitOnce()
-	Params.Init()
+	params.Init()
 	cluster.params = DefaultParams()
 	cluster.clusterConfig = DefaultClusterConfig()
 	for _, opt := range opts {
 		opt(cluster)
 	}
 	for k, v := range cluster.params {
-		Params.Save(k, v)
+		params.Save(k, v)
 	}
+	params.UpdateSourceOpiotns(config.WithEtcdSource(&config.EtcdInfo{
+		KeyPrefix:       cluster.params[EtcdRootPath],
+		RefreshInterval: 2 * time.Second,
+	}))
 
 	if cluster.factory == nil {
 		cluster.factory = dependency.NewDefaultFactory(true)
@@ -147,13 +150,13 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	if cluster.etcdCli == nil {
 		var etcdCli *clientv3.Client
 		etcdCli, err = etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+			params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			params.EtcdCfg.Endpoints.GetAsStrings(),
+			params.EtcdCfg.EtcdTLSCert.GetValue(),
+			params.EtcdCfg.EtcdTLSKey.GetValue(),
+			params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 		if err != nil {
 			return nil, err
 		}
@@ -448,7 +451,7 @@ func (cluster *MiniCluster) Stop() error {
 	}
 	log.Info("mini cluster indexnodes stopped")
 
-	cluster.etcdCli.KV.Delete(cluster.ctx, Params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
+	cluster.etcdCli.KV.Delete(cluster.ctx, params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.etcdCli.Close()
 
 	if cluster.chunkManager == nil {
@@ -469,9 +472,9 @@ func DefaultParams() map[string]string {
 		EtcdRootPath:  testPath,
 		MinioRootPath: testPath,
 		//"runtime.role": typeutil.StandaloneRole,
-		Params.IntegrationTestCfg.IntegrationMode.Key: "true",
-		Params.CommonCfg.StorageType.Key:              "local",
-		Params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
+		params.IntegrationTestCfg.IntegrationMode.Key: "true",
+		params.CommonCfg.StorageType.Key:              "local",
+		params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
 	}
 }
 

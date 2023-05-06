@@ -112,8 +112,25 @@ func (es *EtcdSource) SetEventHandler(eh EventHandler) {
 	es.configRefresher.eh = eh
 }
 
+func (es *EtcdSource) UpdateOptions(opts Options) {
+	if opts.EtcdInfo == nil {
+		return
+	}
+	es.Lock()
+	defer es.Unlock()
+	es.keyPrefix = opts.EtcdInfo.KeyPrefix
+	if es.configRefresher.refreshInterval != opts.EtcdInfo.RefreshInterval {
+		es.configRefresher.stop()
+		es.configRefresher = newRefresher(opts.EtcdInfo.RefreshInterval, es.refreshConfigurations)
+		es.configRefresher.start(es.GetSourceName())
+	}
+}
+
 func (es *EtcdSource) refreshConfigurations() error {
+	es.RLock()
 	prefix := es.keyPrefix + "/config"
+	es.RUnlock()
+
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
 	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix())

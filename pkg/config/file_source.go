@@ -94,10 +94,26 @@ func (fs *FileSource) SetEventHandler(eh EventHandler) {
 	fs.configRefresher.eh = eh
 }
 
+func (fs *FileSource) UpdateOptions(opts Options) {
+	if opts.FileInfo == nil {
+		return
+	}
+
+	fs.Lock()
+	defer fs.Unlock()
+	fs.files = opts.FileInfo.Files
+}
+
 func (fs *FileSource) loadFromFile() error {
 	yamlReader := viper.New()
 	newConfig := make(map[string]string)
-	for _, configFile := range fs.files {
+	var configFiles []string
+
+	fs.RLock()
+	configFiles = fs.files
+	fs.RUnlock()
+
+	for _, configFile := range configFiles {
 		if _, err := os.Stat(configFile); err != nil {
 			continue
 		}
@@ -135,6 +151,7 @@ func (fs *FileSource) loadFromFile() error {
 			newConfig[formatKey(key)] = str
 		}
 	}
+
 	fs.Lock()
 	defer fs.Unlock()
 	err := fs.configRefresher.fireEvents(fs.GetSourceName(), fs.configs, newConfig)

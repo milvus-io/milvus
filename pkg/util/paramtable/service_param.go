@@ -55,7 +55,7 @@ type ServiceParam struct {
 }
 
 func (p *ServiceParam) init() {
-	p.BaseTable.init(10)
+	p.BaseTable.init(2)
 
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)
@@ -736,10 +736,10 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.2.0",
-		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun". 
+		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
 You can use "gcp" for other cloud provider supports S3 API with signature v2
-You can use "aliyun" for other cloud provider uses virtual host style bucket 
+You can use "aliyun" for other cloud provider uses virtual host style bucket
 When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		Export: true,
 	}
