@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -37,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -975,4 +978,147 @@ func TestSegmentLoader_getFieldType(t *testing.T) {
 	fieldType, err = loader.getFieldType(segment, 100)
 	assert.NoError(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, fieldType)
+}
+
+type SegmentLoaderMockSuite struct {
+	suite.Suite
+
+	cm     *mocks.ChunkManager
+	loader *segmentLoader
+}
+
+func (s *SegmentLoaderMockSuite) SetupTest() {
+	s.cm = mocks.NewChunkManager(s.T())
+	replica := newMockReplicaInterface()
+	pool, err := concurrency.NewPool(10)
+	s.Require().NoError(err)
+
+	s.loader = &segmentLoader{
+		metaReplica: replica,
+		cm:          s.cm,
+		lazyPool:    pool,
+	}
+}
+
+func (s *SegmentLoaderMockSuite) TearDownTest() {}
+
+func (s *SegmentLoaderMockSuite) TestSkipBFLoad() {
+	Params.DataNodeCfg.SkipBFStatsLoad = true
+	defer func() {
+		Params.DataNodeCfg.SkipBFStatsLoad = false
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statslogPath := "rootPath/stats/1/0/100/10001"
+
+	s.Run("success_load", func() {
+		defer s.SetupTest()
+
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{statslogPath}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return([][]byte{}, nil)
+		segment := &Segment{
+			segmentID:   10001,
+			lazyLoading: atomic.NewBool(false),
+			destroyed:   atomic.NewBool(false),
+		}
+		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
+		s.NoError(err)
+
+		s.True(segment.isLazyLoading())
+		close(ch)
+
+		s.Eventually(func() bool {
+			return !segment.isLazyLoading()
+		}, time.Second, 100*time.Millisecond)
+	})
+
+	s.Run("fail_nosuchkey", func() {
+		defer s.SetupTest()
+
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{statslogPath}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return(nil, storage.WrapErrNoSuchKey(statslogPath))
+		segment := &Segment{
+			segmentID:   10001,
+			lazyLoading: atomic.NewBool(false),
+			destroyed:   atomic.NewBool(false),
+		}
+		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
+		s.NoError(err)
+
+		s.True(segment.isLazyLoading())
+		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+		close(ch)
+
+		s.True(segment.isLazyLoading())
+		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	})
+
+	s.Run("fail_corrupted", func() {
+		defer s.SetupTest()
+
+		ch := make(chan struct{})
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{statslogPath}).
+			Run(func(_ context.Context, _ []string) {
+				<-ch
+			}).Return([][]byte{[]byte("ABC")}, nil)
+		segment := &Segment{
+			segmentID:   10001,
+			lazyLoading: atomic.NewBool(false),
+			destroyed:   atomic.NewBool(false),
+		}
+		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
+		s.NoError(err)
+
+		s.True(segment.isLazyLoading())
+		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+		close(ch)
+
+		s.True(segment.isLazyLoading())
+		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	})
+
+	s.Run("transient_error", func() {
+		defer s.SetupTest()
+		ch := make(chan struct{})
+		counter := 0
+		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).Call.
+			Return(func(_ context.Context, arg []string) [][]byte {
+				if counter == 0 {
+					return nil
+				}
+				return [][]byte{}
+			}, func(_ context.Context, arg []string) error {
+				if counter == 0 {
+					counter++
+					return errors.New("transient error")
+				}
+				return nil
+			})
+		segment := &Segment{
+			segmentID:   10001,
+			lazyLoading: atomic.NewBool(false),
+			destroyed:   atomic.NewBool(false),
+		}
+		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
+		s.NoError(err)
+
+		s.True(segment.isLazyLoading())
+		close(ch)
+
+		s.Eventually(func() bool {
+			return !segment.isLazyLoading()
+		}, time.Second, 100*time.Millisecond)
+	})
+}
+
+func TestSegmentLoaderWithMock(t *testing.T) {
+	suite.Run(t, new(SegmentLoaderMockSuite))
 }
