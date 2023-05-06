@@ -52,6 +52,9 @@ class ProtoParser {
     ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb);
 
     ExprPtr
+    ParseExistExpr(const proto::plan::ExistsExpr& expr_pb);
+
+    ExprPtr
     ParseExpr(const proto::plan::Expr& expr_pb);
 
     std::unique_ptr<VectorPlanNode>

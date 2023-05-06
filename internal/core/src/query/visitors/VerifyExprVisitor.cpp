@@ -47,4 +47,9 @@ VerifyExprVisitor::visit(CompareExpr& expr) {
     // TODO
 }
 
+void
+VerifyExprVisitor::visit(ExistsExpr& expr) {
+    // TODO
+}
+
 }  // namespace milvus::query

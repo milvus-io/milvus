@@ -45,6 +45,9 @@ class ExecExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
+    void
+    visit(ExistsExpr& expr) override;
+
  public:
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
                     int64_t row_count,
@@ -81,6 +84,10 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename ExprValueType>
     auto
+    ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
     ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
         BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
 
@@ -105,6 +112,10 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename T>
     auto
     ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>
     auto

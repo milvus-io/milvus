@@ -236,6 +236,37 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 	return helper.schema.Fields[offset], nil
 }
 
+// GetFieldFromNameDefaultJSON is used to find the schema by field name, if not exist, use json field
+func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
+	offset, ok := helper.nameOffset[fieldName]
+	if !ok {
+		return helper.getDefaultJSONField()
+	}
+	return helper.schema.Fields[offset], nil
+}
+
+func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error) {
+	var field *schemapb.FieldSchema
+	for _, f := range helper.schema.GetFields() {
+		// TODO @xiaocai2333: get $SYS_META json field
+		if f.DataType == schemapb.DataType_JSON {
+			if field != nil {
+				// TODO @xiaocai2333: will not return error after support $SYS_META
+				errMsg := "there is multi json field in schema, need to specified field name"
+				log.Warn(errMsg)
+				return nil, fmt.Errorf(errMsg)
+			}
+			field = f
+		}
+	}
+	if field == nil {
+		errMsg := "there is no json field in schema, need to specified field name"
+		log.Warn(errMsg)
+		return nil, fmt.Errorf(errMsg)
+	}
+	return field, nil
+}
+
 // GetFieldFromID returns the schema of specified field
 func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.idOffset[fieldID]
@@ -285,6 +316,10 @@ func IsIntegerType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+func IsJSONType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_JSON
 }
 
 // IsFloatingType returns true if input is a floating type, otherwise false

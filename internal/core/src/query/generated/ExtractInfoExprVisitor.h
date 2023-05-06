@@ -39,6 +39,9 @@ class ExtractInfoExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
+    void
+    visit(ExistsExpr& expr) override;
+
  public:
     explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info)
         : plan_info_(plan_info) {

@@ -40,6 +40,9 @@ class ShowExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
+    void
+    visit(ExistsExpr& expr) override;
+
  public:
     Json
 
