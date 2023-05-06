@@ -29,6 +29,10 @@ func parseMD(authorization []string) (username, password string) {
 		return
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
+	if len(secrets) < 2 {
+		log.Warn("invalid token format, length of secrets less than 2")
+		return
+	}
 	username = secrets[0]
 	password = secrets[1]
 	return
