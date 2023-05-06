@@ -1401,23 +1401,23 @@ func (_c *DataCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Conte
 }
 
 // Import provides a mock function with given fields: ctx, req
-func (_m *DataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (_m *DataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *datapb.ImportTaskResponse
+	var r0 *milvuspb.ImportResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)); ok {
 		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportTaskRequest) *datapb.ImportTaskResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) *milvuspb.ImportResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.ImportTaskResponse)
+			r0 = ret.Get(0).(*milvuspb.ImportResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportTaskRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -1438,19 +1438,175 @@ func (_e *DataCoord_Expecter) Import(ctx interface{}, req interface{}) *DataCoor
 	return &DataCoord_Import_Call{Call: _e.mock.On("Import", ctx, req)}
 }
 
-func (_c *DataCoord_Import_Call) Run(run func(ctx context.Context, req *datapb.ImportTaskRequest)) *DataCoord_Import_Call {
+func (_c *DataCoord_Import_Call) Run(run func(ctx context.Context, req *milvuspb.ImportRequest)) *DataCoord_Import_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.ImportTaskRequest))
+		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequest))
 	})
 	return _c
 }
 
-func (_c *DataCoord_Import_Call) Return(_a0 *datapb.ImportTaskResponse, _a1 error) *DataCoord_Import_Call {
+func (_c *DataCoord_Import_Call) Return(_a0 *milvuspb.ImportResponse, _a1 error) *DataCoord_Import_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoord_Import_Call) RunAndReturn(run func(context.Context, *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)) *DataCoord_Import_Call {
+func (_c *DataCoord_Import_Call) RunAndReturn(run func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)) *DataCoord_Import_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImportTasks provides a mock function with given fields: ctx, req
+func (_m *DataCoord) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ListImportTasksResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) *milvuspb.ListImportTasksResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListImportTasksResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportTasksRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_ListImportTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImportTasks'
+type DataCoord_ListImportTasks_Call struct {
+	*mock.Call
+}
+
+// ListImportTasks is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.ListImportTasksRequest
+func (_e *DataCoord_Expecter) ListImportTasks(ctx interface{}, req interface{}) *DataCoord_ListImportTasks_Call {
+	return &DataCoord_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", ctx, req)}
+}
+
+func (_c *DataCoord_ListImportTasks_Call) Run(run func(ctx context.Context, req *milvuspb.ListImportTasksRequest)) *DataCoord_ListImportTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListImportTasksRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_ListImportTasks_Call) Return(_a0 *milvuspb.ListImportTasksResponse, _a1 error) *DataCoord_ListImportTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoord_ListImportTasks_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)) *DataCoord_ListImportTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetImportState provides a mock function with given fields: ctx, req
+func (_m *DataCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.GetImportStateResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) *milvuspb.GetImportStateResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
+type DataCoord_GetImportState_Call struct {
+	*mock.Call
+}
+
+// GetImportState is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.GetImportStateRequest
+func (_e *DataCoord_Expecter) GetImportState(ctx interface{}, req interface{}) *DataCoord_GetImportState_Call {
+	return &DataCoord_GetImportState_Call{Call: _e.mock.On("GetImportState", ctx, req)}
+}
+
+func (_c *DataCoord_GetImportState_Call) Run(run func(ctx context.Context, req *milvuspb.GetImportStateRequest)) *DataCoord_GetImportState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_GetImportState_Call) Return(_a0 *milvuspb.GetImportStateResponse, _a1 error) *DataCoord_GetImportState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoord_GetImportState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)) *DataCoord_GetImportState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReportImport provides a mock function with given fields: ctx, req
+func (_m *DataCoord) ReportImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ImportResult) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ImportResult) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_ReportImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportImport'
+type DataCoord_ReportImport_Call struct {
+	*mock.Call
+}
+
+// ReportImport is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *rootcoordpb.ImportResult
+func (_e *DataCoord_Expecter) ReportImport(ctx interface{}, req interface{}) *DataCoord_ReportImport_Call {
+	return &DataCoord_ReportImport_Call{Call: _e.mock.On("ReportImport", ctx, req)}
+}
+
+func (_c *DataCoord_ReportImport_Call) Run(run func(ctx context.Context, req *datapb.ImportResult)) *DataCoord_ReportImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ImportResult))
+	})
+	return _c
+}
+
+func (_c *DataCoord_ReportImport_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_ReportImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoord_ReportImport_Call) RunAndReturn(run func(context.Context, *datapb.ImportResult) (*commonpb.Status, error)) *DataCoord_ReportImport_Call {
 	_c.Call.Return(run)
 	return _c
 }

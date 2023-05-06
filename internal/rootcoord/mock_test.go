@@ -181,7 +181,7 @@ type mockDataCoord struct {
 	AcquireSegmentLockFunc         func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
 	ReleaseSegmentLockFunc         func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
 	FlushFunc                      func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
-	ImportFunc                     func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	ImportFunc                     func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
 	UnsetIsImportingStateFunc      func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
 }
@@ -210,7 +210,7 @@ func (m *mockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*d
 	return m.FlushFunc(ctx, req)
 }
 
-func (m *mockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (m *mockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	return m.ImportFunc(ctx, req)
 }
 
@@ -638,7 +638,7 @@ func withInvalidDataCoord() Opt {
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return nil, errors.New("error mock Flush")
 	}
-	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+	dc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 		return nil, errors.New("error mock Import")
 	}
 	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
@@ -674,8 +674,8 @@ func withFailedDataCoord() Opt {
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock flush error"),
 		}, nil
 	}
-	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-		return &datapb.ImportTaskResponse{
+	dc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+		return &milvuspb.ImportResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock import error"),
 		}, nil
 	}
@@ -715,8 +715,8 @@ func withValidDataCoord() Opt {
 			Status: succStatus(),
 		}, nil
 	}
-	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-		return &datapb.ImportTaskResponse{
+	dc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+		return &milvuspb.ImportResponse{
 			Status: succStatus(),
 		}, nil
 	}
@@ -841,7 +841,7 @@ type mockBroker struct {
 	AddSegRefLockFunc     func(ctx context.Context, taskID int64, segIDs []int64) error
 	ReleaseSegRefLockFunc func(ctx context.Context, taskID int64, segIDs []int64) error
 	FlushFunc             func(ctx context.Context, cID int64, segIDs []int64) error
-	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*milvuspb.ImportResponse, error)
 
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)

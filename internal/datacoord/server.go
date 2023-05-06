@@ -133,6 +133,7 @@ type Server struct {
 	indexCoord             types.IndexCoord
 
 	segReferManager *SegmentReferenceManager
+	importManager   *importManager
 }
 
 // ServerHelper datacoord server injection helper

@@ -150,8 +150,20 @@ func (m *GrpcDataCoordClient) SetSegmentState(ctx context.Context, req *datapb.S
 	return &datapb.SetSegmentStateResponse{}, m.Err
 }
 
-func (m *GrpcDataCoordClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
-	return &datapb.ImportTaskResponse{}, m.Err
+func (m *GrpcDataCoordClient) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
+	return &milvuspb.ImportResponse{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
+	return &milvuspb.GetImportStateResponse{}, nil
+}
+
+func (m *GrpcDataCoordClient) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
+	return &milvuspb.ListImportTasksResponse{}, nil
+}
+
+func (m *GrpcDataCoordClient) ReportImport(ctx context.Context, req *datapb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
 }
 
 func (m *GrpcDataCoordClient) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

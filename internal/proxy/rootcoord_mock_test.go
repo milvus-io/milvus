@@ -1002,62 +1002,6 @@ func (coord *RootCoordMock) Import(ctx context.Context, req *milvuspb.ImportRequ
 	}, nil
 }
 
-func (coord *RootCoordMock) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	code := coord.state.Load().(commonpb.StateCode)
-	if code != commonpb.StateCode_Healthy {
-		return &milvuspb.GetImportStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
-			},
-			RowCount: 0,
-			IdList:   make([]int64, 0),
-		}, nil
-	}
-	return &milvuspb.GetImportStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		RowCount: 10,
-		IdList:   make([]int64, 3),
-	}, nil
-}
-
-func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	code := coord.state.Load().(commonpb.StateCode)
-	if code != commonpb.StateCode_Healthy {
-		return &milvuspb.ListImportTasksResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
-			},
-			Tasks: make([]*milvuspb.GetImportStateResponse, 0),
-		}, nil
-	}
-	return &milvuspb.ListImportTasksResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Tasks: make([]*milvuspb.GetImportStateResponse, 3),
-	}, nil
-}
-
-func (coord *RootCoordMock) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	code := coord.state.Load().(commonpb.StateCode)
-	if code != commonpb.StateCode_Healthy {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
-}
-
 func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {
 	rc := &RootCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
@@ -1206,6 +1150,26 @@ func (m *mockRootCoord) Import(ctx context.Context, request *milvuspb.ImportRequ
 		return m.ImportFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
+}
+
+func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &milvuspb.ListImportTasksResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+			},
+			Tasks: make([]*milvuspb.GetImportStateResponse, 0),
+		}, nil
+	}
+	return &milvuspb.ListImportTasksResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Tasks: make([]*milvuspb.GetImportStateResponse, 3),
+	}, nil
 }
 
 func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {

@@ -212,13 +212,6 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 	return r.RootCoord.DescribeCollection(ctx, req)
 }
 
-func (r *mockRootCoord) ReportImport(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "something bad",
-	}, nil
-}
-
 func TestFlush(t *testing.T) {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -3751,11 +3744,9 @@ func TestDataCoord_Import(t *testing.T) {
 		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
+		resp, err := svr.Import(svr.ctx, &milvuspb.ImportRequest{
+			CollectionName: "col1",
+			PartitionName:  "par1",
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
@@ -3770,12 +3761,9 @@ func TestDataCoord_Import(t *testing.T) {
 		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-			WorkingNodes: []int64{0},
+		resp, err := svr.Import(svr.ctx, &milvuspb.ImportRequest{
+			CollectionName: "col1",
+			PartitionName:  "par1",
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
@@ -3785,11 +3773,9 @@ func TestDataCoord_Import(t *testing.T) {
 	t.Run("no datanode available", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		Params.MinioCfg.Address = "minio:9000"
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
+		resp, err := svr.Import(svr.ctx, &milvuspb.ImportRequest{
+			CollectionName: "col1",
+			PartitionName:  "par1",
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
@@ -3800,11 +3786,9 @@ func TestDataCoord_Import(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
 
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
+		resp, err := svr.Import(svr.ctx, &milvuspb.ImportRequest{
+			CollectionName: "col1",
+			PartitionName:  "par1",
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())

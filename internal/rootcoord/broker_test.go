@@ -203,35 +203,6 @@ func TestServerBroker_Flush(t *testing.T) {
 	})
 }
 
-func TestServerBroker_Import(t *testing.T) {
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		resp, err := b.Import(ctx, &datapb.ImportTaskRequest{})
-		assert.Error(t, err)
-		assert.Nil(t, resp)
-	})
-
-	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		resp, err := b.Import(ctx, &datapb.ImportTaskRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		resp, err := b.Import(ctx, &datapb.ImportTaskRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-}
-
 func TestServerBroker_DropCollectionIndex(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidIndexCoord())

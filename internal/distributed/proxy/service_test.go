@@ -212,15 +212,7 @@ func (m *MockRootCoord) Import(ctx context.Context, req *milvuspb.ImportRequest)
 	return nil, nil
 }
 
-func (m *MockRootCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	return nil, nil
-}
-
 func (m *MockRootCoord) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	return nil, nil
-}
-
-func (m *MockRootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return nil, nil
 }
 
@@ -628,7 +620,19 @@ func (m *MockDataCoord) SetSegmentState(ctx context.Context, req *datapb.SetSegm
 	return &datapb.SetSegmentStateResponse{}, nil
 }
 
-func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (m *MockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	return nil, nil
+}
+
+func (m *MockDataCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return nil, nil
+}
+
+func (m *MockDataCoord) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return nil, nil
+}
+
+func (m *MockDataCoord) ReportImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
 	return nil, nil
 }
 

@@ -267,8 +267,8 @@ func (coord *DataCoordMock) SetSegmentState(ctx context.Context, req *datapb.Set
 	return &datapb.SetSegmentStateResponse{}, nil
 }
 
-func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	return &datapb.ImportTaskResponse{}, nil
+func (coord *DataCoordMock) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	return &milvuspb.ImportResponse{}, nil
 }
 
 func (coord *DataCoordMock) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {

@@ -4196,7 +4196,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		metrics.TotalLabel).Inc()
 
 	// Call rootCoord to finish import.
-	respFromRC, err := node.rootCoord.Import(ctx, req)
+	respFromRC, err := node.dataCoord.Import(ctx, req)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute bulk insert request", zap.Error(err))
@@ -4223,7 +4223,7 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	resp, err := node.rootCoord.GetImportState(ctx, req)
+	resp, err := node.dataCoord.GetImportState(ctx, req)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute get import state", zap.Error(err))
@@ -4250,7 +4250,7 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
-	resp, err := node.rootCoord.ListImportTasks(ctx, req)
+	resp, err := node.dataCoord.ListImportTasks(ctx, req)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		log.Error("failed to execute list import tasks", zap.Error(err))

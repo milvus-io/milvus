@@ -57,8 +57,6 @@ type Broker interface {
 	AddSegRefLock(ctx context.Context, taskID int64, segIDs []int64) error
 	ReleaseSegRefLock(ctx context.Context, taskID int64, segIDs []int64) error
 	Flush(ctx context.Context, cID int64, segIDs []int64) error
-	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-	UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
@@ -207,14 +205,6 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 	}
 	log.Info("flush on collection succeed", zap.Int64("collection ID", cID))
 	return nil
-}
-
-func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	return b.s.dataCoord.Import(ctx, req)
-}
-
-func (b *ServerBroker) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	return b.s.dataCoord.UnsetIsImportingState(ctx, req)
 }
 
 func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {

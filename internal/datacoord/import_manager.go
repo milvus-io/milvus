@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rootcoord
+package datacoord
 
 import (
 	"context"
@@ -32,15 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-)
-
-const (
-	delimiter = "/"
 )
 
 // checkPendingTasksInterval is the default interval to check and send out pending tasks,
@@ -58,6 +52,10 @@ var cleanUpLoopInterval = 5 * 60 * 1000
 // TODO: Make this configurable.
 var flipPersistedTaskInterval = 2 * 1000
 
+type ImportFunc func(ctx context.Context, busyNodes []int64, req *datapb.ImportTaskRequest) (*commonpb.Status, int64, error)
+type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+type UnsetIsImportingStateFunc func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
+
 // importManager manager for import tasks
 type importManager struct {
 	ctx       context.Context // reserved
@@ -74,20 +72,16 @@ type importManager struct {
 
 	startOnce sync.Once
 
-	idAllocator               func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	callImportService         func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-	getCollectionName         func(collID, partitionID typeutil.UniqueID) (string, string, error)
-	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
-	callUnsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
+	importFunc                ImportFunc
+	getSegmentStatesFunc      GetSegmentStatesFunc
+	unsetIsImportingStateFunc UnsetIsImportingStateFunc
 }
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.TxnKV,
-	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
-	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
-	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
-	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error),
-	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)) *importManager {
+	importFunc ImportFunc,
+	getSegmentStatesFunc GetSegmentStatesFunc,
+	unsetIsImportingStateFunc UnsetIsImportingStateFunc) *importManager {
 	mgr := &importManager{
 		ctx:                       ctx,
 		taskStore:                 client,
@@ -98,11 +92,9 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 		workingLock:               sync.RWMutex{},
 		busyNodesLock:             sync.RWMutex{},
 		lastReqID:                 0,
-		idAllocator:               idAlloc,
-		callImportService:         importService,
-		callGetSegmentStates:      getSegmentStates,
-		getCollectionName:         getCollectionName,
-		callUnsetIsImportingState: unsetIsImportingState,
+		importFunc:                importFunc,
+		getSegmentStatesFunc:      getSegmentStatesFunc,
+		unsetIsImportingStateFunc: unsetIsImportingStateFunc,
 	}
 	return mgr
 }
@@ -197,7 +189,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		log.Info("try to send out pending tasks", zap.Int("task_number", len(m.pendingTasks)))
 		task := m.pendingTasks[0]
 		// TODO: Use ImportTaskInfo directly.
-		it := &datapb.ImportTask{
+		it := &datapb.ImportTaskRequest{
 			CollectionId: task.GetCollectionId(),
 			PartitionId:  task.GetPartitionId(),
 			ChannelNames: task.GetChannelNames(),
@@ -213,15 +205,12 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		}
 
 		// Send import task to dataCoord, which will then distribute the import task to dataNode.
-		resp, err := m.callImportService(ctx, &datapb.ImportTaskRequest{
-			ImportTask:   it,
-			WorkingNodes: busyNodeList,
-		})
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		resp, dnId, err := m.importFunc(ctx, busyNodeList, it)
+		if resp.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("import task is rejected",
 				zap.Int64("task ID", it.GetTaskId()),
-				zap.Any("error code", resp.GetStatus().GetErrorCode()),
-				zap.String("cause", resp.GetStatus().GetReason()))
+				zap.Any("error code", resp.GetErrorCode()),
+				zap.String("cause", resp.GetReason()))
 			break
 		}
 		if err != nil {
@@ -230,12 +219,12 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		}
 
 		// Successfully assigned dataNode for the import task. Add task to working task list and update task store.
-		task.DatanodeId = resp.GetDatanodeId()
+		task.DatanodeId = dnId
 		log.Info("import task successfully assigned to dataNode",
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
-		m.busyNodes[resp.GetDatanodeId()] = task.GetCreateTs()
+		m.busyNodes[dnId] = task.GetCreateTs()
 		err = func() error {
 			m.workingLock.Lock()
 			defer m.workingLock.Unlock()
@@ -310,11 +299,11 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 
 		}()
 		// Unset isImporting flag.
-		if m.callUnsetIsImportingState == nil {
-			log.Error("callUnsetIsImportingState function of importManager is nil")
+		if m.unsetIsImportingStateFunc == nil {
+			log.Error("unsetIsImportingStateFunc function of importManager is nil")
 			return fmt.Errorf("failed to describe index: segment state method of import manager is nil")
 		}
-		_, err := m.callUnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
+		_, err := m.unsetIsImportingStateFunc(ctx, &datapb.UnsetIsImportingStateRequest{
 			SegmentIds: importTask.GetSegmentIds(),
 		})
 		if err := m.setImportTaskState(importTask.GetId(), commonpb.ImportState_ImportCompleted); err != nil {
@@ -340,7 +329,7 @@ func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *mi
 
 // checkFlushDone checks if flush is done on given segments.
 func (m *importManager) checkFlushDone(ctx context.Context, segIDs []UniqueID) (bool, error) {
-	resp, err := m.callGetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{
+	resp, err := m.getSegmentStatesFunc(ctx, &datapb.GetSegmentStatesRequest{
 		SegmentIDs: segIDs,
 	})
 	if err != nil {
@@ -386,7 +375,7 @@ func (m *importManager) isRowbased(files []string) (bool, error) {
 
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
-func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64, pID int64) *milvuspb.ImportResponse {
+func (m *importManager) importJob(ctx context.Context, req *datapb.ImportTaskRequest) *milvuspb.ImportResponse {
 	returnErrorFunc := func(reason string) *milvuspb.ImportResponse {
 		return &milvuspb.ImportResponse{
 			Status: &commonpb.Status{
@@ -400,7 +389,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		return returnErrorFunc("import request is empty")
 	}
 
-	if m.callImportService == nil {
+	if m.importFunc == nil {
 		return returnErrorFunc("import service is not available")
 	}
 
@@ -413,8 +402,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 	log.Info("receive import job",
 		zap.String("collection name", req.GetCollectionName()),
-		zap.Int64("collection ID", cID),
-		zap.Int64("partition ID", pID))
+		zap.Int64("collection ID", req.GetCollectionId()),
+		zap.Int64("partition ID", req.GetPartitionId()))
 	err := func() error {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
@@ -444,29 +433,26 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			// For row-based importing, each file makes a task.
 			taskList := make([]int64, len(req.Files))
 			for i := 0; i < len(req.Files); i++ {
-				tID, _, err := m.idAllocator(1)
+				tID := int64(1)
 				if err != nil {
 					log.Error("failed to allocate ID for import task", zap.Error(err))
 					return err
 				}
 				newTask := &datapb.ImportTaskInfo{
-					Id:           tID,
-					CollectionId: cID,
-					PartitionId:  pID,
-					ChannelNames: req.ChannelNames,
-					Files:        []string{req.GetFiles()[i]},
-					CreateTs:     time.Now().Unix(),
+					Id:             tID,
+					CollectionId:   req.GetCollectionId(),
+					PartitionId:    req.GetPartitionId(),
+					CollectionName: req.GetCollectionName(),
+					PartitionName:  req.GetPartitionName(),
+					ChannelNames:   req.ChannelNames,
+					Files:          []string{req.GetFiles()[i]},
+					CreateTs:       time.Now().Unix(),
 					State: &datapb.ImportTaskState{
 						StateCode: commonpb.ImportState_ImportPending,
 					},
-					Infos: req.Options,
+					Infos: req.Infos,
 				}
 
-				// Here no need to check error returned by setCollectionPartitionName(),
-				// since here we always return task list to client no matter something missed.
-				// We make the method setCollectionPartitionName() returns error
-				// because we need to make sure coverage all the code branch in unittest case.
-				_ = m.setCollectionPartitionName(cID, pID, newTask)
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
 				log.Info("new task created as pending task",
@@ -483,27 +469,25 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		} else {
 			// TODO: Merge duplicated code :(
 			// for column-based, all files is a task
-			tID, _, err := m.idAllocator(1)
+			tID := int64(1)
 			if err != nil {
 				return err
 			}
 			newTask := &datapb.ImportTaskInfo{
-				Id:           tID,
-				CollectionId: cID,
-				PartitionId:  pID,
-				ChannelNames: req.ChannelNames,
-				Files:        req.GetFiles(),
-				CreateTs:     time.Now().Unix(),
+				Id:             tID,
+				CollectionId:   req.GetCollectionId(),
+				PartitionId:    req.GetPartitionId(),
+				CollectionName: req.GetCollectionName(),
+				PartitionName:  req.GetPartitionName(),
+				ChannelNames:   req.ChannelNames,
+				Files:          req.GetFiles(),
+				CreateTs:       time.Now().Unix(),
 				State: &datapb.ImportTaskState{
 					StateCode: commonpb.ImportState_ImportPending,
 				},
-				Infos: req.Options,
+				Infos: req.Infos,
 			}
-			// Here no need to check error returned by setCollectionPartitionName(),
-			// since here we always return task list to client no matter something missed.
-			// We make the method setCollectionPartitionName() returns error
-			// because we need to make sure coverage all the code branch in unittest case.
-			_ = m.setCollectionPartitionName(cID, pID, newTask)
+
 			resp.Tasks = append(resp.Tasks, newTask.GetId())
 			log.Info("new task created as pending task",
 				zap.Int64("task ID", newTask.GetId()))
@@ -530,7 +514,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 // updateTaskInfo updates the task's state in in-memory working tasks list and in task store, given ImportResult
 // result. It returns the ImportTaskInfo of the given task.
-func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.ImportTaskInfo, error) {
+func (m *importManager) updateTaskInfo(ir *datapb.ImportResult) (*datapb.ImportTaskInfo, error) {
 	if ir == nil {
 		return nil, errors.New("import result is nil")
 	}
@@ -684,22 +668,6 @@ func (m *importManager) setImportTaskStateAndReason(taskID int64, targetState co
 	return nil
 }
 
-func (m *importManager) setCollectionPartitionName(colID, partID int64, task *datapb.ImportTaskInfo) error {
-	if m.getCollectionName != nil {
-		colName, partName, err := m.getCollectionName(colID, partID)
-		if err == nil {
-			task.CollectionName = colName
-			task.PartitionName = partName
-			return nil
-		}
-		log.Error("failed to setCollectionPartitionName",
-			zap.Int64("collection ID", colID),
-			zap.Int64("partition ID", partID),
-			zap.Error(err))
-	}
-	return errors.New("failed to setCollectionPartitionName for import task")
-}
-
 func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvuspb.GetImportStateResponse) {
 	output.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -713,7 +681,7 @@ func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvu
 	output.SegmentIds = input.GetState().GetSegments()
 	output.CreateTs = input.GetCreateTs()
 	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.Files, Value: strings.Join(input.GetFiles(), ",")})
-	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.CollectionName, Value: input.GetCollectionName()})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.CollectionName, Value: ""})
 	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.PartitionName, Value: input.GetPartitionName()})
 	output.Infos = append(output.Infos, &commonpb.KeyValuePair{
 		Key:   importutil.FailedReason,

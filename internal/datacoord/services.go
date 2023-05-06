@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"sync"
 
@@ -1327,9 +1326,9 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 
 // Import distributes the import tasks to dataNodes.
 // It returns a failed status if no dataNode is available or if any error occurs.
-func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (s *Server) Import(ctx context.Context, itr *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	log.Info("DataCoord receives import request", zap.Any("import task request", itr))
-	resp := &datapb.ImportTaskResponse{
+	resp := &milvuspb.ImportResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -1341,31 +1340,132 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 		return resp, nil
 	}
 
-	nodes := s.sessionManager.getLiveNodeIDs()
-	if len(nodes) == 0 {
-		log.Error("import failed as all DataNodes are offline")
+	req := &datapb.ImportTaskRequest{}
+
+	return s.importManager.importJob(ctx, req), nil
+}
+
+// GetImportState returns the current state of an import task.
+func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	resp := &milvuspb.GetImportStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
+	if s.isClosed() {
+		log.Warn("DataCoord receive GetImportState request, server closed")
+		setNotServingStatus(resp.Status, s.GetStateCode())
 		return resp, nil
 	}
-	log.Info("available DataNodes are", zap.Int64s("node ID", nodes))
+	return s.importManager.getTaskState(req.GetTask()), nil
+}
 
-	avaNodes := getDiff(nodes, itr.GetWorkingNodes())
-	if len(avaNodes) > 0 {
-		// If there exists available DataNodes, pick one at random.
-		resp.DatanodeId = avaNodes[rand.Intn(len(avaNodes))]
-		log.Info("picking a free dataNode",
-			zap.Any("all dataNodes", nodes),
-			zap.Int64("picking free dataNode with ID", resp.GetDatanodeId()))
-		s.cluster.Import(s.ctx, resp.GetDatanodeId(), itr)
-	} else {
-		// No dataNode is available, reject the import request.
-		msg := "all DataNodes are busy working on data import, the task has been rejected and wait for idle datanode"
-		log.Info(msg, zap.Int64("task ID", itr.GetImportTask().GetTaskId()))
-		resp.Status.Reason = msg
+// ListImportTasks returns id array of all import tasks.
+func (s *Server) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	resp := &milvuspb.ListImportTasksResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
+	if s.isClosed() {
+		log.Warn("DataCoord receive ListImportTasks request, server closed")
+		setNotServingStatus(resp.Status, s.GetStateCode())
 		return resp, nil
 	}
 
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	return resp, nil
+	colID := int64(1)
+	// if the collection name is not specified, the colID is -1, listAllTasks will return all tasks
+	tasks, err := s.importManager.listAllTasks(colID, req.GetLimit())
+	if err != nil {
+		err = fmt.Errorf("failed to list import tasks, collection name: '%s', error: %w", req.GetCollectionName(), err)
+		log.Error("ListImportTasks failed", zap.Error(err))
+		return &milvuspb.ListImportTasksResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: err.Error()},
+		}, nil
+	}
+
+	return &milvuspb.ListImportTasksResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Tasks:  tasks,
+	}, nil
+}
+
+// ReportImport reports import task state to RootCoord.
+func (s *Server) ReportImport(ctx context.Context, ir *datapb.ImportResult) (*commonpb.Status, error) {
+	resp := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
+	if s.isClosed() {
+		log.Warn("DataCoord receive ReportImport request, server closed")
+		setNotServingStatus(resp, s.GetStateCode())
+		return resp, nil
+	}
+
+	// This method update a busy node to idle node, and send import task to idle node
+	resendTaskFunc := func() {
+		func() {
+			s.importManager.busyNodesLock.Lock()
+			defer s.importManager.busyNodesLock.Unlock()
+			delete(s.importManager.busyNodes, ir.GetDatanodeId())
+			log.Info("a DataNode is no longer busy after processing task",
+				zap.Int64("dataNode ID", ir.GetDatanodeId()),
+				zap.Int64("task ID", ir.GetTaskId()))
+
+		}()
+		err := s.importManager.sendOutTasks(s.importManager.ctx)
+		if err != nil {
+			log.Error("fail to send out import task to datanodes")
+		}
+	}
+
+	// If setting ImportState_ImportCompleted, simply update the state and return directly.
+	if ir.GetState() == commonpb.ImportState_ImportCompleted {
+		log.Warn("ReportImport() should not be called when import task is completed!")
+	}
+	// Upon receiving ReportImport request, update the related task's state in task store.
+	ti, err := s.importManager.updateTaskInfo(ir)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateImportTaskFailure,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	// If task failed, send task to idle datanode
+	if ir.GetState() == commonpb.ImportState_ImportFailed {
+		// When a DataNode failed importing, remove this DataNode from the busy node list and send out import tasks again.
+		log.Info("an import task has failed, marking DataNode available and resending import task",
+			zap.Int64("task ID", ir.GetTaskId()))
+		resendTaskFunc()
+	} else if ir.GetState() == commonpb.ImportState_ImportCompleted {
+		// When a DataNode completes importing, remove this DataNode from the busy node list and send out import tasks again.
+		log.Info("an import task has completed, marking DataNode available and resending import task",
+			zap.Int64("task ID", ir.GetTaskId()))
+		resendTaskFunc()
+	} else if ir.GetState() == commonpb.ImportState_ImportPersisted {
+		// Here ir.GetState() == commonpb.ImportState_ImportPersisted
+		// Seal these import segments, so they can be auto-flushed later.
+		log.Info("an import task turns to persisted state, flush segments to be sealed",
+			zap.Any("task ID", ir.GetTaskId()), zap.Any("segments", ir.GetSegments()))
+		respFlush, err := s.Flush(ctx, &datapb.FlushRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
+				commonpbutil.WithSourceID(s.session.ServerID),
+			),
+			DbID:         0,
+			SegmentIDs:   ir.GetSegments(),
+			CollectionID: ti.GetCollectionId(),
+			IsImport:     true,
+		})
+		if err != nil {
+			log.Error("failed to call Flush on bulk insert segments",
+				zap.Int64("task ID", ir.GetTaskId()))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}, nil
+		}
+		if respFlush.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    respFlush.GetStatus().GetReason(),
+			}, nil
+		}
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // UpdateSegmentStatistics updates a segment's stats.

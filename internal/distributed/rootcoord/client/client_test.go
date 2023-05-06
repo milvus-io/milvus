@@ -149,18 +149,6 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
-			r, err := client.Import(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
-			r, err := client.GetImportState(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
-			r, err := client.ReportImport(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
 			r, err := client.CreateCredential(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -351,18 +339,6 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
-		rTimeout, err := client.Import(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.GetImportState(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.ReportImport(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
 		rTimeout, err := client.CreateCredential(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
@@ -380,10 +356,6 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.ListCredUsers(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.ListImportTasks(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{

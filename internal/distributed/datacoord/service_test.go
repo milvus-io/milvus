@@ -63,7 +63,7 @@ type MockDataCoord struct {
 	getFlushAllStateResp      *milvuspb.GetFlushAllStateResponse
 	dropVChanResp             *datapb.DropVirtualChannelResponse
 	setSegmentStateResp       *datapb.SetSegmentStateResponse
-	importResp                *datapb.ImportTaskResponse
+	importResp                *milvuspb.ImportResponse
 	updateSegStatResp         *commonpb.Status
 	updateChanPos             *commonpb.Status
 	acquireSegLockResp        *commonpb.Status
@@ -201,7 +201,7 @@ func (m *MockDataCoord) SetSegmentState(ctx context.Context, req *datapb.SetSegm
 	return m.setSegmentStateResp, m.err
 }
 
-func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (m *MockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	return m.importResp, m.err
 }
 
@@ -481,7 +481,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("import", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
-			importResp: &datapb.ImportTaskResponse{
+			importResp: &milvuspb.ImportResponse{
 				Status: &commonpb.Status{},
 			},
 		}

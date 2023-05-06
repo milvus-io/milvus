@@ -923,53 +923,6 @@ func (_c *RootCoord_GetCredential_Call) Return(_a0 *rootcoordpb.GetCredentialRes
 	return _c
 }
 
-// GetImportState provides a mock function with given fields: ctx, req
-func (_m *RootCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *milvuspb.GetImportStateResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) *milvuspb.GetImportStateResponse); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
-type RootCoord_GetImportState_Call struct {
-	*mock.Call
-}
-
-// GetImportState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetImportStateRequest
-func (_e *RootCoord_Expecter) GetImportState(ctx interface{}, req interface{}) *RootCoord_GetImportState_Call {
-	return &RootCoord_GetImportState_Call{Call: _e.mock.On("GetImportState", ctx, req)}
-}
-
-func (_c *RootCoord_GetImportState_Call) Run(run func(ctx context.Context, req *milvuspb.GetImportStateRequest)) *RootCoord_GetImportState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_GetImportState_Call) Return(_a0 *milvuspb.GetImportStateResponse, _a1 error) *RootCoord_GetImportState_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
 // GetMetrics provides a mock function with given fields: ctx, req
 func (_m *RootCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret := _m.Called(ctx, req)
@@ -1647,53 +1600,6 @@ func (_c *RootCoord_RenameCollection_Call) Run(run func(ctx context.Context, req
 }
 
 func (_c *RootCoord_RenameCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_RenameCollection_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-// ReportImport provides a mock function with given fields: ctx, req
-func (_m *RootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ImportResult) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_ReportImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportImport'
-type RootCoord_ReportImport_Call struct {
-	*mock.Call
-}
-
-// ReportImport is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *rootcoordpb.ImportResult
-func (_e *RootCoord_Expecter) ReportImport(ctx interface{}, req interface{}) *RootCoord_ReportImport_Call {
-	return &RootCoord_ReportImport_Call{Call: _e.mock.On("ReportImport", ctx, req)}
-}
-
-func (_c *RootCoord_ReportImport_Call) Run(run func(ctx context.Context, req *rootcoordpb.ImportResult)) *RootCoord_ReportImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.ImportResult))
-	})
-	return _c
-}
-
-func (_c *RootCoord_ReportImport_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_ReportImport_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

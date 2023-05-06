@@ -205,9 +205,6 @@ type RootCoordFactory struct {
 	collectionName string
 	collectionID   UniqueID
 	pkType         schemapb.DataType
-
-	ReportImportErr        bool
-	ReportImportNotSuccess bool
 }
 
 type DataCoordFactory struct {
@@ -1112,27 +1109,6 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.Co
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-	}, nil
-}
-
-func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	if ctx != nil && ctx.Value(ctxKey{}) != nil {
-		if v := ctx.Value(ctxKey{}).(string); v == returnError {
-			return nil, fmt.Errorf("injected error")
-		}
-	}
-	if m.ReportImportErr {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, fmt.Errorf("mock report import error")
-	}
-	if m.ReportImportNotSuccess {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, nil
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -101,17 +100,17 @@ type ImportWrapper struct {
 	createBinlogsFunc CreateBinlogsFunc // function to create binlog for a segment
 	saveSegmentFunc   SaveSegmentFunc   // function to persist a segment
 
-	importResult         *rootcoordpb.ImportResult                 // import result
-	reportFunc           func(res *rootcoordpb.ImportResult) error // report import state to rootcoord
-	reportImportAttempts uint                                      // attempts count if report function get error
+	importResult         *datapb.ImportResult                 // import result
+	reportFunc           func(res *datapb.ImportResult) error // report import state to rootcoord
+	reportImportAttempts uint                                 // attempts count if report function get error
 
 	workingSegments map[int]*WorkingSegment // a map shard id to working segments
 	progressPercent int64                   // working progress percent
 }
 
 func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.CollectionSchema, shardNum int32, segmentSize int64,
-	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, importResult *rootcoordpb.ImportResult,
-	reportFunc func(res *rootcoordpb.ImportResult) error) *ImportWrapper {
+	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, importResult *datapb.ImportResult,
+	reportFunc func(res *datapb.ImportResult) error) *ImportWrapper {
 	if collectionSchema == nil {
 		log.Error("import wrapper: collection schema is nil")
 		return nil

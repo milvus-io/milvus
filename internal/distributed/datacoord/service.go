@@ -381,8 +381,22 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	return s.dataCoord.Import(ctx, req)
+}
+
+func (s *Server) GetImportState(ctx context.Context, in *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return s.dataCoord.GetImportState(ctx, in)
+}
+
+// Returns id array of all import tasks
+func (s *Server) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return s.dataCoord.ListImportTasks(ctx, in)
+}
+
+// Report impot task state to datacoord
+func (s *Server) ReportImport(ctx context.Context, in *datapb.ImportResult) (*commonpb.Status, error) {
+	return s.dataCoord.ReportImport(ctx, in)
 }
 
 // UpdateSegmentStatistics is the dataCoord service caller of UpdateSegmentStatistics.

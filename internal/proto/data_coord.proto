@@ -58,7 +58,10 @@ service DataCoord {
 
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTaskRequest) returns (ImportTaskResponse) {}
+  rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
+  rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
+  rpc ListImportTasks(milvus.ListImportTasksRequest) returns (milvus.ListImportTasksResponse) {}
+  rpc ReportImport(ImportResult) returns (common.Status) {}
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
   rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
 
@@ -560,15 +563,16 @@ message DropVirtualChannelResponse {
   common.Status status = 1;
 }
 
-message ImportTask {
+message ImportTaskRequest {
   common.Status status = 1;
   int64 collection_id = 2;                   // target collection ID
   int64 partition_id = 3;                    // target partition ID
   repeated string channel_names = 4;         // target channel names of the collection.
-  bool row_based = 5;                        // the file is row-based or column-based
-  int64 task_id = 6;                         // id of the task
-  repeated string files = 7;                 // file paths to be imported
-  repeated common.KeyValuePair infos = 8;    // extra information about the task, bucket, etc.
+  int64 task_id = 5;                         // id of the task
+  repeated string files = 6;                 // file paths to be imported
+  repeated common.KeyValuePair infos = 7;    // extra information about the task, bucket, etc.
+  string collection_name = 8;                // Collection name for the import task.
+  string partition_name = 9;                 // Partition name for the import task.
 }
 
 message ImportTaskState {
@@ -597,15 +601,15 @@ message ImportTaskInfo {
   int64 start_ts = 15;                          // Timestamp when the import task is sent to datanode to execute.
 }
 
-message ImportTaskResponse {
+message ImportResult {
   common.Status status = 1;
-  int64 datanode_id = 2;         // which datanode takes this task
-}
-
-message ImportTaskRequest {
-  common.MsgBase base = 1;
-  ImportTask import_task = 2;          // Target import task.
-  repeated int64 working_nodes = 3;    // DataNodes that are currently working.
+  int64 task_id = 2;                       // id of the task
+  int64 datanode_id = 3;                   // id of the datanode which takes this task
+  common.ImportState state = 4;            // state of the task
+  repeated int64 segments = 5;             // id array of new sealed segments
+  repeated int64 auto_ids = 6;             // auto-generated ids for auto-id primary key
+  int64 row_count = 7;                     // how many rows are imported by this task
+  repeated common.KeyValuePair infos = 8;  // more informations about the task, file path, failed reason, etc.
 }
 
 message UpdateSegmentStatisticsRequest {

@@ -481,36 +481,24 @@ func TestDataNode(t *testing.T) {
 		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
-		req := &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-				ChannelNames: []string{chName1, chName2},
-				Files:        []string{filePath},
-				RowBased:     true,
-			},
+		task := &datapb.ImportTaskRequest{
+			CollectionId: 100,
+			PartitionId:  100,
+			ChannelNames: []string{chName1, chName2},
+			Files:        []string{filePath},
 		}
-		node.rootCoord.(*RootCoordFactory).ReportImportErr = true
-		_, err = node.Import(node.ctx, req)
-		assert.NoError(t, err)
-		node.rootCoord.(*RootCoordFactory).ReportImportErr = false
-
-		node.rootCoord.(*RootCoordFactory).ReportImportNotSuccess = true
-		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
-		assert.NoError(t, err)
-		node.rootCoord.(*RootCoordFactory).ReportImportNotSuccess = false
 
 		node.dataCoord.(*DataCoordFactory).AddSegmentError = true
-		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		node.dataCoord.(*DataCoordFactory).AddSegmentError = false
 
 		node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = true
-		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = false
 
-		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
 		assert.Equal(t, "", stat.GetReason())
@@ -557,16 +545,13 @@ func TestDataNode(t *testing.T) {
 		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
-		req := &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-				ChannelNames: []string{chName1, chName2},
-				Files:        []string{filePath},
-				RowBased:     true,
-			},
+		task := &datapb.ImportTaskRequest{
+			CollectionId: 100,
+			PartitionId:  100,
+			ChannelNames: []string{chName1, chName2},
+			Files:        []string{filePath},
 		}
-		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
 		assert.Equal(t, "", stat.GetReason())
@@ -574,9 +559,8 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test Import report import error", func(t *testing.T) {
 		node.rootCoord = &RootCoordFactory{
-			collectionID:    100,
-			pkType:          schemapb.DataType_Int64,
-			ReportImportErr: true,
+			collectionID: 100,
+			pkType:       schemapb.DataType_Int64,
 		}
 		content := []byte(`{
 		"rows":[
@@ -591,38 +575,33 @@ func TestDataNode(t *testing.T) {
 		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
-		req := &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-				ChannelNames: []string{"ch1", "ch2"},
-				Files:        []string{filePath},
-				RowBased:     true,
-			},
+		task := &datapb.ImportTaskRequest{
+			CollectionId: 100,
+			PartitionId:  100,
+			ChannelNames: []string{"ch1", "ch2"},
+			Files:        []string{filePath},
 		}
-		stat, err := node.Import(node.ctx, req)
+		stat, err := node.Import(node.ctx, task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
 	})
 
 	t.Run("Test Import error", func(t *testing.T) {
 		node.rootCoord = &RootCoordFactory{collectionID: -1}
-		req := &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
+		task := &datapb.ImportTaskRequest{
+			CollectionId: 100,
+			PartitionId:  100,
 		}
-		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.ErrorCode)
 
-		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, returnError), req)
+		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, returnError), task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
 
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
-		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), task)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, stat.GetErrorCode())
 	})

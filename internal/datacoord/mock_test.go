@@ -627,20 +627,8 @@ func (m *mockRootCoordService) Import(ctx context.Context, req *milvuspb.ImportR
 	panic("not implemented") // TODO: Implement
 }
 
-// Check import task state from datanode
-func (m *mockRootCoordService) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Returns id array of all import tasks
-func (m *mockRootCoordService) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+func (m *mockRootCoordService) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	panic("not implemented")
 }
 
 type mockCompactionHandler struct {
