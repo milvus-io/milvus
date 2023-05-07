@@ -96,7 +96,10 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "stored_binlog_size",
 			Help:      "binlog size of segments",
-		}, []string{segmentStateLabelName})
+		}, []string{
+			collectionIDLabelName,
+			segmentIDLabelName,
+		})
 
 	DataCoordSegmentBinLogFileCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -204,4 +207,8 @@ func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
 				collectionIDLabelName: fmt.Sprint(collectionID),
 				segmentIDLabelName:    fmt.Sprint(segmentID),
 			})
+	DataCoordStoredBinlogSize.Delete(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+		segmentIDLabelName:    fmt.Sprint(segmentID),
+	})
 }

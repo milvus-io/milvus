@@ -257,7 +257,6 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
-	sizesOfStates := make(map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
 	for _, segment := range segments {
@@ -266,10 +265,8 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
 		}
-		sizesOfStates[segment.GetState()] += segmentSize
-	}
-	for state, size := range sizesOfStates {
-		metrics.DataCoordStoredBinlogSize.WithLabelValues(state.String()).Set(float64(size))
+		metrics.DataCoordStoredBinlogSize.WithLabelValues(
+			fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
 	}
 	return total, collectionBinlogSize
 }
