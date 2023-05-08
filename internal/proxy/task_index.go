@@ -508,13 +508,13 @@ func (dit *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
 func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetCollectionName())
 	if err != nil {
-		log.Error("failed to get collection schema", zap.Error(err))
-		return fmt.Errorf("failed to get collection schema: %s", err)
+		log.Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
+		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
-		log.Error("failed to parse collection schema", zap.Error(err))
-		return fmt.Errorf("failed to parse collection schema: %s", err)
+		log.Error("failed to parse collection schema", zap.String("collection_name", schema.GetName()), zap.Error(err))
+		return fmt.Errorf("failed to parse collection schema: %s", dit.GetCollectionName())
 	}
 
 	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
@@ -530,7 +530,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
-			log.Error("failed to get collection field", zap.Error(err))
+			log.Error("failed to get collection field", zap.Int64("field_id", indexInfo.FieldID), zap.Error(err))
 			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
 		}
 		params := indexInfo.GetUserIndexParams()
