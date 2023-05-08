@@ -38,6 +38,9 @@ func TestValidAuth(t *testing.T) {
 	assert.Nil(t, err)
 	res = validAuth(ctx, []string{crypto.Base64Encode("mockUser:mockPass")})
 	assert.True(t, res)
+
+	res = validAuth(ctx, []string{crypto.Base64Encode("mock")})
+	assert.False(t, res)
 }
 
 func TestValidSourceID(t *testing.T) {
