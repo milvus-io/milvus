@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -56,11 +57,12 @@ type CollectionObserverSuite struct {
 	store       meta.Store
 
 	// Dependencies
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	broker         *meta.MockBroker
-	targetMgr      *meta.TargetManager
-	targetObserver *TargetObserver
+	dist            *meta.DistributionManager
+	meta            *meta.Meta
+	broker          *meta.MockBroker
+	targetMgr       *meta.TargetManager
+	targetObserver  *TargetObserver
+	checkController *checkers.CheckerController
 
 	// Test object
 	ob *CollectionObserver
@@ -182,6 +184,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
+	suite.checkController = &checkers.CheckerController{}
 
 	// Test object
 	suite.ob = NewCollectionObserver(
@@ -189,6 +192,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.checkController,
 	)
 
 	for _, collection := range suite.collections {

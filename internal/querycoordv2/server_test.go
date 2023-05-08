@@ -486,6 +486,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.server.targetObserver,
+		suite.server.checkerController,
 	)
 
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(&schemapb.CollectionSchema{}, nil).Maybe()
