@@ -126,7 +126,7 @@ func (es *EtcdSource) refreshConfigurations() error {
 	prefix := es.keyPrefix + "/config"
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix())
+	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
 		return err
 	}
