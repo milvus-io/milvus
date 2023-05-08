@@ -29,7 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
+	"github.com/streamnative/pulsar-admin-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -749,12 +749,12 @@ func TestPulsarCtl(t *testing.T) {
 	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
 	admin, err := NewAdminClient(webServiceURL, "", "")
 	assert.NoError(t, err)
-	err = admin.Subscriptions().Delete(*topicName, subName, true)
+	err = admin.Subscriptions().ForceDelete(*topicName, subName)
 	if err != nil {
 		webServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
 		admin, err := NewAdminClient(webServiceURL, "", "")
 		assert.NoError(t, err)
-		err = admin.Subscriptions().Delete(*topicName, subName, true)
+		err = admin.Subscriptions().ForceDelete(*topicName, subName)
 		assert.NoError(t, err)
 	}
 

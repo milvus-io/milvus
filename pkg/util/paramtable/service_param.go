@@ -372,6 +372,8 @@ type PulsarConfig struct {
 	// support tenant
 	Tenant    ParamItem `refreshable:"false"`
 	Namespace ParamItem `refreshable:"false"`
+
+	useSSL ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -384,25 +386,13 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 	}
 	p.Port.Init(base.mgr)
 
-	// due to implicit rule of MQ priority，the default address should be empty
-	p.Address = ParamItem{
-		Key:          "pulsar.address",
-		Version:      "2.0.0",
-		DefaultValue: "",
-		Formatter: func(addr string) string {
-			if addr == "" {
-				return ""
-			}
-			if strings.Contains(addr, ":") {
-				return addr
-			}
-			port, _ := p.Port.get()
-			return "pulsar://" + addr + ":" + port
-		},
-		Doc:    "Address of pulsar",
-		Export: true,
+	p.useSSL = ParamItem{
+		Key:          "pulsar.useSSL",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Export:       true,
 	}
-	p.Address.Init(base.mgr)
+	p.useSSL.Init(base.mgr)
 
 	p.WebPort = ParamItem{
 		Key:          "pulsar.webport",
@@ -412,6 +402,16 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)
+
+	var webPrefix string
+	var brokerPrefix string
+	if p.useSSL.GetAsBool() {
+		webPrefix = "https://"
+		brokerPrefix = "pulsar+ssl://"
+	} else {
+		webPrefix = "http://"
+		brokerPrefix = "pulsar://"
+	}
 
 	p.WebAddress = ParamItem{
 		Key:          "pulsar.webaddress",
@@ -423,7 +423,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 				log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			return webPrefix + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
 		},
 	}
 	p.WebAddress.Init(base.mgr)
@@ -460,9 +460,15 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 	p.AuthPlugin.Init(base.mgr)
 
 	p.AuthParams = ParamItem{
-		Key:     "pulsar.authParams",
-		Version: "2.2.0",
+		Key:          "pulsar.authParams",
+		Version:      "2.2.0",
+		DefaultValue: "",
+		Export:       true,
 		Formatter: func(authParams string) string {
+			// compatible for two format: json and k1:v2,k2:v2
+			if json.Valid([]byte(authParams)) {
+				return authParams
+			}
 			jsonMap := make(map[string]string)
 			params := strings.Split(authParams, ",")
 			for _, param := range params {
@@ -478,6 +484,25 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 	}
 	p.AuthParams.Init(base.mgr)
 
+	// due to implicit rule of MQ priority，the default address should be empty
+	p.Address = ParamItem{
+		Key:          "pulsar.address",
+		Version:      "2.0.0",
+		DefaultValue: "",
+		Formatter: func(addr string) string {
+			if addr == "" {
+				return ""
+			}
+			if strings.Contains(addr, ":") {
+				return addr
+			}
+			port, _ := p.Port.get()
+			return brokerPrefix + addr + ":" + port
+		},
+		Doc:    "Address of pulsar",
+		Export: true,
+	}
+	p.Address.Init(base.mgr)
 }
 
 // --- kafka ---
