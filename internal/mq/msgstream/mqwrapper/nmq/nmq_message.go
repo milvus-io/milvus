@@ -18,48 +18,49 @@ package nmq
 
 import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/nats-io/nats.go"
 )
 
 // Check nmqMessage implements ConsumerMessage
-var _ mqwrapper.Message = (*nmqMessage)(nil)
-
-// This is the payload nats sends. Notices that nats doesn't directly support
-// passing metadata along with actual content. Thus we pack payload and
-// properties together and send it through nats payload.
-type NatsMsgData struct {
-	Payload    []byte            `json:"Payload"`
-	Properties map[string]string `json:"Properties"`
-}
-
-// Message is the message content of a consumer message
-type Message struct {
-	MsgID      MessageIDType
-	Topic      string
-	Payload    []byte
-	Properties map[string]string
-}
+var (
+	_ mqwrapper.Message = (*nmqMessage)(nil)
+)
 
 // nmqMessage wraps the message for natsmq
 type nmqMessage struct {
-	msg Message
+	raw *nats.Msg
+
+	// lazy initialized field.
+	meta *nats.MsgMetadata
 }
 
 // Topic returns the topic name of natsmq message
 func (nm *nmqMessage) Topic() string {
-	return nm.msg.Topic
+	// TODO: Dependency: implement of subscription logic of nmq.
+	return nm.raw.Subject
 }
 
 // Properties returns the properties of natsmq message
 func (nm *nmqMessage) Properties() map[string]string {
-	return nm.msg.Properties
+	properties := make(map[string]string, len(nm.raw.Header))
+	for k, vs := range nm.raw.Header {
+		if len(vs) > 0 {
+			properties[k] = vs[0]
+		}
+	}
+	return properties
 }
 
 // Payload returns the payload of natsmq message
 func (nm *nmqMessage) Payload() []byte {
-	return nm.msg.Payload
+	return nm.raw.Data
 }
 
 // ID returns the id of natsmq message
 func (nm *nmqMessage) ID() mqwrapper.MessageID {
-	return &nmqID{messageID: nm.msg.MsgID}
+	// raw is always a jetstream message, should never fail.
+	if nm.meta == nil {
+		nm.meta, _ = nm.raw.Metadata()
+	}
+	return &nmqID{messageID: nm.meta.Sequence.Stream}
 }

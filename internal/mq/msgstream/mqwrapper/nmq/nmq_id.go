@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
+// MessageIDType is a type alias for server.UniqueID that represents the ID of a Nmq message.
 type MessageIDType = uint64
 
 // nmqID wraps message ID for natsmq
@@ -30,6 +31,13 @@ type nmqID struct {
 
 // Check if nmqID implements MessageID interface
 var _ mqwrapper.MessageID = &nmqID{}
+
+// NewNmqID creates and returns a new instance of the nmqID struct with the given MessageID.
+func NewNmqID(id MessageIDType) mqwrapper.MessageID {
+	return &nmqID{
+		messageID: id,
+	}
+}
 
 // Serialize convert nmq message id to []byte
 func (nid *nmqID) Serialize() []byte {

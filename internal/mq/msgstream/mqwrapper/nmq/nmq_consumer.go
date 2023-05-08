@@ -17,7 +17,6 @@
 package nmq
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -65,22 +64,12 @@ func (nc *Consumer) Chan() <-chan mqwrapper.Message {
 							nc.skip = false
 							continue
 						}
-						meta, err := msg.Metadata()
-						if err != nil {
-							log.Error("Failed to fetch metadata from nats message: ", zap.Error(err))
-							continue
+						nc.msgChan <- &nmqMessage{
+							raw: msg,
 						}
-						var data NatsMsgData
-						err = json.Unmarshal(msg.Data, &data)
-						if err != nil {
-							log.Error("Failed to parse data from nats message: ", zap.Error(err))
-							continue
-						}
-						nc.msgChan <- &nmqMessage{msg: Message{MsgID: meta.Sequence.Stream, Topic: nc.topic, Payload: data.Payload, Properties: data.Properties}}
 					case <-nc.closeChan:
-						log.Info("close consumer ", zap.String("topic", nc.topic), zap.String("groupName", nc.groupName))
+						log.Info("close nmq consumer ", zap.String("topic", nc.topic), zap.String("groupName", nc.groupName))
 						close(nc.msgChan)
-						close(nc.natsChan)
 						return
 					}
 				}
@@ -106,27 +95,35 @@ func (nc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 
 // Ack is used to ask a natsmq message
 func (nc *Consumer) Ack(message mqwrapper.Message) {
-	// Do nothing
+	if err := message.(*nmqMessage).raw.Ack(); err != nil {
+		log.Warn("failed to ack message of nmq", zap.String("topic", message.Topic()), zap.Reflect("msgID", message.ID()))
+	}
 }
 
-// Close is used to free the resounces of this consumer
+// Close is used to free the resources of this consumer
 func (nc *Consumer) Close() {
-	nc.sub.Unsubscribe()
+	if err := nc.sub.Unsubscribe(); err != nil {
+		log.Warn("failed to unsubscribe subscription of nmq", zap.String("topic", nc.topic))
+	}
 	close(nc.closeChan)
 }
 
+// GetLatestMsgID returns the ID of the most recent message processed by the consumer.
 func (nc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
-	cinfo, err := nc.sub.ConsumerInfo()
+	info, err := nc.js.StreamInfo(nc.topic)
 	if err != nil {
-		return nil, util.WrapError("failed to get ConsumerInfo", err)
+		return nil, util.WrapError("failed to get stream info of nats jetstream", err)
 	}
-	msgID := cinfo.Delivered.Stream
+	msgID := info.State.LastSeq
 	return &nmqID{messageID: msgID}, nil
 }
 
+// CheckTopicValid verifies if the given topic is valid for this consumer.
+// A consumer is tied to a specific topic, and thus in a multi-tenant situation,
+// should only be used to check messages from its associated topic.
 func (nc *Consumer) CheckTopicValid(topic string) error {
 	// A consumer is tied to a topic. In a multi-tenant situation,
-	//a consumer is not supposed to check on other topics.
+	// a consumer is not supposed to check on other topics.
 	if topic != nc.topic {
 		return fmt.Errorf("consumer of topic %s checking validness of topic %s", nc.topic, topic)
 	}

@@ -19,16 +19,26 @@ package nmq
 import (
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNmqMessage_All(t *testing.T) {
 	topic := t.Name()
+	raw := nats.NewMsg(topic)
+	raw.Data = []byte(`test payload`)
+	raw.Header.Add("test", "test")
+	nm := nmqMessage{
+		meta: &nats.MsgMetadata{
+			Sequence: nats.SequencePair{
+				Stream: 12,
+			},
+		},
+		raw: raw,
+	}
 	payload := []byte("test payload")
-	msg := Message{MsgID: 12, Topic: topic, Payload: payload}
-	nm := &nmqMessage{msg: msg}
 	assert.Equal(t, topic, nm.Topic())
 	assert.Equal(t, MessageIDType(12), nm.ID().(*nmqID).messageID)
 	assert.Equal(t, payload, nm.Payload())
-	assert.Nil(t, nm.Properties())
+	assert.Equal(t, nm.Properties()["test"], "test")
 }

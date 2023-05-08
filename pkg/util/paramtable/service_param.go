@@ -48,9 +48,11 @@ type ServiceParam struct {
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
 	DBCfg           MetaDBConfig
+	MQCfg           MQConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
+	NatsmqCfg       NatsmqConfig
 	MinioCfg        MinioConfig
 }
 
@@ -61,14 +63,21 @@ func (p *ServiceParam) init() {
 	p.MetaStoreCfg.Init(&p.BaseTable)
 	p.EtcdCfg.Init(&p.BaseTable)
 	p.DBCfg.Init(&p.BaseTable)
+	p.MQCfg.Init(&p.BaseTable)
 	p.PulsarCfg.Init(&p.BaseTable)
 	p.KafkaCfg.Init(&p.BaseTable)
 	p.RocksmqCfg.Init(&p.BaseTable)
+	p.NatsmqCfg.Init(&p.BaseTable)
 	p.MinioCfg.Init(&p.BaseTable)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
 	return p.RocksmqCfg.Path.GetValue() != ""
+}
+
+// NatsmqEnable checks if NATS messaging queue is enabled.
+func (p *ServiceParam) NatsmqEnable() bool {
+	return p.NatsmqCfg.Server.StoreDir.GetValue() != ""
 }
 
 func (p *ServiceParam) PulsarEnable() bool {
@@ -353,7 +362,27 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxIdleConns.Init(base.mgr)
+}
 
+// /////////////////////////////////////////////////////////////////////////////
+// --- mq ---
+
+// MQConfig represents the configuration settings for the message queue.
+type MQConfig struct {
+	Type ParamItem `refreshable:"false"`
+}
+
+// Init initializes the MQConfig object with a BaseTable.
+func (p *MQConfig) Init(base *BaseTable) {
+	p.Type = ParamItem{
+		Key:          "mq.type",
+		Version:      "2.2.0",
+		DefaultValue: "",
+		Doc: `Default value: "default"
+Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
+		Export: true,
+	}
+	p.Type.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -477,7 +506,6 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		},
 	}
 	p.AuthParams.Init(base.mgr)
-
 }
 
 // --- kafka ---
@@ -623,6 +651,122 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Version:      "2.2.2",
 	}
 	r.TickerTimeInSeconds.Init(base.mgr)
+}
+
+// NatsmqConfig describes the configuration options for the Nats message queue
+type NatsmqConfig struct {
+	Server natsmqConfigServer
+}
+
+type natsmqConfigServer struct {
+	Port              ParamItem
+	StoreDir          ParamItem
+	MaxMemoryStore    ParamItem
+	MaxFileStore      ParamItem
+	MaxPayload        ParamItem
+	MaxPending        ParamItem
+	Monitor           natsmqConfigServerMonitor
+	InitializeTimeout ParamItem
+}
+
+type natsmqConfigServerMonitor struct {
+	Debug        ParamItem
+	LogTime      ParamItem
+	LogFile      ParamItem
+	LogSizeLimit ParamItem
+}
+
+// Init sets up a new NatsmqConfig instance using the provided BaseTable
+func (r *NatsmqConfig) Init(base *BaseTable) {
+	r.Server.Port = ParamItem{
+		Key:          "natsmq.server.port",
+		Version:      "2.2.0",
+		DefaultValue: "4222",
+		Doc:          `Port for nats server listening`,
+		Export:       true,
+	}
+	r.Server.Port.Init(base.mgr)
+	r.Server.StoreDir = ParamItem{
+		Key:          "natsmq.server.storeDir",
+		Version:      "2.2.0",
+		DefaultValue: "/var/lib/milvus/nats",
+		Doc:          `Directory to use for JetStream storage of nats`,
+		Export:       true,
+	}
+	r.Server.StoreDir.Init(base.mgr)
+	r.Server.MaxMemoryStore = ParamItem{
+		Key:          "natsmq.server.maxMemoryStore",
+		Version:      "2.2.0",
+		DefaultValue: "536870912",
+		Doc:          `Maximum size of the 'memory' storage`,
+		Export:       true,
+	}
+	r.Server.MaxMemoryStore.Init(base.mgr)
+	r.Server.MaxFileStore = ParamItem{
+		Key:          "natsmq.server.maxFileStore",
+		Version:      "2.2.0",
+		DefaultValue: "68719476736",
+		Doc:          `Maximum size of the 'file' storage`,
+		Export:       true,
+	}
+	r.Server.MaxFileStore.Init(base.mgr)
+	r.Server.MaxPayload = ParamItem{
+		Key:          "natsmq.server.maxPayload",
+		Version:      "2.2.0",
+		DefaultValue: "8388608",
+		Doc:          `Maximum number of bytes in a message payload`,
+		Export:       true,
+	}
+	r.Server.MaxPayload.Init(base.mgr)
+	r.Server.MaxPending = ParamItem{
+		Key:          "natsmq.server.maxPending",
+		Version:      "2.2.0",
+		DefaultValue: "67108864",
+		Doc:          `Maximum number of bytes buffered for a connection Applies to client connections`,
+		Export:       true,
+	}
+	r.Server.MaxPending.Init(base.mgr)
+	r.Server.InitializeTimeout = ParamItem{
+		Key:          "natsmq.server.initializeTimeout",
+		Version:      "2.2.0",
+		DefaultValue: "4000",
+		Doc:          `waiting for initialization of natsmq finished`,
+		Export:       true,
+	}
+	r.Server.InitializeTimeout.Init(base.mgr)
+
+	r.Server.Monitor.Debug = ParamItem{
+		Key:          "natsmq.server.monitor.debug",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		Doc:          `If true enable debug log messages`,
+		Export:       true,
+	}
+	r.Server.Monitor.Debug.Init(base.mgr)
+	r.Server.Monitor.LogTime = ParamItem{
+		Key:          "natsmq.server.monitor.logTime",
+		Version:      "2.2.0",
+		DefaultValue: "true",
+		Doc:          `If set to false, log without timestamps.`,
+		Export:       true,
+	}
+	r.Server.Monitor.LogTime.Init(base.mgr)
+	r.Server.Monitor.LogFile = ParamItem{
+		Key:          "natsmq.server.monitor.logFile",
+		Version:      "2.2.0",
+		DefaultValue: "",
+		Doc:          `Log file path relative to..`,
+		Export:       true,
+	}
+	r.Server.Monitor.LogFile.Init(base.mgr)
+	r.Server.Monitor.LogSizeLimit = ParamItem{
+		Key:          "natsmq.server.monitor.logSizeLimit",
+		Version:      "2.2.0",
+		DefaultValue: "0",
+		Doc:          `Size in bytes after the log file rolls over to a new one`,
+		Export:       true,
+	}
+	r.Server.Monitor.LogSizeLimit.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

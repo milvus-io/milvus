@@ -22,13 +22,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
+// MessageIDType is a type alias for server.UniqueID that represents the ID of a Rmq message.
+type MessageIDType = server.UniqueID
+
 // rmqID wraps message ID for rocksmq
 type rmqID struct {
-	messageID server.UniqueID
+	messageID MessageIDType
 }
 
 // Check if rmqID implements MessageID interface
 var _ mqwrapper.MessageID = &rmqID{}
+
+// NewRmqID creates and returns a new instance of the rmqID struct with the given MessageID.
+func NewRmqID(id MessageIDType) mqwrapper.MessageID {
+	return &rmqID{
+		messageID: id,
+	}
+}
 
 // Serialize convert rmq message id to []byte
 func (rid *rmqID) Serialize() []byte {

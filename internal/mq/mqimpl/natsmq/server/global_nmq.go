@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // Nmq is global natsmq instance that will be initialized only once
@@ -37,24 +38,41 @@ var once sync.Once
 func InitNatsMQ(storeDir string) error {
 	var finalErr error
 	once.Do(func() {
-		log.Debug("initializing global nmq", zap.String("storeDir", storeDir))
-		opts := &server.Options{
-			JetStream: true,
-			StoreDir:  storeDir,
-		}
+		opts, initializeTimeout := getServerOption(storeDir)
+		log.Debug("try to initialize global nmq", zap.Reflect("options", opts), zap.Duration("timeout", initializeTimeout))
 		Nmq, finalErr = server.NewServer(opts)
+		log.Debug("initialize nmq finished", zap.Error(finalErr))
 		if finalErr != nil {
 			return
 		}
 		go Nmq.Start()
 		// Wait for server to be ready for connections
-		// TODO: Make waiting time a param.
-		if !Nmq.ReadyForConnections(4 * time.Second) {
-			finalErr = fmt.Errorf("invalid consumer config: empty topic")
-			return
+		if !Nmq.ReadyForConnections(initializeTimeout) {
+			finalErr = fmt.Errorf("nmq is not ready with timeout %s", initializeTimeout)
+			log.Warn("nmq is not ready", zap.Duration("timeout", initializeTimeout), zap.Reflect("options", opts))
 		}
 	})
 	return finalErr
+}
+
+// getServerOption get nats server option from config.
+func getServerOption(storeDir string) (*server.Options, time.Duration) {
+	params := paramtable.Get()
+	opts := &server.Options{
+		Host:               "127.0.0.1", // Force to use loopback address.
+		Port:               params.NatsmqCfg.Server.Port.GetAsInt(),
+		MaxPayload:         params.NatsmqCfg.Server.MaxPayload.GetAsInt32(),
+		MaxPending:         params.NatsmqCfg.Server.MaxPending.GetAsInt64(),
+		JetStream:          true,
+		JetStreamMaxMemory: params.NatsmqCfg.Server.MaxMemoryStore.GetAsInt64(),
+		JetStreamMaxStore:  params.NatsmqCfg.Server.MaxFileStore.GetAsInt64(),
+		StoreDir:           storeDir,
+		Debug:              params.NatsmqCfg.Server.Monitor.Debug.GetAsBool(),
+		Logtime:            params.NatsmqCfg.Server.Monitor.LogTime.GetAsBool(),
+		LogFile:            params.NatsmqCfg.Server.Monitor.LogFile.GetValue(),
+		LogSizeLimit:       params.NatsmqCfg.Server.Monitor.LogSizeLimit.GetAsInt64(),
+	}
+	return opts, time.Duration(params.NatsmqCfg.Server.InitializeTimeout.GetAsInt()) * time.Millisecond
 }
 
 // CloseNatsMQ is used to close global natsmq
@@ -65,5 +83,6 @@ func CloseNatsMQ() {
 		Nmq.Shutdown()
 		// Wait for server shutdown.
 		Nmq.WaitForShutdown()
+		Nmq = nil
 	}
 }

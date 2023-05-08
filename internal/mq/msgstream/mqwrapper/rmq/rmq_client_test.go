@@ -36,10 +36,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	Params.Init()
+	paramtable.Init()
+
 	rand.Seed(time.Now().UnixNano())
 	path := "/tmp/milvus/rdb_data"
 	defer os.RemoveAll(path)
-	paramtable.Init()
 	_ = rocksmqimplserver.InitRocksMQ(path)
 	exitCode := m.Run()
 	defer rocksmqimplserver.CloseRocksMQ()

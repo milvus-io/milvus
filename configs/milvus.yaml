@@ -88,10 +88,16 @@ minio:
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: 
 
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
-# There is a note about enabling priority if we config multiple mq in this file
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
+
+# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
+# You can change your mq by setting mq.type field.
+# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
+# 1. standalone(local) mode: rocksmq(ifdefault) > natsmq > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
+mq:
+  # Default value: "default"
+  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
+  type: default
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -119,6 +125,22 @@ rocksmq:
   retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+
+# natsmq configuration.
+natsmq:
+  server: # server side configuration for natsmq.
+    port: 4222 # 4222 by default, Port for nats server listening.
+    storeDir: /var/lib/milvus/nats # /var/lib/milvus/nats by default, directory to use for JetStream storage of nats.
+    maxMemoryStore: 536870912 # (B) 512MB by default, Maximum size of the 'memory' storage.
+    maxFileStore: 68719476736 # (B) 64GB by default, Maximum size of the 'file' storage.
+    maxPayload: 8388608 # (B) 8MB by default, Maximum number of bytes in a message payload.
+    maxPending: 67108864 # (B) 64MB by default, Maximum number of bytes buffered for a connection Applies to client connections.
+    initializeTimeout: 4000 # (ms) 4s by default, waiting for initialization of natsmq finished.
+    monitor:
+      debug: false # false by default, If true enable debug log messages.
+      logTime: true # true by default, If set to false, log without timestamps.
+      logFile: # no log file by default, Log file path relative to.. .
+      logSizeLimit: 0 # (B) 0, unlimited by default, Size in bytes after the log file rolls over to a new one.
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

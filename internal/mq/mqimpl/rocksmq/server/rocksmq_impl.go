@@ -490,6 +490,7 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
+	// TODO: CAS Here.
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == consumer.GroupName {
@@ -581,7 +582,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
-
 	if err != nil {
 		return []UniqueID{}, err
 	}
@@ -825,7 +825,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 		log.Warn("RocksMQ: trying to seek to no exist position, reset current id",
 			zap.String("topic", topicName), zap.String("group", groupName), zap.Int64("msgId", msgID))
 		err := rmq.moveConsumePos(topicName, groupName, DefaultMessageID)
-		//skip seek if key is not found, this is the behavior as pulsar
+		// skip seek if key is not found, this is the behavior as pulsar
 		return err
 	}
 	/* Step II: update current_id */
@@ -846,7 +846,7 @@ func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID Uni
 		panic("move consume position backward")
 	}
 
-	//update ack if position move forward
+	// update ack if position move forward
 	err := rmq.updateAckedInfo(topicName, groupName, oldPos.(UniqueID), msgID-1)
 	if err != nil {
 		log.Warn("failed to update acked info ", zap.String("topic", topicName),

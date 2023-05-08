@@ -69,5 +69,6 @@ func CloseRocksMQ() {
 	log.Debug("Close Rocksmq!")
 	if Rmq != nil && Rmq.store != nil {
 		Rmq.Close()
+		Rmq = nil
 	}
 }

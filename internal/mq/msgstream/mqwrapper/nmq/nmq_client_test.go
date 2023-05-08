@@ -30,11 +30,14 @@ import (
 
 	nmqserver "github.com/milvus-io/milvus/internal/mq/mqimpl/natsmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var natsServerAddress string
 
 func TestMain(m *testing.M) {
+	paramtable.Init()
+
 	tmpDir := path.Join(os.TempDir(), "nmq_client_test", fmt.Sprint(rand.Int()))
 	nmqserver.InitNatsMQ(tmpDir)
 	natsServerAddress = nmqserver.Nmq.ClientURL()

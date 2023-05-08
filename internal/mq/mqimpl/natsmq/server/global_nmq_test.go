@@ -20,13 +20,34 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_InitNatsMQ(t *testing.T) {
-	storeDir := "/tmp/milvus/nats_store_global"
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
+
+func TestGetServerOption(t *testing.T) {
+	storeDir, err := os.MkdirTemp("", "milvus_nmq")
 	defer os.RemoveAll(storeDir)
-	err := InitNatsMQ(storeDir)
 	assert.Nil(t, err)
+
+	opts, _ := getServerOption(storeDir)
+	assert.Equal(t, "127.0.0.1", opts.Host)
+	assert.Equal(t, true, opts.JetStream)
+	assert.Equal(t, storeDir, opts.StoreDir)
+}
+
+func TestInitNatsMQ(t *testing.T) {
+	storeDir, err := os.MkdirTemp("", "milvus_nmq")
+	defer os.RemoveAll(storeDir)
+	assert.Nil(t, err)
+
+	err = InitNatsMQ(storeDir)
+	assert.Nil(t, err)
+	assert.NotNil(t, Nmq)
 	CloseNatsMQ()
 }

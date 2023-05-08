@@ -27,12 +27,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 )
 
+// nmqClient implements mqwrapper.Client.
+var _ mqwrapper.Client = &nmqClient{}
+
 // nmqClient contains a natsmq client
 type nmqClient struct {
 	conn *nats.Conn
 }
 
-func NewClientWithDefaultOptions() (*nmqClient, error) {
+// NewClientWithDefaultOptions returns a new NMQ client with default options.
+// It retrieves the NMQ client URL from the server configuration.
+func NewClientWithDefaultOptions() (mqwrapper.Client, error) {
 	url := server.Nmq.ClientURL()
 	return NewClient(url)
 }
@@ -81,7 +86,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 	}
 	// TODO: do we allow passing in an existing natsChan from options?
 	// also, revisit the size or make it a user param
-	natsChan := make(chan *nats.Msg, 8192)
+	natsChan := make(chan *nats.Msg, options.BufSize)
 	// TODO: should we allow subscribe to a topic that doesn't exist yet? Current logic allows it.
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     options.Topic,
@@ -94,25 +99,15 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 
 	var sub *nats.Subscription
 	position := options.SubscriptionInitialPosition
-	if position != mqwrapper.SubscriptionPositionUnknown {
-		// TODO: should we only allow exclusive subscribe? Current logic allows double subscribe.
-		sub, err = js.ChanSubscribe(options.Topic, natsChan)
-		if err != nil {
-			return nil, util.WrapError("failed to subscribe", err)
-		}
-		if position == mqwrapper.SubscriptionPositionLatest {
-			cinfo, err := sub.ConsumerInfo()
-			if err != nil {
-				return nil, util.WrapError("failed to get consumer info", err)
-			}
-			msgID := cinfo.Delivered.Stream
-			natsChan = make(chan *nats.Msg, 8192)
-			sub.Unsubscribe()
-			sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.StartSequence(msgID))
-			if err != nil {
-				return nil, util.WrapError("failed to subscribe from latest message", err)
-			}
-		}
+	// TODO: should we only allow exclusive subscribe? Current logic allows double subscribe.
+	switch position {
+	case mqwrapper.SubscriptionPositionLatest:
+		sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.DeliverNew())
+	case mqwrapper.SubscriptionPositionEarliest:
+		sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.DeliverAll())
+	}
+	if err != nil {
+		return nil, util.WrapError(fmt.Sprintf("failed to get consumer info, subscribe position: %d", position), err)
 	}
 
 	return &Consumer{

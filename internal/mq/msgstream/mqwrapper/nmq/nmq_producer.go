@@ -18,11 +18,11 @@ package nmq
 
 import (
 	"context"
-	"encoding/json"
 
-	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/nats-io/nats.go"
+	"go.uber.org/zap"
 )
 
 var _ mqwrapper.Producer = (*nmqProducer)(nil)
@@ -40,15 +40,22 @@ func (np *nmqProducer) Topic() string {
 
 // Send send the producer messages to natsmq
 func (np *nmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
-	msg := NatsMsgData{
-		Payload:    message.Payload,
-		Properties: message.Properties,
+	// Encode message
+	msg := &nats.Msg{
+		Subject: np.topic,
+		Header:  make(nats.Header, len(message.Properties)),
+		Data:    message.Payload,
 	}
-	payload, err := json.Marshal(msg)
+	for k, v := range message.Properties {
+		msg.Header.Add(k, v)
+	}
+
+	// publish to nats-server
+	pa, err := np.js.PublishMsg(msg)
 	if err != nil {
-		return nil, util.WrapError("failed to create Message payload", err)
+		log.Warn("failed to publish message by nmq", zap.String("topic", np.topic), zap.Error(err), zap.Int("payload_size", len(message.Payload)))
+		return nil, err
 	}
-	pa, err := np.js.Publish(np.topic, payload)
 	return &nmqID{messageID: pa.Sequence}, err
 }
 

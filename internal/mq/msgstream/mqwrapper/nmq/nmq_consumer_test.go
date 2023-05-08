@@ -18,7 +18,6 @@ package nmq
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -110,11 +109,15 @@ func TestComsumeMessage(t *testing.T) {
 	recvMsg, err := c.(*Consumer).sub.NextMsg(1 * time.Second)
 	assert.NoError(t, err)
 	recvMsg.Ack()
-	var data NatsMsgData
-	err = json.Unmarshal(recvMsg.Data, &data)
 	assert.NoError(t, err)
-	assert.Equal(t, msg, data.Payload)
-	assert.True(t, reflect.DeepEqual(prop, data.Properties))
+	assert.Equal(t, msg, recvMsg.Data)
+	properties := make(map[string]string)
+	for k, vs := range recvMsg.Header {
+		if len(vs) > 0 {
+			properties[k] = vs[0]
+		}
+	}
+	assert.True(t, reflect.DeepEqual(prop, properties))
 
 	msg2 := []byte("test the second message")
 	prop2 := map[string]string{"k1": "v3", "k4": "v4"}
@@ -126,10 +129,14 @@ func TestComsumeMessage(t *testing.T) {
 	recvMsg, err = c.(*Consumer).sub.NextMsg(1 * time.Second)
 	assert.NoError(t, err)
 	recvMsg.Ack()
-	var data2 NatsMsgData
-	err = json.Unmarshal(recvMsg.Data, &data2)
-	assert.Equal(t, msg2, data2.Payload)
-	assert.True(t, reflect.DeepEqual(prop2, data2.Properties))
+	assert.Equal(t, msg2, recvMsg.Data)
+	properties = make(map[string]string)
+	for k, vs := range recvMsg.Header {
+		if len(vs) > 0 {
+			properties[k] = vs[0]
+		}
+	}
+	assert.True(t, reflect.DeepEqual(prop2, properties))
 
 	assert.NoError(t, err)
 	assert.NotNil(t, c)

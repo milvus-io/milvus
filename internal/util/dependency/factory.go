@@ -3,10 +3,19 @@ package dependency
 import (
 	"context"
 
-	rmqstream "github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/cockroachdb/errors"
+	smsgstream "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
+
+const (
+	mqTypeDefault = "default"
+	mqTypeNatsmq  = "natsmq"
+	mqTypeRocksmq = "rocksmq"
+	mqTypeKafka   = "kafka"
+	mqTypePulsar  = "pulsar"
 )
 
 type DefaultFactory struct {
@@ -19,20 +28,23 @@ type DefaultFactory struct {
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:       standAlone,
-		msgStreamFactory: rmqstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
+		msgStreamFactory: smsgstream.NewFactory(smsgstream.MsgStreamTypeRmq, "/tmp/milvus/rocksmq/"),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
 	}
 }
 
+// NewFactory creates a new instance of the DefaultFactory type.
+// If standAlone is true, the factory will operate in standalone mode.
 func NewFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{standAlone: standAlone}
 }
 
 // Init create a msg factory(TODO only support one mq at the same time.)
 // In order to guarantee backward compatibility of config file, we still support multiple mq configs.
-// 1. Rocksmq only run on local mode, and it has the highest priority
-// 2. Pulsar has higher priority than Kafka within remote msg
+// The initialization of MQ follows the following rules, if the mq.type is default.
+// 1. standalone(local) mode: rocksmq(ifdefault) > natsmq > Pulsar > Kafka
+// 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
 func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 	// skip if using default factory
 	if f.msgStreamFactory != nil {
@@ -41,41 +53,87 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 
 	f.chunkManagerFactory = storage.NewChunkManagerFactoryWithParam(params)
 
-	// init mq storage
-	if f.standAlone {
-		f.msgStreamFactory = f.initMQLocalService(params)
-		if f.msgStreamFactory != nil {
-			return
-		}
-	}
-
-	f.msgStreamFactory = f.initMQRemoteService(params)
-	if f.msgStreamFactory == nil {
-		panic("no available remote mq configuration, must config Pulsar or Kafka at least one of these!")
+	// initialize mq client or embedded mq.
+	if err := f.initMQ(f.standAlone, params); err != nil {
+		panic(err)
 	}
 }
 
-func (f *DefaultFactory) initMQLocalService(params *paramtable.ComponentParam) msgstream.Factory {
-	if params.RocksmqEnable() {
-		path, err := params.Load("rocksmq.path")
-		if err != nil {
-			panic(err)
+func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
+	err := errors.New("invalid mq config")
+	mqType := f.selectMQType(standalone, params)
+	if mqType == "" {
+		return errors.Wrapf(err, "no available mq config found, %s", mqType)
+	}
+	if err := f.validateMQType(standalone, mqType); err != nil {
+		panic(err)
+	}
+
+	generateErr := func(item *paramtable.ParamItem) error {
+		return errors.Wrapf(err, "%s should not be empty when %s is %s", item.Key, params.MQCfg.Type.Key, mqType)
+	}
+
+	switch mqType {
+	case mqTypeNatsmq:
+		if !params.NatsmqEnable() {
+			return generateErr(&params.NatsmqCfg.Server.StoreDir)
 		}
-		return rmqstream.NewRmsFactory(path)
+		f.msgStreamFactory = smsgstream.NewFactory(smsgstream.MsgStreamTypeNmq, params.NatsmqCfg.Server.StoreDir.GetValue())
+	case mqTypeRocksmq:
+		if !params.RocksmqEnable() {
+			return generateErr(&params.RocksmqCfg.Path)
+		}
+		f.msgStreamFactory = smsgstream.NewFactory(smsgstream.MsgStreamTypeRmq, params.RocksmqCfg.Path.GetValue())
+	case mqTypePulsar:
+		if !params.PulsarEnable() {
+			return generateErr(&params.PulsarCfg.Address)
+		}
+		f.msgStreamFactory = msgstream.NewPmsFactory(&params.PulsarCfg)
+	case mqTypeKafka:
+		if !params.KafkaEnable() {
+			return generateErr(&params.KafkaCfg.Address)
+		}
+		f.msgStreamFactory = msgstream.NewKmsFactory(&params.KafkaCfg)
+	}
+
+	if f.msgStreamFactory == nil {
+		return errors.New("failed to create MQ: check the milvus log for initialization failures")
 	}
 	return nil
 }
 
-// initRemoteService Pulsar has higher priority than Kafka.
-func (f *DefaultFactory) initMQRemoteService(params *paramtable.ComponentParam) msgstream.Factory {
+// Select valid mq if mq type is default.
+func (f *DefaultFactory) selectMQType(standalone bool, params *paramtable.ComponentParam) string {
+	mqType := params.MQCfg.Type.GetValue()
+	if mqType != mqTypeDefault {
+		return mqType
+	}
+
+	if standalone {
+		if params.RocksmqEnable() {
+			return mqTypeRocksmq
+		}
+		if params.NatsmqEnable() {
+			return mqTypeNatsmq
+		}
+	}
 	if params.PulsarEnable() {
-		return msgstream.NewPmsFactory(&params.PulsarCfg)
+		return mqTypePulsar
 	}
-
 	if params.KafkaEnable() {
-		return msgstream.NewKmsFactory(&params.KafkaCfg)
+		return mqTypeKafka
 	}
+	return ""
+}
 
+// Validate mq type.
+func (f *DefaultFactory) validateMQType(standalone bool, mqType string) error {
+	if mqType != mqTypeNatsmq && mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar {
+		return errors.Newf("mq.type %s is invalid", mqType)
+	}
+	if !standalone && (mqType == mqTypeRocksmq || mqType == mqTypeNatsmq) {
+		return errors.Newf("mq %s is only valid in standalone mode")
+	}
 	return nil
 }
 
