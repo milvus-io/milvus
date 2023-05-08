@@ -947,7 +947,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			log.Error("fail to load the grant privilege entity", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
 		}
-		err = appendGrantEntity(v, entity.Object.Name, entity.ObjectName)
+		err = appendGrantEntity(v, entity.Object.Name, funcutil.CombineObjectName(entity.DbName, entity.ObjectName))
 		if err != nil {
 			return entities, err
 		}
