@@ -22,13 +22,16 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
@@ -389,5 +392,96 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
 		<-removePartitionChan
 		assert.True(t, removePartitionCalled)
+	})
+}
+
+func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
+	t.Run("test normal", func(t *testing.T) {
+		defer cleanTestEnv()
+
+		ticker := newTickerWithMockNormalStream()
+		tsoAllocator := mocktso.NewAllocator(t)
+
+		signal := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).
+			Run(func(ctx context.Context, collectionID int64, partitionID int64, ts uint64) {
+				signal <- struct{}{}
+			})
+
+		qc := types.NewMockQueryCoord(t)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+
+		core := newTestCore(withTtSynchronizer(ticker),
+			withMeta(meta),
+			withTsoAllocator(tsoAllocator),
+			withQueryCoord(qc))
+		gc := newBgGarbageCollector(core)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
+		core.garbageCollector = gc
+		core.broker = newServerBroker(core)
+
+		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		<-signal
+	})
+
+	t.Run("test ReleasePartitions failed", func(t *testing.T) {
+		defer cleanTestEnv()
+
+		ticker := newTickerWithMockNormalStream()
+		tsoAllocator := mocktso.NewAllocator(t)
+
+		signal := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+
+		qc := types.NewMockQueryCoord(t)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).
+			Return(merr.Status(nil), fmt.Errorf("mock err")).
+			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest) {
+				signal <- struct{}{}
+			})
+
+		core := newTestCore(withTtSynchronizer(ticker),
+			withMeta(meta),
+			withTsoAllocator(tsoAllocator),
+			withQueryCoord(qc))
+		gc := newBgGarbageCollector(core)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
+		core.garbageCollector = gc
+		core.broker = newServerBroker(core)
+
+		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		<-signal
+	})
+
+	t.Run("test RemovePartition failed", func(t *testing.T) {
+		defer cleanTestEnv()
+
+		ticker := newTickerWithMockNormalStream()
+		tsoAllocator := mocktso.NewAllocator(t)
+
+		signal := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(fmt.Errorf("mock err")).
+			Run(func(ctx context.Context, collectionID int64, partitionID int64, ts uint64) {
+				signal <- struct{}{}
+			})
+
+		qc := types.NewMockQueryCoord(t)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+
+		core := newTestCore(withTtSynchronizer(ticker),
+			withMeta(meta),
+			withTsoAllocator(tsoAllocator),
+			withQueryCoord(qc))
+		gc := newBgGarbageCollector(core)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
+		core.garbageCollector = gc
+		core.broker = newServerBroker(core)
+
+		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		<-signal
 	})
 }

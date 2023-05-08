@@ -598,6 +598,8 @@ func (c *Core) restore(ctx context.Context) error {
 			switch part.State {
 			case pb.PartitionState_PartitionDropping:
 				go c.garbageCollector.ReDropPartition(coll.PhysicalChannelNames, part.Clone(), ts)
+			case pb.PartitionState_PartitionCreating:
+				go c.garbageCollector.RemoveCreatingPartition(part.Clone(), ts)
 			default:
 			}
 		}
