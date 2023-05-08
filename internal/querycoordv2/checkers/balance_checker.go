@@ -64,7 +64,7 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	// all replicas belonging to loading collection will be skipped
 	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
 		collection := b.meta.GetCollection(cid)
-		return collection != nil && b.meta.GetCollection(cid).Status == querypb.LoadStatus_Loaded
+		return collection != nil && collection.Status == querypb.LoadStatus_Loaded
 	})
 	sort.Slice(loadedCollections, func(i, j int) bool {
 		return loadedCollections[i] < loadedCollections[j]
