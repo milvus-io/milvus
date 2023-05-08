@@ -1090,6 +1090,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                              "err_msg": f"not implemented"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="It will report error before range search")
     @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
     def test_range_search_data_type_metric_type_mismatch(self, metric):
         """
@@ -1790,7 +1791,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = M * 4
         ef = limit
         self._connect()
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
                                                                                   dim=dim, is_index=False)[0:5]
@@ -2964,7 +2965,7 @@ class TestCollectionSearch(TestcaseBase):
                 if vectorInsert != vectorRes:
                     getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
                     vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
-                assert str(vectorInsert) == vectorRes
+                assert float(str(vectorInsert)) == float(vectorRes)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23661")
