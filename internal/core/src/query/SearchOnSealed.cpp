@@ -37,8 +37,11 @@ SearchOnSealedIndex(const Schema& schema,
 
     AssertInfo(record.is_ready(field_id), "[SearchOnSealed]Record isn't ready");
     auto field_indexing = record.get_field_indexing(field_id);
-    AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
-               "Metric type of field index isn't the same with search info");
+    if (!search_info.metric_type_.empty()) {
+        AssertInfo(
+            field_indexing->metric_type_ == search_info.metric_type_,
+            "Metric type mismatch: field: " + field_indexing->metric_type_ + ", search: " + search_info.metric_type_);
+    }
 
     auto final = [&] {
         auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
@@ -74,6 +77,7 @@ SearchOnSealedIndex(const Schema& schema,
 void
 SearchOnSealed(const Schema& schema,
                const void* vec_data,
+               const IndexMetaPtr& index_meta,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
@@ -83,14 +87,20 @@ SearchOnSealed(const Schema& schema,
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
-    query::dataset::SearchDataset dataset{search_info.metric_type_,
+    knowhere::MetricType metric_type =
+        index_meta->GetFieldIndexMeta(field_id).GetMetricType();
+    if (!search_info.metric_type_.empty()) {
+        AssertInfo(metric_type == search_info.metric_type_,
+                   "Metric type mismatch: field: " + metric_type + ", search: " + search_info.metric_type_);
+    }
+    query::dataset::SearchDataset dataset{metric_type,
                                           num_queries,
                                           search_info.topk_,
                                           search_info.round_decimal_,
                                           field.get_dim(),
                                           query_data};
 
-    CheckBruteForceSearchParam(field, search_info);
+    CheckBruteForceSearchParam(field, metric_type);
     auto sub_qr = BruteForceSearch(
         dataset, vec_data, row_count, search_info.search_params_, bitset);
 

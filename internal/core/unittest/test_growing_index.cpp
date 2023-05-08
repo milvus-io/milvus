@@ -34,7 +34,7 @@ TEST(GrowingIndex, Correctness) {
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    auto& config = SegcoreConfig::default_config();
+    auto config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_growing_segment_index(true);
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
@@ -48,7 +48,7 @@ TEST(GrowingIndex, Correctness) {
             {
                 "vector": {
                     "embeddings": {
-                        "metric_type": "l2",
+                        "metric_type": "L2",
                         "params": {
                             "nprobe": 16
                         },
@@ -102,7 +102,7 @@ TEST(GrowingIndex, GetVector) {
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    auto& config = SegcoreConfig::default_config();
+    auto config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_growing_segment_index(true);
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};

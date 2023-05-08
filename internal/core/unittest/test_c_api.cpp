@@ -100,6 +100,33 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
+const char*
+get_default_ip_index_meta() {
+    static std::string conf = R"(maxIndexRowCount: 1000
+                                index_metas: <
+                                  fieldID: 100
+                                  collectionID: 1001
+                                  index_name: "test-index"
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "index_type"
+                                    value: "IVF_FLAT"
+                                  >
+                                  index_params: <
+                                   key: "metric_type"
+                                   value: "IP"
+                                  >
+                                  index_params: <
+                                   key: "nlist"
+                                   value: "128"
+                                  >
+                                >)";
+    return conf.c_str();
+}
+
 auto
 generate_data(int N) {
     std::vector<char> raw_data;
@@ -208,6 +235,32 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
         collection_schema, &schema_string);
     assert(marshal);
     return schema_string;
+}
+
+std::string
+generate_index_meta(std::string metric_type, int dim) {
+    milvus::proto::segcore::CollectionIndexMeta collection_index_meta;
+    collection_index_meta.set_maxindexrowcount(100000);
+    auto index_meta = collection_index_meta.add_index_metas();
+    index_meta->set_fieldid(100);
+    auto index_type_params = index_meta->add_index_params();
+    index_type_params->set_key("index_type");
+    index_type_params->set_value("IVF_FLAT");
+    auto metric_type_params = index_meta->add_index_params();
+    metric_type_params->set_key("metric_type");
+    metric_type_params->set_value(metric_type);
+    auto index_specific_params = index_meta->add_index_params();
+    index_specific_params->set_key("nlist");
+    index_specific_params->set_value("128");
+    auto type_params = index_meta->add_type_params();
+    type_params->set_key("dim");
+    type_params->set_value(std::to_string(dim));
+
+    std::string index_meta_string;
+    auto marshal = google::protobuf::TextFormat::PrintToString(
+        collection_index_meta, &index_meta_string);
+    assert(marshal);
+    return index_meta_string;
 }
 
 // VecIndexPtr
@@ -1009,6 +1062,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1081,6 +1135,7 @@ TEST(CApiTest, SearchTest) {
 
 TEST(CApiTest, SearchTestWithExpr) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -1361,6 +1416,7 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
 
 TEST(CApiTest, ReudceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(collection, get_default_index_meta());
     auto segment = NewSegment(collection, Growing, -1);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1449,6 +1505,7 @@ TEST(CApiTest, ReudceNullResult) {
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
     auto collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(collection, get_default_index_meta());
     auto segment = NewSegment(collection, Growing, -1);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1584,6 +1641,7 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
               << num_queries << ")" << std::endl;
 
     auto collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(collection, get_default_index_meta());
     auto segment = NewSegment(collection, Growing, -1);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -1808,6 +1866,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -1959,6 +2020,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2106,6 +2170,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2267,6 +2334,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2443,6 +2513,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2602,6 +2675,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2771,6 +2847,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::JACCARD, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -2932,6 +3011,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::JACCARD, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -3107,6 +3189,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::JACCARD, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -3289,6 +3374,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::JACCARD, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
 
@@ -3506,6 +3594,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
 
@@ -3676,6 +3767,9 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
 
@@ -3799,6 +3893,9 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     std::string schema_string =
         generate_collection_schema(knowhere::metric::L2, DIM, false);
     auto collection = NewCollection(schema_string.c_str());
+    std::string index_meta_string = generate_index_meta(knowhere::metric::L2, DIM);
+    SetIndexMeta(collection, index_meta_string.c_str());
+
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Sealed, -1);
 
@@ -3992,7 +4089,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
 
-    auto segment = CreateSealedSegment(schema).release();
+    auto segment = CreateSealedSegment(schema, empty_index_meta).release();
 
     int N = ROW_COUNT;
     auto raw_data = DataGen(schema, N);
@@ -4153,6 +4250,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_ip_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4220,6 +4318,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_ip_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4288,6 +4387,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 
@@ -4355,6 +4455,7 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
 
 TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     auto c_collection = NewCollection(get_default_schema_config());
+    SetIndexMeta(c_collection, get_default_index_meta());
     auto segment = NewSegment(c_collection, Growing, -1);
     auto col = (milvus::segcore::Collection*)c_collection;
 

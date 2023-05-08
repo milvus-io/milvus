@@ -21,7 +21,7 @@ namespace milvus::query {
 
 void
 CheckBruteForceSearchParam(const FieldMeta& field,
-                           const SearchInfo& search_info);
+                           const knowhere::MetricType& metric_type);
 
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& dataset,

@@ -41,17 +41,15 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                                           info.round_decimal_,
                                           field.get_dim(),
                                           query_data};
-    if (indexing_record.is_in(vecfield_id)) {
-        const auto& field_indexing =
-            indexing_record.get_vec_field_indexing(vecfield_id);
+    const auto& field_indexing =
+        indexing_record.get_vec_field_indexing(vecfield_id);
 
-        auto indexing = field_indexing.get_segment_indexing();
-        SearchInfo search_conf = field_indexing.get_search_params(info);
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing);
-        auto result =
-            SearchOnIndex(search_dataset, *vec_index, search_conf, bitset);
-        results.merge(result);
-    }
+    auto indexing = field_indexing.get_segment_indexing();
+    SearchInfo search_conf = field_indexing.get_search_params(info);
+    auto vec_index = dynamic_cast<index::VectorIndex*>(indexing);
+    auto result =
+        SearchOnIndex(search_dataset, *vec_index, search_conf, bitset);
+    results.merge(result);
 }
 
 void
@@ -64,6 +62,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
+    auto& indexing_record = segment.get_indexing_record();
+    auto& index_meta = segment.get_index_meta();
+
     auto active_count =
         std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
@@ -71,15 +72,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
     auto& field = schema[vecfield_id];
-    CheckBruteForceSearchParam(field, info);
 
     auto data_type = field.get_data_type();
     AssertInfo(datatype_is_vector(data_type),
                "[SearchOnGrowing]Data type isn't vector type");
 
     auto dim = field.get_dim();
-    auto topk = info.topk_;
-    auto metric_type = info.metric_type_;
+    auto topk = info.topk_;    
+    auto metric_type =
+        index_meta->GetFieldIndexMeta(field.get_id()).GetMetricType();
+    if (!info.metric_type_.empty()) {
+        AssertInfo(metric_type == info.metric_type_,
+                   "Metric type mismatch: field: " + metric_type + ", search: " + info.metric_type_);
+    }
     auto round_decimal = info.round_decimal_;
 
     // step 2: small indexing search
@@ -87,7 +92,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     dataset::SearchDataset search_dataset{
         metric_type, num_queries, topk, round_decimal, dim, query_data};
 
-    if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
+    if (indexing_record.SyncDataWithIndex(field.get_id())) {
         FloatSegmentIndexSearch(segment,
                                 info,
                                 query_data,
@@ -100,6 +105,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         results.unity_topK_ = topk;
         results.total_nq_ = num_queries;
     } else {
+        CheckBruteForceSearchParam(field, metric_type);
+
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_field_data_base(vecfield_id);

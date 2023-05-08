@@ -79,6 +79,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_;
     }
 
+    const IndexMetaPtr&
+    get_index_meta() const {
+        return index_meta_;
+    }
+
     const IndexingRecord&
     get_indexing_record() const {
         return indexing_record_;
@@ -255,10 +260,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t id_;
 };
-
-const static IndexMetaPtr empty_index_meta =
-    std::make_shared<CollectionIndexMeta>(1024,
-                                          std::map<FieldId, FieldIndexMeta>());
 
 inline SegmentGrowingPtr
 CreateGrowingSegment(

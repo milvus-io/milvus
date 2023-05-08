@@ -110,7 +110,7 @@ BENCHMARK(Search_GrowingIndex)
 
 static void
 Search_Sealed(benchmark::State& state) {
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     static int64_t N = 1024 * 1024;
     const auto dataset_ = [] {
         auto dataset_ = DataGen(schema, N);

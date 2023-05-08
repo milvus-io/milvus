@@ -454,6 +454,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         auto& vec_data = fixed_fields_.at(field_id);
         query::SearchOnSealed(*schema_,
                               vec_data.data(),
+                              index_meta_,
                               search_info,
                               query_data,
                               query_count,
@@ -559,8 +560,11 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     }
 }
 
-SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
+SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
+                                     IndexMetaPtr indexMeta,
+                                     int64_t segment_id)
     : schema_(schema),
+      index_meta_(indexMeta),
       insert_record_(*schema, MAX_ROW_COUNT),
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),

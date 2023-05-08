@@ -30,6 +30,7 @@ SearchOnSealedIndex(const Schema& schema,
 void
 SearchOnSealed(const Schema& schema,
                const void* vec_data,
+               const IndexMetaPtr& index_meta,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,

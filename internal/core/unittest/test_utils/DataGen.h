@@ -531,9 +531,23 @@ SealedLoadFieldData(const GeneratedData& dataset,
 
 inline std::unique_ptr<SegmentSealed>
 SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     return segment;
+}
+
+inline IndexMetaPtr
+GenIndexMeta(FieldId vec_id, knowhere::MetricType metric_type, int dim) {
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"}, {"metric_type", metric_type}, {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", std::to_string(dim)}};
+    FieldIndexMeta fieldIndexMeta(
+        vec_id, std::move(index_params), std::move(type_params));
+
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec_id, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+    return metaPtr;
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>

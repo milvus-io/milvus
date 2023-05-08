@@ -19,7 +19,7 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                const SegcoreConfig& config)
     : max_index_row_count_(max_index_row_cout), config_(config) {
     origin_index_type_ = index_meta_.GetIndexType();
-    metric_type_ = index_meta_.GeMetricType();
+    metric_type_ = index_meta_.GetMetricType();
 
     index_type_ = support_index_types[0];
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
@@ -62,7 +62,6 @@ VecIndexConfig::GetBuildBaseParams() {
 SearchInfo
 VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
     SearchInfo searchParam(searchInfo);
-    searchParam.metric_type_ = metric_type_;
     searchParam.search_params_ = search_params_;
     return searchParam;
 }

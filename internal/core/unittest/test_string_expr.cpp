@@ -649,7 +649,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto str_col =
         dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto query_ptr = vec_col.data();
-    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment = CreateGrowingSegment(schema, GenIndexMeta(fvec_meta.get_id(), knowhere::metric::L2, dim));
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

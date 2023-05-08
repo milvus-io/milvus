@@ -36,7 +36,10 @@ namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
+    explicit SegmentSealedImpl(SchemaPtr schema,
+                               IndexMetaPtr indexMeta,
+                               int64_t segment_id);
+
     ~SegmentSealedImpl() override = default;
     void
     LoadIndex(const LoadIndexInfo& info) override;
@@ -213,6 +216,8 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
  private:
+    IndexMetaPtr index_meta_;
+
     // segment loading state
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
@@ -240,8 +245,10 @@ class SegmentSealedImpl : public SegmentSealed {
 };
 
 inline SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t segment_id = -1) {
-    return std::make_unique<SegmentSealedImpl>(schema, segment_id);
+CreateSealedSegment(SchemaPtr schema,
+                    IndexMetaPtr indexMeta,
+                    int64_t segment_id = -1) {
+    return std::make_unique<SegmentSealedImpl>(schema, indexMeta, segment_id);
 }
 
 }  // namespace milvus::segcore

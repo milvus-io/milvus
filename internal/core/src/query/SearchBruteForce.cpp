@@ -23,9 +23,8 @@ namespace milvus::query {
 
 void
 CheckBruteForceSearchParam(const FieldMeta& field,
-                           const SearchInfo& search_info) {
+                           const knowhere::MetricType& metric_type) {
     auto data_type = field.get_data_type();
-    auto& metric_type = search_info.metric_type_;
 
     AssertInfo(datatype_is_vector(data_type),
                "[BruteForceSearch] Data type isn't vector type");
