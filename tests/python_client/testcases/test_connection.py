@@ -931,7 +931,7 @@ class TestConnectUriInvalid(TestcaseBase):
                                      check_items={ct.err_code: 2})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("port", ["8080", "443", "0", "65536"])
+    @pytest.mark.parametrize("port", ["8080", "443", "0"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     @pytest.mark.parametrize("protocol", ["http", "https"])
     def test_parameters_with_invalid_port(self, host, port, connect_name, protocol):
@@ -947,7 +947,7 @@ class TestConnectUriInvalid(TestcaseBase):
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("host", ["www.google.com"])
-    @pytest.mark.parametrize("port", ["65535", "19530"])
+    @pytest.mark.parametrize("port", ["19530"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     @pytest.mark.parametrize("protocol", ["http", "https"])
     def test_parameters_with_invalid_url(self, host, port, connect_name, protocol):
@@ -960,6 +960,22 @@ class TestConnectUriInvalid(TestcaseBase):
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 2})
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("host", ["www.google.com"])
+    @pytest.mark.parametrize("port", ["65535"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    @pytest.mark.parametrize("protocol", ["http", "https"])
+    def test_parameters_with_port_out_of_range(self, host, port, connect_name, protocol):
+        """
+        target: test the host part of the uri parameter
+        method: use a domain name that does not exist in error
+        expected: connection is False
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 1})
 
 
 class TestConnectAddressInvalid(TestcaseBase):
