@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -129,12 +129,12 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			0, "by-dev-rootcoord-dml-test_v0",
 			1, 0, "", 0,
 			1, 1, "", 0,
-			"CollID 0 mismach with seginfo collID 1"},
+			"CollID 0 mismatch with seginfo collID 1"},
 		{true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 0, "by-dev-rootcoord-dml-test_v2", 0,
 			1, 1, "by-dev-rootcoord-dml-test_v3", 0,
-			"chanName c1 mismach with seginfo chanName c2"},
+			"chanName c1 mismatch with seginfo chanName c2"},
 		{true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 0, "by-dev-rootcoord-dml-test_v1", 0,

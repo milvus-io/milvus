@@ -154,7 +154,7 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 	// 	assert.Error(t, err)
 	// })
 
-	createAdatper := func(dt schemapb.DataType) *NumpyAdapter {
+	createAdapter := func(dt schemapb.DataType) *NumpyAdapter {
 		adapter := &NumpyAdapter{
 			reader: &MockReader{},
 			npyReader: &npy.Reader{
@@ -169,13 +169,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read bool", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadBool(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Bool)
+		adapter = createAdapter(schemapb.DataType_Bool)
 		data, err = adapter.ReadBool(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -194,7 +194,7 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read uint8", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		adapter.npyReader.Header.Descr.Type = "dummy"
 		data, err := adapter.ReadUint8(1)
 		assert.Nil(t, data)
@@ -220,13 +220,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read int8", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadInt8(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Int8)
+		adapter = createAdapter(schemapb.DataType_Int8)
 		data, err = adapter.ReadInt8(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -245,13 +245,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read int16", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadInt16(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Int16)
+		adapter = createAdapter(schemapb.DataType_Int16)
 		data, err = adapter.ReadInt16(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -270,13 +270,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read int32", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadInt32(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Int32)
+		adapter = createAdapter(schemapb.DataType_Int32)
 		data, err = adapter.ReadInt32(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -295,13 +295,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read int64", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadInt64(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Int64)
+		adapter = createAdapter(schemapb.DataType_Int64)
 		data, err = adapter.ReadInt64(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -320,13 +320,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read float", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadFloat32(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Float)
+		adapter = createAdapter(schemapb.DataType_Float)
 		data, err = adapter.ReadFloat32(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -345,13 +345,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read double", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadFloat64(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_Double)
+		adapter = createAdapter(schemapb.DataType_Double)
 		data, err = adapter.ReadFloat64(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
@@ -370,13 +370,13 @@ func Test_NumpyAdapterReadError(t *testing.T) {
 
 	t.Run("test read varchar", func(t *testing.T) {
 		// type mismatch
-		adapter := createAdatper(schemapb.DataType_None)
+		adapter := createAdapter(schemapb.DataType_None)
 		data, err := adapter.ReadString(1)
 		assert.Nil(t, data)
 		assert.Error(t, err)
 
 		// reader is nil, cannot read
-		adapter = createAdatper(schemapb.DataType_VarChar)
+		adapter = createAdapter(schemapb.DataType_VarChar)
 		adapter.reader = nil
 		adapter.npyReader.Header.Descr.Type = "S3"
 		data, err = adapter.ReadString(1)

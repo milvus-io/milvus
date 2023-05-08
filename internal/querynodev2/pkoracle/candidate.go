@@ -41,7 +41,7 @@ type candidateWithWorker struct {
 // CandidateFilter filter type for candidate.
 type CandidateFilter func(candidate candidateWithWorker) bool
 
-// WithSegmentType returns CandiateFilter with provided segment type.
+// WithSegmentType returns CandidateFilter with provided segment type.
 func WithSegmentType(typ commonpb.SegmentState) CandidateFilter {
 	return func(candidate candidateWithWorker) bool {
 		return candidate.Type() == typ

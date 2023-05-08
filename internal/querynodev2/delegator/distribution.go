@@ -114,7 +114,7 @@ func (d *distribution) Peek(partitions ...int64) (sealed []SnapshotItem, growing
 	return sealed, growing
 }
 
-// Serviceable returns wether current snapshot is serviceable.
+// Serviceable returns whether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
 	return d.serviceable.Load()
 }

@@ -1,0 +1,26 @@
+# See https://github.com/crate-ci/typos/blob/master/docs/reference.md to configure typos
+[default.extend-words]
+ba = "ba"
+comando = "comando"
+componet = "componet"             # TODO: component
+Configuations = "Configuations"   # TODO: Configurations
+datas = "datas"                   # TODO: data
+DEPENDEES = "DEPENDEES"
+depositos = "depositos"
+Dereferencable = "Dereferencable" # TODO: Dereferenceable
+DOKCER = "DOKCER"                 # TODO: DOCKER
+endianess = "endianess"           # TODO: endianness
+entitiy = "entitiy"               # TODO: entity
+fo = "fo"
+indexs = "indexs"                 # TODO: indexes | indices
+lastest = "lastest"               # TODO: latest
+mis = "mis"
+nd = "nd"
+NIN = "NIN"
+provids = "provids"               # TODO: typo or not?
+ser = "ser"
+Uncomplete = "Uncomplete"         # TODO: Incomplete
+unexpect = "unexpect"             # TODO: unexpected
+VAULE = "VAULE"                   # TODO: VALUE
+[files]
+extend-exclude = ["go.mod", "*.pb.go", "*.pb.cc", "*.pb.h", "*.csr"]

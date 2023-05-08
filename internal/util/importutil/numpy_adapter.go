@@ -29,13 +29,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 var (
@@ -255,8 +255,8 @@ func (n *NumpyAdapter) checkCount(count int) int {
 
 func (n *NumpyAdapter) ReadBool(count int) ([]bool, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read bool data with a zero or nagative count")
-		return nil, errors.New("cannot read bool data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read bool data with a zero or negative count")
+		return nil, errors.New("cannot read bool data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -289,8 +289,8 @@ func (n *NumpyAdapter) ReadBool(count int) ([]bool, error) {
 
 func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read uint8 data with a zero or nagative count")
-		return nil, errors.New("cannot read uint8 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read uint8 data with a zero or negative count")
+		return nil, errors.New("cannot read uint8 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -326,8 +326,8 @@ func (n *NumpyAdapter) ReadUint8(count int) ([]uint8, error) {
 
 func (n *NumpyAdapter) ReadInt8(count int) ([]int8, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read int8 data with a zero or nagative count")
-		return nil, errors.New("cannot read int8 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read int8 data with a zero or negative count")
+		return nil, errors.New("cannot read int8 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -360,8 +360,8 @@ func (n *NumpyAdapter) ReadInt8(count int) ([]int8, error) {
 
 func (n *NumpyAdapter) ReadInt16(count int) ([]int16, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read int16 data with a zero or nagative count")
-		return nil, errors.New("cannot read int16 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read int16 data with a zero or negative count")
+		return nil, errors.New("cannot read int16 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -394,8 +394,8 @@ func (n *NumpyAdapter) ReadInt16(count int) ([]int16, error) {
 
 func (n *NumpyAdapter) ReadInt32(count int) ([]int32, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read int32 data with a zero or nagative count")
-		return nil, errors.New("cannot read int32 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read int32 data with a zero or negative count")
+		return nil, errors.New("cannot read int32 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -428,8 +428,8 @@ func (n *NumpyAdapter) ReadInt32(count int) ([]int32, error) {
 
 func (n *NumpyAdapter) ReadInt64(count int) ([]int64, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read int64 data with a zero or nagative count")
-		return nil, errors.New("cannot read int64 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read int64 data with a zero or negative count")
+		return nil, errors.New("cannot read int64 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -462,8 +462,8 @@ func (n *NumpyAdapter) ReadInt64(count int) ([]int64, error) {
 
 func (n *NumpyAdapter) ReadFloat32(count int) ([]float32, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read float32 data with a zero or nagative count")
-		return nil, errors.New("cannot read float32 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read float32 data with a zero or negative count")
+		return nil, errors.New("cannot read float32 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -496,8 +496,8 @@ func (n *NumpyAdapter) ReadFloat32(count int) ([]float32, error) {
 
 func (n *NumpyAdapter) ReadFloat64(count int) ([]float64, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read float64 data with a zero or nagative count")
-		return nil, errors.New("cannot read float64 data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read float64 data with a zero or negative count")
+		return nil, errors.New("cannot read float64 data with a zero or negative count")
 	}
 
 	// incorrect type
@@ -530,8 +530,8 @@ func (n *NumpyAdapter) ReadFloat64(count int) ([]float64, error) {
 
 func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	if count <= 0 {
-		log.Error("Numpy adapter: cannot read varchar data with a zero or nagative count")
-		return nil, errors.New("cannot read varchar data with a zero or nagative count")
+		log.Error("Numpy adapter: cannot read varchar data with a zero or negative count")
+		return nil, errors.New("cannot read varchar data with a zero or negative count")
 	}
 
 	// incorrect type

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -1040,7 +1041,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 	defer sp.End()
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
-	//TODO: use collectionID instead of collectionName
+	// TODO: use collectionID instead of collectionName
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
@@ -1364,7 +1365,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	method := "ShowPartitions"
 	tr := timerecord.NewTimeRecorder(method)
-	//TODO: use collectionID instead of collectionName
+	// TODO: use collectionID instead of collectionName
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
@@ -3204,7 +3205,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 
 	getSegmentsByStatesResponse, err := node.dataCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 		CollectionID: collectionID,
-		// -1 means list all partition segemnts
+		// -1 means list all partition segments
 		PartitionID: -1,
 		States:      []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed},
 	})
@@ -3411,7 +3412,7 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 			},
 		}, nil
 	}
-	//metrics.ProxyLinkedSDKs.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Inc()
+	// metrics.ProxyLinkedSDKs.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Inc()
 	return &milvuspb.RegisterLinkResponse{
 		Address: nil,
 		Status: &commonpb.Status{
@@ -3552,7 +3553,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 			}, nil
 		}
 
-		//log.Debug("Proxy.GetProxyMetrics",
+		// log.Debug("Proxy.GetProxyMetrics",
 		//	zap.String("metricType", metricType))
 
 		return proxyMetrics, nil
@@ -4248,7 +4249,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 		}, nil
 	}
 	if IsDefaultRole(req.RoleName) {
-		errMsg := fmt.Sprintf("the role[%s] is a default role, which can't be droped", req.RoleName)
+		errMsg := fmt.Sprintf("the role[%s] is a default role, which can't be dropped", req.RoleName)
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    errMsg,

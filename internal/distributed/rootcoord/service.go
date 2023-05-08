@@ -418,7 +418,7 @@ func (s *Server) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTas
 	return s.rootCoord.ListImportTasks(ctx, in)
 }
 
-// Report impot task state to datacoord
+// Report import task state to datacoord
 func (s *Server) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return s.rootCoord.ReportImport(ctx, in)
 }

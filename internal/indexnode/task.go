@@ -468,7 +468,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 		// TODO: unify blob key to file key instead of full path
 		parts := strings.Split(blob.Key, "/")
 		if len(parts) == 0 {
-			return fmt.Errorf("invaild blob key: %s", blob.Key)
+			return fmt.Errorf("invalid blob key: %s", blob.Key)
 		}
 		fileKey := parts[len(parts)-1]
 		saveFileKeys[i] = fileKey

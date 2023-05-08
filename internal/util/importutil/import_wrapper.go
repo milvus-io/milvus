@@ -58,7 +58,7 @@ const (
 	// progress percent value of persist state
 	ProgressValueForPersist = 90
 
-	// keywords of import task informations
+	// keywords of import task information
 	FailedReason    = "failed_reason"
 	Files           = "files"
 	CollectionName  = "collection"
@@ -214,7 +214,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 			}
 		}
 
-		// check dupliate file
+		// check duplicate file
 		_, ok := fileNames[name]
 		if ok {
 			log.Error("import wrapper: duplicate file name", zap.String("filePath", filePath))

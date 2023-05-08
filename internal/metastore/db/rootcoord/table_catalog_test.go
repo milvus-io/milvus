@@ -1785,12 +1785,12 @@ func TestTableCatalog_AlterGrant_InvalidType(t *testing.T) {
 
 func TestTableCatalog_ListGrant(t *testing.T) {
 	var (
-		roleID  int64 = 1
-		grantID int64 = 10
-		grant   *milvuspb.GrantEntity
-		grants  []*dbmodel.Grant
-		entites []*milvuspb.GrantEntity
-		err     error
+		roleID   int64 = 1
+		grantID  int64 = 10
+		grant    *milvuspb.GrantEntity
+		grants   []*dbmodel.Grant
+		entities []*milvuspb.GrantEntity
+		err      error
 	)
 
 	grant = &milvuspb.GrantEntity{
@@ -1819,14 +1819,14 @@ func TestTableCatalog_ListGrant(t *testing.T) {
 		},
 	}, nil).Once()
 
-	entites, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	entities, err = mockCatalog.ListGrant(ctx, tenantID, grant)
 	require.NoError(t, err)
-	require.Equal(t, 2, len(entites))
-	require.Equal(t, "foo", entites[0].Role.Name)
-	require.Equal(t, "Collection", entites[1].Object.Name)
-	require.Equal(t, "col1", entites[1].ObjectName)
-	require.Equal(t, "root", entites[1].Grantor.User.Name)
-	require.Equal(t, "*", entites[1].Grantor.Privilege.Name)
+	require.Equal(t, 2, len(entities))
+	require.Equal(t, "foo", entities[0].Role.Name)
+	require.Equal(t, "Collection", entities[1].Object.Name)
+	require.Equal(t, "col1", entities[1].ObjectName)
+	require.Equal(t, "root", entities[1].Grantor.User.Name)
+	require.Equal(t, "*", entities[1].Grantor.Privilege.Name)
 }
 
 func TestTableCatalog_ListGrant_GetRolesError(t *testing.T) {

@@ -174,7 +174,7 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
-// InitSegcore set init params of segCore, such as chunckRows, SIMD type...
+// InitSegcore set init params of segCore, such as chunkRows, SIMD type...
 func (node *QueryNode) InitSegcore() {
 	cEasyloggingYaml := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
 	C.SegcoreInit(cEasyloggingYaml)

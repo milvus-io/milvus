@@ -7,7 +7,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -17,11 +16,11 @@ import (
 // We wrap original protobuf structure for 2 reasons:
 // 1. Milvus uses `bytes` as the type of `schema` field,
 // while the bytes has to be serialized by proto.Marshal.
-// It's very inconvenient for an HTTP clien to do this,
+// It's very inconvenient for an HTTP client to do this,
 // so we change the type to a struct,
 // and does the conversion for user.
 // 2. Some fields uses proto.oneof, does not supported directly json marshal
-// so we have to implements the marshal procedure. example: InsertReqeust
+// so we have to implements the marshal procedure. example: InsertRequest
 
 // WrappedCreateCollectionRequest wraps CreateCollectionRequest
 type WrappedCreateCollectionRequest struct {

@@ -814,7 +814,7 @@ func (p *NumpyParser) splitFieldsData(fieldsData map[storage.FieldID]storage.Fie
 		p.autoIDRange = append(p.autoIDRange, rowIDBegin, rowIDEnd)
 	}
 
-	// if the primary key is not auto-gernerate and user doesn't provide, return error
+	// if the primary key is not auto-generate and user doesn't provide, return error
 	primaryData, ok := fieldsData[primaryKey.GetFieldID()]
 	if !ok || primaryData.RowNum() <= 0 {
 		log.Error("Numpy parser: primary key field is not provided", zap.String("keyName", primaryKey.GetName()))

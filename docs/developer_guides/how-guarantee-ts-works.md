@@ -37,7 +37,7 @@ records, but also insert timetick continuously. Taking "syncTs1" in the figure a
 other words, the inserted record with a timestamp smaller than syncTs1 will no longer appear in the message queue.
 
 
-![ts-watermask](./figs/guarantee-ts-ts-mask.png)
+![ts-watermark](./figs/guarantee-ts-ts-mask.png)
 
 ## Guarantee Timestamp
 

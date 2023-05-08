@@ -125,7 +125,7 @@ func WithRetryTimes(n int64) SessionOption {
 	return func(session *Session) { session.sessionRetryTimes = n }
 }
 
-func WithResueNodeID(b bool) SessionOption {
+func WithReuseNodeID(b bool) SessionOption {
 	return func(session *Session) { session.reuseNodeID = b }
 }
 
@@ -457,7 +457,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					close(failCh)
 					return
 				}
-				//failCh <- true
+				// failCh <- true
 			}
 		}
 	}()
@@ -589,10 +589,10 @@ func (w *sessionWatcher) start() {
 // eventChannel.
 // prefix is a parameter to know which service to watch and can be obtained in
 // typeutil.type.go.
-// revision is a etcd reversion to prevent missing key events and can be obtained
+// revision is an etcd reversion to prevent missing key events and can be obtained
 // in GetSessions.
-// If a server up, an event will be add to channel with eventType SessionAddType.
-// If a server down, an event will be add to channel with eventType SessionDelType.
+// If a server up, an event will be added to channel with eventType SessionAddType.
+// If a server down, an event will be added to channel with eventType SessionDelType.
 func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
 	w := &sessionWatcher{
 		s:        s,
@@ -609,9 +609,9 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 // WatchServicesWithVersionRange watches the service's up and down in etcd, and sends event to event Channel.
 // Acts like WatchServices but with extra version range check.
 // prefix is a parameter to know which service to watch and can be obtained in type util.type.go.
-// revision is a etcd reversion to prevent missing key events and can be obtained in GetSessions.
-// If a server up, an event will be add to channel with eventType SessionAddType.
-// If a server down, an event will be add to channel with eventType SessionDelType.
+// revision is an etcd reversion to prevent missing key events and can be obtained in GetSessions.
+// If a server up, an event will be added to channel with eventType SessionAddType.
+// If a server down, an event will be added to channel with eventType SessionDelType.
 func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
 	w := &sessionWatcher{
 		s:        s,
@@ -678,7 +678,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 func (w *sessionWatcher) handleWatchErr(err error) error {
 	// if not ErrCompacted, just close the channel
 	if err != v3rpc.ErrCompacted {
-		//close event channel
+		// close event channel
 		log.Warn("Watch service found error", zap.Error(err))
 		close(w.eventCh)
 		return err
@@ -723,7 +723,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					continue
 				}
 				// not ok, connection lost
-				log.Warn("connection lost detected, shuting down")
+				log.Warn("connection lost detected, shutting down")
 				s.SetDisconnected(true)
 				if callback != nil {
 					go callback()
@@ -747,7 +747,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				if resp.Err() != nil {
 					// if not ErrCompacted, just close the channel
 					if resp.Err() != v3rpc.ErrCompacted {
-						//close event channel
+						// close event channel
 						log.Warn("Watch service found error", zap.Error(resp.Err()))
 						if s.keepAliveCancel != nil {
 							s.keepAliveCancel()

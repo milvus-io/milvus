@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
@@ -288,7 +291,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get partitions in collection.", zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
-	//fetch search_growing from query param
+	// fetch search_growing from query param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
@@ -493,7 +496,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	return nil
 }
 
-// IDs2Expr converts ids slices to bool expresion with specified field name
+// IDs2Expr converts ids slices to bool expression with specified field name
 func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	var idsStr string
 	switch ids.GetIdField().(type) {
@@ -510,7 +513,7 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 }
 
 func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
-	log.Ctx(ctx).Debug("reduceInternelRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
+	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
 		ret = &milvuspb.QueryResults{}
 

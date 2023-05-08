@@ -25,7 +25,7 @@ TEST(Tracer, Init) {
     auto config = std::make_shared<TraceConfig>();
     config->exporter = "stdout";
     config->nodeID = 1;
-    initTelementry(config.get());
+    initTelemetry(config.get());
     auto span = StartSpan("test");
     Assert(span->IsRecording());
 
@@ -33,7 +33,7 @@ TEST(Tracer, Init) {
     config->exporter = "jaeger";
     config->jaegerURL = "http://localhost:14268/api/traces";
     config->nodeID = 1;
-    initTelementry(config.get());
+    initTelemetry(config.get());
     span = StartSpan("test");
     Assert(span->IsRecording());
 }
@@ -42,7 +42,7 @@ TEST(Tracer, Span) {
     auto config = std::make_shared<TraceConfig>();
     config->exporter = "stdout";
     config->nodeID = 1;
-    initTelementry(config.get());
+    initTelemetry(config.get());
 
     auto ctx = std::make_shared<TraceContext>();
     ctx->traceID = new uint8_t[16]{0x01,

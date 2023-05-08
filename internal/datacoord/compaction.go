@@ -315,7 +315,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				c.completeCompaction(stateResult.GetResult())
 				continue
 			}
-			// check wether the CompactionPlan is timeout
+			// check whether the CompactionPlan is timeout
 			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 				continue
 			}

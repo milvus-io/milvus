@@ -199,7 +199,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		return errors.New("JSON row consumer is not initialized")
 	}
 
-	// flush in necessery
+	// flush in necessary
 	if rows == nil {
 		err := v.flush(true)
 		log.Info("JSON row consumer finished")

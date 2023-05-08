@@ -138,7 +138,7 @@ func (ss *SuffixSnapshot) hideRootPrefix(value string) string {
 }
 
 // composeSnapshotPrefix build a prefix for load snapshots
-// formated like [snapshotPrefix]/key[sep]
+// formatted like [snapshotPrefix]/key[sep]
 func (ss *SuffixSnapshot) composeSnapshotPrefix(key string) string {
 	return path.Join(ss.snapshotPrefix, key+ss.separator)
 }
@@ -174,7 +174,7 @@ func (ss *SuffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
 }
 
 // isTSOfKey check whether a key is in ts-key format of provided group key
-// if true, laso returns parsed ts value
+// if true, also returns parsed ts value
 func (ss *SuffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Timestamp, bool) {
 	// not in snapshot path
 	if !strings.HasPrefix(key, ss.snapshotPrefix) {
@@ -286,7 +286,7 @@ func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) 
 	tsKey := ss.composeTSKey(key, ts)
 
 	// provided key value is latest
-	// stores both tsKey and orignal key
+	// stores both tsKey and original key
 	after, err := ss.checkKeyTS(key, ts)
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 	for key, value := range kvs {
 		tsKey := ss.composeTSKey(key, ts)
 		// provided key value is latest
-		// stores both tsKey and orignal key
+		// stores both tsKey and original key
 		after, err = ss.checkKeyTS(key, ts)
 		if err != nil {
 			return nil, nil, err
@@ -530,7 +530,7 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 			return err
 		}
 
-		// add tombstone to orignal key and add ts entry
+		// add tombstone to original key and add ts entry
 		for _, key := range keys {
 			key = ss.hideRootPrefix(key)
 			execute[key] = string(SuffixSnapshotTombstone)

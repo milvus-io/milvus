@@ -215,8 +215,8 @@ jobs:
         #continue-on-error: true # do not impact ci-passed for now
         run: |
           chmod +x build/builder.sh
-          chmod +x scripts/run_intergration_test.sh
-          ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
+          chmod +x scripts/run_integration_test.sh
+          ./build/builder.sh /bin/bash -c ./scripts/run_integration_test.sh
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go]

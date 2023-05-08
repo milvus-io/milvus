@@ -1,6 +1,6 @@
 # Data Coordinator
 
-Data cooridnator(datacoord for short) is the component to organize DataNodes and segments allocations.
+Data coordinator(datacoord for short) is the component to organize DataNodes and segments allocations.
 
 ## Dependency
 

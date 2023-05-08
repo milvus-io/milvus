@@ -706,7 +706,7 @@ class TestUtilityBase(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_collection_after_drop(self):
         """
-        target: test has_collection with collection name droped before
+        target: test has_collection with collection name dropped before
         method: input random collection name
         expected: False
         """
@@ -2219,7 +2219,7 @@ class TestUtilityUserPassword(TestcaseBase):
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_delete_user_with_invalid_username(self, host, port):
         """
-        target: test the nonexistant user when deleting credential
+        target: test the nonexistent user when deleting credential
         method: delete a credential with user wrong
         excepted: delete is true
         """

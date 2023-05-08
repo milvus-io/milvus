@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -459,7 +460,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 234}}
 		iMsg = &inMsg
 
-		// Triger auto flush
+		// Trigger auto flush
 		output := iBNode.Operate([]flowgraph.Msg{iMsg})
 		fgm := output[0].(*flowGraphMsg)
 		wg.Add(len(fgm.segmentsToSync))
@@ -692,7 +693,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 234}}
 		iMsg = &inMsg
 
-		// Triger auto flush
+		// Trigger auto flush
 		output := iBNode.Operate([]flowgraph.Msg{iMsg})
 		fgm := output[0].(*flowGraphMsg)
 		wg.Add(len(fgm.segmentsToSync))
@@ -1032,7 +1033,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
-			msg.RowIDs = []int64{} //misaligned data
+			msg.RowIDs = []int64{} // misaligned data
 			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 			assert.NotNil(t, err)
 		}
@@ -1044,7 +1045,7 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	invalideTests := []struct {
+	invalidTests := []struct {
 		channelCollID UniqueID
 
 		inCollID    UniqueID
@@ -1054,7 +1055,7 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 		{1, 9, 100, "collectionID mismatch"},
 	}
 
-	for _, test := range invalideTests {
+	for _, test := range invalidTests {
 		channel := newChannel("channel", test.channelCollID, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
 
 		ibNode := &insertBufferNode{

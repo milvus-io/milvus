@@ -97,11 +97,11 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	ctx := context.Background()
 	var err error
 	// mock
-	loadSegmetns := []int64{}
+	loadSegments := []int64{}
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	delegator.EXPECT().LoadGrowing(mock.Anything, mock.Anything, mock.Anything).Run(func(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) {
 		for _, info := range infos {
-			loadSegmetns = append(loadSegmetns, info.SegmentID)
+			loadSegments = append(loadSegments, info.SegmentID)
 		}
 	}).Return(nil)
 
@@ -119,7 +119,7 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	// unflushed segment not in segmentInfos, will skip
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
-	suite.Equal(0, len(loadSegmetns))
+	suite.Equal(0, len(loadSegments))
 
 	// binlog was empty, will skip
 	req.SegmentInfos[suite.segmentID] = &datapb.SegmentInfo{
@@ -129,14 +129,14 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	}
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
-	suite.Equal(0, len(loadSegmetns))
+	suite.Equal(0, len(loadSegments))
 
 	// normal load
 	binlog := &datapb.FieldBinlog{}
 	req.SegmentInfos[suite.segmentID].Binlogs = append(req.SegmentInfos[suite.segmentID].Binlogs, binlog)
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
-	suite.Equal(1, len(loadSegmetns))
+	suite.Equal(1, len(loadSegments))
 }
 
 func TestHandlersSuite(t *testing.T) {

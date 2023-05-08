@@ -197,7 +197,7 @@ class GetImportStateResponse(BaseModel):
     )
     infos: Optional[List[common.KeyValuePair]] = Field(
         None,
-        description='more informations about the task, progress percent, file path, failed reason, etc.',
+        description='more information about the task, progress percent, file path, failed reason, etc.',
     )
     row_count: Optional[int] = Field(
         None,
@@ -546,7 +546,7 @@ class DescribeCollectionResponse(BaseModel):
     schema_: Optional[schema.CollectionSchema] = Field(None, alias='schema')
     shards_num: Optional[int] = Field(None, description='The shards number you set.')
     start_positions: Optional[List[common.KeyDataPair]] = Field(
-        None, description='The message ID/posititon when collection is created'
+        None, description='The message ID/position when collection is created'
     )
     status: Optional[common.Status] = None
     virtual_channel_names: Optional[List[str]] = Field(
@@ -557,7 +557,7 @@ class DescribeCollectionResponse(BaseModel):
 class DescribeIndexResponse(BaseModel):
     index_descriptions: Optional[List[IndexDescription]] = Field(
         None,
-        description='All index informations, for now only return tha latest index you created for the collection.',
+        description='All index information, for now only return the latest index you created for the collection.',
     )
     status: Optional[common.Status] = None
 

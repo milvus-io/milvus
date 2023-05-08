@@ -408,7 +408,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.webport",
 		Version:      "2.0.0",
 		DefaultValue: "80",
-		Doc:          "Web port of pulsar, if you connect direcly without proxy, should use 8080",
+		Doc:          "Web port of pulsar, if you connect directly without proxy, should use 8080",
 		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)

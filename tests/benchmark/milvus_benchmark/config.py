@@ -13,7 +13,7 @@ SERVER_PORT_DEFAULT = 19530
 
 # milvus version, should be changed by manual
 SERVER_VERSION = "2.0.0-RC9"
-DEFUALT_DEPLOY_MODE = "single"
+DEFAULT_DEPLOY_MODE = "single"
 
 
 HELM_NAMESPACE = "milvus"

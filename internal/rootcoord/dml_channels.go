@@ -191,8 +191,8 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			// if one of the topics is not empty, panic
 			err := ms.CheckTopicValid(name)
 			if err != nil {
-				log.Error("created topic is invaild", zap.String("name", name), zap.Error(err))
-				panic("created topic is invaild")
+				log.Error("created topic is invalid", zap.String("name", name), zap.Error(err))
+				panic("created topic is invalid")
 			}
 		}
 

@@ -62,7 +62,7 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 		if schema.GetFieldID() == common.RowIDField || schema.GetFieldID() == common.TimeStampField {
 			continue
 		}
-		// if primary key field is auto-gernerated, no need to parse
+		// if primary key field is auto-generated, no need to parse
 		if schema.GetAutoID() {
 			continue
 		}
@@ -182,7 +182,7 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 	if len(row) != len(p.name2FieldID) {
 		for k, v := range p.name2FieldID {
 			if v == p.dynamicFieldID {
-				// dyanmic field, allow user ignore this field
+				// dynamic field, allow user ignore this field
 				continue
 			}
 			_, ok := row[v]

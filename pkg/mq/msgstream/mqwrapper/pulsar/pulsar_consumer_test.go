@@ -63,7 +63,7 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 	assert.Equal(t, "-1:-1:0", fmt.Sprintf("%v", mid))
 }
 
-func TestComsumeCompressedMessage(t *testing.T) {
+func TestConsumeCompressedMessage(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)

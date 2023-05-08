@@ -1083,7 +1083,7 @@ func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 	return &DataDefinitionCodec{collectionID: collectionID}
 }
 
-// Serialize transfer @ts and @ddRequsts to blob.
+// Serialize transfer @ts and @ddRequests to blob.
 // From schema, it get all fields.
 // For each field, it will create a binlog writer, and write specific event according
 // to the dataDefinition type.

@@ -213,7 +213,7 @@ func EncodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int6
 }
 
 func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, limit int64) (*internalpb.RetrieveResults, error) {
-	log.Ctx(ctx).Debug("mergeInternelRetrieveResults",
+	log.Ctx(ctx).Debug("mergeInternalRetrieveResults",
 		zap.Int64("limit", limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)

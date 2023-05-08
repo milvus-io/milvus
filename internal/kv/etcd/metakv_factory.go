@@ -45,7 +45,7 @@ func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaK
 			cfg = embed.NewConfig()
 		}
 		cfg.Dir = etcdCfg.DataDir.GetValue()
-		metaKv, err := NewEmbededEtcdKV(cfg, rootPath)
+		metaKv, err := NewEmbeddedEtcdKV(cfg, rootPath)
 		if err != nil {
 			return nil, err
 		}

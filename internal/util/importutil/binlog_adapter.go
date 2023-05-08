@@ -24,13 +24,13 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // A struct to hold insert log paths and delta log paths of a segment
@@ -106,7 +106,7 @@ func NewBinlogAdapter(ctx context.Context,
 		tsEndPoint:       tsEndPoint,
 	}
 
-	// amend the segment size to avoid portential OOM risk
+	// amend the segment size to avoid potential OOM risk
 	if adapter.blockSize > MaxSegmentSizeInMemory {
 		adapter.blockSize = MaxSegmentSizeInMemory
 	}
@@ -253,10 +253,10 @@ func (p *BinlogAdapter) Read(segmentHolder *SegmentFilesHolder) error {
 }
 
 // verify method verify the schema and binlog files
-//  1. each field must has binlog file
+//  1. each field must have binlog file
 //  2. binlog file count of each field must be equal
 //  3. the collectionSchema doesn't contain TimeStampField and RowIDField since the import_wrapper excludes them,
-//     but the segmentHolder.fieldFiles need to contains the two fields.
+//     but the segmentHolder.fieldFiles need to contain the two fields.
 func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 	if segmentHolder == nil {
 		log.Error("Binlog adapter: segment files holder is nil")
@@ -264,7 +264,7 @@ func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 	}
 
 	firstFieldFileCount := 0
-	//  each field must has binlog file
+	//  each field must have binlog file
 	for i := 0; i < len(p.collectionSchema.Fields); i++ {
 		schema := p.collectionSchema.Fields[i]
 
@@ -279,14 +279,14 @@ func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 		}
 	}
 
-	// the segmentHolder.fieldFiles need to contains RowIDField
+	// the segmentHolder.fieldFiles need to contain RowIDField
 	_, ok := segmentHolder.fieldFiles[common.RowIDField]
 	if !ok {
 		log.Error("Binlog adapter: the binlog files of RowIDField is missed")
 		return errors.New("the binlog files of RowIDField is missed")
 	}
 
-	// the segmentHolder.fieldFiles need to contains TimeStampField
+	// the segmentHolder.fieldFiles need to contain TimeStampField
 	_, ok = segmentHolder.fieldFiles[common.TimeStampField]
 	if !ok {
 		log.Error("Binlog adapter: the binlog files of TimeStampField is missed")
@@ -772,7 +772,7 @@ func (p *BinlogAdapter) dispatchBoolToShards(data []bool, memoryData []map[stora
 		return fmt.Errorf("bool field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -795,7 +795,7 @@ func (p *BinlogAdapter) dispatchInt8ToShards(data []int8, memoryData []map[stora
 		return fmt.Errorf("int8 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entity acoording to shard list
+	// dispatch entity according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -818,7 +818,7 @@ func (p *BinlogAdapter) dispatchInt16ToShards(data []int16, memoryData []map[sto
 		return fmt.Errorf("int16 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -841,7 +841,7 @@ func (p *BinlogAdapter) dispatchInt32ToShards(data []int32, memoryData []map[sto
 		return fmt.Errorf("int32 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -864,7 +864,7 @@ func (p *BinlogAdapter) dispatchInt64ToShards(data []int64, memoryData []map[sto
 		return fmt.Errorf("int64 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -887,7 +887,7 @@ func (p *BinlogAdapter) dispatchFloatToShards(data []float32, memoryData []map[s
 		return fmt.Errorf("float field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -910,7 +910,7 @@ func (p *BinlogAdapter) dispatchDoubleToShards(data []float64, memoryData []map[
 		return fmt.Errorf("double field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -933,7 +933,7 @@ func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []map[
 		return fmt.Errorf("varchar field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -956,7 +956,7 @@ func (p *BinlogAdapter) dispatchBytesToShards(data [][]byte, memoryData []map[st
 		return fmt.Errorf("varchar JSON row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i, val := range data {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -982,7 +982,7 @@ func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryDa
 		return fmt.Errorf("binary vector field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i := 0; i < count; i++ {
 		shardID := shardList[i]
 		if shardID < 0 {
@@ -1022,7 +1022,7 @@ func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memory
 		return fmt.Errorf("float vector field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
-	// dispatch entities acoording to shard list
+	// dispatch entities according to shard list
 	for i := 0; i < count; i++ {
 		shardID := shardList[i]
 		if shardID < 0 {

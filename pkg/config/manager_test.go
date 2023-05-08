@@ -33,7 +33,7 @@ func TestAllConfigFromManager(t *testing.T) {
 	assert.Less(t, 0, len(all))
 }
 
-func TestAllDupliateSource(t *testing.T) {
+func TestAllDuplicateSource(t *testing.T) {
 	mgr, _ := Init()
 	err := mgr.AddSource(NewEnvSource(formatKey))
 	assert.Nil(t, err)

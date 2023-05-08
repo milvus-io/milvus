@@ -124,7 +124,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList = sync.Mutex{}
 
-	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+	s := NewSession(ctx, metaRoot, etcdCli, WithReuseNodeID(false))
 
 	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
@@ -136,7 +136,7 @@ func TestUpdateSessions(t *testing.T) {
 	getIDFunc := func() {
 		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 		require.NoError(t, err)
-		singleS := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+		singleS := NewSession(ctx, metaRoot, etcdCli, WithReuseNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
 		singleS.Register()
 		muList.Lock()
@@ -386,7 +386,7 @@ func TestSession_String(t *testing.T) {
 	log.Debug("log session", zap.Any("session", s))
 }
 
-func TestSesssionMarshal(t *testing.T) {
+func TestSessionMarshal(t *testing.T) {
 	s := &Session{
 		ServerID:   1,
 		ServerName: "test",
@@ -473,21 +473,21 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	suite.metaRoot = "sessionWithVersion"
 	suite.serverName = "sessionComp"
 
-	s1 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s1 := NewSession(ctx, suite.metaRoot, client, WithReuseNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
 	s1.Register()
 
 	suite.sessions = append(suite.sessions, s1)
 
-	s2 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s2 := NewSession(ctx, suite.metaRoot, client, WithReuseNodeID(false))
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
 	s2.Init(suite.serverName, "s2", false, false)
 	s2.Register()
 
 	suite.sessions = append(suite.sessions, s2)
 
-	s3 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s3 := NewSession(ctx, suite.metaRoot, client, WithReuseNodeID(false))
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
 	s3.Init(suite.serverName, "s3", false, false)
@@ -513,7 +513,7 @@ func (suite *SessionWithVersionSuite) TearDownTest() {
 }
 
 func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
+	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithReuseNodeID(false))
 
 	suite.Run(">1.0.0", func() {
 		r, err := semver.ParseRange(">1.0.0")
@@ -556,7 +556,7 @@ func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
 }
 
 func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
+	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithReuseNodeID(false))
 
 	suite.Run(">1.0.0 <=2.1.0", func() {
 		r, err := semver.ParseRange(">1.0.0 <=2.1.0")
@@ -614,7 +614,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 1, will be active
 	ctx1 := context.Background()
-	s1 := NewSession(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
+	s1 := NewSession(ctx1, metaRoot, etcdCli, WithReuseNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
@@ -634,7 +634,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 2, will be standby
 	ctx2 := context.Background()
-	s2 := NewSession(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
+	s2 := NewSession(ctx2, metaRoot, etcdCli, WithReuseNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
@@ -646,7 +646,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	assert.True(t, s2.isStandby.Load().(bool))
 
-	//assert.True(t, s2.watchingPrimaryKeyLock)
+	// assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
@@ -829,12 +829,12 @@ func (s *SessionSuite) TestGoingStop() {
 
 func (s *SessionSuite) TestRevoke() {
 	ctx := context.Background()
-	disconnected := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	disconnected := NewSession(ctx, s.metaRoot, s.client, WithReuseNodeID(false))
 	disconnected.Init("test", "disconnected", false, false)
 	disconnected.Register()
 	disconnected.SetDisconnected(true)
 
-	sess := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess := NewSession(ctx, s.metaRoot, s.client, WithReuseNodeID(false))
 	sess.Init("test", "normal", false, false)
 	sess.Register()
 

@@ -31,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -251,7 +249,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return fmt.Errorf("the maximum length specified for a VarChar shoule be in (0, 65535]")
+			return fmt.Errorf("the maximum length specified for a VarChar should be in (0, 65535]")
 		}
 		exist = true
 	}
@@ -305,11 +303,11 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	for i, field := range coll.Fields {
 		if field.AutoID {
 			if idx != -1 {
-				return fmt.Errorf("only one field can speficy AutoID with true, field name = %s, %s", coll.Fields[idx].Name, field.Name)
+				return fmt.Errorf("only one field can specify AutoID with true, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 			idx = i
 			if !field.IsPrimaryKey {
-				return fmt.Errorf("only primary field can speficy AutoID with true, field name = %s", field.Name)
+				return fmt.Errorf("only primary field can specify AutoID with true, field name = %s", field.Name)
 			}
 		}
 	}
@@ -419,7 +417,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_Int64 {
-				return fmt.Errorf("type of primary key shoule be int64")
+				return fmt.Errorf("type of primary key should be int64")
 			}
 			primaryIdx = idx
 		}
@@ -747,7 +745,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fail to decode the token, token: %s", token)
 	}
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
+	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
 		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
@@ -828,21 +826,6 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					schemaH, err := typeutil.CreateSchemaHelper(schema)
-					if err != nil {
-						return nil, nil, err
-					}
-					err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
-						if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
-							expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
-							return nil
-						}
-						return fmt.Errorf("not suppot getting subkeys of json field yet")
-					})
-					if err != nil {
-						log.Info("parse output field name failed", zap.String("field name", outputFieldName))
-						return nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
-					}
 					resultFieldNameMap[common.MetaFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {

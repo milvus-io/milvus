@@ -120,7 +120,7 @@ func defaultValueTypeMatch(schema *schemapb.CollectionSchema) error {
 					return merr.WrapErrParameterInvalid("DataType_VarChar", "not match", "default value type mismatches field schema type")
 				}
 			default:
-				panic("default value unsupport data type")
+				panic("default value unsupported data type")
 			}
 		}
 	}

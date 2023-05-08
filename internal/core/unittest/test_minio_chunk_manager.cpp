@@ -110,7 +110,7 @@ TEST_F(MinioChunkManagerTest, BucketPositive) {
     chunk_manager_->DeleteBucket(testBucketName);
 }
 
-TEST_F(MinioChunkManagerTest, BucketNegtive) {
+TEST_F(MinioChunkManagerTest, BucketNegative) {
     string testBucketName = "test-bucket-ng";
     chunk_manager_->SetBucketName(testBucketName);
     chunk_manager_->DeleteBucket(testBucketName);

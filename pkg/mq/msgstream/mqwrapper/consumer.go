@@ -26,7 +26,7 @@ const (
 	// SubscriptionPositionEarliest is earliest position which means the start consuming position will be the first message
 	SubscriptionPositionEarliest
 
-	// SubscriptionPositionUnkown indicates we don't care about the consumer location, since we are doing another seek or only some meta api over that
+	// SubscriptionPositionUnknown indicates we don't care about the consumer location, since we are doing another seek or only some meta api over that
 	SubscriptionPositionUnknown
 )
 
@@ -53,10 +53,10 @@ type ConsumerOptions struct {
 
 // Consumer is the interface that provides operations of a consumer
 type Consumer interface {
-	// returns the subscription for the consumer
+	// Subscription returns the subscription for the consumer
 	Subscription() string
 
-	// Get Message channel, once you chan you can not seek again
+	// Chan gets Message channel, once you chan you can not seek again
 	Chan() <-chan Message
 
 	// Seek to the uniqueID position
@@ -68,9 +68,9 @@ type Consumer interface {
 	// Close consumer
 	Close()
 
-	// GetLatestMsgID return the latest message ID
+	// GetLatestMsgID returns the latest message ID
 	GetLatestMsgID() (MessageID, error)
 
-	// check created topic whether vaild or not
+	// CheckTopicValid checks created topic whether valid or not
 	CheckTopicValid(channel string) error
 }

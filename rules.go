@@ -222,14 +222,14 @@ func oddmathbits(m dsl.Matcher) {
 // 		"$x == $y",
 // 		"$x != $y",
 // 	).
-// 		Where(m["x"].Type.Is("float32") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
+// 		Where(m["x"].Type.Is("float32") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparison.go")).
 // 		Report("floating point tested for equality")
 
 // 	m.Match(
 // 		"$x == $y",
 // 		"$x != $y",
 // 	).
-// 		Where(m["x"].Type.Is("float64") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
+// 		Where(m["x"].Type.Is("float64") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparison.go")).
 // 		Report("floating point tested for equality")
 
 // 	m.Match("switch $x { $*_ }", "switch $*_; $x { $*_ }").
@@ -296,13 +296,13 @@ func sprinterr(m dsl.Matcher) {
 }
 
 // disable this check, because it can not apply to generic type
-//func largeloopcopy(m dsl.Matcher) {
+// func largeloopcopy(m dsl.Matcher) {
 //	m.Match(
 //		`for $_, $v := range $_ { $*_ }`,
 //	).
 //		Where(m["v"].Type.Size > 1024).
 //		Report(`loop copies large value each iteration`)
-//}
+// }
 
 func joinpath(m dsl.Matcher) {
 	m.Match(

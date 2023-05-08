@@ -145,7 +145,7 @@ func (dec *ZstdDecompressor) GetType() CompressType {
 
 // Usa case: compress stream, large object only once
 // This can be called concurrently
-// Try ZstdCompressor for better efficiency if you need compress mutiple streams one by one
+// Try ZstdCompressor for better efficiency if you need compress multiple streams one by one
 func ZstdCompress(in io.Reader, out io.Writer, opts ...zstd.EOption) error {
 	enc, err := NewZstdCompressor(out, opts...)
 	if err != nil {
@@ -162,7 +162,7 @@ func ZstdCompress(in io.Reader, out io.Writer, opts ...zstd.EOption) error {
 
 // Use case: decompress stream, large object only once
 // This can be called concurrently
-// Try ZstdDecompressor for better efficiency if you need decompress mutiple streams one by one
+// Try ZstdDecompressor for better efficiency if you need decompress multiple streams one by one
 func ZstdDecompress(in io.Reader, out io.Writer, opts ...zstd.DOption) error {
 	dec, err := NewZstdDecompressor(in, opts...)
 	if err != nil {

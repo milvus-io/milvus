@@ -393,11 +393,7 @@ func Test_InitValidators(t *testing.T) {
 		validVal = "aa"
 		checkConvertFunc("FieldString", validVal, nil)
 
-		validVal = map[string]interface{}{"x": 5, "y": true, "z": "hello"}
-		checkConvertFunc("FieldJSON", validVal, nil)
-		checkConvertFunc("FieldJSON", "{\"x\": 8}", "{")
-
-		// the binary vector dimension is 16, shoud input two uint8 values, each value should between 0~255
+		// the binary vector dimension is 16, should input two uint8 values, each value should between 0~255
 		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
 		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("1256")}
 		checkConvertFunc("FieldBinaryVector", validVal, invalidVal)

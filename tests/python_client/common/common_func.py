@@ -609,7 +609,7 @@ def gen_normal_string_expressions(field):
     return expressions
 
 
-def gen_invaild_string_expressions():
+def gen_invalid_string_expressions():
     expressions = [
         "varchar in [0,  \"1\"]",
         "varchar not in [\"0\", 1, 2]"

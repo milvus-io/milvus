@@ -35,7 +35,7 @@ BUILD_ARGS=""
 pushd "${toplevel}"
 BUILD_BASE_IMAGE=${BUILD_BASE_IMAGE:-"false"}
 
-# Seperate base dockerfile to ignore install dependencies when build milvus image
+# Separate base dockerfile to ignore install dependencies when build milvus image
 if [[ ${OS_NAME} == "ubuntu20.04" && ${BUILD_BASE_IMAGE} == "true" ]]; then 
   docker build -f "./build/docker/milvus/gpu/${OS_NAME}/Dockerfile.base" -t "${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}" .
   BUILD_ARGS="--build-arg MILVUS_BASE_IMAGE_REPO=${MILVUS_BASE_IMAGE_REPO} --build-arg MILVUS_BASE_IMAGE_TAG=${MILVUS_BASE_IMAGE_TAG}"

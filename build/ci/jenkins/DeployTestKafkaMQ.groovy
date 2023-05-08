@@ -256,7 +256,7 @@ pipeline {
                         script {
                         echo "get pod status"
                         sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
-                        echo "collecte logs"
+                        echo "collect logs"
                         sh "bash ../../scripts/export_log_k8s.sh ${env.NAMESPACE} ${env.RELEASE_NAME} k8s_log/${env.RELEASE_NAME}/first_deployment || echo 'export log failed'"
                         }
                     }
@@ -358,7 +358,7 @@ pipeline {
                     script {
                         echo "get pod status"
                         sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
-                        echo "collecte logs"
+                        echo "collect logs"
                         sh "bash ../../scripts/export_log_k8s.sh ${env.NAMESPACE} ${env.RELEASE_NAME} k8s_log/${env.RELEASE_NAME}/second_deployment || echo 'export log failed'"
                         echo "upload logs"
                         sh "tar -zcvf artifacts-${env.RELEASE_NAME}-logs.tar.gz k8s_log/ --remove-files || true"

@@ -253,7 +253,7 @@ class TestPartitionParams(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partiton_respectively(self):
+    def test_load_partition_respectively(self):
         """
         target: test release the partition after load partition
         method: load partition1 and load another partition

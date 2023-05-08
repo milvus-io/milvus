@@ -102,13 +102,13 @@ meta-migration:
     		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
     		${AARCH64_FLAG} -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
-INTERATION_PATH = $(PWD)/tests/integration
+INTEGRATION_PATH = $(PWD)/tests/integration
 integration-test:
 	@echo "Building integration tests ..."
 	@source $(PWD)/scripts/setenv.sh && \
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
     		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-    		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
+    		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/integration-test $(INTEGRATION_PATH)/ 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu

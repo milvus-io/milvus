@@ -9,7 +9,7 @@ import utils
 
 
 def parse_server_tag(server_tag):
-    """ paser server tag from server config"""
+    """ parse server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
     if server_tag[-1] == "c":
         p = r"(\d+)c"
@@ -104,7 +104,7 @@ def update_values(src_values_file, deploy_params_file):
             }
         }
     # use external minio/s3
-    
+
     # TODO: disable temp
     values_dict['minio']['enabled'] = True
     # values_dict["externalS3"]["enabled"] = True
@@ -150,7 +150,7 @@ def update_values(src_values_file, deploy_params_file):
             # values_dict['pulsarStandalone']['resources'] = resources
         if mems:
             logging.debug("TODO: Update mem resources")
-        
+
         logging.debug("Add tolerations into cluster server")
         values_dict['proxy']['tolerations'] = perf_tolerations
         values_dict['queryNode']['tolerations'] = perf_tolerations

@@ -1792,7 +1792,7 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "per-second increasing rate of faild requests.",
+      "description": "per-second increasing rate of failed requests.",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -1843,7 +1843,7 @@
       ],
       "thresholds": [],
       "timeRegions": [],
-      "title": "Faild Request Rate",
+      "title": "Failed Request Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -9427,7 +9427,7 @@
             "type": "prometheus",
             "uid": "$datasource"
           },
-          "description": "per-second increasing rate of building index requests recived by IndexCoord.",
+          "description": "per-second increasing rate of building index requests received by IndexCoord.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -9717,7 +9717,7 @@
             "type": "prometheus",
             "uid": "$datasource"
           },
-          "description": "per-second increasing rate of index  tasks recevied by  IndexNode",
+          "description": "per-second increasing rate of index  tasks received by  IndexNode",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {

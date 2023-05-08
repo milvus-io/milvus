@@ -231,7 +231,7 @@ func (s *Server) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (
 	return s.indexnode.CreateJob(ctx, req)
 }
 
-// QueryJobs querys index jobs statues
+// QueryJobs queries index jobs statues
 func (s *Server) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 	return s.indexnode.QueryJobs(ctx, req)
 }

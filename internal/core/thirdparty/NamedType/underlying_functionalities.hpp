@@ -419,7 +419,7 @@ struct hash<fluent::NamedType<T, Parameter, Skills...>>
 
     size_t operator()(fluent::NamedType<T, Parameter, Skills...> const& x) const noexcept
     {
-        static_assert(noexcept(std::hash<T>()(x.get())), "hash fuction should not throw");
+        static_assert(noexcept(std::hash<T>()(x.get())), "hash function should not throw");
 
         return std::hash<T>()(x.get());
     }

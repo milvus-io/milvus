@@ -739,7 +739,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
+			return fmt.Errorf("please subscribe the channel, channel name =%s", mp.ChannelName)
 		}
 
 		if consumer == nil {

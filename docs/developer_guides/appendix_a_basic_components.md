@@ -107,7 +107,7 @@ type Session struct {
 }
 
 // NewSession is a helper to build Session object.
-// ServerID, ServerName, Address, Exclusive will be assigned after registeration.
+// ServerID, ServerName, Address, Exclusive will be assigned after registration.
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
 func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *Session {}

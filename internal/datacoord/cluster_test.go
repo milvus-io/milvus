@@ -334,7 +334,7 @@ func TestUnregister(t *testing.T) {
 		assert.EqualValues(t, "ch1", channels[0].Channels[0].Name)
 	})
 
-	t.Run("remove all channels after unregsiter", func(t *testing.T) {
+	t.Run("remove all channels after unregister", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -375,7 +375,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		kv.Close()
 	}()
 
-	t.Run("add deplicated channel to cluster", func(t *testing.T) {
+	t.Run("add duplicated channel to cluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())

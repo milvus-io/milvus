@@ -34,7 +34,7 @@ struct TraceContext {
 namespace trace = opentelemetry::trace;
 
 void
-initTelementry(TraceConfig* config);
+initTelemetry(TraceConfig* config);
 
 std::shared_ptr<trace::Tracer>
 GetTracer();

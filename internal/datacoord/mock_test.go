@@ -756,7 +756,7 @@ func (t *mockCompactionTrigger) triggerCompaction() error {
 	panic("not implemented")
 }
 
-// triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
+// triggerSingleCompaction trigerr a compaction bundled with collection-partition-channel-segment
 func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
 	if f, ok := t.methods["triggerSingleCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string) error); ok {

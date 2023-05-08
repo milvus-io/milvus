@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -951,20 +952,20 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 }
 
 func (suite *TaskSuite) TestCreateTaskBehavior() {
-	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0)
+	channelTask, err := NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
-	suite.Nil(chanelTask)
+	suite.Nil(channelTask)
 
 	action := NewSegmentAction(0, 0, "", 0)
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action)
+	channelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
-	suite.Nil(chanelTask)
+	suite.Nil(channelTask)
 
 	action1 := NewChannelAction(0, 0, "fake-channel1")
 	action2 := NewChannelAction(0, 0, "fake-channel2")
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action1, action2)
+	channelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action1, action2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
-	suite.Nil(chanelTask)
+	suite.Nil(channelTask)
 
 	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)

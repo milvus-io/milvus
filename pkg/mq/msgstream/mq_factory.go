@@ -101,10 +101,10 @@ func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	auth, err := pulsar.NewAuthentication(f.PulsarAuthPlugin, f.PulsarAuthParams)
 
 	if err != nil {
-		log.Error("build authencation from config failed, please check it!",
+		log.Error("build authentication from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
 			zap.Error(err))
-		return nil, errors.New("build authencation from config failed")
+		return nil, errors.New("build authentication from config failed")
 	}
 	return auth, nil
 }

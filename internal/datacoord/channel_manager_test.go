@@ -137,7 +137,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 	t.Run("ToWatch-WatchFail-ToRelease", func(t *testing.T) {
 		metakv.RemoveWithPrefix("")
-		cName := channelNamePrefix + "ToWatch-WatchFail-ToRelase"
+		cName := channelNamePrefix + "ToWatch-WatchFail-ToRelease"
 		ctx, cancel := context.WithCancel(context.TODO())
 		chManager, err := NewChannelManager(metakv, newMockHandler())
 		require.NoError(t, err)
@@ -388,7 +388,7 @@ func TestChannelManager(t *testing.T) {
 	}()
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
-	t.Run("test AddNode with avalible node", func(t *testing.T) {
+	t.Run("test AddNode with available node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
 		defer metakv.RemoveWithPrefix("")
 		var (
@@ -551,7 +551,7 @@ func TestChannelManager(t *testing.T) {
 		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// test nodes of reassignTest contains no channel
-		// test all channels are assgined to node of remainTest
+		// test all channels are assigned to node of remainTest
 		assert.False(t, chManager.Match(reassignTest.nodeID, reassignTest.chName))
 		assert.True(t, chManager.Match(remainTest.nodeID, reassignTest.chName))
 		assert.True(t, chManager.Match(remainTest.nodeID, remainTest.chName))
@@ -633,7 +633,7 @@ func TestChannelManager(t *testing.T) {
 		// test nodes of reassignTest contains no channel
 		assert.False(t, chManager.Match(reassignTest.nodeID, reassignTest.chName))
 
-		// test all channels are assgined to node of remainTest
+		// test all channels are assigned to node of remainTest
 		assert.True(t, chManager.Match(remainTest.nodeID, reassignTest.chName))
 		assert.True(t, chManager.Match(remainTest.nodeID, remainTest.chName))
 
@@ -696,7 +696,7 @@ func TestChannelManager(t *testing.T) {
 			description string
 		}{
 			{datapb.ChannelWatchState_ToWatch, "fill toWatch state"},
-			{datapb.ChannelWatchState_ToRelease, "fill toRelase state"},
+			{datapb.ChannelWatchState_ToRelease, "fill toRelease state"},
 		}
 
 		for _, test := range tests {
@@ -1111,7 +1111,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 			oNodes []int64
 
 			expectedOut []int64
-			desription  string
+			description  string
 		}{
 			{[]int64{}, []int64{}, []int64{}, "empty both"},
 			{[]int64{1}, []int64{}, []int64{}, "empty oNodes"},
@@ -1123,7 +1123,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 		}
 
 		for _, test := range tests {
-			t.Run(test.desription, func(t *testing.T) {
+			t.Run(test.description, func(t *testing.T) {
 				nodes := c.getOldOnlines(test.nodes, test.oNodes)
 				assert.ElementsMatch(t, test.expectedOut, nodes)
 			})
@@ -1136,7 +1136,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 			oNodes []int64
 
 			expectedOut []int64
-			desription  string
+			description  string
 		}{
 			{[]int64{}, []int64{}, []int64{}, "empty both"},
 			{[]int64{1}, []int64{}, []int64{1}, "empty oNodes"},
@@ -1148,7 +1148,7 @@ func TestChannelManager_HelperFunc(t *testing.T) {
 		}
 
 		for _, test := range tests {
-			t.Run(test.desription, func(t *testing.T) {
+			t.Run(test.description, func(t *testing.T) {
 				nodes := c.getNewOnLines(test.nodes, test.oNodes)
 				assert.ElementsMatch(t, test.expectedOut, nodes)
 			})

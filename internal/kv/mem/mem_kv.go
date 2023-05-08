@@ -186,7 +186,7 @@ func (kv *MemoryKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	return result, nil
 }
 
-// MultiSave saves given key-value pairs in MemoryKV atomicly.
+// MultiSave saves given key-value pairs in MemoryKV atomically.
 func (kv *MemoryKV) MultiSave(kvs map[string]string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -196,7 +196,7 @@ func (kv *MemoryKV) MultiSave(kvs map[string]string) error {
 	return nil
 }
 
-// MultiSaveBytes saves given key-value pairs in MemoryKV atomicly.
+// MultiSaveBytes saves given key-value pairs in MemoryKV atomically.
 func (kv *MemoryKV) MultiSaveBytes(kvs map[string][]byte) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -206,7 +206,7 @@ func (kv *MemoryKV) MultiSaveBytes(kvs map[string][]byte) error {
 	return nil
 }
 
-// MultiRemove removes given @keys in MemoryKV atomicly.
+// MultiRemove removes given @keys in MemoryKV atomically.
 func (kv *MemoryKV) MultiRemove(keys []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -216,7 +216,7 @@ func (kv *MemoryKV) MultiRemove(keys []string) error {
 	return nil
 }
 
-// MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
+// MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomically.
 func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -229,7 +229,7 @@ func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []strin
 	return nil
 }
 
-// MultiSaveBytesAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
+// MultiSaveBytesAndRemove saves and removes given key-value pairs in MemoryKV atomically.
 func (kv *MemoryKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -335,7 +335,7 @@ func (kv *MemoryKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, r
 	return nil
 }
 
-// RemoveWithPrefix remove key of given prefix in MemoryKV atomicly.
+// RemoveWithPrefix remove key of given prefix in MemoryKV atomically.
 func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	kv.Lock()
 	defer kv.Unlock()

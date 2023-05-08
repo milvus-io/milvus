@@ -131,7 +131,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 				}
 			}
 		})
-	//build pipleine
+	//build pipeline
 	manager := &segments.Manager{
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,

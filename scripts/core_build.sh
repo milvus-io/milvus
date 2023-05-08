@@ -233,7 +233,7 @@ make rebuild_cache >/dev/null 2>&1
 
 
 if [[ ${MAKE_CLEAN} == "ON" ]]; then
-  echo "Runing make clean in ${BUILD_OUTPUT_DIR} ..."
+  echo "Running make clean in ${BUILD_OUTPUT_DIR} ..."
   make clean
   exit 0
 fi

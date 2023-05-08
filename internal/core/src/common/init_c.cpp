@@ -70,7 +70,7 @@ InitTrace(CTraceConfig* config) {
     std::call_once(
         traceFlag,
         [](milvus::tracer::TraceConfig* c) {
-            milvus::tracer::initTelementry(c);
+            milvus::tracer::initTelemetry(c);
         },
         &traceConfig);
 }

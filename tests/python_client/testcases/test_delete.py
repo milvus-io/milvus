@@ -17,7 +17,7 @@ query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
 query_tmp_expr_str = [{f'{ct.default_string_field_name}': "0"}]
 exp_res = "exp_res"
 default_string_expr = "varchar in [ \"0\"]"
-default_invaild_string_exp = "varchar >= 0"
+default_invalid_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
@@ -876,7 +876,7 @@ class TestDeleteOperation(TestcaseBase):
         target: test insert same id entity after delete from sealed data
         method: 1.create and insert with flush
                 2.load and query with the id
-                3.delte the id entity
+                3.delete the id entity
                 4.insert new entity with the same id and flush
                 5.query the id
         expected: Verify that the query gets the newly inserted entity
@@ -1794,8 +1794,8 @@ class TestDeleteString(TestcaseBase):
             self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
         collection_w.load()
         error = {ct.err_code: 0,
-                 ct.err_msg: f"failed to create expr plan, expr = {default_invaild_string_exp}"}
-        collection_w.delete(expr=default_invaild_string_exp,
+                 ct.err_msg: f"failed to create expr plan, expr = {default_invalid_string_exp}"}
+        collection_w.delete(expr=default_invalid_string_exp,
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

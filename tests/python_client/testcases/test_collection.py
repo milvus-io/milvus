@@ -2781,7 +2781,7 @@ class TestLoadCollection(TestcaseBase):
                 6.search and query
         expected: Verify search and query results
         """
-        # craete and insert
+        # create and insert
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=3)
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
@@ -3597,9 +3597,9 @@ class TestCollectionString(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_with_muti_string_fields(self):
+    def test_collection_with_multi_string_fields(self):
         """
-        target: test create collection with muti string fields
+        target: test create collection with multi string fields
         method: 1. create collection with primary string field and not primary string field
                 2. string fields is_primary=True
         expected: Create collection successfully
@@ -3652,7 +3652,7 @@ class TestCollectionString(TestcaseBase):
     def test_collection_invalid_string_field_dtype(self):
         """
         target: test create collection with string field
-        method: create collection with string field, the string field datatype is invaild
+        method: create collection with string field, the string field datatype is invalid
         expected: Raise exception
         """
         self._connect()

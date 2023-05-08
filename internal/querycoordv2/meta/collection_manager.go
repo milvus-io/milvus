@@ -43,11 +43,11 @@ type Collection struct {
 	refreshNotifier chan struct{}
 }
 
-func (collection *Collection) SetRefreshNotifier(notifer chan struct{}) {
+func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	collection.mut.Lock()
 	defer collection.mut.Unlock()
 
-	collection.refreshNotifier = notifer
+	collection.refreshNotifier = notifier
 }
 
 func (collection *Collection) IsRefreshed() bool {

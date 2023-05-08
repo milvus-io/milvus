@@ -16,16 +16,16 @@ FILES=`find ${FOLDER} \
 | grep -v "build/" \
 | grep -v output \
 | grep -v "\.pb\."`
-# echo formating ${FILES} ...
+# echo formatting ${FILES} ...
 skip_count=0
 for f in ${FILES}; do
-  if (grep "Apache License" $f > /dev/null);then 
+  if (grep "Apache License" $f > /dev/null);then
     # echo "No need to copy the License Header to $f"
     skip_count=$((skip_count+1))
   else
     cat ${LICENSE} $f > $f.new
     mv $f.new $f
     echo "License Header copied to $f"
-  fi 
-done   
-echo "license adder: $skip_count file(s) skiped"
+  fi
+done
+echo "license adder: $skip_count file(s) skipped"

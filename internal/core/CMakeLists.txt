@@ -79,8 +79,8 @@ set( MILVUS_BINARY_DIR      ${PROJECT_BINARY_DIR} )
 set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
 set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 
-# This will set RPATH to all excutable TARGET
-# self-installed dynamic libraries will be correctly linked by excutable
+# This will set RPATH to all executable TARGET
+# self-installed dynamic libraries will be correctly linked by executable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" "${CMAKE_INSTALL_PREFIX}/lib64" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
 

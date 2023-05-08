@@ -181,7 +181,7 @@ AppendOneChunk(BitsetType& result, const FixedVector<bool>& chunk_res) {
     auto AppendBlock = [&result](const bool* ptr, int n) {
         for (int i = 0; i < n; ++i) {
             BitSetBlockType val = 0;
-            // This can use CPU SIMD optimzation
+            // This can use CPU SIMD optimization
             uint8_t vals[BITSET_BLOCK_SIZE] = {0};
             for (size_t j = 0; j < 8; ++j) {
                 for (size_t k = 0; k < BITSET_BLOCK_SIZE; ++k) {
@@ -270,7 +270,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
         FixedVector<bool> chunk_res(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
-        // Can use CPU SIMD optimazation to speed up
+        // Can use CPU SIMD optimization to speed up
         for (int index = 0; index < this_size; ++index) {
             chunk_res[index] = element_func(data[index]);
         }

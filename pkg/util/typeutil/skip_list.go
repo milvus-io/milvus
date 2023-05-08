@@ -119,7 +119,7 @@ func (sl *SkipList[K, V]) Upsert(key K, value V) {
 		next:  make([]*skipListNode[K, V], level),
 	}
 
-	// update next for prevous node stored in path
+	// update next for previous node stored in path
 	for i := 0; i < level; i++ {
 		element.next[i] = path[i].next[i]
 		path[i].next[i] = element

@@ -27,9 +27,10 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 )
 
 type BinlogParser struct {
@@ -114,7 +115,7 @@ func NewBinlogParser(ctx context.Context,
 //
 //	"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105"
 //
-// In this function, we will constuct a list of SegmentFilesHolder objects, each SegmentFilesHolder holds the
+// In this function, we will construct a list of SegmentFilesHolder objects, each SegmentFilesHolder holds the
 // insert logs and delta logs of a segment.
 func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoot string) ([]*SegmentFilesHolder, error) {
 	holders := make(map[int64]*SegmentFilesHolder)

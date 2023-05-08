@@ -35,9 +35,9 @@ type IPartitionDb interface {
 
 // model <---> db
 
-func UnmarshalPartitionModel(partitons []*Partition) []*model.Partition {
-	r := make([]*model.Partition, 0, len(partitons))
-	for _, p := range partitons {
+func UnmarshalPartitionModel(partitions []*Partition) []*model.Partition {
+	r := make([]*model.Partition, 0, len(partitions))
+	for _, p := range partitions {
 		partition := ConvertPartitionDBToModel(p)
 		r = append(r, partition)
 	}
@@ -45,10 +45,10 @@ func UnmarshalPartitionModel(partitons []*Partition) []*model.Partition {
 	return r
 }
 
-func ConvertPartitionDBToModel(partiton *Partition) *model.Partition {
+func ConvertPartitionDBToModel(partition *Partition) *model.Partition {
 	return &model.Partition{
-		PartitionID:               partiton.PartitionID,
-		PartitionName:             partiton.PartitionName,
-		PartitionCreatedTimestamp: partiton.PartitionCreatedTimestamp,
+		PartitionID:               partition.PartitionID,
+		PartitionName:             partition.PartitionName,
+		PartitionCreatedTimestamp: partition.PartitionCreatedTimestamp,
 	}
 }

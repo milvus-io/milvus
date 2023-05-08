@@ -173,7 +173,7 @@ message ImportResult {
   repeated int64 segments = 5;             // id array of new sealed segments
   repeated int64 auto_ids = 6;             // auto-generated ids for auto-id primary key
   int64 row_count = 7;                     // how many rows are imported by this task
-  repeated common.KeyValuePair infos = 8;  // more informations about the task, file path, failed reason, etc.
+  repeated common.KeyValuePair infos = 8;  // more information about the task, file path, failed reason, etc.
 }
 
 // TODO: find a proper place for these segment-related messages.
@@ -217,4 +217,3 @@ message GetCredentialResponse {
   // password stored in etcd/mysql
   string password = 3;
 }
-

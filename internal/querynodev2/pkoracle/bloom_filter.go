@@ -35,7 +35,7 @@ var _ Candidate = (*BloomFilterSet)(nil)
 type BloomFilterSet struct {
 	statsMutex   sync.RWMutex
 	segmentID    int64
-	paritionID   int64
+	partitionID  int64
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
@@ -65,7 +65,7 @@ func (s *BloomFilterSet) ID() int64 {
 
 // Partition implements candidate.
 func (s *BloomFilterSet) Partition() int64 {
-	return s.paritionID
+	return s.partitionID
 }
 
 // Type implements candidate.
@@ -121,11 +121,11 @@ func (s *BloomFilterSet) initCurrentStat() {
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.
-func NewBloomFilterSet(segmentID int64, paritionID int64, segType commonpb.SegmentState) *BloomFilterSet {
+func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.SegmentState) *BloomFilterSet {
 	bfs := &BloomFilterSet{
-		segmentID:  segmentID,
-		paritionID: paritionID,
-		segType:    segType,
+		segmentID:   segmentID,
+		partitionID: partitionID,
+		segType:     segType,
 	}
 	// does not need to init current
 	return bfs

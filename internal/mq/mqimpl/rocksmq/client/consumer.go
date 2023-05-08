@@ -73,6 +73,6 @@ type Consumer interface {
 	// GetLatestMsgID get the latest msgID
 	GetLatestMsgID() (int64, error)
 
-	// check created topic whether vaild or not
+	// check created topic whether valid or not
 	CheckTopicValid(topic string) error
 }

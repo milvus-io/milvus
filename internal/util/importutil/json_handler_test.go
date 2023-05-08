@@ -152,7 +152,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 	assert.Equal(t, rowCountEachShard*int(shardNum), totalCount)
 	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
 
-	// execeed block size trigger flush
+	// exceed block size trigger flush
 	callTime = 0
 	totalCount = 0
 	for i := 0; i < int(shardNum); i++ {

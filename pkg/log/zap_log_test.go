@@ -168,7 +168,7 @@ func TestZapCaller(t *testing.T) {
 		"\"z\\\\test_coordinator1.go:20\"",
 		"undefined",
 	}
-	conf := &Config{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
+	conf := &Config{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
 	enc := NewTextEncoderByConfig(conf).(*textEncoder)
 
 	for i, d := range data {

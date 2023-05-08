@@ -423,9 +423,9 @@ func initRmq(name string) *etcdkv.EtcdKV {
 	return etcdKV
 }
 
-func Close(rocksdbName string, intputStream, outputStream msgstream.MsgStream, etcdKV *etcdkv.EtcdKV) {
+func Close(rocksdbName string, inputStream, outputStream msgstream.MsgStream, etcdKV *etcdkv.EtcdKV) {
 	server.CloseRocksMQ()
-	intputStream.Close()
+	inputStream.Close()
 	outputStream.Close()
 	etcdKV.Close()
 	err := os.RemoveAll(rocksdbName)

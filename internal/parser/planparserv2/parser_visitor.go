@@ -1002,7 +1002,7 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 
 	if columnInfo.GetDataType() != schemapb.DataType_JSON {
 		return fmt.Errorf(
-			"exists oerations are only supportted on json field, got:%s", columnInfo.GetDataType())
+			"exists operations are only supported on json field, got:%s", columnInfo.GetDataType())
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{

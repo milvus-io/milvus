@@ -145,7 +145,7 @@ func NewTextEncoderByConfig(cfg *Config) zapcore.Encoder {
 	case "json":
 		return zapcore.NewJSONEncoder(cc)
 	default:
-		panic(fmt.Sprintf("unsupport log format: %s", cfg.Format))
+		panic(fmt.Sprintf("unsupported log format: %s", cfg.Format))
 	}
 }
 
@@ -573,7 +573,7 @@ func (enc *textEncoder) safeAddByteString(s []byte) {
 	}
 }
 
-// See [log-fileds](https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-fields-section).
+// See [log-fields](https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-fields-section).
 func (enc *textEncoder) needDoubleQuotes(s string) bool {
 	for i := 0; i < len(s); {
 		b := s[i]

@@ -123,7 +123,7 @@ func GetFullTopicName(tenant string, namespace string, topic string) (string, er
 	if len(tenant) == 0 || len(namespace) == 0 || len(topic) == 0 {
 		log.Error("build full topic name failed",
 			zap.String("tenant", tenant),
-			zap.String("namesapce", namespace),
+			zap.String("namespace", namespace),
 			zap.String("topic", topic))
 		return "", errors.New("build full topic name failed")
 	}

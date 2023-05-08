@@ -23,11 +23,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -125,7 +125,7 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 	err = parser.validateFileNames(fileNames)
 	assert.Error(t, err)
 
-	//valid
+	// valid
 	fileNames = append(fileNames, "FieldFloatVector.npy")
 	err = parser.validateFileNames(fileNames)
 	assert.NoError(t, err)
@@ -196,7 +196,7 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("veridate binary vector numpy", func(t *testing.T) {
+	t.Run("validate binary vector numpy", func(t *testing.T) {
 		// numpy file is not vectors
 		data1 := []int32{1, 2, 3, 4}
 		schema := findSchema(sampleSchema(), schemapb.DataType_BinaryVector)
@@ -307,7 +307,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 		defer closeReaders(readers)
 	})
 
-	t.Run("velidate header failed", func(t *testing.T) {
+	t.Run("validate header failed", func(t *testing.T) {
 		filePath := TempFilesPath + "FieldBool.npy"
 		err = CreateNumpyFile(filePath, []int32{1, 2, 3, 4, 5})
 		assert.Nil(t, err)
@@ -348,7 +348,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 			assert.Equal(t, 3, fieldData.RowNum())
 		}
 
-		// unsupport data type
+		// unsupported data type
 		columnReader := &NumpyColumnReader{
 			fieldName: "dummy",
 			dataType:  schemapb.DataType_None,
@@ -373,7 +373,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, fieldData)
 
-		// nothint to read
+		// nothing to read
 		_, err = parser.readData(readers[0], 2)
 		assert.NoError(t, err)
 	}
@@ -878,8 +878,8 @@ func Test_NumpyParserParse_perf(t *testing.T) {
 
 	tr.Record("generate large data")
 
-	createNpyFile := func(t *testing.T, fielName string, data interface{}) string {
-		filePath := TempFilesPath + fielName + ".npy"
+	createNpyFile := func(t *testing.T, fieldName string, data interface{}) string {
+		filePath := TempFilesPath + fieldName + ".npy"
 		content, err := CreateNumpyData(data)
 		assert.NoError(t, err)
 		err = cm.Write(ctx, filePath, content)

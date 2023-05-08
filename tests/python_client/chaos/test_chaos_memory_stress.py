@@ -74,7 +74,7 @@ class TestChaosData:
         # wait memory stress
         sleep(constants.WAIT_PER_OP * 2)
 
-        # try to do release, load, query and serach in a duration time loop
+        # try to do release, load, query and search in a duration time loop
         try:
             start = time.time()
             while time.time() - start < eval(duration):
@@ -285,7 +285,7 @@ class TestMemoryStressReplica:
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16887")
     @pytest.mark.tags(CaseLabel.L3)
-    def test_memory_stress_replicas_befor_load(self, prepare_collection):
+    def test_memory_stress_replicas_before_load(self, prepare_collection):
         """
         target: test querynode group load with insufficient memory
         method: 1.Limit querynode memory ? 2Gi
@@ -353,7 +353,7 @@ class TestMemoryStressReplica:
     def test_memory_stress_replicas_group_insufficient(self, prepare_collection, mode):
         """
         target: test apply stress memory on different number querynodes and the group failed to load,
-                bacause of the memory is insufficient
+                because of the memory is insufficient
         method: 1.Limit querynodes memory 5Gi
                 2.Create collection and insert 1000,000 entities
                 3.Apply memory stress on querynodes and it's memory is not enough to load replicas
@@ -549,7 +549,7 @@ class TestMemoryStressReplicaLoadBalance:
         method: 1.Limit all querynodes memory 6Gi
                 2.Create and insert 1000,000 entities
                 3.Load collection with two replicas
-                4.Apply memory stress on one grooup 80%
+                4.Apply memory stress on one group 80%
         expected: Verify that load balancing across groups is not occurring
         """
         collection_w = prepare_collection

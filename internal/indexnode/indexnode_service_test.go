@@ -267,7 +267,7 @@ func TestIndexNodeComplex(t *testing.T) {
 	}
 	wg.Wait()
 
-	t.Logf("start concurent testing")
+	t.Logf("start concurrent testing")
 	testwg := sync.WaitGroup{}
 	for i := 0; i < len(tasks); i++ {
 		req := &indexpb.CreateJobRequest{

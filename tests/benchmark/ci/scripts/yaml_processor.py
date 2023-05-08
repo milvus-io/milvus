@@ -168,7 +168,7 @@ def _get_update_par(_args):
     _tips = _dict.get('tips', None) or "Input \"-h\" for more information"
     # update
     _u = _dict.get("u", None) or _dict.get("update", None)
-    # apppend
+    # append
     _a = _dict.get('a', None) or _dict.get('append', None)
     # out stream group
     _i = _dict.get("i", None) or _dict.get("inplace", None)

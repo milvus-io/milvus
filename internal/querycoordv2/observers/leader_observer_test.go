@@ -27,6 +27,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -121,7 +122,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectRequestFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -154,7 +155,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		Run(func(args mock.Arguments) {
 			inputReq := (args[2]).(*querypb.SyncDistributionRequest)
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{inputReq},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(inputReq.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectRequestFunc(inputReq.GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -210,7 +211,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectRequestFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -241,7 +242,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		Run(func(args mock.Arguments) {
 			inputReq := (args[2]).(*querypb.SyncDistributionRequest)
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{inputReq},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(inputReq.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectRequestFunc(inputReq.GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -338,7 +339,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{}))
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectRequestFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -370,7 +371,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		Run(func(args mock.Arguments) {
 			inputReq := (args[2]).(*querypb.SyncDistributionRequest)
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{inputReq},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(inputReq.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectRequestFunc(inputReq.GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -397,7 +398,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectRequestFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -426,7 +427,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 		Run(func(args mock.Arguments) {
 			inputReq := (args[2]).(*querypb.SyncDistributionRequest)
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{inputReq},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(inputReq.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectRequestFunc(inputReq.GetVersion())})
 			close(ch)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -467,7 +468,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2, 2: 2}, map[int64]*meta.Segment{}))
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectRequestFunc := func(version int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -495,7 +496,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncRemovedSegments() {
 		Run(func(args mock.Arguments) {
 			inputReq := (args[2]).(*querypb.SyncDistributionRequest)
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{inputReq},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(inputReq.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectRequestFunc(inputReq.GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)

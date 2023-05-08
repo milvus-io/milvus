@@ -98,7 +98,7 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 }
 
 // search will search on the historical segments the target segments in historical.
-// if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
+// if segIDs is not specified, it will search on all the historical segments specified by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []int64, []int64, error) {

@@ -505,7 +505,7 @@ class TestCompactionOperation(TestcaseBase):
         method: 1.Create a collection with 2 shards
                 2.Insert twice and generate 4 segments
                 3.Compact and wait it completed
-        expected: Verify there are 2 merge type complation plans
+        expected: Verify there are 2 merge type compaction plans
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
         for i in range(2):

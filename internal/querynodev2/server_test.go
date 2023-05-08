@@ -91,14 +91,14 @@ func (suite *QueryNodeSuite) TestBasic() {
 	err = suite.node.Init()
 	suite.NoError(err)
 
-	// node shoule be unhealthy before node start
+	// node should be unhealthy before node start
 	suite.False(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// start node
 	err = suite.node.Start()
 	suite.NoError(err)
 
-	// node shoule be healthy after node start
+	// node should be healthy after node start
 	suite.True(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// register node to etcd
@@ -130,11 +130,11 @@ func (suite *QueryNodeSuite) TestInit_RemoteChunkManagerFailed() {
 	suite.Error(err)
 }
 
-func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
+func (suite *QueryNodeSuite) TestInit_VectorChunkManagerFailed() {
 	var err error
 	suite.node.SetEtcdClient(suite.etcd)
 
-	// init vactor chunk manager failed
+	// init vector chunk manager failed
 	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())).Once()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(nil, errors.New("mock error")).Once()

@@ -94,11 +94,11 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	suite.schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	suite.indexMeta = segments.GenTestIndexMeta(suite.collectionID, suite.schema)
 	collection := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, querypb.LoadType_LoadCollection)
-	loadMata := &querypb.LoadMetaInfo{
+	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 	}
-	suite.node.manager.Collection.Put(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
+	suite.node.manager.Collection.Put(suite.collectionID, collection.Schema(), suite.indexMeta, loadMeta)
 	suite.worker = NewLocalWorker(suite.node)
 }
 

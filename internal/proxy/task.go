@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -612,7 +613,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 				sct.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
-			//DbID: sct.ShowCollectionsRequest.DbName,
+			// DbID: sct.ShowCollectionsRequest.DbName,
 			CollectionIDs: collectionIDs,
 		})
 
@@ -1313,7 +1314,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// To compat with LoadCollcetion before Milvus@2.1
+	// To compat with LoadCollection before Milvus@2.1
 	if lct.ReplicaNumber == 0 {
 		lct.ReplicaNumber = 1
 	}

@@ -83,7 +83,7 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_BinaryVector:
 			data := singleData.(*BinaryVectorFieldData).Data
 			dim := singleData.(*BinaryVectorFieldData).Dim
-			// dim for binary vector must be multiplier of 8, simple verion for swapping:
+			// dim for binary vector must be multiplier of 8, simple version for swapping:
 			steps := dim / 8
 			for idx := 0; idx < steps; idx++ {
 				data[i*steps+idx], data[j*steps+idx] = data[j*steps+idx], data[i*steps+idx]

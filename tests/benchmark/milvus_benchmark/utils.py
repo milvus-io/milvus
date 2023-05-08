@@ -125,7 +125,7 @@ def get_deploy_mode(deploy_params):
         if "milvus" in deploy_params:
             milvus_params = deploy_params["milvus"]
         if not milvus_params:
-            deploy_mode = config.DEFUALT_DEPLOY_MODE
+            deploy_mode = config.DEFAULT_DEPLOY_MODE
         elif "deploy_mode" in milvus_params:
             deploy_mode = milvus_params["deploy_mode"]
             if deploy_mode not in [config.SINGLE_DEPLOY_MODE, config.CLUSTER_DEPLOY_MODE, config.CLUSTER_3RD_DEPLOY_MODE]:

@@ -236,7 +236,7 @@ class MilvusClient(object):
             assert not item
         # if count_before - len(delete_ids) < self.count():
         #     logger.error(delete_ids)
-        #     raise Exception("Error occured")
+        #     raise Exception("Error occurred")
 
     @time_wrapper
     def flush(self, _async=False, collection_name=None, timeout=None):

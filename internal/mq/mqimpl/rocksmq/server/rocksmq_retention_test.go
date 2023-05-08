@@ -519,7 +519,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	assert.Equal(t, cMsgs[0].MsgID, ids[0])
 	time.Sleep(time.Duration(3) * time.Second)
 
-	// insert another 100 messages which should not be cleand up
+	// insert another 100 messages which should not be cleaned up
 	pMsgs2 := make([]ProducerMessage, msgNum)
 	for i := 0; i < msgNum; i++ {
 		msg := "message_" + strconv.Itoa(i+100)

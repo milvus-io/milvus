@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -43,7 +44,7 @@ var _ flowgraph.Node = (*ddNode)(nil)
 
 // ddNode filters messages from message streams.
 //
-// ddNode recives all the messages from message stream dml channels, including insert messages,
+// ddNode receives all the messages from message stream dml channels, including insert messages,
 //
 //	delete messages and ddl messages like CreateCollectionMsg and DropCollectionMsg.
 //
@@ -52,7 +53,7 @@ var _ flowgraph.Node = (*ddNode)(nil)
 //
 // When receiving a `DropCollection` message, ddNode will send a signal to DataNode `BackgroundGC`
 //
-//	goroutinue, telling DataNode to release the resources of this particular flow graph.
+//	goroutine, telling DataNode to release the resources of this particular flow graph.
 //
 // After the filtering process, ddNode passes all the valid insert messages and delete message
 //
@@ -167,7 +168,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("drop partition msg received",
 					zap.Int64("collectionID", dpMsg.GetCollectionID()),
 					zap.Int64("partitionID", dpMsg.GetPartitionID()),
-					zap.String("vChanneName", ddn.vChannelName))
+					zap.String("vChannelName", ddn.vChannelName))
 				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
 			}
 

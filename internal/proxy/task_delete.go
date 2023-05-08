@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -32,7 +33,7 @@ type deleteTask struct {
 	deleteMsg  *BaseDeleteTask
 	ctx        context.Context
 	deleteExpr string
-	//req       *milvuspb.DeleteRequest
+	// req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
 	chMgr     channelsMgr
 	chTicker  channelsTimeTicker
@@ -142,7 +143,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 			},
 		}
 	default:
-		return res, 0, fmt.Errorf("invalid field data type specifyed in delete expr")
+		return res, 0, fmt.Errorf("invalid field data type specified in delete expr")
 	}
 
 	return res, rowNum, nil

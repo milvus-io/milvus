@@ -16,7 +16,7 @@ FILES=`find ${FOLDER} \
 | grep -v "build/" \
 | grep -v output \
 | grep -v "\.pb\."`
-# echo formating ${FILES} ...
+# echo formatting ${FILES} ...
 skip_count=0
 for f in ${FILES}; do
   if (grep "Apache License" $f > /dev/null);then 

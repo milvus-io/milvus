@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -702,7 +702,7 @@ func (t *compactionTask) injectDone() {
 	}
 }
 
-// TODO copy maybe expensive, but this seems to be the only convinent way.
+// TODO copy maybe expensive, but this seems to be the only convenient way.
 func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}, numRows int64) (storage.FieldData, error) {
 	var rst storage.FieldData
 	switch schemaDataType {
@@ -878,7 +878,7 @@ func (t *compactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *et
 	}
 
 	// TODO current compaction timestamp replace zero? why?
-	//  Bad desgin of describe collection.
+	//  Bad design of describe collection.
 	sch, err := t.getCollectionSchema(collID, 0)
 	if err != nil {
 		return -1, -1, nil, err

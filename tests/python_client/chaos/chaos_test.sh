@@ -22,7 +22,7 @@ ns="chaos-testing"
 # set parameters
 pod=${1:-"querynode"}
 chaos_type=${2:-"pod_kill"} #pod_kill or pod_failure
-chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test 
+chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test
 node_num=${4:-1} # cluster_1_node or cluster_n_nodes
 
 cur_time=$(date +%H-%M-%S)
@@ -42,7 +42,7 @@ declare -A pod_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datano
 echo "install milvus"
 if [[ ${pod} != *"standalone"* ]];
 then
-    echo "insatll cluster"
+    echo "install cluster"
     helm install --wait --timeout 360s ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
 fi
 

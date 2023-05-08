@@ -2,7 +2,7 @@ if [ -z $1 ]; then
     echo "usage: $0 <path_to_core>"
     exit -1
 else
-    echo start formating
+    echo start formatting
 fi
 CorePath=$1
 

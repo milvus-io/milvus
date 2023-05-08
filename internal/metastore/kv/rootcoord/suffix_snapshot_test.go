@@ -225,7 +225,7 @@ func Test_ComposeIsTsKey(t *testing.T) {
 	}
 }
 
-func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
+func Test_SuffixSnapshotIsTSOfKey(t *testing.T) {
 	sep := "_ts"
 	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
 	require.Nil(t, err)

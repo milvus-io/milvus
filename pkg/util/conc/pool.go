@@ -44,7 +44,7 @@ func NewPool[T any](cap int, opts ...ants.Option) *Pool[T] {
 }
 
 // NewDefaultPool returns a pool with cap of the number of logical CPU,
-// and pre-alloced goroutines.
+// and pre-allocated goroutines.
 func NewDefaultPool[T any]() *Pool[T] {
 	return NewPool[T](runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
 }

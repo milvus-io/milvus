@@ -464,7 +464,7 @@ func (c *Client) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTa
 	})
 }
 
-// Report impot task state to rootcoord
+// Report import task state to rootcoord
 func (c *Client) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
 		return client.ReportImport(ctx, req)

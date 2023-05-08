@@ -22,7 +22,7 @@ syncTs1 为例，当下游消费者（比如QueryNodes）看到 syncTs1，那么
 数据已经全部被消费了，换句话说，比 syncTs1 时间戳还小的插入记录不会再出现在消息队列中。
 当然了，有的话，那肯定是系统有 bug，如果你发现了，还希望尽快告诉我们。
 
-![ts-watermask](./figs/guarantee-ts-ts-mask.png)
+![ts-watermark](./figs/guarantee-ts-ts-mask.png)
 
 ## Guarantee Timestamp
 

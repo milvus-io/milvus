@@ -35,7 +35,7 @@ namespace ostream = opentelemetry::exporter::trace;
 namespace otlp = opentelemetry::exporter::otlp;
 
 void
-initTelementry(TraceConfig* config) {
+initTelemetry(TraceConfig* config) {
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> exporter;
     if (config->exporter == "stdout") {
         exporter = ostream::OStreamSpanExporterFactory::Create();
