@@ -17,6 +17,7 @@
 package pulsar
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,8 +25,8 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
+	pulsaradmin "github.com/streamnative/pulsar-admin-go"
+	"github.com/streamnative/pulsar-admin-go/pkg/admin/config"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -150,18 +151,48 @@ func GetFullTopicName(tenant string, namespace string, topic string) (string, er
 	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
 }
 
-func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, error) {
-	config := common.Config{
-		WebServiceURL: address,
-		AuthPlugin:    authPlugin,
-		AuthParams:    authParams,
+func NewAdminClient(address, authPlugin, authParams string) (pulsaradmin.Client, error) {
+	config, err := parsePulsarAdminConfig(address, authPlugin, authParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse pulsar admin config due to %s", err.Error())
 	}
-	admin, err := pulsarctl.New(&config)
+	admin, err := pulsaradmin.NewClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
 	}
 
 	return admin, nil
+}
+
+func parsePulsarAdminConfig(address, authPlugin, authParams string) (*config.Config, error) {
+	config := config.Config{
+		WebServiceURL: address,
+		AuthPlugin:    authPlugin,
+		AuthParams:    authParams,
+	}
+
+	var mapString map[string]string
+	if err := json.Unmarshal([]byte(authParams), &mapString); err != nil {
+		return nil, err
+	}
+
+	if v, ok := mapString["issuerUrl"]; ok {
+		config.IssuerEndpoint = v
+	}
+	if v, ok := mapString["issuer_url"]; ok {
+		config.IssuerEndpoint = v
+	}
+	if v, ok := mapString["client_id"]; ok {
+		config.ClientID = v
+	}
+	if v, ok := mapString["audience"]; ok {
+		config.Audience = v
+	}
+	if v, ok := mapString["privateKey"]; ok {
+		config.KeyFile = v
+	}
+
+	return &config, nil
 }
 
 // EarliestMessageID returns the earliest message id

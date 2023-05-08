@@ -30,8 +30,8 @@ import (
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/streamnative/pulsarctl/pkg/cli"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
+	"github.com/streamnative/pulsar-admin-go/pkg/rest"
+	"github.com/streamnative/pulsar-admin-go/pkg/utils"
 	"go.uber.org/zap"
 )
 
@@ -104,6 +104,7 @@ func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	if err != nil {
 		log.Error("build authencation from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
+			zap.String("authParams", f.PulsarAuthParams),
 			zap.Error(err))
 		return nil, errors.New("build authencation from config failed")
 	}
@@ -132,9 +133,9 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 				log.Warn("failed to get topic name", zap.Error(err))
 				return retry.Unrecoverable(err)
 			}
-			err = admin.Subscriptions().Delete(*topic, subname, true)
+			err = admin.Subscriptions().ForceDelete(*topic, subname)
 			if err != nil {
-				pulsarErr, ok := err.(cli.Error)
+				pulsarErr, ok := err.(rest.Error)
 				if ok {
 					// subscription not found, ignore error
 					if strings.Contains(pulsarErr.Reason, "Subscription not found") {

@@ -19,12 +19,12 @@ package msgstream
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
-// unsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()
-// TODO use streamnative pulsarctl
+// UnsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()
 func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, channels []string) {
 	log.Info("unsubscribe channel", zap.String("subname", subName), zap.Any("channels", channels))
 	err := factory.NewMsgStreamDisposer(ctx)(channels, subName)

@@ -10,7 +10,7 @@ require (
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
-	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/apache/pulsar-client-go v0.10.0
 	github.com/apache/thrift v0.15.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/casbin/casbin/v2 v2.44.2
@@ -25,7 +25,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jarcoal/httpmock v1.0.8
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/klauspost/compress v1.14.2
+	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230423035028-6708d3c12699
@@ -40,7 +40,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
-	github.com/streamnative/pulsarctl v0.5.0
+	github.com/streamnative/pulsar-admin-go v0.1.0
 	github.com/stretchr/testify v1.8.2
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
@@ -65,15 +65,15 @@ require (
 require (
 	cloud.google.com/go v0.81.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
-	github.com/AthenZ/athenz v1.10.15 // indirect
-	github.com/DataDog/zstd v1.4.6-0.20210211175136-c6db21d202f4 // indirect
+	github.com/AthenZ/athenz v1.10.39 // indirect
+	github.com/DataDog/zstd v1.5.0 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b // indirect
+	//github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.2.0 // indirect
+	github.com/bits-and-blooms/bitset v1.4.0 // indirect
 	github.com/blang/semver/v4 v4.0.0
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
@@ -133,7 +133,7 @@ require (
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_model v0.2.0
+	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/rs/xid v1.2.1 // indirect
@@ -186,6 +186,7 @@ require (
 	github.com/bytedance/sonic v1.8.8 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.2 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
+	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/pelletier/go-toml/v2 v2.0.7 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.0.1 // indirect
@@ -194,10 +195,9 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.8
+	github.com/apache/pulsar-client-go => github.com/wayblink/pulsar-client-go v0.10.1
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt v3.2.2+incompatible // Fix security alert for jwt-go 3.2.0
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
-	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )

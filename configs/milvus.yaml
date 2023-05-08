@@ -104,6 +104,9 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
   tenant: public
   namespace: default
+  authPlugin: "" # Auth type of pulsar, support value: oauth2, token
+  authParams: "" # Auth params of pulsar, related to authPlugin
+  useSSL: false
 
 # If you want to enable kafka, needs to comment the pulsar configs
 kafka:

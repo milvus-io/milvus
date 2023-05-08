@@ -29,14 +29,15 @@ import (
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/streamnative/pulsar-admin-go/pkg/utils"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 const (
@@ -612,6 +613,11 @@ func hackPulsarError(result pulsar.Result) *pulsar.Error {
 
 type mockPulsarClient struct{}
 
+func (c *mockPulsarClient) CreateTableView(options pulsar.TableViewOptions) (pulsar.TableView, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // CreateProducer Creates the producer instance
 // This method will block until the producer is created successfully
 func (c *mockPulsarClient) CreateProducer(_ pulsar.ProducerOptions) (pulsar.Producer, error) {
@@ -738,12 +744,12 @@ func TestPulsarCtl(t *testing.T) {
 	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
 	admin, err := NewAdminClient(webServiceURL, "", "")
 	assert.NoError(t, err)
-	err = admin.Subscriptions().Delete(*topicName, subName, true)
+	err = admin.Subscriptions().ForceDelete(*topicName, subName)
 	if err != nil {
 		webServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
 		admin, err := NewAdminClient(webServiceURL, "", "")
 		assert.NoError(t, err)
-		err = admin.Subscriptions().Delete(*topicName, subName, true)
+		err = admin.Subscriptions().ForceDelete(*topicName, subName)
 		assert.NoError(t, err)
 	}
 

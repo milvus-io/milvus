@@ -161,7 +161,7 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string, position mq
 			ms.consumerChannels = append(ms.consumerChannels, channel)
 			return nil
 		}
-		// TODO if know the former subscribe is invalid, should we use pulsarctl to accelerate recovery speed
+		// TODO if know the former subscribe is invalid, should we use pulsar-admin to accelerate recovery speed
 		err := retry.Do(context.TODO(), fn, retry.Attempts(50), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()

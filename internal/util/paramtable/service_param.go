@@ -319,18 +319,22 @@ type PulsarConfig struct {
 	// support tenant
 	Tenant    string
 	Namespace string
+
+	UseSSL bool
 }
 
 func (p *PulsarConfig) init(base *BaseTable) {
 	p.Base = base
 
-	p.initAddress()
+	// put initUseSSL first as following inits will use UseSSL
+	p.initUseSSL()
 	p.initWebAddress()
 	p.initMaxMessageSize()
 	p.initAuthPlugin()
 	p.initAuthParams()
 	p.initTenant()
 	p.initNamespace()
+	p.initAddress()
 }
 
 func (p *PulsarConfig) initAddress() {
@@ -342,7 +346,12 @@ func (p *PulsarConfig) initAddress() {
 
 	port := p.Base.LoadWithDefault("pulsar.port", "")
 	if len(pulsarHost) != 0 && len(port) != 0 {
-		p.Address = "pulsar://" + pulsarHost + ":" + port
+		p.Address = pulsarHost + ":" + port
+	}
+	if p.UseSSL {
+		p.Address = "pulsar+ssl://" + p.Address
+	} else {
+		p.Address = "pulsar://" + p.Address
 	}
 }
 
@@ -351,13 +360,20 @@ func (p *PulsarConfig) initWebAddress() {
 		return
 	}
 
+	var webPrefix string
+	if p.UseSSL {
+		webPrefix = "https://"
+	} else {
+		webPrefix = "http://"
+	}
+
 	pulsarURL, err := url.ParseRequestURI(p.Address)
 	if err != nil {
 		p.WebAddress = ""
 		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
 	} else {
 		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
-		p.WebAddress = "http://" + pulsarURL.Hostname() + ":" + webport
+		p.WebAddress = webPrefix + pulsarURL.Hostname() + ":" + webport
 	}
 }
 
@@ -382,6 +398,12 @@ func (p *PulsarConfig) initAuthPlugin() {
 func (p *PulsarConfig) initAuthParams() {
 	paramString := p.Base.LoadWithDefault("pulsar.authParams", "")
 
+	// if authParams is a json, no need to wrap
+	if json.Valid([]byte(paramString)) {
+		p.AuthParams = paramString
+		return
+	}
+
 	// need to parse params to json due to .yaml config file doesn't support json format config item
 	// official pulsar client JWT config : {"token","fake_token_string"}
 	// milvus config: token:fake_token_string
@@ -404,6 +426,10 @@ func (p *PulsarConfig) initTenant() {
 
 func (p *PulsarConfig) initNamespace() {
 	p.Namespace = p.Base.LoadWithDefault("pulsar.namespace", "default")
+}
+
+func (p *PulsarConfig) initUseSSL() {
+	p.UseSSL = p.Base.ParseBool("pulsar.useSSL", false)
 }
 
 // --- kafka ---
