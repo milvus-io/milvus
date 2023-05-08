@@ -28,6 +28,8 @@
 #include <aws/s3/model/PutObjectRequest.h>
 
 #include "storage/MinioChunkManager.h"
+#include "storage/AliyunSTSClient.h"
+#include "storage/AliyunCredentialsProvider.h"
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
@@ -75,7 +77,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     if (initCount == 0) {
         sdk_options_.httpOptions.installSigPipeHandler = true;
 #ifdef BUILD_GCP
-        if (type == STORAGE_GOOGLE_CLOUD) {
+        if (type == RemoteStorageType::GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
                 // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
                 auto credentials =
@@ -136,9 +138,11 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     remote_root_path_ = storage_config.remote_root_path;
     RemoteStorageType storageType;
     if (storage_config.address.find("google") != std::string::npos) {
-        storageType = STORAGE_GOOGLE_CLOUD;
+        storageType = RemoteStorageType::GOOGLE_CLOUD;
+    } else if (storage_config.address.find("aliyun") != std::string::npos) {
+        storageType = RemoteStorageType::ALIYUN_CLOUD;
     } else {
-        storageType = STORAGE_S3;
+        storageType = RemoteStorageType::S3;
     }
 
     InitSDKAPI(storageType);
@@ -153,9 +157,11 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         config.verifySSL = false;
     }
 
-    if (storageType == STORAGE_S3) {
+    if (storageType == RemoteStorageType::S3) {
         BuildS3Client(storage_config, config);
-    } else if (storageType == STORAGE_GOOGLE_CLOUD) {
+    } else if (storageType == RemoteStorageType::ALIYUN_CLOUD) {
+        BuildAliyunCloudClient(storage_config, config);
+    } else if (storageType == RemoteStorageType::GOOGLE_CLOUD) {
         BuildGoogleCloudClient(storage_config, config);
     }
 
@@ -169,6 +175,23 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '" << storage_config.address
                        << "', default_bucket_name:'" << storage_config.bucket_name << "', use_secure:'"
                        << std::boolalpha << storage_config.useSSL << "']";
+}
+
+void
+MinioChunkManager::BuildAliyunCloudClient(const StorageConfig& storage_config,
+                                          const Aws::Client::ClientConfiguration& config) {
+    if (storage_config.useIAM) {
+        auto aliyun_provider = Aws::MakeShared<Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
+            "AliyunSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
+        AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(), "if use iam, access key id should not be empty");
+        AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(), "if use iam, secret key should not be empty");
+        AssertInfo(!aliyun_credentials.GetSessionToken().empty(), "if use iam, token should not be empty");
+        client_ = std::make_shared<Aws::S3::S3Client>(aliyun_provider, config,
+                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
+    } else {
+        throw std::runtime_error("aliyun cloud only support iam mode now");
+    }
 }
 
 MinioChunkManager::~MinioChunkManager() {
