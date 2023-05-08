@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -37,6 +38,7 @@ type CollectionObserver struct {
 	meta                  *meta.Meta
 	targetMgr             *meta.TargetManager
 	targetObserver        *TargetObserver
+	checkerController     *checkers.CheckerController
 	collectionLoadedCount map[int64]int
 	partitionLoadedCount  map[int64]int
 
@@ -48,6 +50,7 @@ func NewCollectionObserver(
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
+	checkController *checkers.CheckerController,
 ) *CollectionObserver {
 	return &CollectionObserver{
 		stopCh:                make(chan struct{}),
@@ -55,6 +58,7 @@ func NewCollectionObserver(
 		meta:                  meta,
 		targetMgr:             targetMgr,
 		targetObserver:        targetObserver,
+		checkerController:     checkController,
 		collectionLoadedCount: make(map[int64]int),
 		partitionLoadedCount:  make(map[int64]int),
 	}
@@ -137,12 +141,14 @@ func (ob *CollectionObserver) observeTimeout() {
 }
 
 func (ob *CollectionObserver) observeLoadStatus() {
+	loading := false
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.LoadPercentage == 100 {
 			continue
 		}
 		ob.observeCollectionLoadStatus(collection)
+		loading = true
 	}
 
 	partitions := ob.meta.CollectionManager.GetAllPartitions()
@@ -154,6 +160,11 @@ func (ob *CollectionObserver) observeLoadStatus() {
 			continue
 		}
 		ob.observePartitionLoadStatus(partition)
+		loading = true
+	}
+	// trigger check if there are some collections/partitions still loading
+	if loading {
+		ob.checkerController.Check()
 	}
 }
 
