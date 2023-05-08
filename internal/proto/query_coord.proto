@@ -249,7 +249,7 @@ message SegmentLoadInfo {
   int64 segment_size = 12;
   string insert_channel = 13;
   msg.MsgPosition start_position = 14;
-  msg.MsgPosition end_position = 15;
+  msg.MsgPosition delta_position = 15;
 }
 
 message FieldIndexInfo {
@@ -280,7 +280,7 @@ message LoadSegmentsRequest {
   int64 collectionID = 6;
   LoadMetaInfo load_meta = 7;
   int64 replicaID = 8;
-  repeated msg.MsgPosition delta_positions = 9;
+  repeated msg.MsgPosition delta_positions = 9; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
   int64 version = 10;
   bool need_transfer = 11;
   LoadScope load_scope = 12;

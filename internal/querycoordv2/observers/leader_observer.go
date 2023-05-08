@@ -126,8 +126,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 				continue
 			}
-			segment := resp.GetInfos()[0]
-			loadInfo := utils.PackSegmentLoadInfo(segment, nil)
+			loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 
 			ret = append(ret, &querypb.SyncAction{
 				Type:        querypb.SyncType_Set,

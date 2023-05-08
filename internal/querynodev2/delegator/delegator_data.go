@@ -345,7 +345,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Info("work loads segments done")
 
 	log.Info("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, infos, targetNodeID, worker)
+	err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker)
 	if err != nil {
 		log.Warn("load stream delete failed", zap.Error(err))
 		return err
@@ -389,7 +389,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	return nil
 }
 
-func (sd *shardDelegator) loadStreamDelete(ctx context.Context, candidates []*pkoracle.BloomFilterSet, infos []*querypb.SegmentLoadInfo,
+func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
+	candidates []*pkoracle.BloomFilterSet,
+	infos []*querypb.SegmentLoadInfo,
+	deltaPositions []*msgpb.MsgPosition,
 	targetNodeID int64, worker cluster.Worker) error {
 	log := sd.getLogger(ctx)
 	sd.deleteMut.Lock()
@@ -401,16 +404,20 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context, candidates []*pk
 
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
-	for _, info := range infos {
+	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
+		position := info.GetDeltaPosition()
+		if position == nil { // for compatibility of rolling upgrade from 2.2.x to 2.3
+			position = deltaPositions[i]
+		}
 
 		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
-		if info.GetEndPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
+		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
 			log.Info("load delete from stream...")
 			var err error
-			deleteData, err = sd.readDeleteFromMsgstream(ctx, info.GetEndPosition(), sd.deleteBuffer.SafeTs(), candidate)
+			deleteData, err = sd.readDeleteFromMsgstream(ctx, position, sd.deleteBuffer.SafeTs(), candidate)
 			if err != nil {
 				log.Warn("failed to read delete data from msgstream", zap.Error(err))
 				return err
@@ -419,7 +426,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context, candidates []*pk
 		}
 
 		// list buffered delete
-		deleteRecords := sd.deleteBuffer.ListAfter(info.GetEndPosition().GetTimestamp())
+		deleteRecords := sd.deleteBuffer.ListAfter(position.GetTimestamp())
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
 				if record.PartitionID != common.InvalidPartitionID && candidate.Partition() != record.PartitionID {

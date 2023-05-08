@@ -269,7 +269,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get index of segment", zap.Error(err))
 		return err
 	}
-	loadInfo := utils.PackSegmentLoadInfo(segment, indexes)
+	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
 
 	// Get shard leader for the given replica and segment
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
@@ -281,7 +281,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, resp)
+	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")

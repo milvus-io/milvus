@@ -456,6 +456,8 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			BinlogPaths:   binlogs,
 			Statslogs:     statslogs,
 			IndexInfos:    []*querypb.FieldIndexInfo{indexes},
+			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 		}
 		infos = append(infos, info)
 	}
@@ -472,11 +474,12 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Schema:       schema,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		NeedTransfer: true,
+		CollectionID:   suite.collectionID,
+		DstNodeID:      suite.node.session.ServerID,
+		Schema:         schema,
+		Infos:          suite.genSegmentLoadInfos(schema),
+		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
+		NeedTransfer:   true,
 	}
 
 	// LoadSegment
@@ -495,11 +498,12 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID: suite.collectionID,
-		DstNodeID:    suite.node.session.ServerID,
-		Schema:       schema,
-		Infos:        suite.genSegmentLoadInfos(schema),
-		NeedTransfer: true,
+		CollectionID:   suite.collectionID,
+		DstNodeID:      suite.node.session.ServerID,
+		Schema:         schema,
+		Infos:          suite.genSegmentLoadInfos(schema),
+		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
+		NeedTransfer:   true,
 	}
 
 	// LoadSegment
