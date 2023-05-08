@@ -2183,6 +2183,10 @@ func TestRBAC_Grant(t *testing.T) {
 			fmt.Sprintf("%s/%s/%s", "role1", "obj1", "obj_name1"))
 		kvmock.EXPECT().Load(validGranteeKey).Call.
 			Return(func(key string) string { return crypto.MD5(key) }, nil)
+		validGranteeKey2 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+			fmt.Sprintf("%s/%s/%s", "role1", "obj1", "foo.obj_name2"))
+		kvmock.EXPECT().Load(validGranteeKey2).Call.
+			Return(func(key string) string { return crypto.MD5(key) }, nil)
 		kvmock.EXPECT().Load(mock.Anything).Call.
 			Return("", errors.New("mock Load error"))
 
@@ -2233,11 +2237,23 @@ func TestRBAC_Grant(t *testing.T) {
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name1",
 				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role with valid entity"},
+			{true, &milvuspb.GrantEntity{
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name2",
+				DbName:     "foo",
+				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and dbName with valid entity"},
+			{false, &milvuspb.GrantEntity{
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name2",
+				DbName:     "foo2",
+				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and invalid dbName with valid entity"},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				test.entity.DbName = util.DefaultDBName
+				if test.entity.DbName == "" {
+					test.entity.DbName = util.DefaultDBName
+				}
 				grants, err := c.ListGrant(ctx, tenant, test.entity)
 				if test.isValid {
 					assert.NoError(t, err)
