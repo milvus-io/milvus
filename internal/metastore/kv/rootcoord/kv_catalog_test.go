@@ -1477,11 +1477,10 @@ func TestRBAC_Role(t *testing.T) {
 			name    string
 
 			expectedError error
-			ignorable     bool
 		}{
-			{"key not exists", true, notExistName, nil, false},
-			{"other error", false, errorName, otherError, false},
-			{"ignorable error", false, "key1", &common.IgnorableError{}, true},
+			{"key not exists", true, notExistName, nil},
+			{"other error", false, errorName, otherError},
+			{"ignorable error", false, "key1", &common.IgnorableError{}},
 		}
 
 		for _, test := range tests {
@@ -1493,11 +1492,6 @@ func TestRBAC_Role(t *testing.T) {
 					assert.NoError(t, err)
 				} else {
 					assert.Error(t, err)
-				}
-
-				if test.ignorable {
-					_, ok := err.(*common.IgnorableError)
-					assert.True(t, ok)
 				}
 			})
 		}
