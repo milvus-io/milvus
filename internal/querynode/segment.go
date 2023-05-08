@@ -91,6 +91,7 @@ type Segment struct {
 	recentlyModified  *atomic.Bool
 	segmentType       *atomic.Int32
 	destroyed         *atomic.Bool
+	lazyLoading       *atomic.Bool
 	indexedFieldInfos *typeutil.ConcurrentMap[UniqueID, *IndexedFieldInfo]
 
 	statLock sync.Mutex
@@ -203,6 +204,7 @@ func newSegment(collection *Collection,
 		indexedFieldInfos: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		recentlyModified:  atomic.NewBool(false),
 		destroyed:         atomic.NewBool(false),
+		lazyLoading:       atomic.NewBool(false),
 		historyStats:      []*storage.PkStatistics{},
 	}
 
@@ -609,15 +611,21 @@ func (s *Segment) InitCurrentStat() {
 	}
 }
 
+func (s *Segment) isLazyLoading() bool {
+	if s.lazyLoading == nil {
+		return false
+	}
+	return s.lazyLoading.Load()
+}
+
 // check if PK exists is current
 func (s *Segment) isPKExist(pk primaryKey) bool {
-	s.statLock.Lock()
-	defer s.statLock.Unlock()
-
-	if Params.DataNodeCfg.SkipBFStatsLoad {
-		log.Warn("processing delete while skip load BF, may affect performance", zap.Any("pk", pk), zap.Int64("segmentID", s.segmentID))
+	if s.isLazyLoading() {
+		log.Warn("processing delete while lazy loading BF, may affect performance", zap.Any("pk", pk), zap.Int64("segmentID", s.segmentID))
 		return true
 	}
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
 
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
 		return true

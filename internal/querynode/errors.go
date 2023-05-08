@@ -29,6 +29,9 @@ var (
 	ErrTsLagTooLarge = errors.New("Timestamp lag too large")
 	// ErrInsufficientMemory returns insufficient memory error.
 	ErrInsufficientMemory = errors.New("InsufficientMemoryToLoad")
+
+	// errBinlogCorrupted error stands for any binlog(data, stats or delta) cannot be parsed correctly.
+	errBinlogCorrupted = errors.New("binlog corrupted")
 )
 
 // WrapErrShardNotAvailable wraps ErrShardNotAvailable with replica id and channel name.
@@ -49,4 +52,8 @@ func msgQueryNodeIsUnhealthy(nodeID UniqueID) string {
 // errQueryNodeIsUnhealthy is the error of query node is unhealthy
 func errQueryNodeIsUnhealthy(nodeID UniqueID) error {
 	return errors.New(msgQueryNodeIsUnhealthy(nodeID))
+}
+
+func WrapBinlogCorruptedErr(path string) error {
+	return fmt.Errorf("%w(path=%s)", errBinlogCorrupted, path)
 }

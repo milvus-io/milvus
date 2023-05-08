@@ -72,8 +72,9 @@ type segmentLoader struct {
 	cm     storage.ChunkManager // minio cm
 	etcdKV *etcdkv.EtcdKV
 
-	ioPool  *concurrency.Pool
-	cpuPool *concurrency.Pool
+	ioPool   *concurrency.Pool
+	cpuPool  *concurrency.Pool
+	lazyPool *concurrency.Pool
 
 	factory msgstream.Factory
 }
@@ -473,12 +474,48 @@ func (loader *segmentLoader) loadSegmentBloomFilter(ctx context.Context, segment
 	}
 
 	if Params.DataNodeCfg.SkipBFStatsLoad {
-		log.Info("skip load BF with config set ", zap.Int64("segmentID", segment.segmentID))
+		log.Info("skip load BF with lazy load", zap.Int64("segmentID", segment.segmentID))
+		segment.lazyLoading.Store(true)
+		loader.submitLazyLoadTask(segment, binlogPaths)
 		return nil
 	}
 
+	return loader.loadStatslog(ctx, segment, binlogPaths)
+}
+
+func (loader *segmentLoader) submitLazyLoadTask(s *Segment, statslogs []string) {
+	log := log.Ctx(context.Background()).With(
+		zap.Int64("collectionID", s.collectionID),
+		zap.Int64("segmentID", s.segmentID),
+	)
+
+	if s.destroyed.Load() {
+		return
+	}
+
+	// do submitting in a goroutine in case of task pool is full.
+	go func() {
+		loader.lazyPool.Submit(func() (any, error) {
+			err := loader.loadStatslog(context.Background(), s, statslogs)
+			if err != nil {
+				// non-retryable
+				if errors.Is(err, storage.ErrNoSuchKey) || errors.Is(err, errBinlogCorrupted) {
+					log.Warn("failed to lazy load statslog with non-retryable error", zap.Error(err))
+					return nil, err
+				}
+				log.Warn("failed to lazy load statslog for segment, retrying...", zap.Error(err))
+				loader.submitLazyLoadTask(s, statslogs)
+				return nil, err
+			}
+			s.lazyLoading.Store(false)
+			return nil, nil
+		})
+	}()
+}
+
+func (loader *segmentLoader) loadStatslog(ctx context.Context, segment *Segment, statslogPaths []string) error {
 	startTs := time.Now()
-	values, err := loader.cm.MultiRead(ctx, binlogPaths)
+	values, err := loader.cm.MultiRead(ctx, statslogPaths)
 	if err != nil {
 		return err
 	}
@@ -841,6 +878,11 @@ func newSegmentLoader(
 		log.Error("failed to create cpu goroutine pool for segment loader", zap.Error(err))
 		panic(err)
 	}
+	lazyPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(false))
+	if err != nil {
+		log.Error("failed to create lazy load pool for segment loader", zap.Error(err))
+		panic(err)
+	}
 
 	log.Info("SegmentLoader created",
 		zap.Int("ioPoolSize", ioPoolSize),
@@ -854,8 +896,9 @@ func newSegmentLoader(
 		etcdKV: etcdKV,
 
 		// init them later
-		ioPool:  ioPool,
-		cpuPool: cpuPool,
+		ioPool:   ioPool,
+		cpuPool:  cpuPool,
+		lazyPool: lazyPool,
 
 		factory: factory,
 	}
