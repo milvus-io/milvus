@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -188,6 +189,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.targetObserver,
+		&checkers.CheckerController{},
 	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

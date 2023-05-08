@@ -70,7 +70,7 @@ func NewCheckerController(
 
 	return &CheckerController{
 		stopCh:    make(chan struct{}),
-		checkCh:   make(chan struct{}),
+		checkCh:   make(chan struct{}, 1),
 		meta:      meta,
 		dist:      dist,
 		targetMgr: targetMgr,
@@ -112,7 +112,10 @@ func (controller *CheckerController) Stop() {
 }
 
 func (controller *CheckerController) Check() {
-	controller.checkCh <- struct{}{}
+	select {
+	case controller.checkCh <- struct{}{}:
+	default:
+	}
 }
 
 // check is the real implementation of Check

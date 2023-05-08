@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -37,6 +38,7 @@ type CollectionObserver struct {
 	meta                 *meta.Meta
 	targetMgr            *meta.TargetManager
 	targetObserver       *TargetObserver
+	checkerController    *checkers.CheckerController
 	partitionLoadedCount map[int64]int
 
 	stopOnce sync.Once
@@ -47,6 +49,7 @@ func NewCollectionObserver(
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
+	checherController *checkers.CheckerController,
 ) *CollectionObserver {
 	return &CollectionObserver{
 		stopCh:               make(chan struct{}),
@@ -54,6 +57,7 @@ func NewCollectionObserver(
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		targetObserver:       targetObserver,
+		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 	}
 }
@@ -135,12 +139,18 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	if len(partitions) > 0 {
 		log.Info("observe partitions status", zap.Int("partitionNum", len(partitions)))
 	}
+	loading := false
 	for _, partition := range partitions {
 		if partition.LoadPercentage == 100 {
 			continue
 		}
 		replicaNum := ob.meta.GetReplicaNumber(partition.GetCollectionID())
 		ob.observePartitionLoadStatus(partition, replicaNum)
+		loading = true
+	}
+	// trigger check logic when loading collections/partitions
+	if loading {
+		ob.checkerController.Check()
 	}
 }
 

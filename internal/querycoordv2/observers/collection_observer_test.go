@@ -30,6 +30,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -58,10 +59,11 @@ type CollectionObserverSuite struct {
 	broker      *meta.MockBroker
 
 	// Dependencies
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	targetMgr      *meta.TargetManager
-	targetObserver *TargetObserver
+	dist              *meta.DistributionManager
+	meta              *meta.Meta
+	targetMgr         *meta.TargetManager
+	targetObserver    *TargetObserver
+	checkerController *checkers.CheckerController
 
 	// Test object
 	ob *CollectionObserver
@@ -188,6 +190,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
+	suite.checkerController = &checkers.CheckerController{}
 
 	// Test object
 	suite.ob = NewCollectionObserver(
@@ -195,6 +198,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.checkerController,
 	)
 
 	for _, collection := range suite.collections {
