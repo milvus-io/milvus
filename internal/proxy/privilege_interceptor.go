@@ -36,7 +36,7 @@ p = sub, obj, act
 e = some(where (p.eft == allow))
 
 [matchers]
-m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || (r.sub == p.sub && p.act == "PrivilegeAll")
+m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || (r.sub == p.sub && dbMatch(r.obj, p.obj) && p.act == "PrivilegeAll")
 `
 )
 
@@ -99,6 +99,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	logWithCurrentRequestInfo := log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
+		zap.String("db_name", dbName),
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames),
 		zap.String("policy_info", policyInfo))
@@ -113,6 +114,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		logWithCurrentRequestInfo.Warn("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
 		return ctx, err
 	}
+	e.AddFunction("dbMatch", DBMatchFunc)
 	for _, roleName := range roleNames {
 		permitFunc := func(resName string) (bool, error) {
 			object := funcutil.PolicyForResource(dbName, objectType, resName)
@@ -167,4 +169,14 @@ func isCurUserObject(objectType string, curUser string, object string) bool {
 		return false
 	}
 	return curUser == object
+}
+
+func DBMatchFunc(args ...interface{}) (interface{}, error) {
+	name1 := args[0].(string)
+	name2 := args[1].(string)
+
+	db1, _ := funcutil.SplitObjectName(name1[strings.Index(name1, "-")+1:])
+	db2, _ := funcutil.SplitObjectName(name2[strings.Index(name2, "-")+1:])
+
+	return db1 == db2, nil
 }

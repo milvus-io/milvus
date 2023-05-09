@@ -136,6 +136,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.Nil(t, err)
 
+		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
+			DbName:         "db_test",
+			CollectionName: "col1",
+		})
+		assert.NotNil(t, err)
+
 		g := sync.WaitGroup{}
 		for i := 0; i < 20; i++ {
 			g.Add(1)
