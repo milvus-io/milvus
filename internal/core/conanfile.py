@@ -6,7 +6,7 @@ class MilvusConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     requires = (
         "rocksdb/6.29.5",
-        "boost/1.81.0",
+        "boost/1.79.0",
         "onetbb/2021.7.0",
         "nlohmann_json/3.11.2",
         "zstd/1.5.5",
@@ -73,7 +73,6 @@ class MilvusConan(ConanFile):
             self.options["boost"].without_graph = True
             self.options["boost"].without_graph_parallel = True
             self.options["boost"].without_nowide = True
-            self.options["boost"].without_url = True
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
