@@ -1,3 +1,5 @@
+import random
+
 import numpy
 import pandas as pd
 import pytest
@@ -2262,7 +2264,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23499")
+    # @pytest.mark.skip(reason="issue #23499")
     def test_load_partitions_after_release_partition(self):
         """
         target: test load collection after release partition and load partitions
@@ -2286,7 +2288,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23499")
+    # @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_release_partition_collection(self):
         """
         target: test load collection after release partition and collection
@@ -2303,7 +2305,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         partition_w.release()
         error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
-        collection_w.query(default_term_expr, partition_names=[partition2],
+        collection_w.query(default_term_expr, partition_names=[partition1],
                            check_task=CheckTasks.err_res, check_items=error)
         collection_w.release()
         collection_w.load()
@@ -2406,6 +2408,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
         partition_w2.load()
@@ -2425,6 +2428,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.load()
         collection_w.query(default_term_expr, partition_names=[partition2])
@@ -2443,6 +2447,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
+        partition_w1.release()
         partition_w1.drop()
         collection_w.load()
         collection_w.query(default_term_expr, partition_names=[partition2])
@@ -2918,7 +2923,7 @@ class TestDescribeCollection(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        description = {'collection_name': c_name, 'auto_id': False, 'description': '',
+        description = {'collection_name': c_name, 'auto_id': False, 'num_shards': ct.default_shards_num, 'description': '',
                        'fields': [{'field_id': 100, 'name': 'int64', 'description': '', 'type': 5,
                                    'params': {}, 'is_primary': True, 'auto_id': False},
                                   {'field_id': 101, 'name': 'float', 'description': '', 'type': 10,
@@ -3417,11 +3422,13 @@ class TestLoadPartition(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.load()
         collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #23937")
     def test_load_collection_after_load_drop_partition(self):
         """
         target: test load collection after load and drop partition
@@ -3437,6 +3444,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
+        partition_w1.release()
         partition_w1.drop()
         error = {ct.err_code: 1, ct.err_msg: 'name not found'}
         collection_w.query(default_term_expr, partition_names=[partition1, partition2],
@@ -3446,7 +3454,7 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23048")
+    @pytest.mark.skip(reason="issue #23536")
     def test_release_load_partition_after_load_drop_partition(self):
         """
         target: test release load partition after load and drop partition
@@ -3460,12 +3468,13 @@ class TestLoadPartition(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
         partition_w2.load()
+        collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23048")
     def test_release_load_collection_after_load_drop_partition(self):
         """
         target: test release load partition after load and drop partition
@@ -3479,9 +3488,11 @@ class TestLoadPartition(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         partition_w1.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
-        partition_w2.load()
+        collection_w.load()
+        collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_another_partition_after_load_drop_partition(self):
