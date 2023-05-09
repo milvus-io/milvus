@@ -33,6 +33,11 @@ macro(build_aws_sdk_s3)
         set(AWS_SDK_S3_CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS} "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
     endif()
 
+    if ( MSYS )
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAWS_IO_EXPORTS -DAWS_CRT_CPP_EXPORTS")
+        set(AWS_SDK_S3_CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS} "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
+    endif()
+
     ExternalProject_Add(aws_sdk_s3_ep
 
         GIT_REPOSITORY https://github.com/aws/aws-sdk-cpp.git
@@ -47,6 +52,8 @@ macro(build_aws_sdk_s3)
         BUILD_COMMAND ${AWS_SDK_BUILD_COMMAND}
         INSTALL_COMMAND ${AWS_SDK_INSTALL_COMMAND}
         CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS}
+        # If want build with mingw, need to patch the source code
+        # PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/../../../patches/aws-sdk-1.9.234.patch
     )
 
     add_library(aws-cpp-sdk-core SHARED IMPORTED)
@@ -55,6 +62,11 @@ macro(build_aws_sdk_s3)
         IMPORTED_GLOBAL TRUE
         IMPORTED_LOCATION ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_SHARED_LIBRARY_SUFFIX}
         INTERFACE_INCLUDE_DIRECTORIES ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
+    if ( MSYS )
+        set_target_properties(aws-cpp-sdk-core
+            PROPERTIES
+            IMPORTED_IMPLIB ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_SHARED_LIBRARY_SUFFIX}.a)
+    endif ()
     add_dependencies(aws-cpp-sdk-core aws_sdk_s3_ep)
 
     add_library(aws-cpp-sdk-s3 SHARED IMPORTED)
@@ -63,6 +75,11 @@ macro(build_aws_sdk_s3)
         IMPORTED_GLOBAL TRUE
         IMPORTED_LOCATION ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_SHARED_LIBRARY_SUFFIX}
         INTERFACE_INCLUDE_DIRECTORIES ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
+    if ( MSYS )
+        set_target_properties(aws-cpp-sdk-s3
+            PROPERTIES
+            IMPORTED_IMPLIB ${AWS_SDK_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_SHARED_LIBRARY_SUFFIX}.a)
+    endif ()
     add_dependencies(aws-cpp-sdk-s3 aws_sdk_s3_ep)
 
     # add_library(aws-cpp-sdk-sts SHARED IMPORTED)

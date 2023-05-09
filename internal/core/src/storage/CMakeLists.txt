@@ -42,6 +42,11 @@ set(STORAGE_FILES
     DiskFileManagerImpl.cpp
     MemFileManagerImpl.cpp)
 
+if (MSYS)
+    list(REMOVE_ITEM STORAGE_FILES
+        DiskFileManagerImpl.cpp)
+endif (MSYS)
+
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
 find_package(Boost REQUIRED COMPONENTS filesystem)
@@ -49,7 +54,7 @@ find_package(Boost REQUIRED COMPONENTS filesystem)
 if ( LINUX OR APPLE )
     target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-core aws-cpp-sdk-s3 google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
 elseif ( MSYS )
-    message(FATAL_ERROR "Unsupported platform!" )
+    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-core aws-cpp-sdk-s3 aws-crt-cpp pthread)
 endif ()
 
 if(NOT CMAKE_INSTALL_PREFIX)

@@ -31,6 +31,11 @@
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
+#if __MINGW32__
+#undef GetMessage
+#undef GetObject
+#endif
+
 #define THROWS3ERROR(FUNCTION)                                                                         \
     do {                                                                                               \
         auto& err = outcome.GetError();                                                                \

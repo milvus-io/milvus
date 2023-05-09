@@ -29,7 +29,7 @@ function install_linux_deps() {
       sudo yum install -y git make lcov libtool m4 autoconf automake ccache openssl-devel zlib-devel libzstd-devel \
           libcurl-devel python3-devel \
           devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-          llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra libuuid-devel pulseaudio-libs-devel 
+          llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra libuuid-devel pulseaudio-libs-devel
 
       echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
       echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
@@ -56,16 +56,9 @@ function install_linux_deps() {
 }
 
 function install_mac_deps() {
-  sudo xcode-select --install > /dev/null 2>&1
-  brew install libomp ninja cmake llvm@15 ccache grep
-  export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
-  brew update && brew upgrade && brew cleanup
-
-  if [[ $(arch) == 'arm64' ]]; then
-    brew install openssl
-    brew install librdkafka
-    brew install pkg-config
-  fi
+  sudo xcode-select --install  > /dev/null 2>&1
+  brew install boost libomp ninja tbb openblas cmake llvm@15 ccache pkg-config zstd openssl librdkafka
+  brew install grep
 }
 
 if ! command -v go &> /dev/null

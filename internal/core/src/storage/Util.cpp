@@ -22,6 +22,7 @@
 #include "config/ConfigChunkManager.h"
 #include "storage/FieldData.h"
 #include "storage/parquet_c.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/ThreadPool.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/FieldDataFactory.h"
@@ -354,9 +355,13 @@ CreateFileManager(IndexType index_type,
 
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(RemoteChunkManager* remote_chunk_manager, std::string file) {
-    auto fileSize = remote_chunk_manager->Size(file);
+    ChunkManager* chunk_manager = remote_chunk_manager;
+    if (!chunk_manager) {
+        chunk_manager = &LocalChunkManager::GetInstance();
+    }
+    auto fileSize = chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-    remote_chunk_manager->Read(file, buf.get(), fileSize);
+    chunk_manager->Read(file, buf.get(), fileSize);
 
     return DeserializeFileData(buf, fileSize);
 }
@@ -376,7 +381,11 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
     auto serialized_index_data = indexData->serialize_to_remote_file();
     auto serialized_index_size = serialized_index_data.size();
 
-    remote_chunk_manager->Write(object_key, serialized_index_data.data(), serialized_index_size);
+    ChunkManager* chunk_manager = remote_chunk_manager;
+    if (!chunk_manager) {
+        chunk_manager = &LocalChunkManager::GetInstance();
+    }
+    chunk_manager->Write(object_key, serialized_index_data.data(), serialized_index_size);
     return std::pair<std::string, size_t>(object_key, serialized_index_size);
 }
 

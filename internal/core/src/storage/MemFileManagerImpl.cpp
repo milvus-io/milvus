@@ -26,7 +26,9 @@ MemFileManagerImpl::MemFileManagerImpl(const FieldDataMeta& field_mata,
                                        const IndexMeta& index_meta,
                                        const StorageConfig& storage_config)
     : FileManagerImpl(field_mata, index_meta) {
-    rcm_ = std::make_unique<MinioChunkManager>(storage_config);
+    if (storage_config.storage_type == "minio") {
+        rcm_ = std::make_unique<MinioChunkManager>(storage_config);
+    }
 }
 
 MemFileManagerImpl::MemFileManagerImpl(const FieldDataMeta& field_mata,
@@ -92,7 +94,7 @@ MemFileManagerImpl::LoadIndexToMemory(std::vector<std::string> remote_files) {
     auto LoadBatchIndexFiles = [&]() {
         auto index_datas = GetObjectData(rcm_.get(), batch_files);
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
-            auto file_name = batch_files[idx].substr(batch_files[idx].find_last_of("/") + 1);
+            auto file_name = batch_files[idx].substr(batch_files[idx].find_last_of("/\\") + 1);
             file_to_index_data[file_name] = index_datas[idx];
         }
     };
@@ -118,7 +120,7 @@ MemFileManagerImpl::LoadIndexToMemory(std::vector<std::string> remote_files) {
 std::vector<FieldDataPtr>
 MemFileManagerImpl::CacheRawDataToMemory(std::vector<std::string> remote_files) {
     std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
-        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        return std::stoll(a.substr(a.find_last_of("/\\") + 1)) < std::stoll(b.substr(b.find_last_of("/\\") + 1));
     });
 
     auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);

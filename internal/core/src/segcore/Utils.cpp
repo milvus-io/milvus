@@ -519,7 +519,7 @@ std::vector<storage::FieldDataPtr>
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
     auto rcm = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
     std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
-        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        return std::stoll(a.substr(a.find_last_of("/\\") + 1)) < std::stoll(b.substr(b.find_last_of("/\\") + 1));
     });
 
     auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);

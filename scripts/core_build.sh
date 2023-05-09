@@ -194,20 +194,21 @@ case "${unameOut}" in
       fi
     done
     if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-      echo "valid llvm(14 or 15) not installed"
+      echo "llvm@14~15 is not installed"
       exit 1
     fi
     llvm_prefix="$(brew --prefix llvm@${llvm_version})"
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+    export PATH=${CLANG_TOOLS_PATH}:${PATH}
     export CC="${llvm_prefix}/bin/clang"
     export CXX="${llvm_prefix}/bin/clang++"
-    export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include"
+    export CFLAGS="-Wno-deprecated-declarations -I${llvm_prefix}/include -I/usr/local/include -I$(brew --prefix libomp)/include -I$(brew --prefix boost)/include -I$(brew --prefix tbb)/include"
     export CXXFLAGS=${CFLAGS}
-    export LDFLAGS="-L$(brew --prefix libomp)/lib"
+    export LDFLAGS="-L${llvm_prefix}/lib -L$(brew --prefix libomp)/lib -L$(brew --prefix boost)/lib -L$(brew --prefix tbb)/lib"
     ;;
   Linux*)
     ;;
-  *)   
+  *)
     echo "Cannot build on windows"
     ;;
 esac

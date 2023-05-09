@@ -127,7 +127,7 @@ ScalarIndexSort<T>::Upload(const Config& config) {
     BinarySet ret;
     for (auto& file : remote_paths_to_size) {
         auto abs_file_path = file.first;
-        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/") + 1), nullptr, file.second);
+        ret.Append(abs_file_path.substr(abs_file_path.find_last_of("/\\") + 1), nullptr, file.second);
     }
 
     return ret;

@@ -1,6 +1,9 @@
 package etcd
 
 import (
+	"net/url"
+	"os"
+	"runtime"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -45,6 +48,12 @@ func InitEtcdServer(
 			} else {
 				cfg = embed.NewConfig()
 			}
+			if runtime.GOOS == "windows" {
+				err := zap.RegisterSink("winfile", newWinFileSink)
+				if err != nil {
+					initError = err
+				}
+			}
 			cfg.Dir = dataDir
 			cfg.LogOutputs = []string{logPath}
 			cfg.LogLevel = logLevel
@@ -72,4 +81,11 @@ func StopEtcdServer() {
 			etcdServer.Close()
 		})
 	}
+}
+
+// special file sink for zap, as etcd using zap as Logger
+// See: https://github.com/uber-go/zap/issues/621
+func newWinFileSink(u *url.URL) (zap.Sink, error) {
+	// e.g. winfile:///D:/test/ -> D:/test/
+	return os.OpenFile(u.Path[1:], os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
 }

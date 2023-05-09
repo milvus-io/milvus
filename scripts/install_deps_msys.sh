@@ -11,6 +11,10 @@ pacmanInstall()
 {
   pacman -S --noconfirm --needed \
     git make tar dos2unix zip unzip patch \
+    mingw-w64-x86_64-arrow \
+    mingw-w64-x86_64-aws-c-http \
+    mingw-w64-x86_64-aws-c-s3 \
+    mingw-w64-x86_64-aws-sdk-cpp \
     mingw-w64-x86_64-toolchain \
     mingw-w64-x86_64-make \
     mingw-w64-x86_64-ccache \
@@ -22,11 +26,10 @@ pacmanInstall()
     mingw-w64-x86_64-clang-tools-extra \
     mingw-w64-x86_64-python2 \
     mingw-w64-x86_64-diffutils \
-    mingw-w64-x86_64-arrow \
-    mingw-w64-x86_64-go \
     mingw-w64-x86_64-zstd
-  pacman -U --noconfirm \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rocksdb-6.26.1-1-any.pkg.tar.zst
+  pacman -U --noconfirm --needed \
+    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rocksdb-6.26.1-1-any.pkg.tar.zst \
+    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-go-1.18-2-any.pkg.tar.zst
 }
 
 updateKey()

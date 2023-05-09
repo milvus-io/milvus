@@ -35,7 +35,9 @@ DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
                                          const IndexMeta& index_meta,
                                          const StorageConfig& storage_config)
     : FileManagerImpl(field_mata, index_meta) {
-    rcm_ = std::make_unique<MinioChunkManager>(storage_config);
+    if (storage_config.storage_type == "minio") {
+        rcm_ = std::make_unique<MinioChunkManager>(storage_config);
+    }
 }
 
 DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
@@ -159,13 +161,18 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
     }
 
     auto EstimateParalleDegree = [&](const std::string& file) -> uint64_t {
-        auto fileSize = rcm_->Size(file);
+        size_t fileSize = 0;
+        if (rcm_) {
+            fileSize = rcm_->Size(file);
+        } else {
+            fileSize = LocalChunkManager::GetInstance().Size(file);
+        }
         return uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / fileSize);
     };
 
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
-        auto local_index_file_name = GetLocalIndexObjectPrefix() + prefix.substr(prefix.find_last_of("/") + 1);
+        auto local_index_file_name = GetLocalIndexObjectPrefix() + prefix.substr(prefix.find_last_of("/\\") + 1);
         local_chunk_manager.CreateFile(local_index_file_name);
         int64_t offset = 0;
         std::vector<std::string> batch_remote_files;
@@ -216,7 +223,7 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
-        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        return std::stoll(a.substr(a.find_last_of("/\\") + 1)) < std::stoll(b.substr(b.find_last_of("/\\") + 1));
     });
 
     auto segment_id = GetFieldDataMeta().segment_id;

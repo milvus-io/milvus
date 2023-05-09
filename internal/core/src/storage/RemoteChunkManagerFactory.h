@@ -47,7 +47,8 @@ class RemoteChunkManagerFactory {
         if (rcm_ == nullptr) {
             switch (storage_type) {
                 case ChunkManagerType::Local: {
-                    PanicInfo("unsupported");  // TODO ::
+                    // PanicInfo("unsupported");  // TODO ::
+                    break;
                 }
                 case ChunkManagerType::Minio: {
                     rcm_ = std::make_shared<MinioChunkManager>(storage_config);

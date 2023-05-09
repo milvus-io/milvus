@@ -44,7 +44,7 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 	var cBuildIndexInfo C.CBuildIndexInfo
 
 	// TODO::xige-16 support embedded milvus
-	storageType := "minio"
+	storageType := config.StorageType
 	cAddress := C.CString(config.Address)
 	cBucketName := C.CString(config.BucketName)
 	cAccessKey := C.CString(config.AccessKeyID)

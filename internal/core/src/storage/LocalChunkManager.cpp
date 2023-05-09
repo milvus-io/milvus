@@ -97,6 +97,8 @@ LocalChunkManager::Read(const std::string& filepath, uint64_t offset, void* buf,
 void
 LocalChunkManager::Write(const std::string& absPathStr, void* buf, uint64_t size) {
     std::ofstream outfile;
+    boost::filesystem::path absPath(absPathStr);
+    boost::filesystem::create_directories(absPath.parent_path());
     outfile.open(absPathStr, std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;
@@ -113,6 +115,8 @@ LocalChunkManager::Write(const std::string& absPathStr, void* buf, uint64_t size
 void
 LocalChunkManager::Write(const std::string& absPathStr, uint64_t offset, void* buf, uint64_t size) {
     std::ofstream outfile;
+    boost::filesystem::path absPath(absPathStr);
+    boost::filesystem::create_directories(absPath.parent_path());
     outfile.open(absPathStr, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;

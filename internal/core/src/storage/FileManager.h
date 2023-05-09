@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "common/Consts.h"
+#include "config/ConfigChunkManager.h"
 #include "knowhere/common/FileManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
@@ -110,7 +111,12 @@ class FileManagerImpl : public knowhere::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        return rcm_->GetRemoteRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+        if (rcm_) {
+            return rcm_->GetRemoteRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+                   std::to_string(index_meta_.build_id) + "/" + std::to_string(index_meta_.index_version) + "/" +
+                   std::to_string(field_meta_.partition_id) + "/" + std::to_string(field_meta_.segment_id);
+        }
+        return ChunkMangerConfig::GetLocalRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
                std::to_string(index_meta_.build_id) + "/" + std::to_string(index_meta_.index_version) + "/" +
                std::to_string(field_meta_.partition_id) + "/" + std::to_string(field_meta_.segment_id);
     }

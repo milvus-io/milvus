@@ -26,8 +26,10 @@
 #include <aws/core/http/HttpRequest.h>
 #include <aws/core/http/HttpTypes.h>
 #include <aws/core/http/URI.h>
+#ifdef BUILD_GCP
 #include <aws/core/http/curl/CurlHttpClient.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
+#endif  // BUILD_GCP
 #include <aws/s3/S3Client.h>
 
 #include "config/ConfigChunkManager.h"

@@ -42,6 +42,7 @@ case "${unameOut}" in
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)    
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
+      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$(brew --prefix openssl)/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib
       export RPATH=$DYLD_LIBRARY_PATH;;
     MINGW*)          

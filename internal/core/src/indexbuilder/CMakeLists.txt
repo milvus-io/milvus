@@ -23,6 +23,7 @@ add_library(milvus_indexbuilder SHARED ${INDEXBUILDER_FILES})
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
 if (MSYS)
+find_library(TBB NAMES tbb12)
 set(PLATFORM_LIBS -Wl,--allow-multiple-definition)
 endif ()
 
