@@ -67,7 +67,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 
 	// test add duplicate rg
 	err = suite.manager.AddResourceGroup("rg1")
-	suite.NoError(err)
+	suite.Error(err)
 	// test delete rg
 	err = suite.manager.RemoveResourceGroup("rg1")
 	suite.NoError(err)

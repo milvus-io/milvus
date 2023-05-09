@@ -136,7 +136,7 @@ func (rm *ResourceManager) AddResourceGroup(rgName string) error {
 	}
 
 	if rm.groups[rgName] != nil {
-		return nil
+		return ErrRGAlreadyExist
 	}
 
 	if len(rm.groups) >= 1024 {
