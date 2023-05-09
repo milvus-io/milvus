@@ -45,7 +45,7 @@ const (
 	MaxBeamWidth  = 16
 )
 
-func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
+func GetRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 	var floatValue float32
 	/* #nosec G103 */
 	return int64(unsafe.Sizeof(floatValue)) * dim * numRows
@@ -136,7 +136,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	}
 
 	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",
-		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(searchCacheBudgetGBRatio)/(1<<30))
+		float32(GetRowDataSizeOfFloatVector(numRows, dim))*float32(searchCacheBudgetGBRatio)/(1<<30))
 
 	numLoadThread := int(float32(hardware.GetCPUNum()) * float32(loadNumThreadRatio))
 	if numLoadThread > MaxLoadThread {

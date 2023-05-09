@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -1121,4 +1122,55 @@ func (s *SegmentLoaderMockSuite) TestSkipBFLoad() {
 
 func TestSegmentLoaderWithMock(t *testing.T) {
 	suite.Run(t, new(SegmentLoaderMockSuite))
+}
+
+func TestSegmentLoader_check_diskann_mem_usage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node, generr := genSimpleQueryNode(ctx)
+	assert.NoError(t, generr)
+	indexParams := make(map[string]string)
+	indexParams["index_type"] = indexparamcheck.IndexDISKANN
+	indexParams["metric_type"] = "L2"
+	indexParams["dim"] = "128"
+	indexParams["pq_code_budget_gb_ratio"] = "0.125"
+	schema := genTestCollectionSchema()
+	fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	assert.NoError(t, err)
+	indexInfo := &querypb.FieldIndexInfo{
+		FieldID:        simpleFloatVecField.id,
+		EnableIndex:    true,
+		IndexName:      indexName,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		IndexParams:    funcutil.Map2KeyValuePair(indexParams),
+		IndexFilePaths: []string{"diskindexpathtmp"},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadSegments,
+			MsgID:   rand.Int63(),
+		},
+		DstNodeID: 0,
+		Schema:    schema,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:    defaultSegmentID,
+				PartitionID:  defaultPartitionID,
+				CollectionID: defaultCollectionID,
+				BinlogPaths:  fieldBinlog,
+				IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
+				Statslogs:    statsLog,
+				NumOfRows:    defaultMsgLength,
+			},
+		},
+	}
+	loader := node.loader
+	concurrencyLevel := 1
+	err = loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
+	assert.Error(t, err)
+
+	loader.appendFieldIndexLoadParams(req)
+	err = loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
+	assert.NoError(t, err)
 }
