@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -3305,7 +3306,7 @@ func TestPostFlush(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		err := svr.postFlush(context.Background(), 1)
-		assert.EqualValues(t, errors.New("segment not found, might be a faked segment, ignore post flush"), err)
+		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
 	})
 
 	t.Run("success post flush", func(t *testing.T) {

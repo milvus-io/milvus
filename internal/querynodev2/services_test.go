@@ -216,7 +216,7 @@ func (suite *ServiceSuite) TestGetStatistics_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.GetStatistics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
@@ -362,7 +362,7 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
@@ -415,7 +415,7 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema) []*querypb.SegmentLoadInfo {
@@ -592,7 +592,7 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
@@ -688,7 +688,7 @@ func (suite *ServiceSuite) TestReleaseCollection_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err := suite.node.ReleaseCollection(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestReleasePartitions_Normal() {
@@ -715,7 +715,7 @@ func (suite *ServiceSuite) TestReleasePartitions_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err := suite.node.ReleasePartitions(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestReleaseSegments_Normal() {
@@ -759,7 +759,7 @@ func (suite *ServiceSuite) TestReleaseSegments_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.ReleaseSegments(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
@@ -858,7 +858,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	rsp, err := suite.node.GetSegmentInfo(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, rsp.GetStatus().GetErrorCode())
 }
 
 // Test Search
@@ -957,7 +957,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	resp, err := suite.node.Search(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), "GetShardDelefatorFailed")
+	suite.Contains(resp.GetStatus().GetReason(), "failed to get query shard delegator")
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -972,7 +972,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
 // Test Query
@@ -1035,7 +1035,7 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	resp, err := suite.node.Query(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), "GetShardDelefatorFailed")
+	suite.Contains(resp.GetStatus().GetReason(), "failed to get query shard delegator")
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
@@ -1050,7 +1050,7 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.Query(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestSyncReplicaSegments_Normal() {
@@ -1092,7 +1092,7 @@ func (suite *ServiceSuite) TestShowConfigurations_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err := suite.node.ShowConfigurations(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestGetMetric_Normal() {
@@ -1146,7 +1146,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 }
 
 func (suite *ServiceSuite) TestGetDataDistribution_Normal() {
@@ -1185,7 +1185,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.node.GetDataDistribution(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {
@@ -1301,7 +1301,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestDelete_Int64() {
@@ -1403,7 +1403,7 @@ func (suite *ServiceSuite) TestDelete_Failed() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.Delete(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestLoadPartition() {
@@ -1421,7 +1421,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err := suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	// collection not exist and schema is nil

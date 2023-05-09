@@ -1783,8 +1783,9 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 // GetIndexStatistics get the information of index.
 func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
 	if !node.checkHealthy() {
+		err := merr.WrapErrServiceNotReady(fmt.Sprintf("proxy %d is unhealthy", paramtable.GetNodeID()))
 		return &milvuspb.GetIndexStatisticsResponse{
-			Status: unhealthyStatus(),
+			Status: merr.Status(err),
 		}, nil
 	}
 

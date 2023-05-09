@@ -187,13 +187,13 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	var baseParams = paramtable.BaseTable{}
-	baseParams.Save("msgChannel.chanNamePrefix.rootCoordDml", "common.chanNamePrefix.rootCoordDml")
-	baseParams.Save("msgChannel.chanNamePrefix.rootCoordDelta", "common.chanNamePrefix.rootCoordDelta")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
+	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "5")
 	chans := map[UniqueID][]string{}
 
-	chans[UniqueID(100)] = []string{"rootcoord-dml_4", "rootcoord-dml_8"}
-	chans[UniqueID(102)] = []string{"rootcoord-dml_2", "rootcoord-dml_9"}
+	chans[UniqueID(100)] = []string{"by-dev-rootcoord-dml_4", "by-dev-rootcoord-dml_8"}
+	chans[UniqueID(102)] = []string{"by-dev-rootcoord-dml_2", "by-dev-rootcoord-dml_9"}
 	ttSync := newTimeTickSync(ctx, sourceID, factory, chans)
 
 	var wg sync.WaitGroup
@@ -218,10 +218,10 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	t.Run("assign channels", func(t *testing.T) {
 		defer wg.Done()
 		channels := ttSync.getDmlChannelNames(int(4))
-		assert.Equal(t, channels, []string{"rootcoord-dml_0", "rootcoord-dml_1", "rootcoord-dml_3", "rootcoord-dml_5"})
+		assert.Equal(t, channels, []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_3", "by-dev-rootcoord-dml_5"})
 
 		channels = ttSync.getDmlChannelNames(int(4))
-		assert.Equal(t, channels, []string{"rootcoord-dml_6", "rootcoord-dml_7", "rootcoord-dml_0", "rootcoord-dml_1"})
+		assert.Equal(t, channels, []string{"by-dev-rootcoord-dml_6", "by-dev-rootcoord-dml_7", "by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"})
 	})
 
 	// test get new channels
@@ -238,9 +238,8 @@ func TestTimetickSyncInvalidName(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	var baseParams = paramtable.BaseTable{}
-	baseParams.Save("msgChannel.chanNamePrefix.rootCoordDml", "common.chanNamePrefix.rootCoordDml")
-	baseParams.Save("msgChannel.chanNamePrefix.rootCoordDelta", "common.chanNamePrefix.rootCoordDelta")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	chans := map[UniqueID][]string{}
 	chans[UniqueID(100)] = []string{"rootcoord-dml4"}
 	assert.Panics(t, func() {

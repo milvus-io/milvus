@@ -2343,7 +2343,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 
 	dct.DropCollectionRequest.CollectionName = "c2"
 	err = dct.Execute(ctx)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, dct.result.GetErrorCode())
 }
 

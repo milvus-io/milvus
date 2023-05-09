@@ -4440,7 +4440,8 @@ func TestProxy_GetLoadState(t *testing.T) {
 	})
 }
 
-func TestProxy_GetIndexStatistics(t *testing.T) {
+func TestUnhealthProxy_GetIndexStatistics(t *testing.T) {
+	// check GetIndexStatistics when proxy is unhealthy
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	proxy, err := NewProxy(ctx, factory)
@@ -4454,6 +4455,6 @@ func TestProxy_GetIndexStatistics(t *testing.T) {
 			IndexName:      "",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 }
