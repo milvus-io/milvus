@@ -18,11 +18,17 @@ package utils
 
 import (
 	"fmt"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 // WrapStatus wraps status with given error code, message and errors
@@ -78,7 +84,37 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
-func PackSegmentLoadInfo(segment *datapb.SegmentInfo, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+	var (
+		deltaPosition *msgpb.MsgPosition
+		positionSrc   string
+	)
+
+	segment := resp.GetInfos()[0]
+
+	if resp.GetChannelCheckpoint() != nil && resp.ChannelCheckpoint[segment.InsertChannel] != nil {
+		deltaPosition = resp.ChannelCheckpoint[segment.InsertChannel]
+		positionSrc = "channelCheckpoint"
+	} else if segment.GetDmlPosition() != nil {
+		deltaPosition = segment.GetDmlPosition()
+		positionSrc = "segmentDMLPos"
+	} else {
+		deltaPosition = segment.GetStartPosition()
+		positionSrc = "segmentStartPos"
+	}
+
+	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
+	tsLag := time.Since(posTime)
+	if tsLag >= 10*time.Minute {
+		log.Warn("delta position is quite stale",
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.Int64("segmentID", segment.GetID()),
+			zap.String("channel", segment.InsertChannel),
+			zap.String("positionSource", positionSrc),
+			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
+			zap.Time("posTime", posTime),
+			zap.Duration("tsLag", tsLag))
+	}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:     segment.ID,
 		PartitionID:   segment.PartitionID,
@@ -90,7 +126,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, indexes []*querypb.FieldIn
 		InsertChannel: segment.InsertChannel,
 		IndexInfos:    indexes,
 		StartPosition: segment.GetStartPosition(),
-		EndPosition:   segment.GetDmlPosition(),
+		DeltaPosition: deltaPosition,
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo

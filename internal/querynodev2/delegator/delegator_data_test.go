@@ -285,7 +285,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				CollectionID:  s.collectionID,
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-				EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 			},
 		},
 	})
@@ -338,7 +338,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					SegmentID:     100,
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
 		})
@@ -414,7 +414,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					SegmentID:     200,
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
 		})
@@ -456,7 +456,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					SegmentID:     100,
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
 		})
@@ -494,7 +494,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					SegmentID:     100,
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
 		})
@@ -538,7 +538,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					SegmentID:     100,
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				},
 			},
 		})
@@ -601,11 +601,9 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	defer cancel()
 	err := s.delegator.LoadGrowing(ctx, []*querypb.SegmentLoadInfo{
 		{
-			SegmentID:     1001,
-			CollectionID:  s.collectionID,
-			PartitionID:   500,
-			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-			EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+			SegmentID:    1001,
+			CollectionID: s.collectionID,
+			PartitionID:  500,
 		},
 	}, 0)
 	s.Require().NoError(err)
@@ -620,7 +618,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 				CollectionID:  s.collectionID,
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-				EndPosition:   &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 			},
 		},
 	})

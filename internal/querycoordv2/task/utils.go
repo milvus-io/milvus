@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -87,36 +86,7 @@ func packLoadSegmentRequest(
 	schema *schemapb.CollectionSchema,
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
-	resp *datapb.GetSegmentInfoResponse,
 ) *querypb.LoadSegmentsRequest {
-	var deltaPosition *msgpb.MsgPosition
-	segment := resp.GetInfos()[0]
-
-	var posSrcStr string
-	if segment.GetDmlPosition() != nil {
-		deltaPosition = segment.GetDmlPosition()
-		posSrcStr = "segmentDMLPos"
-	} else {
-		deltaPosition = segment.GetStartPosition()
-		posSrcStr = "segmentStartPos"
-	}
-
-	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
-	tsLag := time.Since(posTime)
-	if tsLag >= 10*time.Minute {
-		log.Warn("deltaPosition is quite stale when packLoadSegmentRequest",
-			zap.Int64("taskID", task.ID()),
-			zap.Int64("collectionID", task.CollectionID()),
-			zap.Int64("segmentID", task.SegmentID()),
-			zap.Int64("node", action.Node()),
-			zap.Int64("source", task.SourceID()),
-			zap.String("channel", segment.InsertChannel),
-			zap.String("posSource", posSrcStr),
-			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
-			zap.Time("posTime", posTime),
-			zap.Duration("tsLag", tsLag))
-	}
-
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
@@ -127,7 +97,7 @@ func packLoadSegmentRequest(
 		LoadMeta:       loadMeta,
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: []*msgpb.MsgPosition{deltaPosition},
+		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		DstNodeID:      action.Node(),
 		Version:        time.Now().UnixNano(),
 		NeedTransfer:   true,

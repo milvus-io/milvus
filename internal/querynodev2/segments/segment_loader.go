@@ -191,7 +191,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			clearAll()
 			return nil, err
 		}
-		segment, err := NewSegment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, info.GetStartPosition(), info.GetEndPosition())
+		segment, err := NewSegment(collection, segmentID, partitionID, collectionID, shard, segmentType, version, info.GetStartPosition(), info.GetDeltaPosition())
 		if err != nil {
 			log.Error("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),

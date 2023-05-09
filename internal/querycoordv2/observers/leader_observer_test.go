@@ -105,7 +105,10 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	resp := &datapb.GetSegmentInfoResponse{
+		Infos: []*datapb.SegmentInfo{info},
+	}
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
@@ -192,7 +195,10 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	resp := &datapb.GetSegmentInfoResponse{
+		Infos: []*datapb.SegmentInfo{info},
+	}
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
@@ -314,7 +320,10 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		PartitionID:   1,
 		InsertChannel: "test-insert-channel",
 	}
-	loadInfo := utils.PackSegmentLoadInfo(info, nil)
+	resp := &datapb.GetSegmentInfoResponse{
+		Infos: []*datapb.SegmentInfo{info},
+	}
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil)
 	schema := utils.CreateTestSchema()
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
 		&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{info}}, nil)

@@ -190,7 +190,7 @@ func NewSegment(collection *Collection,
 	segmentType SegmentType,
 	version int64,
 	startPosition *msgpb.MsgPosition,
-	endPosition *msgpb.MsgPosition,
+	deltaPosition *msgpb.MsgPosition,
 ) (*LocalSegment, error) {
 	/*
 		CSegmentInterface
@@ -215,7 +215,7 @@ func NewSegment(collection *Collection,
 	var segment = &LocalSegment{
 		baseSegment:        newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, version, startPosition),
 		ptr:                segmentPtr,
-		lastDeltaTimestamp: atomic.NewUint64(endPosition.GetTimestamp()),
+		lastDeltaTimestamp: atomic.NewUint64(deltaPosition.GetTimestamp()),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 	}
 
