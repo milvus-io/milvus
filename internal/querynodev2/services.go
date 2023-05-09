@@ -466,10 +466,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		}, nil
 	}
 
-	log.Info("save loaded segments...",
+	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
-
-	node.manager.Segment.Put(segments.SegmentTypeSealed, loaded...)
 	return util.SuccessStatus(), nil
 }
 

@@ -285,18 +285,20 @@ func (sd *shardDelegator) addGrowing(entries ...SegmentEntry) {
 func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	log := sd.getLogger(ctx)
 
+	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
+	log.Info("loading growing segments...", zap.Int64s("segmentIDs", segmentIDs))
 	loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeGrowing, version, infos...)
 	if err != nil {
 		log.Warn("failed to load growing segment", zap.Error(err))
-		for _, segment := range loaded {
-			segments.DeleteSegment(segment.(*segments.LocalSegment))
-		}
 		return err
 	}
+
+	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
+	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+
 	for _, candidate := range loaded {
 		sd.pkOracle.Register(candidate, paramtable.GetNodeID())
 	}
-	sd.segmentManager.Put(segments.SegmentTypeGrowing, loaded...)
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
 		return SegmentEntry{
 			NodeID:      paramtable.GetNodeID(),

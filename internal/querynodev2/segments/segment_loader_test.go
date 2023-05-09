@@ -36,8 +36,8 @@ type SegmentLoaderSuite struct {
 	loader Loader
 
 	// Dependencies
-	collectionManager CollectionManager
-	chunkManager      storage.ChunkManager
+	manager      *Manager
+	chunkManager storage.ChunkManager
 
 	// Data
 	collectionID int64
@@ -56,11 +56,11 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 
 func (suite *SegmentLoaderSuite) SetupTest() {
 	// Dependencies
-	suite.collectionManager = NewCollectionManager()
+	suite.manager = NewManager()
 	suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
 		fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
 
-	suite.loader = NewLoader(suite.collectionManager, suite.chunkManager)
+	suite.loader = NewLoader(suite.manager, suite.chunkManager)
 
 	// Data
 	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
@@ -70,7 +70,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.collectionManager.Put(suite.collectionID, schema, indexMeta, loadMeta)
+	suite.manager.Collection.Put(suite.collectionID, schema, indexMeta, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TestLoad() {
