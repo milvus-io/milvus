@@ -894,7 +894,7 @@ class TestPartitionOperations(TestcaseBase):
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
                                       check_items={ct.err_code: 0,
-                                                   ct.err_msg: "not been loaded"})
+                                                   ct.err_msg: "not loaded"})
         # release partition
         partition_w.release()
 

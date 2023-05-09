@@ -685,60 +685,6 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 	})
 }
 
-func TestMetaCache_LoadCache(t *testing.T) {
-	ctx := context.Background()
-	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
-	assert.Nil(t, err)
-
-	qcCounter := 0
-	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		CollectionIDs:       []UniqueID{1, 2},
-		InMemoryPercentages: []int64{100, 50},
-	}, nil).Run(func(ctx context.Context, req *querypb.ShowCollectionsRequest) {
-		qcCounter++
-	})
-	t.Run("test IsCollectionLoaded", func(t *testing.T) {
-		info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
-		assert.NoError(t, err)
-		assert.True(t, info.isLoaded)
-		// no collectionInfo of collection1, should access RootCoord
-		assert.Equal(t, rootCoord.GetAccessCount(), 1)
-		// not loaded, should access QueryCoord
-		assert.Equal(t, qcCounter, 1)
-
-		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
-		assert.NoError(t, err)
-		assert.True(t, info.isLoaded)
-		// shouldn't access QueryCoord or RootCoord again
-		assert.Equal(t, rootCoord.GetAccessCount(), 1)
-		assert.Equal(t, qcCounter, 1)
-
-		// test collection2 not fully loaded
-		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection2")
-		assert.NoError(t, err)
-		assert.False(t, info.isLoaded)
-		// no collectionInfo of collection2, should access RootCoord
-		assert.Equal(t, rootCoord.GetAccessCount(), 2)
-		// not loaded, should access QueryCoord
-		assert.Equal(t, qcCounter, 2)
-	})
-
-	t.Run("test RemoveCollectionLoadCache", func(t *testing.T) {
-		globalMetaCache.RemoveCollection(ctx, "collection1")
-		info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
-		assert.NoError(t, err)
-		assert.True(t, info.isLoaded)
-		// should access QueryCoord
-		assert.Equal(t, qcCounter, 3)
-	})
-}
-
 func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
@@ -755,31 +701,27 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 		InMemoryPercentages: []int64{100, 50},
 	}, nil)
 
-	info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
 	assert.NoError(t, err)
-	assert.True(t, info.isLoaded)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
 	assert.NoError(t, err)
-	assert.True(t, info.isLoaded)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	globalMetaCache.RemoveCollection(ctx, "collection1")
 	// no collectionInfo of collection2, should access RootCoord
-	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
 	assert.NoError(t, err)
-	assert.True(t, info.isLoaded)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
 	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	_, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
 	assert.NoError(t, err)
-	assert.True(t, info.isLoaded)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 }

@@ -94,7 +94,6 @@ type collectionInfo struct {
 	shardLeaders        *shardLeaders
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
-	isLoaded            bool
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -292,40 +291,6 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		collInfo = m.collInfo[collectionName]
 		m.mu.Unlock()
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	}
-
-	if !collInfo.isLoaded {
-		// check if collection was loaded
-		showResp, err := m.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			CollectionIDs: []int64{collInfo.collID},
-		})
-		if err != nil {
-			return nil, err
-		}
-		if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(showResp.Status.Reason)
-		}
-		log.Debug("QueryCoord show collections",
-			zap.Int64("collID", collInfo.collID),
-			zap.Int64s("collections", showResp.GetCollectionIDs()),
-			zap.Int64s("collectionsInMemoryPercentages", showResp.GetInMemoryPercentages()),
-		)
-		loaded := false
-		for index, collID := range showResp.CollectionIDs {
-			if collID == collInfo.collID && showResp.GetInMemoryPercentages()[index] >= int64(100) {
-				loaded = true
-				break
-			}
-		}
-		if loaded {
-			m.mu.Lock()
-			m.collInfo[collectionName].isLoaded = true
-			m.mu.Unlock()
-		}
 	}
 
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionInfo", metrics.CacheHitLabel).Inc()

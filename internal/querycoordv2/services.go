@@ -839,7 +839,14 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		Status: merr.Status(nil),
 	}
 
-	if s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID()) < 100 {
+	percentage := s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID())
+	if percentage < 0 {
+		err := merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
+		log.Warn("failed to GetShardLeaders", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	if percentage < 100 {
 		msg := fmt.Sprintf("collection %v is not fully loaded", req.GetCollectionID())
 		log.Warn(msg)
 		resp.Status = utils.WrapStatus(commonpb.ErrorCode_NoReplicaAvailable, msg)

@@ -1516,6 +1516,15 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 	}
+
+	// collection not loaded
+	req := &querypb.GetShardLeadersRequest{
+		CollectionID: -1,
+	}
+	resp, err := server.GetShardLeaders(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded))
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {
