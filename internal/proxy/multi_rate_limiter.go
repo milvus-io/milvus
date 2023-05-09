@@ -51,15 +51,18 @@ func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
 // MultiRateLimiter includes multilevel rate limiters, such as global rateLimiter,
 // collection level rateLimiter and so on. It also implements Limiter interface.
 type MultiRateLimiter struct {
-	// TODO: add collection level rateLimiter
-	quotaStatesMu      sync.RWMutex
+	quotaStatesMu sync.RWMutex
+	// for DML and DQL
 	collectionLimiters map[int64]*rateLimiter
+	// for DDL
+	globalDDLLimiter *rateLimiter
 }
 
 // NewMultiRateLimiter returns a new MultiRateLimiter.
 func NewMultiRateLimiter() *MultiRateLimiter {
 	m := &MultiRateLimiter{
 		collectionLimiters: make(map[int64]*rateLimiter, 0),
+		globalDDLLimiter:   newRateLimiter(),
 	}
 	return m
 }
@@ -73,7 +76,13 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
 
-	limiter := m.collectionLimiters[collectionID]
+	var limiter *rateLimiter
+	if IsDDLRequest(rt) {
+		limiter = m.globalDDLLimiter
+	} else {
+		limiter = m.collectionLimiters[collectionID]
+	}
+
 	if limiter == nil {
 		return commonpb.ErrorCode_Success
 	}
@@ -86,6 +95,16 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 		return commonpb.ErrorCode_RateLimit
 	}
 	return commonpb.ErrorCode_Success
+}
+
+func IsDDLRequest(rt internalpb.RateType) bool {
+	switch rt {
+	case internalpb.RateType_DDLCollection | internalpb.RateType_DDLPartition | internalpb.RateType_DDLIndex |
+		internalpb.RateType_DDLFlush | internalpb.RateType_DDLCompaction:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetQuotaStates returns quota states.
