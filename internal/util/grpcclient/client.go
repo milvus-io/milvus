@@ -157,7 +157,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 func (c *ClientBase[T]) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Warn("failed to get client address", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get client address", zap.Error(err))
 		return err
 	}
 
@@ -276,7 +276,7 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return generic.Zero[T](), err
 	}
 	if !funcutil.IsGrpcErr(err) {
-		log.Warn("ClientBase:isNotGrpcErr", zap.Error(err))
+		log.Ctx(ctx).Warn("ClientBase:isNotGrpcErr", zap.Error(err))
 		return generic.Zero[T](), err
 	}
 	log.Info("ClientBase grpc error, start to reset connection",
@@ -296,7 +296,7 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-		log.Warn("ClientBase Call grpc first call get error",
+		log.Ctx(ctx).Warn("ClientBase Call grpc first call get error",
 			zap.String("role", c.GetRole()),
 			zap.Error(traceErr),
 		)
@@ -317,7 +317,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 	}
 
 	traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-	log.Warn("ClientBase ReCall grpc first call get error ", zap.String("role", c.GetRole()), zap.Error(traceErr))
+	log.Ctx(ctx).Warn("ClientBase ReCall grpc first call get error ", zap.String("role", c.GetRole()), zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
 		return generic.Zero[T](), ctx.Err()
@@ -326,7 +326,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr = fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-		log.Warn("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
+		log.Ctx(ctx).Warn("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
