@@ -70,6 +70,9 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 		return commonpb.ErrorCode_Success
 	}
 
+	m.quotaStatesMu.RLock()
+	defer m.quotaStatesMu.RUnlock()
+
 	limiter := m.collectionLimiters[collectionID]
 	if limiter == nil {
 		return commonpb.ErrorCode_Success
