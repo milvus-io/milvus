@@ -42,15 +42,29 @@ func TestMultiRateLimiter(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
 		for _, rt := range internalpb.RateType_value {
-			multiLimiter.collectionLimiters[collectionID].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
+			if IsDDLRequest(internalpb.RateType(rt)) {
+				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
+			} else {
+				multiLimiter.collectionLimiters[collectionID].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
+			}
 		}
 		for _, rt := range internalpb.RateType_value {
-			errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
-			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-			errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
-			assert.Equal(t, commonpb.ErrorCode_Success, errCode)
-			errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
-			assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+			if IsDDLRequest(internalpb.RateType(rt)) {
+				errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), 5)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+			} else {
+				errCode := multiLimiter.Check(collectionID, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+			}
+
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 	})

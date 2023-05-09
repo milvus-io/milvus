@@ -22,14 +22,12 @@ import (
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
@@ -40,37 +38,14 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		switch request := req.(type) {
-		case *milvuspb.FlushRequest:
-			collectionNames := request.GetCollectionNames()
-			for _, collectionName := range collectionNames {
-				collectionID, err = globalMetaCache.GetCollectionID(context.TODO(), collectionName)
-				if err != nil {
-					log.Info("skip limit check",
-						zap.String("method", info.FullMethod),
-						zap.Error(err),
-					)
-					return handler(ctx, req)
-				}
-				code := limiter.Check(collectionID, rt, n)
-				if code != commonpb.ErrorCode_Success {
-					rsp := getFailedResponse(req, rt, code, info.FullMethod)
-					if rsp != nil {
-						return rsp, nil
-					}
-				}
+		code := limiter.Check(collectionID, rt, n)
+		if code != commonpb.ErrorCode_Success {
+			rsp := getFailedResponse(req, rt, code, info.FullMethod)
+			if rsp != nil {
+				return rsp, nil
 			}
-			return handler(ctx, req)
-		default:
-			code := limiter.Check(collectionID, rt, n)
-			if code != commonpb.ErrorCode_Success {
-				rsp := getFailedResponse(req, rt, code, info.FullMethod)
-				if rsp != nil {
-					return rsp, nil
-				}
-			}
-			return handler(ctx, req)
 		}
+		return handler(ctx, req)
 	}
 }
 
