@@ -31,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/indexparams"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -72,12 +70,6 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 
 	// some build params also exist in indexParams, which are useless during loading process
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
-		err = indexparams.SetDiskIndexLoadParams(&Params, indexParams, indexInfo.GetNumRows())
-		if err != nil {
-			return err
-		}
-	}
 
 	for key, value := range indexParams {
 		err = li.appendIndexParam(key, value)
