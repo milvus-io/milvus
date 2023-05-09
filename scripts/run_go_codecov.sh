@@ -19,11 +19,11 @@
 FILE_COVERAGE_INFO="go_coverage.txt"
 FILE_COVERAGE_HTML="go_coverage.html"
 
-set -ex
-echo "mode: atomic" > ${FILE_COVERAGE_INFO}
-
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
+
+set -ex
+echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 
 # run unittest
 echo "Running unittest under ./internal & ./pkg"
