@@ -265,7 +265,7 @@ func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.Se
 		return req, nil
 	}
 
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetReq().GetCollectionID()))
 
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
 	// plan not found
@@ -315,7 +315,7 @@ func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.Se
 			return nil, merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
-
+		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
