@@ -582,6 +582,11 @@ func (t *searchTask) Requery() error {
 		typeutil.AppendFieldData(t.result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
 	}
 
+	// filter id field out if it is not specified as output
+	t.result.Results.FieldsData = lo.Filter(t.result.Results.FieldsData, func(fieldData *schemapb.FieldData, i int) bool {
+		return lo.Contains(t.request.GetOutputFields(), fieldData.GetFieldName())
+	})
+
 	return nil
 }
 
