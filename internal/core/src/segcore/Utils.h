@@ -13,7 +13,7 @@
 #include <exception>
 #include <memory>
 #include <stdexcept>
-#include <stdlib.h>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +23,7 @@
 #include "segcore/InsertRecord.h"
 #include "index/Index.h"
 #include "storage/ChunkManager.h"
+#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 

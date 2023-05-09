@@ -27,6 +27,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "common/type_c.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
@@ -68,6 +69,9 @@ class SegmentInterface {
 
     virtual int64_t
     get_real_count() const = 0;
+
+    virtual SegmentType
+    type() const = 0;
 
     virtual int64_t
     PreDelete(int64_t size) = 0;

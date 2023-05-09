@@ -37,15 +37,16 @@ class SegmentGrowing : public SegmentInternalInterface {
            const Timestamp* timestamps,
            const InsertData* insert_data) = 0;
 
+    SegmentType
+    type() const override {
+        return Growing;
+    }
+
     // virtual int64_t
     // PreDelete(int64_t size) = 0;
 
     // virtual Status
     // Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
-
- public:
-    virtual int64_t
-    get_deleted_count() const = 0;
 };
 
 using SegmentGrowingPtr = std::unique_ptr<SegmentGrowing>;

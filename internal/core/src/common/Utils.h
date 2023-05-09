@@ -12,16 +12,28 @@
 #pragma once
 
 #include <google/protobuf/text_format.h>
+#include <simdjson.h>
 
+#include <algorithm>
+#include <cstring>
+#include <memory>
 #include <string>
 
+#include <fcntl.h>
+#include <sys/mman.h>
+
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "config/ConfigChunkManager.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
+#define FIELD_DATA(data_array, type) (data_array->scalars().type##_data().data())
+
+#define VEC_FIELD_DATA(data_array, type) (data_array->vectors().type##_vector().data())
 
 inline DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
@@ -54,8 +66,8 @@ GetDatasetDim(const DatasetPtr& dataset) {
 }
 
 inline bool
-PrefixMatch(const std::string& str, const std::string& prefix) {
-    auto ret = strncmp(str.c_str(), prefix.c_str(), prefix.length());
+PrefixMatch(const std::string_view str, const std::string_view prefix) {
+    auto ret = strncmp(str.data(), prefix.data(), prefix.length());
     if (ret != 0) {
         return false;
     }
@@ -64,24 +76,16 @@ PrefixMatch(const std::string& str, const std::string& prefix) {
 }
 
 inline bool
-PostfixMatch(const std::string& str, const std::string& postfix) {
+PostfixMatch(const std::string_view str, const std::string_view postfix) {
     if (postfix.length() > str.length()) {
         return false;
     }
 
     int offset = str.length() - postfix.length();
-    auto ret = strncmp(str.c_str() + offset, postfix.c_str(), postfix.length());
+    auto ret = strncmp(str.data() + offset, postfix.data(), postfix.length());
     if (ret != 0) {
         return false;
     }
-    //
-    //    int i = postfix.length() - 1;
-    //    int j = str.length() - 1;
-    //    for (; i >= 0; i--, j--) {
-    //        if (postfix[i] != str[j]) {
-    //            return false;
-    //        }
-    //    }
     return true;
 }
 

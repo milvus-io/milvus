@@ -94,6 +94,12 @@ func (ds *DataSorter) Swap(i, j int) {
 			for idx := 0; idx < dim; idx++ {
 				data[i*dim+idx], data[j*dim+idx] = data[j*dim+idx], data[i*dim+idx]
 			}
+		case schemapb.DataType_Array:
+			data := singleData.(*ArrayFieldData).Data
+			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_JSON:
+			data := singleData.(*JSONFieldData).Data
+			data[i], data[j] = data[j], data[i]
 		default:
 			errMsg := "undefined data type " + string(field.DataType)
 			panic(errMsg)

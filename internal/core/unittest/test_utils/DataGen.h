@@ -15,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include <string>
 #include <google/protobuf/text_format.h>
 
 #include "Constants.h"
@@ -141,6 +142,12 @@ struct GeneratedData {
                     auto src_data = target_field_data.scalars().string_data().data();
                     std::copy(src_data.begin(), src_data.end(), ret_data);
 
+                    break;
+                }
+                case DataType::JSON: {
+                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
+                    auto src_data = target_field_data.scalars().json_data().data();
+                    std::copy(src_data.begin(), src_data.end(), ret_data);
                     break;
                 }
                 default: {
@@ -276,6 +283,16 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
                     for (int j = 0; j < repeat_count; j++) {
                         data[i * repeat_count + j] = str;
                     }
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::JSON: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    auto str = R"({"int":)" + std::to_string(er()) + R"(,"double":)" +
+                               std::to_string(static_cast<double>(er())) + "}";
+                    data[i] = str;
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -437,11 +454,17 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
             raw_data = data->vectors().float_vector().data().data();
             dim = field_meta.get_dim();
             data_type = DataType::VECTOR_FLOAT;
+            auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+            field_data->FillFieldData(raw_data, raw_count);
+            return field_data;
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
             raw_data = data->vectors().binary_vector().data();
             dim = field_meta.get_dim();
             AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
             data_type = DataType::VECTOR_BINARY;
+            auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+            field_data->FillFieldData(raw_data, raw_count);
+            return field_data;
         } else {
             PanicInfo("unsupported");
         }
@@ -450,7 +473,9 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
             case DataType::BOOL: {
                 raw_data = data->scalars().bool_data().data().data();
                 data_type = DataType::BOOL;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::INT8: {
                 auto src_data = data->scalars().int_data().data();
@@ -458,7 +483,9 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
                 std::copy_n(src_data.data(), src_data.size(), data_raw.data());
                 raw_data = data_raw.data();
                 data_type = DataType::INT8;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::INT16: {
                 auto src_data = data->scalars().int_data().data();
@@ -466,27 +493,37 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
                 std::copy_n(src_data.data(), src_data.size(), data_raw.data());
                 raw_data = data_raw.data();
                 data_type = DataType::INT16;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::INT32: {
                 raw_data = data->scalars().int_data().data().data();
                 data_type = DataType::INT32;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::INT64: {
                 raw_data = data->scalars().long_data().data().data();
                 data_type = DataType::INT64;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::FLOAT: {
                 raw_data = data->scalars().float_data().data().data();
                 data_type = DataType::FLOAT;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::DOUBLE: {
                 raw_data = data->scalars().double_data().data().data();
                 data_type = DataType::DOUBLE;
-                break;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
             }
             case DataType::VARCHAR: {
                 auto begin = data->scalars().string_data().data().begin();
@@ -498,15 +535,23 @@ CreateFieldDataFromDataArray(ssize_t raw_count, const DataArray* data, const Fie
                 field_data->FillFieldData(raw_data, raw_count);
                 return field_data;
             }
+            case DataType::JSON: {
+                auto begin = data->scalars().json_data().data().begin();
+                auto end = data->scalars().json_data().data().end();
+                std::vector<std::string> data_raw(begin, end);
+                raw_data = data_raw.data();
+                data_type = DataType::JSON;
+                auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
+                field_data->FillFieldData(raw_data, raw_count);
+                return field_data;
+            }
             default: {
                 PanicInfo("unsupported");
             }
         }
     }
 
-    auto field_data = storage::FieldDataFactory::GetInstance().CreateFieldData(data_type, dim);
-    field_data->FillFieldData(raw_data, raw_count);
-    return field_data;
+    return {};
 }
 
 inline void
@@ -529,7 +574,7 @@ SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std:
         }
     }
     auto fields = dataset.schema_->get_fields();
-    for (auto field_data : dataset.raw_->fields_data()) {
+    for (auto& field_data : dataset.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
         if (exclude_fields.find(field_id) != exclude_fields.end()) {
             continue;

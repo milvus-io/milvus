@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/FieldDataFactory.h"
+#include "common/Json.h"
 #include "storage/Exception.h"
 
 namespace milvus::storage {
@@ -39,6 +40,8 @@ FieldDataFactory::CreateFieldData(const DataType& type, int64_t dim, int64_t tot
         case DataType::STRING:
         case DataType::VARCHAR:
             return std::make_shared<FieldData<std::string>>(type, total_num_rows);
+        case DataType::JSON:
+            return std::make_shared<FieldData<milvus::Json>>(type, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(dim, type, total_num_rows);
         case DataType::VECTOR_BINARY:

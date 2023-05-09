@@ -15,13 +15,16 @@
 // limitations under the License.
 
 #include "storage/Util.h"
+#include "arrow/array/builder_binary.h"
+#include "arrow/type_fwd.h"
 #include "exceptions/EasyAssert.h"
 #include "common/Consts.h"
 #include "config/ConfigChunkManager.h"
-#include "storage/FieldDataFactory.h"
-#include "storage/MemFileManagerImpl.h"
+#include "storage/FieldData.h"
+#include "storage/parquet_c.h"
 #include "storage/ThreadPool.h"
-#include "log/Log.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/FieldDataFactory.h"
 
 #ifdef BUILD_DISK_ANN
 #include "storage/DiskFileManagerImpl.h"
@@ -129,6 +132,19 @@ AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const c
     AssertInfo(ast.ok(), "append value to arrow builder failed");
 }
 
+void
+AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const uint8_t* data, int length) {
+    AssertInfo(builder != nullptr, "empty arrow builder");
+    auto binary_builder = std::dynamic_pointer_cast<arrow::BinaryBuilder>(builder);
+    arrow::Status ast;
+    if (data == nullptr || length < 0) {
+        ast = binary_builder->AppendNull();
+    } else {
+        ast = binary_builder->Append(data, length);
+    }
+    AssertInfo(ast.ok(), "append value to arrow builder failed");
+}
+
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type) {
     switch (static_cast<DataType>(data_type)) {
@@ -156,6 +172,10 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::VARCHAR:
         case DataType::STRING: {
             return std::make_shared<arrow::StringBuilder>();
+        }
+        case DataType::ARRAY:
+        case DataType::JSON: {
+            return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
             PanicInfo("unsupported numeric data type");
@@ -207,6 +227,10 @@ CreateArrowSchema(DataType data_type) {
         case DataType::VARCHAR:
         case DataType::STRING: {
             return arrow::schema({arrow::field("val", arrow::utf8())});
+        }
+        case DataType::ARRAY:
+        case DataType::JSON: {
+            return arrow::schema({arrow::field("val", arrow::binary())});
         }
         default: {
             PanicInfo("unsupported numeric data type");
@@ -440,13 +464,21 @@ PutIndexData(RemoteChunkManager* remote_chunk_manager,
 }
 
 int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_data) {
     int64_t count = 0;
-    for (auto& field_data : field_datas) {
+    for (auto& field_data : field_data) {
         count += field_data->get_num_rows();
     }
-
     return count;
+}
+
+size_t
+CalcFieldDataSize(const std::vector<FieldDataPtr>& field_data) {
+    size_t size{};
+    for (auto& field_data : field_data) {
+        size += field_data->Size();
+    }
+    return size;
 }
 
 void

@@ -50,7 +50,7 @@ ExtractInfoExprVisitor::visit(UnaryRangeExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(BinaryRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_id_);
+    plan_info_.add_involved_field(expr.column_.field_id);
 }
 
 void
@@ -61,7 +61,7 @@ ExtractInfoExprVisitor::visit(CompareExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_id_);
+    plan_info_.add_involved_field(expr.column_.field_id);
 }
 
 }  // namespace milvus::query

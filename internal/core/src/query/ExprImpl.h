@@ -17,10 +17,12 @@
 #pragma once
 
 #include <tuple>
+#include <utility>
 #include <vector>
 #include <boost/container/vector.hpp>
 
 #include "Expr.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
@@ -38,13 +40,13 @@ struct BinaryArithOpEvalRangeExprImpl : BinaryArithOpEvalRangeExpr {
     const T right_operand_;
     const T value_;
 
-    BinaryArithOpEvalRangeExprImpl(const FieldId field_id,
-                                   const DataType data_type,
+    BinaryArithOpEvalRangeExprImpl(ColumnInfo column,
+                                   const proto::plan::GenericValue::ValCase val_case,
                                    const ArithOpType arith_op,
                                    const T right_operand,
                                    const OpType op_type,
                                    const T value)
-        : BinaryArithOpEvalRangeExpr(field_id, data_type, op_type, arith_op),
+        : BinaryArithOpEvalRangeExpr(std::forward<ColumnInfo>(column), val_case, op_type, arith_op),
           right_operand_(right_operand),
           value_(value) {
     }
@@ -64,13 +66,13 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
     const T lower_value_;
     const T upper_value_;
 
-    BinaryRangeExprImpl(const FieldId field_id,
-                        const DataType data_type,
+    BinaryRangeExprImpl(ColumnInfo column,
+                        const proto::plan::GenericValue::ValCase val_case,
                         const bool lower_inclusive,
                         const bool upper_inclusive,
                         const T lower_value,
                         const T upper_value)
-        : BinaryRangeExpr(field_id, data_type, lower_inclusive, upper_inclusive),
+        : BinaryRangeExpr(std::forward<ColumnInfo>(column), val_case, lower_inclusive, upper_inclusive),
           lower_value_(lower_value),
           upper_value_(upper_value) {
     }

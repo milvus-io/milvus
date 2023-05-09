@@ -22,6 +22,8 @@
 #include "Plan.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "generated/VerifyPlanNodeVisitor.h"
+#include "pb/plan.pb.h"
+#include "query/Expr.h"
 
 namespace milvus::query {
 
@@ -92,7 +94,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
     auto field_name = FieldName(out_iter.key());
-    auto body = out_iter.value();
+    auto& body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
     Assert(!datatype_is_vector(data_type));
 
@@ -299,8 +301,9 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
 
             return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
-                schema.get_field_id(field_name), schema[field_name].get_data_type(),
-                arith_op_mapping_.at(arith_op_name), right_operand, mapping_.at(op_name), value);
+                ColumnInfo(schema.get_field_id(field_name), schema[field_name].get_data_type()),
+                proto::plan::GenericValue::ValCase::VAL_NOT_SET, arith_op_mapping_.at(arith_op_name), right_operand,
+                mapping_.at(op_name), value);
         }
 
         if constexpr (std::is_same_v<T, bool>) {
@@ -352,9 +355,10 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
         }
         AssertInfo(has_lower_value && has_upper_value, "illegal binary-range node");
-        return std::make_unique<BinaryRangeExprImpl<T>>(schema.get_field_id(field_name),
-                                                        schema[field_name].get_data_type(), lower_inclusive,
-                                                        upper_inclusive, lower_value, upper_value);
+        return std::make_unique<BinaryRangeExprImpl<T>>(
+            ColumnInfo(schema.get_field_id(field_name), schema[field_name].get_data_type()),
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET, lower_inclusive, upper_inclusive, lower_value,
+            upper_value);
     } else {
         PanicInfo("illegal range node, too more or too few ops");
     }

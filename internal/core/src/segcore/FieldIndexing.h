@@ -131,6 +131,10 @@ class IndexingRecord {
                     continue;
                 }
             }
+            if (field_meta.get_data_type() == DataType::ARRAY || field_meta.get_data_type() == DataType::JSON) {
+                // not supported yet
+                continue;
+            }
 
             field_indexings_.try_emplace(field_id, CreateIndex(field_meta, segcore_config_));
         }
@@ -164,7 +168,10 @@ class IndexingRecord {
 
     // concurrent
     int64_t
-    get_finished_ack() const {
+    get_finished_ack(FieldId field_id) const {
+        if (field_indexings_.find(field_id) == field_indexings_.end()) {
+            return 0;
+        }
         return finished_ack_.GetAck();
     }
 

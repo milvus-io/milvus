@@ -11,13 +11,16 @@
 
 #include <google/protobuf/text_format.h>
 
+#include <cstdint>
 #include <string>
 
 #include "ExprImpl.h"
-#include "PlanProto.h"
+#include "common/VectorTrait.h"
+#include "exceptions/EasyAssert.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
-#include "common/VectorTrait.h"
+#include "pb/plan.pb.h"
+#include "PlanProto.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -96,9 +99,9 @@ ExtractBinaryRangeExprImpl(FieldId field_id, DataType data_type, const planpb::B
             static_assert(always_false<T>);
         }
     };
-    return std::make_unique<BinaryRangeExprImpl<T>>(field_id, data_type, expr_proto.lower_inclusive(),
-                                                    expr_proto.upper_inclusive(), getValue(expr_proto.lower_value()),
-                                                    getValue(expr_proto.upper_value()));
+    return std::make_unique<BinaryRangeExprImpl<T>>(
+        ColumnInfo(expr_proto.column_info()), expr_proto.lower_value().val_case(), expr_proto.lower_inclusive(),
+        expr_proto.upper_inclusive(), getValue(expr_proto.lower_value()), getValue(expr_proto.upper_value()));
 }
 
 template <typename T>
@@ -122,8 +125,8 @@ ExtractBinaryArithOpEvalRangeExprImpl(FieldId field_id,
         }
     };
     return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
-        field_id, data_type, static_cast<ArithOpType>(expr_proto.arith_op()), getValue(expr_proto.right_operand()),
-        static_cast<OpType>(expr_proto.op()), getValue(expr_proto.value()));
+        ColumnInfo(expr_proto.column_info()), expr_proto.value().val_case(), expr_proto.arith_op(),
+        getValue(expr_proto.right_operand()), expr_proto.op(), getValue(expr_proto.value()));
 }
 
 std::unique_ptr<VectorPlanNode>
@@ -287,6 +290,21 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
             case DataType::VARCHAR: {
                 return ExtractBinaryRangeExprImpl<std::string>(field_id, data_type, expr_pb);
             }
+            case DataType::JSON: {
+                switch (expr_pb.lower_value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        return ExtractBinaryRangeExprImpl<bool>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryRangeExprImpl<double>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractBinaryRangeExprImpl<std::string>(field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo("unknown data type in expression");
+                }
+            }
+
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -402,6 +420,17 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(const proto::plan::BinaryArithOpEva
             }
             case DataType::DOUBLE: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<double>(field_id, data_type, expr_pb);
+            }
+            case DataType::JSON: {
+                switch (expr_pb.value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractBinaryArithOpEvalRangeExprImpl<double>(field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo(std::string("unsupported expression data type ") +
+                                  std::to_string(expr_pb.value().val_case()));
+                }
             }
             default: {
                 PanicInfo("unsupported data type");

@@ -2543,8 +2543,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		// req:       request,
-		BaseInsertTask: BaseInsertTask{
+		BaseInsertTask: msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
@@ -5307,7 +5306,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 	panic("implement me")
 }
 
-func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
 	//TODO implement me
 	panic("implement me")
 }

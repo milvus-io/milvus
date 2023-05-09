@@ -15,9 +15,11 @@
 #include <utility>
 #include <vector>
 
+#include "common/type_c.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 
@@ -33,6 +35,11 @@ class SegmentSealed : public SegmentInternalInterface {
     DropFieldData(const FieldId field_id) = 0;
     virtual void
     LoadFieldData(FieldId field_id, const std::vector<storage::FieldDataPtr>& field_datas) = 0;
+
+    SegmentType
+    type() const override {
+        return Sealed;
+    }
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;

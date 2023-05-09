@@ -40,6 +40,8 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const Pay
 
 void
 AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const char* str, int str_size);
+void
+AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const uint8_t* data, int length);
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
@@ -118,8 +120,59 @@ PutIndexData(RemoteChunkManager* remote_chunk_manager,
 int64_t
 GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
 
+size_t
+CalcFieldDataSize(const std::vector<FieldDataPtr>& field_data);
+
 void
 ReleaseArrowUnused();
+
+inline void
+FillField(DataType data_type, size_t size, const std::vector<storage::FieldDataPtr>& field_data, void* dst) {
+    auto dest = static_cast<char*>(dst);
+
+    if (datatype_is_variable(data_type)) {
+        for (auto& data : field_data) {
+            auto n = data->get_num_rows();
+            for (auto i = 0; i < n; i++) {
+                auto src = static_cast<const std::string*>(data->RawValue(i));
+                std::copy_n(src->data(), src->size(), dest);
+                dest += src->size();
+            }
+        }
+    } else {
+        for (auto& data : field_data) {
+            std::copy_n(static_cast<const char*>(data->Data()), data->Size(), dest);
+            dest += data->Size();
+        }
+    }
+}
+
+// CreateMap creates a memory mapping,
+// if mmap enabled, this writes field data to disk and create a map to the file,
+// otherwise this just alloc memory
+inline void*
+CreateMap(int64_t segment_id, const FieldMeta& field_meta, const std::vector<storage::FieldDataPtr>& field_data) {
+    static int mmap_flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    // macOS doesn't support MAP_POPULATE
+    mmap_flags |= MAP_POPULATE;
+#endif
+
+    // simdjson requires a padding following the json data
+    size_t padding = field_meta.get_data_type() == DataType::JSON ? simdjson::SIMDJSON_PADDING : 0;
+
+    auto data_type = field_meta.get_data_type();
+    auto data_size = storage::CalcFieldDataSize(field_data);
+    if (data_size == 0) {
+        return nullptr;
+    }
+
+    // Use anon mapping so we are able to free these memory with munmap only
+    void* map = mmap(nullptr, data_size + padding, PROT_READ | PROT_WRITE, mmap_flags | MAP_ANON, -1, 0);
+    AssertInfo(map != MAP_FAILED, std::string("failed to create anon map, err: ") + strerror(errno));
+    FillField(data_type, data_size, field_data, map);
+    return map;
+}
 
 // size_t
 // getCurrentRSS();

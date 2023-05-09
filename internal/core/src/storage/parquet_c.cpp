@@ -118,6 +118,28 @@ AddOneStringToPayload(CPayloadWriter payloadWriter, char* cstr, int str_size) {
 }
 
 extern "C" CStatus
+AddOneArrayToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
+    try {
+        auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
+        p->add_one_binary_payload(data, length);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+AddOneJSONToPayload(CPayloadWriter payloadWriter, uint8_t* data, int length) {
+    try {
+        auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
+        p->add_one_binary_payload(data, length);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
 AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t* values, int dimension, int length) {
     try {
         auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);

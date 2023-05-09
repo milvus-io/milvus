@@ -139,7 +139,6 @@ func TestPlan_newSearchRequest(t *testing.T) {
 	searchReq, err := newSearchRequest(collection, req, req.Req.GetPlaceholderGroup())
 	assert.NoError(t, err)
 
-	assert.Equal(t, simpleFloatVecField.id, searchReq.searchFieldID)
 	assert.EqualValues(t, defaultNQ, searchReq.getNumOfQuery())
 
 	searchReq.delete()
