@@ -180,6 +180,41 @@ jobs:
             *.info
             *.out
             .git
+  integration-test:
+    name: Integration Test
+    needs: Build
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [20.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Download code
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
+      - name: Cache Go Mod Volumes
+        uses: actions/cache@v3
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
+          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+      - name: Start Service
+        shell: bash
+        run: |
+          docker-compose up -d pulsar etcd minio
+      - name: IntegrationTest
+        continue-on-error: true # do not impact ci-passed for now
+        run: |
+          chmod +x build/builder.sh
+          chmod +x scripts/run_intergration_test.sh
+          ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
   codecov:
     name: Upload Code Coverage
     needs: [UT-Cpp, UT-Go]
