@@ -1837,6 +1837,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			},
 		}
 
+		outputFields := []string{vecField}
 		qt := &searchTask{
 			ctx: ctx,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1845,7 +1846,9 @@ func TestSearchTask_Requery(t *testing.T) {
 					SourceID: paramtable.GetNodeID(),
 				},
 			},
-			request: &milvuspb.SearchRequest{},
+			request: &milvuspb.SearchRequest{
+				OutputFields: outputFields,
+			},
 			result: &milvuspb.SearchResults{
 				Results: &schemapb.SearchResultData{
 					Ids: resultIDs,
@@ -1858,6 +1861,8 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		err := qt.Requery()
 		assert.NoError(t, err)
+		assert.Len(t, qt.result.Results.FieldsData, 1)
+		assert.Equal(t, vecField, qt.result.Results.FieldsData[0].GetFieldName())
 	})
 
 	t.Run("Test no primary key", func(t *testing.T) {
