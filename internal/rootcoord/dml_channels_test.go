@@ -196,6 +196,65 @@ func TestDmChannelsFailure(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGetNeedChanNum(t *testing.T) {
+	paramtable.Get().Save(Params.CommonCfg.PreCreatedTopicEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.PreCreatedTopicEnabled.Key)
+	chans := map[UniqueID][]string{}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	t.Run("topic were empty", func(t *testing.T) {
+		defer wg.Done()
+		paramtable.Get().Save(Params.CommonCfg.TopicNames.Key, "")
+		defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
+		assert.Panics(t, func() {
+			getNeedChanNum(10, chans)
+		})
+	})
+
+	wg.Add(1)
+	t.Run("duplicated topics", func(t *testing.T) {
+		defer wg.Done()
+		paramtable.Get().Save(Params.CommonCfg.TopicNames.Key, "topic1,topic1")
+		defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
+		assert.Panics(t, func() {
+			getNeedChanNum(10, chans)
+		})
+	})
+
+	wg.Add(1)
+	t.Run("invalid channel channel that not in the list", func(t *testing.T) {
+		defer wg.Done()
+		paramtable.Get().Save(Params.CommonCfg.TopicNames.Key, "topic1,topic2")
+		defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
+		chans[UniqueID(100)] = []string{"rootcoord-dml_0"}
+		assert.Panics(t, func() {
+			getNeedChanNum(10, chans)
+		})
+	})
+
+	wg.Add(1)
+	t.Run("normal case when pre-created topic", func(t *testing.T) {
+		defer wg.Done()
+		paramtable.Get().Save(Params.CommonCfg.TopicNames.Key, "topic1,topic2")
+		defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
+		chans[UniqueID(100)] = []string{"topic1"}
+		assert.Equal(t, getNeedChanNum(10, chans), 0)
+	})
+
+	wg.Add(1)
+	t.Run("normal case", func(t *testing.T) {
+		defer wg.Done()
+		paramtable.Get().Save(Params.CommonCfg.PreCreatedTopicEnabled.Key, "false")
+		paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+		defer paramtable.Get().Reset(Params.CommonCfg.RootCoordDml.Key)
+		chans[UniqueID(100)] = []string{"rootcoord-dml_99"}
+		assert.Equal(t, getNeedChanNum(10, chans), 100)
+	})
+
+	wg.Wait()
+}
+
 // FailMessageStreamFactory mock MessageStreamFactory failure
 type FailMessageStreamFactory struct {
 	msgstream.Factory
