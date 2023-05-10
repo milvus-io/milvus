@@ -196,3 +196,24 @@ func (suite *UtilSuite) TestGetCollectionTTL() {
 	suite.NoError(err)
 	suite.Equal(ttl, Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 }
+
+func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
+	properties := map[string]string{
+		common.CollectionAutoCompactionKey: "true",
+	}
+
+	enabled, err := getCollectionAutoCompactionEnabled(properties)
+	suite.NoError(err)
+	suite.True(enabled)
+
+	properties = map[string]string{
+		common.CollectionAutoCompactionKey: "bad_value",
+	}
+
+	_, err = getCollectionAutoCompactionEnabled(properties)
+	suite.Error(err)
+
+	enabled, err = getCollectionAutoCompactionEnabled(map[string]string{})
+	suite.NoError(err)
+	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
+}

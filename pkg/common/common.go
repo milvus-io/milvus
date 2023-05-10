@@ -90,7 +90,8 @@ const (
 //  Collection properties key
 
 const (
-	CollectionTTLConfigKey = "collection.ttl.seconds"
+	CollectionTTLConfigKey      = "collection.ttl.seconds"
+	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 )
 
 const (

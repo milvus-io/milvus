@@ -36,9 +36,9 @@ import (
 // Handler handles some channel method for ChannelManager
 type Handler interface {
 	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
-	GetQueryVChanPositions(channel *channel, partitionIDs ...UniqueID) *datapb.VchannelInfo
+	GetQueryVChanPositions(ch *channel, partitionIDs ...UniqueID) *datapb.VchannelInfo
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
-	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
+	GetDataVChanPositions(ch *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string, collectionID UniqueID) bool
 	FinishDropChannel(channel string) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)

@@ -21,8 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -1730,9 +1733,266 @@ func Test_getCompactTime(t *testing.T) {
 				meta: m,
 			},
 		})
-
+	coll := &collectionInfo{
+		ID:         1,
+		Schema:     newTestSchema(),
+		Partitions: []UniqueID{1},
+		Properties: map[string]string{
+			common.CollectionTTLConfigKey: "10",
+		},
+	}
 	now := tsoutil.GetCurrentTime()
-	ct, err := got.getCompactTime(now, 1)
+	ct, err := got.getCompactTime(now, coll)
 	assert.NoError(t, err)
 	assert.NotNil(t, ct)
+}
+
+type CompactionTriggerSuite struct {
+	suite.Suite
+
+	collectionID int64
+	partitionID  int64
+	channel      string
+
+	meta              *meta
+	tr                *compactionTrigger
+	allocator         *NMockAllocator
+	handler           *NMockHandler
+	compactionHandler *MockCompactionPlanContext
+}
+
+func (s *CompactionTriggerSuite) SetupSuite() {
+}
+
+func (s *CompactionTriggerSuite) genSeg(segID, numRows int64) *datapb.SegmentInfo {
+	return &datapb.SegmentInfo{
+		ID:             segID,
+		CollectionID:   s.collectionID,
+		PartitionID:    s.partitionID,
+		LastExpireTime: 100,
+		NumOfRows:      numRows,
+		MaxRowNum:      110,
+		InsertChannel:  s.channel,
+		State:          commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+				},
+			},
+		},
+	}
+}
+
+func (s *CompactionTriggerSuite) SetupTest() {
+	s.collectionID = 100
+	s.partitionID = 200
+	s.channel = "dml_0_100v0"
+	s.meta = &meta{segments: &SegmentsInfo{
+		map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo:   s.genSeg(1, 60),
+				lastFlushTime: time.Now().Add(-100 * time.Minute),
+			},
+			2: {
+				SegmentInfo:   s.genSeg(2, 60),
+				lastFlushTime: time.Now(),
+			},
+			3: {
+				SegmentInfo:   s.genSeg(3, 60),
+				lastFlushTime: time.Now(),
+			},
+			4: {
+				SegmentInfo:   s.genSeg(4, 60),
+				lastFlushTime: time.Now(),
+			},
+			5: {
+				SegmentInfo:   s.genSeg(5, 26),
+				lastFlushTime: time.Now(),
+			},
+			6: {
+				SegmentInfo:   s.genSeg(6, 26),
+				lastFlushTime: time.Now(),
+			},
+		},
+	},
+	}
+	s.allocator = NewNMockAllocator(s.T())
+	s.compactionHandler = NewMockCompactionPlanContext(s.T())
+	s.handler = NewNMockHandler(s.T())
+	s.tr = newCompactionTrigger(
+		s.meta,
+		s.compactionHandler,
+		s.allocator,
+		s.handler,
+	)
+	s.tr.testingOnly = true
+}
+
+func (s *CompactionTriggerSuite) TestHandleSignal() {
+	s.Run("getCompaction_failed", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
+		tr.handleSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionConfigError", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "bad_value",
+			},
+		}, nil)
+		tr.handleSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionDisabled", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}, nil)
+		tr.handleSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionDisabled_force", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}, nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		tr.handleSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      true,
+		})
+	})
+}
+
+func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
+	s.Run("getCompaction_failed", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
+		tr.handleGlobalSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionConfigError", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "bad_value",
+			},
+		}, nil)
+		tr.handleGlobalSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionDisabled", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}, nil)
+		tr.handleGlobalSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      false,
+		})
+
+		// suite shall check compactionHandler.execCompactionPlan never called
+	})
+
+	s.Run("collectionAutoCompactionDisabled_force", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil)
+		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil)
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}, nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		tr.handleGlobalSignal(&compactionSignal{
+			segmentID:    1,
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channel:      s.channel,
+			isForce:      true,
+		})
+	})
+}
+
+func TestCompactionTriggerSuite(t *testing.T) {
+	suite.Run(t, new(CompactionTriggerSuite))
 }

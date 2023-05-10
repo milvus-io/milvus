@@ -161,6 +161,20 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
 }
 
+// getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
+// if not set, returns global auto compaction config.
+func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+	v, ok := properties[common.CollectionAutoCompactionKey]
+	if ok {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, err
+		}
+		return enabled, nil
+	}
+	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil
+}
+
 func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 	for _, param := range indexParams {
 		if param.Key == "index_type" {
