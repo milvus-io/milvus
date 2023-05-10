@@ -28,6 +28,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -880,7 +881,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
-		return errors.New("segment not found, might be a faked segment, ignore post flush")
+		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 	// set segment to SegmentState_Flushed
 	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {

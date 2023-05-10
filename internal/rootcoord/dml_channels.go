@@ -205,6 +205,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			pos:    i,
 		}
 		d.pool.Store(name, dms)
+		log.Info("lxg", zap.Any("name", name))
 		d.channelsHeap = append(d.channelsHeap, dms)
 	}
 

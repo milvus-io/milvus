@@ -101,12 +101,6 @@ func TestStatisticTask_all(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
 
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:              &successStatus,
-		CollectionIDs:       []int64{collectionID},
-		InMemoryPercentages: []int64{100},
-	}, nil)
-
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,

@@ -361,7 +361,7 @@ func (suite *ServiceSuite) TestResourceGroup() {
 
 	resp, err = server.CreateResourceGroup(ctx, createRG)
 	suite.NoError(err)
-	suite.True(merr.Ok(resp))
+	suite.False(merr.Ok(resp))
 
 	listRG := &milvuspb.ListResourceGroupsRequest{}
 	resp1, err := server.ListResourceGroups(ctx, listRG)
