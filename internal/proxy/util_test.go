@@ -721,6 +721,18 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 	return metadata.NewIncomingContext(ctx, md)
 }
 
+func GetContextWithDB(ctx context.Context, originValue string, dbName string) context.Context {
+	authKey := strings.ToLower(util.HeaderAuthorize)
+	authValue := crypto.Base64Encode(originValue)
+	dbKey := strings.ToLower(util.HeaderDBName)
+	contextMap := map[string]string{
+		authKey: authValue,
+		dbKey:   dbName,
+	}
+	md := metadata.New(contextMap)
+	return metadata.NewIncomingContext(ctx, md)
+}
+
 func TestGetCurUserFromContext(t *testing.T) {
 	_, err := GetCurUserFromContext(context.Background())
 	assert.NotNil(t, err)
