@@ -18,7 +18,6 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -65,10 +64,14 @@ func TestBulkInsert(t *testing.T) {
 	prefix := "TestBulkInsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	floatVecField := floatVecField
+	//floatVecField := floatVecField
 	dim := 128
 
-	schema := constructSchema(collectionName, dim, true)
+	schema := constructSchema(collectionName, dim, true,
+		&schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		&schemapb.FieldSchema{Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}}},
+		&schemapb.FieldSchema{Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+	)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -81,6 +84,7 @@ func TestBulkInsert(t *testing.T) {
 	assert.NoError(t, err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		t.FailNow()
 	}
 	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
@@ -157,7 +161,7 @@ func TestBulkInsert(t *testing.T) {
 	// create index
 	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      "embeddings",
 		IndexName:      "_default",
 		ExtraParams:    constructIndexParam(dim, IndexHNSW, distance.L2),
 	})
@@ -166,6 +170,8 @@ func TestBulkInsert(t *testing.T) {
 	}
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+
+	waitingForIndexBuilt(ctx, c, t, collectionName, "embeddings")
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -180,14 +186,14 @@ func TestBulkInsert(t *testing.T) {
 	waitingForLoad(ctx, c, collectionName)
 
 	// search
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := "" //fmt.Sprintf("%s > 0", int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 
 	params := getSearchParams(IndexHNSW, distance.L2)
 	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+		"embeddings", schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.proxy.Search(ctx, searchReq)
 

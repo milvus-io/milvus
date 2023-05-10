@@ -17,10 +17,14 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"strconv"
+	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
@@ -37,6 +41,38 @@ const (
 	IndexHNSW            = indexparamcheck.IndexHNSW
 	IndexDISKANN         = indexparamcheck.IndexDISKANN
 )
+
+func waitingForIndexBuilt(ctx context.Context, cluster *MiniCluster, t *testing.T, collection, field string) {
+	getIndexBuilt := func() bool {
+		resp, err := cluster.proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			CollectionName: collection,
+			FieldName:      field,
+		})
+		if err != nil {
+			t.FailNow()
+			return true
+		}
+		for _, desc := range resp.GetIndexDescriptions() {
+			if desc.GetFieldName() == field {
+				switch desc.GetState() {
+				case commonpb.IndexState_Finished:
+					return true
+				case commonpb.IndexState_Failed:
+					return false
+				}
+			}
+		}
+		return false
+	}
+	for !getIndexBuilt() {
+		select {
+		case <-ctx.Done():
+			t.FailNow()
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
 
 func constructIndexParam(dim int, indexType string, metricType string) []*commonpb.KeyValuePair {
 	params := []*commonpb.KeyValuePair{
