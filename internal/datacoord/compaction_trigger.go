@@ -173,14 +173,26 @@ func (t *compactionTrigger) allocTs() (Timestamp, error) {
 	return ts, nil
 }
 
-func (t *compactionTrigger) getCompactTime(ts Timestamp, collectionID UniqueID) (*compactTime, error) {
+func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
 	}
+	return coll, nil
+}
 
+func (t *compactionTrigger) isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
+	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
+	if err != nil {
+		log.Warn("collection properties auto compaction not valid, returning false", zap.Error(err))
+		return false
+	}
+	return enabled
+}
+
+func (t *compactionTrigger) getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
 	collectionTTL, err := getCollectionTTL(coll.Properties)
 	if err != nil {
 		return nil, err
@@ -359,7 +371,25 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			continue
 		}
 
-		ct, err := t.getCompactTime(ts, group.collectionID)
+		coll, err := t.getCollection(group.collectionID)
+		if err != nil {
+			log.Warn("get collection info failed, skip handling compaction",
+				zap.Int64("collectionID", group.collectionID),
+				zap.Int64("partitionID", group.partitionID),
+				zap.String("channel", group.channelName),
+				zap.Error(err),
+			)
+			return
+		}
+
+		if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
+			log.RatedInfo(20, "collection auto compaction disabled",
+				zap.Int64("collectionID", group.collectionID),
+			)
+			return
+		}
+
+		ct, err := t.getCompactTime(ts, coll)
 		if err != nil {
 			log.Warn("get compact time failed, skip to handle compaction",
 				zap.Int64("collectionID", group.collectionID),
@@ -430,6 +460,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 
 	channel := segment.GetInsertChannel()
 	partitionID := segment.GetPartitionID()
+	collectionID := segment.GetCollectionID()
 	segments := t.getCandidateSegments(channel, partitionID)
 
 	if len(segments) == 0 {
@@ -449,7 +480,25 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	ct, err := t.getCompactTime(ts, segment.GetCollectionID())
+	coll, err := t.getCollection(collectionID)
+	if err != nil {
+		log.Warn("get collection info failed, skip handling compaction",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID),
+			zap.String("channel", channel),
+			zap.Error(err),
+		)
+		return
+	}
+
+	if !signal.isForce && !t.isCollectionAutoCompactionEnabled(coll) {
+		log.RatedInfo(20, "collection auto compaction disabled",
+			zap.Int64("collectionID", collectionID),
+		)
+		return
+	}
+
+	ct, err := t.getCompactTime(ts, coll)
 	if err != nil {
 		log.Warn("get compact time failed, skip to handle compaction", zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("partitionID", partitionID), zap.String("channel", channel))
