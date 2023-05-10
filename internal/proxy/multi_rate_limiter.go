@@ -76,25 +76,31 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
 
-	var limiter *rateLimiter
-	if IsDDLRequest(rt) {
-		limiter = m.globalDDLLimiter
-	} else {
-		limiter = m.collectionLimiters[collectionID]
-	}
+	checkFunc := func(limiter *rateLimiter) commonpb.ErrorCode {
+		if limiter == nil {
+			return commonpb.ErrorCode_Success
+		}
 
-	if limiter == nil {
+		limit, rate := limiter.limit(rt, n)
+		if rate == 0 {
+			return limiter.getErrorCode(rt)
+		}
+		if limit {
+			return commonpb.ErrorCode_RateLimit
+		}
 		return commonpb.ErrorCode_Success
 	}
 
-	limit, rate := limiter.limit(rt, n)
-	if rate == 0 {
-		return limiter.getErrorCode(rt)
+	// first, check global level rate limits
+	ret := checkFunc(m.globalDDLLimiter)
+
+	// second check collection level rate limits
+	if ret == commonpb.ErrorCode_Success && !IsDDLRequest(rt) {
+		// only dml and dql have collection level rate limits
+		ret = checkFunc(m.collectionLimiters[collectionID])
 	}
-	if limit {
-		return commonpb.ErrorCode_RateLimit
-	}
-	return commonpb.ErrorCode_Success
+
+	return ret
 }
 
 func IsDDLRequest(rt internalpb.RateType) bool {
