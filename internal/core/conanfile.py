@@ -17,6 +17,7 @@ class MilvusConan(ConanFile):
         "openssl/1.1.1q",
         "s2n/1.3.31@milvus/dev",
         "aws-c-common/0.8.2@milvus/dev",
+        "aws-c-compression/0.2.15@milvus/dev",
         "aws-checksums/0.1.13@milvus/dev",
         "aws-sdk-cpp/1.9.234",
         "googleapis/cci.20220711@milvus/dev",
