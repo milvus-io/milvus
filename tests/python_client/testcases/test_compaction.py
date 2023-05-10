@@ -507,7 +507,7 @@ class TestCompactionOperation(TestcaseBase):
                 3.Compact and wait it completed
         expected: Verify there are 2 merge type complation plans
         """
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
         for i in range(2):
             df = cf.gen_default_dataframe_data(2 * tmp_nb)
             insert_res, _ = collection_w.insert(df)

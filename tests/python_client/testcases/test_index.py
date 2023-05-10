@@ -1150,7 +1150,7 @@ class TestNewIndexBinary(TestcaseBase):
         binary_index_params = {'index_type': 'BIN_IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 64}}
         collection_w.create_index(default_binary_vec_field_name, binary_index_params,
                                   index_name=binary_field_name, check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 0,
+                                  check_items={ct.err_code: 1,
                                                ct.err_msg: "Invalid metric_type: L2, which does not match the index type: BIN_IVF_FLAT"})
 
     """
