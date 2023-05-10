@@ -566,13 +566,15 @@ func (p *MinioConfig) initUseIAM() {
 
 // CloudProvider supported
 const (
-	CloudProviderAWS = "aws"
-	CloudProviderGCP = "gcp"
+	CloudProviderAWS    = "aws"
+	CloudProviderGCP    = "gcp"
+	CloudProviderAliyun = "aliyun"
 )
 
 var supportedCloudProvider = map[string]bool{
-	CloudProviderAWS: true,
-	CloudProviderGCP: true,
+	CloudProviderAWS:    true,
+	CloudProviderGCP:    true,
+	CloudProviderAliyun: true,
 }
 
 func (p *MinioConfig) initCloudProvider() {

@@ -185,6 +185,13 @@ require (
 require github.com/cockroachdb/errors v1.2.4
 
 require (
+	github.com/aliyun/credentials-go v1.2.7
+	github.com/cockroachdb/errors v1.2.4
+)
+
+require (
+	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
+	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	github.com/bytedance/sonic v1.8.8 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.2 // indirect
 	github.com/certifi/gocertifi v0.0.0-20200922220541-2c3bb06c6054 // indirect
