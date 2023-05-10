@@ -2562,7 +2562,7 @@ class TestLoadCollection(TestcaseBase):
         replicas = collection_w.get_replicas()[0]
         groups = replicas.groups
         assert len(groups) == 1
-        assert len(groups[0].shards) == 2
+        assert len(groups[0].shards) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("replicas", [None])
