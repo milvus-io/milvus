@@ -220,23 +220,29 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     auto values = body["values"];
 
     std::vector<T> terms(values.size());
+    auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     for (int i = 0; i < values.size(); i++) {
         auto value = values[i];
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value.is_boolean());
+            val_case = proto::plan::GenericValue::ValCase::kBoolVal;
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value.is_number_integer());
+            val_case = proto::plan::GenericValue::ValCase::kInt64Val;
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value.is_number());
+            val_case = proto::plan::GenericValue::ValCase::kFloatVal;
         } else {
             static_assert(always_false<T>, "unsupported type");
         }
         terms[i] = value;
     }
     std::sort(terms.begin(), terms.end());
-    return std::make_unique<TermExprImpl<T>>(schema.get_field_id(field_name),
-                                             schema[field_name].get_data_type(),
-                                             terms);
+    return std::make_unique<TermExprImpl<T>>(
+        ColumnInfo(schema.get_field_id(field_name),
+                   schema[field_name].get_data_type()),
+        terms,
+        val_case);
 }
 
 template <typename T>
@@ -323,10 +329,11 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             static_assert(always_false<T>, "unsupported type");
         }
         return std::make_unique<UnaryRangeExprImpl<T>>(
-            schema.get_field_id(field_name),
-            schema[field_name].get_data_type(),
+            ColumnInfo(schema.get_field_id(field_name),
+                       schema[field_name].get_data_type()),
             mapping_.at(op_name),
-            item.value());
+            item.value(),
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET);
     } else if (body.size() == 2) {
         bool has_lower_value = false;
         bool has_upper_value = false;

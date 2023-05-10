@@ -41,12 +41,12 @@ ExtractInfoExprVisitor::visit(LogicalBinaryExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(TermExpr& expr) {
-    plan_info_.add_involved_field(expr.field_id_);
+    plan_info_.add_involved_field(expr.column_.field_id);
 }
 
 void
 ExtractInfoExprVisitor::visit(UnaryRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_id_);
+    plan_info_.add_involved_field(expr.column_.field_id);
 }
 
 void
@@ -62,6 +62,11 @@ ExtractInfoExprVisitor::visit(CompareExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
+    plan_info_.add_involved_field(expr.column_.field_id);
+}
+
+void
+ExtractInfoExprVisitor::visit(ExistsExpr& expr) {
     plan_info_.add_involved_field(expr.column_.field_id);
 }
 

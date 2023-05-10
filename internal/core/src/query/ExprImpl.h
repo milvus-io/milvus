@@ -30,10 +30,10 @@ template <typename T>
 struct TermExprImpl : TermExpr {
     const std::vector<T> terms_;
 
-    TermExprImpl(const FieldId field_id,
-                 const DataType data_type,
-                 const std::vector<T>& terms)
-        : TermExpr(field_id, data_type), terms_(terms) {
+    TermExprImpl(ColumnInfo column,
+                 const std::vector<T>& terms,
+                 const proto::plan::GenericValue::ValCase val_case)
+        : TermExpr(std::forward<ColumnInfo>(column), val_case), terms_(terms) {
     }
 };
 
@@ -60,11 +60,12 @@ template <typename T>
 struct UnaryRangeExprImpl : UnaryRangeExpr {
     const T value_;
 
-    UnaryRangeExprImpl(const FieldId field_id,
-                       const DataType data_type,
+    UnaryRangeExprImpl(ColumnInfo column,
                        const OpType op_type,
-                       const T value)
-        : UnaryRangeExpr(field_id, data_type, op_type), value_(value) {
+                       const T value,
+                       const proto::plan::GenericValue::ValCase val_case)
+        : UnaryRangeExpr(std::forward<ColumnInfo>(column), op_type, val_case),
+          value_(value) {
     }
 };
 
@@ -85,6 +86,12 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
                           upper_inclusive),
           lower_value_(lower_value),
           upper_value_(upper_value) {
+    }
+};
+
+struct ExistsExprImpl : ExistsExpr {
+    ExistsExprImpl(ColumnInfo column)
+        : ExistsExpr(std::forward<ColumnInfo>(column)) {
     }
 };
 

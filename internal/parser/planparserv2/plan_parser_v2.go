@@ -3,11 +3,10 @@ package planparserv2
 import (
 	"fmt"
 
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
-	"github.com/antlr/antlr4/runtime/Go/antlr"
 )
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
@@ -56,7 +55,6 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 	if predicate == nil {
 		return nil, fmt.Errorf("cannot parse expression: %s", exprStr)
 	}
-
 	if !typeutil.IsBoolType(predicate.dataType) {
 		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
 	}
