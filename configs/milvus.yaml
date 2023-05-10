@@ -458,18 +458,28 @@ quotaAndLimits:
     # The maximum rate will not be greater than max.
     enabled: false
     insertRate:
+      collection:
+        max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit
     deleteRate:
+      collection:
+        max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit
     bulkLoadRate:
+      collection:
+        max: -1 # MB/s, default no limit, not support yet. TODO: limit bulkLoad rate
       max: -1 # MB/s, default no limit, not support yet. TODO: limit bulkLoad rate
   dql:
     # dql limit rates, default no limit.
     # The maximum rate will not be greater than max.
     enabled: false
     searchRate:
+      collection:
+        max: -1 # vps (vectors per second), default no limit
       max: -1 # vps (vectors per second), default no limit
     queryRate:
+      collection:
+        max: -1 # qps, default no limit
       max: -1 # qps, default no limit
   limitWriting:
     # forceDeny false means dml requests are allowed (except for some

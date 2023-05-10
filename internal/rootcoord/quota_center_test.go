@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
@@ -206,13 +205,10 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
 		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
 		paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "10.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRate.Key, "100.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMinInsertRate.Key, "0.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMaxDeleteRate.Key, "100.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMinDeleteRate.Key, "0.0")
-
-		log.Info(paramtable.Get().Get(Params.QuotaConfig.DMLMaxInsertRate.Key))
-		log.Info(Params.QuotaConfig.DMLMaxInsertRate.GetValue())
+		paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "100.0")
+		paramtable.Get().Save(Params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "0.0")
+		paramtable.Get().Save(Params.QuotaConfig.DMLMaxDeleteRatePerCollection.Key, "100.0")
+		paramtable.Get().Save(Params.QuotaConfig.DMLMinDeleteRatePerCollection.Key, "0.0")
 
 		quotaCenter.writableCollections = []int64{1, 2, 3}
 
@@ -250,7 +246,7 @@ func TestQuotaCenter(t *testing.T) {
 			}
 			quotaCenter.resetAllCurrentRates()
 			quotaCenter.calculateWriteRates()
-			deleteFactor := float64(quotaCenter.currentRates[1][internalpb.RateType_DMLDelete]) / Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat()
+			deleteFactor := float64(quotaCenter.currentRates[1][internalpb.RateType_DMLDelete]) / Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
 			assert.Equal(t, c.expectedFactor, deleteFactor)
 		}
 		Params.QuotaConfig.MaxTimeTickDelay = backup
@@ -270,8 +266,8 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
 		paramtable.Get().Save(Params.QuotaConfig.QueueLatencyThreshold.Key, "100")
 		paramtable.Get().Save(Params.QuotaConfig.DQLLimitEnabled.Key, "true")
-		paramtable.Get().Save(Params.QuotaConfig.DQLMaxQueryRate.Key, "500")
-		paramtable.Get().Save(Params.QuotaConfig.DQLMaxSearchRate.Key, "500")
+		paramtable.Get().Save(Params.QuotaConfig.DQLMaxQueryRatePerCollection.Key, "500")
+		paramtable.Get().Save(Params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "500")
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{

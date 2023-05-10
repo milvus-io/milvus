@@ -396,8 +396,8 @@ func (q *QuotaCenter) calculateReadRates() {
 			}
 		}
 
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate.GetAsFloat(), internalpb.RateType_DQLSearch, collections...)
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate.GetAsFloat(), internalpb.RateType_DQLQuery, collections...)
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat(), internalpb.RateType_DQLSearch, collections...)
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat(), internalpb.RateType_DQLQuery, collections...)
 		log.Info("QueryNodeMetrics when cool-off",
 			zap.Any("metrics", q.queryNodeMetrics))
 	}
@@ -441,8 +441,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		if q.currentRates[collection][internalpb.RateType_DMLDelete] != Inf {
 			q.currentRates[collection][internalpb.RateType_DMLDelete] *= Limit(factor)
 		}
-		q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRate.GetAsFloat(), internalpb.RateType_DMLInsert)
-		q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRate.GetAsFloat(), internalpb.RateType_DMLDelete)
+		q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat(), internalpb.RateType_DMLInsert)
+		q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat(), internalpb.RateType_DMLDelete)
 		log.RatedDebug(10, "QuotaCenter cool write rates off done",
 			zap.Int64("collectionID", collection),
 			zap.Float64("factor", factor))
@@ -638,15 +638,15 @@ func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64)
 	}
 	switch rt {
 	case internalpb.RateType_DMLInsert:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
 	case internalpb.RateType_DMLDelete:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
 	case internalpb.RateType_DMLBulkLoad:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
 	case internalpb.RateType_DQLSearch:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
 	case internalpb.RateType_DQLQuery:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
 	}
 	if q.currentRates[collection][rt] < 0 {
 		q.currentRates[collection][rt] = Inf // no limit
