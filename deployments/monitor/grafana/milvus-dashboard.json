@@ -12167,7 +12167,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "$datasource"
         },
         "definition": "label_values(milvus_proxy_collection_mutation_latency_sum{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"}, collection_name)",
         "hide": 0,
