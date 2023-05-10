@@ -10,6 +10,7 @@ on:
       - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
+      - 'tests/integration' # run integration test
       - '.github/workflows/main.yaml'
       - '.env'
       - docker-compose.yml
@@ -25,6 +26,7 @@ on:
       - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
+      - 'tests/integration' # run integration test
       - '.github/workflows/main.yaml'
       - '.env'
       - docker-compose.yml
