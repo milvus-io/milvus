@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/querynode"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1854,6 +1856,10 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	task.searchShardPolicy = mergeRoundRobinPolicy
 	qn.searchError = fmt.Errorf("mock error")
+	assert.Error(t, task.Execute(ctx))
+
+	tempQueryNode := querynode.NewQueryNode(context.Background(), nil)
+	tempQueryNode.IsStandAlone = true
 	assert.Error(t, task.Execute(ctx))
 
 	qn.searchError = nil

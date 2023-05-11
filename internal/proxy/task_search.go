@@ -450,10 +450,12 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	queryNode := querynode.GetQueryNode()
 	var result *internalpb.SearchResults
 	var err error
+	var isStandAlone = queryNode != nil && queryNode.IsStandAlone
 
-	if queryNode != nil && queryNode.IsStandAlone {
+	if isStandAlone {
 		result, err = queryNode.Search(ctx, req)
-	} else {
+	}
+	if !isStandAlone || (isStandAlone && (err != nil || result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success)) {
 		result, err = qn.Search(ctx, req)
 	}
 	if err != nil {
