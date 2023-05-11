@@ -117,6 +117,7 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 		"FieldFloat.npy",
 		"FieldDouble.npy",
 		"FieldString.npy",
+		"FieldJSON.npy",
 		"FieldBinaryVector.npy",
 	}
 	err = parser.validateFileNames(fileNames)
@@ -493,6 +494,10 @@ func Test_NumpyParserReadData(t *testing.T) {
 
 	t.Run("read varchar", func(t *testing.T) {
 		specialReadEmptyFunc("FieldString", []string{"aaa"})
+	})
+
+	t.Run("read JSON", func(t *testing.T) {
+		specialReadEmptyFunc("FieldJSON", []string{"{\"x\": 1}"})
 	})
 
 	t.Run("read binary vector", func(t *testing.T) {

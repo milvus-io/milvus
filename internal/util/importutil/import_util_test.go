@@ -116,6 +116,13 @@ func sampleSchema() *schemapb.CollectionSchema {
 					{Key: "dim", Value: "4"},
 				},
 			},
+			{
+				FieldID:      112,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				Description:  "json",
+				DataType:     schemapb.DataType_JSON,
+			},
 		},
 	}
 	return schema
@@ -131,6 +138,7 @@ type sampleRow struct {
 	FieldFloat        float32
 	FieldDouble       float64
 	FieldString       string
+	FieldJSON         string
 	FieldBinaryVector []int
 	FieldFloatVector  []float32
 }
@@ -454,6 +462,44 @@ func Test_InitValidators(t *testing.T) {
 		err = initValidators(schema, validators)
 		assert.NotNil(t, err)
 	})
+
+	t.Run("json field", func(t *testing.T) {
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  102,
+					Name:     "FieldJSON",
+					DataType: schemapb.DataType_JSON,
+				},
+			},
+		}
+
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.Nil(t, err)
+
+		v, ok := validators[102]
+		assert.True(t, ok)
+
+		fields := initSegmentData(schema)
+		assert.NotNil(t, fields)
+		fieldData := fields[102]
+
+		err = v.convertFunc("{\"x\": 1, \"y\": 5}", fieldData)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, fieldData.RowNum())
+
+		err = v.convertFunc("{}", fieldData)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, fieldData.RowNum())
+
+		err = v.convertFunc("", fieldData)
+		assert.Error(t, err)
+		assert.Equal(t, 2, fieldData.RowNum())
+	})
 }
 
 func Test_GetFileNameAndExt(t *testing.T) {
@@ -616,6 +662,8 @@ func Test_GetTypeName(t *testing.T) {
 	str = getTypeName(schemapb.DataType_BinaryVector)
 	assert.NotEmpty(t, str)
 	str = getTypeName(schemapb.DataType_FloatVector)
+	assert.NotEmpty(t, str)
+	str = getTypeName(schemapb.DataType_JSON)
 	assert.NotEmpty(t, str)
 	str = getTypeName(schemapb.DataType_None)
 	assert.Equal(t, "InvalidType", str)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -101,6 +102,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			FieldFloat:        3 + float32(i)/11,
 			FieldDouble:       1 + float64(i)/7,
 			FieldString:       "No." + strconv.FormatInt(int64(i), 10),
+			FieldJSON:         fmt.Sprintf("{\"x\": %d}", i),
 			FieldBinaryVector: []int{(200 + i) % math.MaxUint8, 0},
 			FieldFloatVector:  []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
 		}
