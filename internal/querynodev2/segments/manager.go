@@ -131,6 +131,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 		if _, ok := targetMap[segment.ID()]; ok {
 			continue
 		}
+
 		targetMap[segment.ID()] = segment
 		metrics.QueryNodeNumSegments.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),

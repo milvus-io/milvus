@@ -74,6 +74,11 @@ func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
 	return value.(V), true
 }
 
+func (m *ConcurrentMap[K, V]) Contain(key K) bool {
+	_, ok := m.Get(key)
+	return ok
+}
+
 // GetOrInsert returns the `value` and `loaded` on the given `key`, `value` set.
 // If the key already exists, return the value and set `loaded` to true.
 // If the key does not exist, insert the given `key` and `value` to map, return the value and set `loaded` to false.

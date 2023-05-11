@@ -20,9 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -46,20 +43,14 @@ func NewLocalWorker(node *QueryNode) *LocalWorker {
 func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := log.Ctx(ctx)
 	log.Info("start to load segments...")
-	loaded, err := w.node.loader.Load(ctx,
+	_, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
 	)
-	if err != nil {
-		return err
-	}
-
-	log.Info("save loaded segments...",
-		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
-	w.node.manager.Segment.Put(segments.SegmentTypeSealed, loaded...)
-	return nil
+	log.Info("load segments done")
+	return err
 }
 
 func (w *LocalWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) error {
