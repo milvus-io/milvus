@@ -65,8 +65,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     HasRawData() const override;
 
     const std::vector<uint8_t>
-    GetVector(const DatasetPtr dataset,
-              const Config& config = {}) const override;
+    GetVector(const DatasetPtr dataset) const override;
 
     void
     CleanLocalData() override;

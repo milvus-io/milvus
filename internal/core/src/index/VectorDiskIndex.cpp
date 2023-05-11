@@ -238,9 +238,8 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 
 template <typename T>
 const std::vector<uint8_t>
-VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset,
-                                 const Config& config) const {
-    auto res = index_.GetVectorByIds(*dataset, config);
+VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
+    auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,

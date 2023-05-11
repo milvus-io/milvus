@@ -165,9 +165,8 @@ VectorMemIndex::HasRawData() const {
 }
 
 const std::vector<uint8_t>
-VectorMemIndex::GetVector(const DatasetPtr dataset,
-                          const Config& config) const {
-    auto res = index_.GetVectorByIds(*dataset, config);
+VectorMemIndex::GetVector(const DatasetPtr dataset) const {
+    auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,

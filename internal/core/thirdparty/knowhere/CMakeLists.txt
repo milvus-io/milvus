@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION a77607d )
+set( KNOWHERE_VERSION fbf2b6e6 )
 
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
