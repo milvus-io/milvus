@@ -402,7 +402,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				segIDs[seg.SegmentID] = seg.Deltalogs
 			}
 
-			log.Info("time cost of generating global compaction", zap.Any("segID2DeltaLogs", segIDs), zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
+			log.Info("time cost of generating global compaction", zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
 				zap.Int64("collectionID", signal.collectionID), zap.String("channel", group.channelName), zap.Int64("partitionID", group.partitionID))
 		}
 	}
@@ -548,7 +548,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			size += s.getSegmentSize()
 			row += s.GetNumOfRows()
 		}
-		log.Info("generate a plan for priority candidates", zap.Any("plan", plan),
+		log.Info("generate a plan for priority candidates", zap.Int64("planID", plan.GetPlanID()),
 			zap.Int64("target segment row", row), zap.Int64("target segment size", size))
 		plans = append(plans, plan)
 	}

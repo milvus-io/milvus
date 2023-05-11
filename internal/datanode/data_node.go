@@ -873,9 +873,14 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		})
 		return true
 	})
+	for _, result := range results {
+		log.Info("Compaction results", zap.Int64("planID", result.GetPlanID()),
+			zap.Int64("segmentID", result.Result.SegmentID),
+			zap.Int64("num_rows", result.Result.GetNumOfRows()),
+			zap.Int("insert log num", len(result.Result.GetInsertLogs())),
+			zap.Int("stats log num", len(result.Result.GetField2StatslogPaths())),
+			zap.Int("delta log num", len(result.Result.GetDeltalogs())))
 
-	if len(results) > 0 {
-		log.Info("Compaction results", zap.Any("results", results))
 	}
 	return &datapb.CompactionStateResponse{
 		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
