@@ -113,6 +113,17 @@ func createBinlogBuf(t *testing.T, dataType schemapb.DataType, data interface{})
 		// without the two lines, the case will crash at here.
 		// the "original_size" is come from storage.originalSizeKey
 		w.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
+	case schemapb.DataType_JSON:
+		rows := data.([][]byte)
+		sizeTotal := 0
+		for i := 0; i < len(rows); i++ {
+			err = evt.AddOneJSONToPayload(rows[i])
+			assert.Nil(t, err)
+			sizeTotal += binary.Size(rows[i])
+		}
+		// without the two lines, the case will crash at here.
+		// the "original_size" is come from storage.originalSizeKey
+		w.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
 	case schemapb.DataType_BinaryVector:
 		vectors := data.([][]byte)
 		for i := 0; i < len(vectors); i++ {
@@ -230,6 +241,10 @@ func Test_BinlogFileOpen(t *testing.T) {
 
 	dataVarchar, err := binlogFile.ReadVarchar()
 	assert.Nil(t, dataVarchar)
+	assert.NotNil(t, err)
+
+	dataJSON, err := binlogFile.ReadJSON()
+	assert.Nil(t, dataJSON)
 	assert.NotNil(t, err)
 
 	dataBinaryVector, dim, err := binlogFile.ReadBinaryVector()
@@ -632,9 +647,60 @@ func Test_BinlogFileVarchar(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.Nil(t, err)
 
+	d, err := binlogFile.ReadJSON()
+	assert.Zero(t, len(d))
+	assert.NotNil(t, err)
+
+	binlogFile.Close()
+}
+
+func Test_BinlogFileJSON(t *testing.T) {
+	source := [][]byte{[]byte("{\"x\": 3, \"y\": 10.5}"), []byte("{\"y\": true}"), []byte("{\"z\": \"hello\"}"), []byte("{}")}
+	chunkManager := &MockChunkManager{
+		readBuf: map[string][]byte{
+			"dummy": createBinlogBuf(t, schemapb.DataType_JSON, source),
+		},
+	}
+
+	binlogFile, err := NewBinlogFile(chunkManager)
+	assert.Nil(t, err)
+	assert.NotNil(t, binlogFile)
+
+	// correct reading
+	err = binlogFile.Open("dummy")
+	assert.Nil(t, err)
+	assert.Equal(t, schemapb.DataType_JSON, binlogFile.DataType())
+
+	data, err := binlogFile.ReadJSON()
+	assert.Nil(t, err)
+	assert.NotNil(t, data)
+	assert.Equal(t, len(source), len(data))
+	for i := 0; i < len(source); i++ {
+		assert.Equal(t, string(source[i]), string(data[i]))
+	}
+
+	binlogFile.Close()
+
+	// wrong data type reading
+	binlogFile, err = NewBinlogFile(chunkManager)
+	assert.Nil(t, err)
+	err = binlogFile.Open("dummy")
+	assert.Nil(t, err)
+
 	d, dim, err := binlogFile.ReadBinaryVector()
 	assert.Zero(t, len(d))
 	assert.Zero(t, dim)
+	assert.NotNil(t, err)
+
+	binlogFile.Close()
+
+	// wrong log type
+	chunkManager.readBuf["dummy"] = createDeltalogBuf(t, []int64{1}, false)
+	err = binlogFile.Open("dummy")
+	assert.Nil(t, err)
+
+	data, err = binlogFile.ReadJSON()
+	assert.Zero(t, len(data))
 	assert.NotNil(t, err)
 
 	binlogFile.Close()

@@ -726,6 +726,16 @@ func (p *BinlogAdapter) readInsertlog(fieldID storage.FieldID, logPath string,
 		if err != nil {
 			return err
 		}
+	case schemapb.DataType_JSON:
+		data, err := binlogFile.ReadJSON()
+		if err != nil {
+			return err
+		}
+
+		err = p.dispatchBytesToShards(data, memoryData, shardList, fieldID)
+		if err != nil {
+			return err
+		}
 	case schemapb.DataType_BinaryVector:
 		data, dim, err := binlogFile.ReadBinaryVector()
 		if err != nil {
@@ -933,6 +943,29 @@ func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []map[
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, val)
+	}
+
+	return nil
+}
+
+func (p *BinlogAdapter) dispatchBytesToShards(data [][]byte, memoryData []map[storage.FieldID]storage.FieldData,
+	shardList []int32, fieldID storage.FieldID) error {
+	// verify row count
+	if len(data) != len(shardList) {
+		log.Error("Binlog adapter: JSON field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("varchar JSON row count %d is not equal to shard list row count %d", len(data), len(shardList))
+	}
+
+	// dispatch entities acoording to shard list
+	for i, val := range data {
+		shardID := shardList[i]
+		if shardID < 0 {
+			continue // this entity has been deleted or excluded by timestamp
+		}
+
+		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
+		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
+		field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, val)
 	}
 
 	return nil

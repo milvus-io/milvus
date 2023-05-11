@@ -18,6 +18,7 @@ package importutil
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -83,6 +84,7 @@ func createFieldsData(rowCount int) map[storage.FieldID]interface{} {
 	varcharData := make([]string, 0)
 	binVecData := make([][]byte, 0)
 	floatVecData := make([][]float32, 0)
+	jsonData := make([][]byte, 0)
 
 	boolFunc := func(i int) bool {
 		return i%3 != 0
@@ -101,6 +103,7 @@ func createFieldsData(rowCount int) map[storage.FieldID]interface{} {
 		varcharData = append(varcharData, "no."+strconv.Itoa(i))
 		binVecData = append(binVecData, []byte{byte(i % 256), byte(i % 256)})                                          // dim = 16
 		floatVecData = append(floatVecData, []float32{float32(i / 2), float32(i / 4), float32(i / 5), float32(i / 8)}) // dim = 4
+		jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
 	}
 
 	fieldsData[0] = rowIDData
@@ -115,6 +118,7 @@ func createFieldsData(rowCount int) map[storage.FieldID]interface{} {
 	fieldsData[109] = varcharData
 	fieldsData[110] = binVecData
 	fieldsData[111] = floatVecData
+	fieldsData[112] = jsonData
 
 	return fieldsData
 }
@@ -151,6 +155,9 @@ func createSegmentsData(fieldsData map[storage.FieldID]interface{}, shardNum int
 		for _, vec := range floatVectors {
 			segData[fieldID].(*storage.FloatVectorFieldData).Data = append(segData[fieldID].(*storage.FloatVectorFieldData).Data, vec...)
 		}
+		fieldID = int64(112)
+		segData[fieldID].(*storage.JSONFieldData).Data = append(segData[fieldID].(*storage.JSONFieldData).Data, fieldsData[fieldID].([][]byte)...)
+
 		segmentsData = append(segmentsData, segData)
 	}
 	return segmentsData
@@ -228,7 +235,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 
 	// row id field missed
 	holder.fieldFiles = make(map[int64][]string)
-	for i := int64(102); i <= 111; i++ {
+	for i := int64(102); i <= 112; i++ {
 		holder.fieldFiles[i] = make([]string, 0)
 	}
 	err = adapter.verify(holder)
@@ -250,7 +257,7 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// succeed
-	for i := int64(102); i <= 111; i++ {
+	for i := int64(102); i <= 112; i++ {
 		holder.fieldFiles[i] = []string{
 			"a",
 		}
@@ -730,6 +737,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		int64(109): {"109_insertlog"},
 		int64(110): {"110_insertlog"},
 		int64(111): {"111_insertlog"},
+		int64(112): {"112_insertlog"},
 	}
 	holder.deltaFiles = []string{"deltalog"}
 	err = adapter.Read(holder)
@@ -751,6 +759,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 		"109_insertlog": createBinlogBuf(t, schemapb.DataType_VarChar, fieldsData[109].([]string)),
 		"110_insertlog": createBinlogBuf(t, schemapb.DataType_BinaryVector, fieldsData[110].([][]byte)),
 		"111_insertlog": createBinlogBuf(t, schemapb.DataType_FloatVector, fieldsData[111].([][]float32)),
+		"112_insertlog": createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte)),
 		"deltalog":      createDeltalogBuf(t, deletedItems, false),
 	}
 
@@ -983,6 +992,20 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 	assert.Equal(t, 1, segmentsData[1][fieldID].RowNum())
 	assert.Equal(t, 0, segmentsData[2][fieldID].RowNum())
 
+	// dispatch JSON data
+	fieldID = int64(112)
+	data := [][]byte{[]byte("{\"x\": 3, \"y\": 10.5}"), []byte("{\"y\": true}"), []byte("{\"z\": \"hello\"}"), []byte("{}")}
+	err = adapter.dispatchBytesToShards(data, segmentsData, shardList, fieldID) // row count mismatch
+	assert.NotNil(t, err)
+	for _, segment := range segmentsData {
+		assert.Equal(t, 0, segment[fieldID].RowNum())
+	}
+	err = adapter.dispatchBytesToShards([][]byte{[]byte("{}"), []byte("{}"), []byte("{}")}, segmentsData, shardList, fieldID) // succeed
+	assert.Nil(t, err)
+	assert.Equal(t, 1, segmentsData[0][fieldID].RowNum())
+	assert.Equal(t, 1, segmentsData[1][fieldID].RowNum())
+	assert.Equal(t, 0, segmentsData[2][fieldID].RowNum())
+
 	// dispatch binary vector data
 	fieldID = int64(110)
 	err = adapter.dispatchBinaryVecToShards([]byte{1, 2, 3, 4}, 16, segmentsData, shardList, fieldID) // row count mismatch
@@ -1076,6 +1099,11 @@ func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 	// failed to dispatch varchar data
 	chunkManager.readBuf["varchar"] = createBinlogBuf(t, schemapb.DataType_VarChar, fieldsData[109].([]string))
 	err = adapter.readInsertlog(1, "varchar", segmentsData, []int32{1})
+	assert.NotNil(t, err)
+
+	// failed to dispatch JSON data
+	chunkManager.readBuf["JSON"] = createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte))
+	err = adapter.readInsertlog(1, "JSON", segmentsData, []int32{1})
 	assert.NotNil(t, err)
 
 	// failed to dispatch binvector data

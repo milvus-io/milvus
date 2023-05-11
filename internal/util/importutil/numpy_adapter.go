@@ -136,6 +136,7 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 		return schemapb.DataType_Double, nil
 	default:
 		if isStringType(typeStr) {
+			// Note: JSON field and VARCHAR field are using string type numpy
 			return schemapb.DataType_VarChar, nil
 		}
 		log.Error("Numpy adapter: the numpy file data type is not supported", zap.String("dtype", typeStr))

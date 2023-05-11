@@ -435,6 +435,49 @@ func (p *BinlogFile) ReadVarchar() ([]string, error) {
 	return result, nil
 }
 
+// ReadJSON method reads all the blocks of a binlog by a data type.
+// A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
+func (p *BinlogFile) ReadJSON() ([][]byte, error) {
+	if p.reader == nil {
+		log.Error("Binlog file: binlog reader not yet initialized")
+		return nil, errors.New("binlog reader not yet initialized")
+	}
+
+	result := make([][]byte, 0)
+	for {
+		event, err := p.reader.NextEventReader()
+		if err != nil {
+			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
+		}
+
+		// end of the file
+		if event == nil {
+			break
+		}
+
+		if event.TypeCode != storage.InsertEventType {
+			log.Error("Binlog file: binlog file is not insert log")
+			return nil, errors.New("binlog file is not insert log")
+		}
+
+		if p.DataType() != schemapb.DataType_JSON {
+			log.Error("Binlog file: binlog data type is not JSON")
+			return nil, errors.New("binlog data type is not JSON")
+		}
+
+		data, err := event.PayloadReaderInterface.GetJSONFromPayload()
+		if err != nil {
+			log.Error("Binlog file: failed to read JSON data", zap.Error(err))
+			return nil, fmt.Errorf("failed to read JSON data, error: %w", err)
+		}
+
+		result = append(result, data...)
+	}
+
+	return result, nil
+}
+
 // ReadBinaryVector method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
 // return vectors data and the dimension
