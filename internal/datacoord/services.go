@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/errorutil"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -74,6 +73,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("receive flush request",
 		zap.Int64("dbID", req.GetDbID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -139,6 +139,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 // AssignSegmentID applies for segment ids and make allocation for records.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
+	log := log.Ctx(ctx)
 	if s.isClosed() {
 		return &datapb.AssignSegmentIDResponse{
 			Status: &commonpb.Status{
@@ -283,8 +284,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 // GetCollectionStatistics returns statistics for collection
 // for now only row count is returned
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Info("received request to get collection statistics")
+	log := log.Ctx(ctx)
+	log.Info("received request to get collection statistics")
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -297,7 +298,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
-	logutil.Logger(ctx).Info("success to get collection statistics", zap.Any("response", resp))
+	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }
 
@@ -305,6 +306,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 // if partID is empty, return statistics for all partitions of the collection
 // for now only row count is returned
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &datapb.GetPartitionStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -324,7 +326,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
-	logutil.Logger(ctx).Info("success to get partition statistics", zap.Any("response", resp))
+	log.Info("success to get partition statistics", zap.Any("response", resp))
 	return resp, nil
 }
 
@@ -341,6 +343,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 // GetSegmentInfo returns segment info requested, status, row count, etc included
 // Called by: QueryCoord, DataNode, IndexCoord, Proxy.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -490,6 +493,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 // DropVirtualChannel notifies vchannel dropped
 // And contains the remaining data log & checkpoint to update
 func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &datapb.DropVirtualChannelResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -551,6 +555,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 // SetSegmentState reset the state of the given segment.
 func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	log := log.Ctx(ctx)
 	if s.isClosed() {
 		return &datapb.SetSegmentStateResponse{
 			Status: &commonpb.Status{
@@ -611,9 +616,10 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 // GetRecoveryInfo get recovery info for segment.
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	log := log.Ctx(ctx)
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
-	log := log.With(
+	log = log.With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 	)
@@ -747,9 +753,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // GetRecoveryInfoV2 get recovery info for segment
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+	log := log.Ctx(ctx)
 	collectionID := req.GetCollectionID()
 	partitionIDs := req.GetPartitionIDs()
-	log := log.With(
+	log = log.With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs),
 	)
@@ -843,6 +850,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 // GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &datapb.GetFlushedSegmentsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -888,6 +896,7 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // GetSegmentsByStates returns all segment matches provided criterion and States
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentsByStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -930,6 +939,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 
 // ShowConfigurations returns the configurations of DataCoord matching req.Pattern
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	log := log.Ctx(ctx)
 	log.Debug("DataCoord.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if s.isClosed() {
 		log.Warn("DataCoord.ShowConfigurations failed",
@@ -967,6 +977,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log := log.Ctx(ctx)
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -1039,6 +1050,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("received manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
 
 	resp := &milvuspb.ManualCompactionResponse{
@@ -1074,6 +1086,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("received get compaction state request", zap.Int64("compactionID", req.GetCompactionID()))
 	resp := &milvuspb.GetCompactionStateResponse{
 		Status: &commonpb.Status{
@@ -1115,6 +1128,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 
 // GetCompactionStateWithPlans returns the compaction state of given plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("received the request to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()))
 
 	resp := &milvuspb.GetCompactionPlansResponse{
@@ -1194,6 +1208,7 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 
 // WatchChannels notifies DataCoord to watch vchannels of a collection.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
 	resp := &datapb.WatchChannelsResponse{
 		Status: &commonpb.Status{
@@ -1267,6 +1282,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
+	log := log.Ctx(ctx)
 	resp := &milvuspb.GetFlushAllStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
 		log.Warn("DataCoord receive GetFlushAllState request, server closed")
@@ -1313,6 +1329,7 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 // Import distributes the import tasks to dataNodes.
 // It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+	log := log.Ctx(ctx)
 	log.Info("DataCoord receives import request", zap.Any("import task request", itr))
 	resp := &datapb.ImportTaskResponse{
 		Status: &commonpb.Status{
@@ -1356,6 +1373,7 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 
 // UpdateSegmentStatistics updates a segment's stats.
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx)
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -1411,6 +1429,7 @@ func getDiff(base, remove []int64) []int64 {
 
 // SaveImportSegment saves the segment binlog paths and puts this segment to its belonging DataNode as a flushed segment.
 func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx)
 	log.Info("DataCoord putting segment to the right DataNode and saving binlog path",
 		zap.Int64("segment ID", req.GetSegmentId()),
 		zap.Int64("collection ID", req.GetCollectionId()),
@@ -1486,6 +1505,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 // UnsetIsImportingState unsets the isImporting states of the given segments.
 // An error status will be returned and error will be logged, if we failed to update *all* segments.
 func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx)
 	log.Info("unsetting isImport state of segments",
 		zap.Int64s("segments", req.GetSegmentIds()))
 	var reportErr error
@@ -1531,6 +1551,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 }
 
 func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx)
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
