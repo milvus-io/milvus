@@ -8,13 +8,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_verifyLengthPerRow(t *testing.T) {
 	maxLength := 16
 
-	assert.NoError(t, verifyLengthPerRow(nil, int64(maxLength)))
+	assert.NoError(t, verifyLengthPerRow[string](nil, int64(maxLength)))
 
 	assert.NoError(t, verifyLengthPerRow([]string{"111111", "22222"}, int64(maxLength)))
 
@@ -596,6 +597,8 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 }
 
 func Test_validateUtil_Validate(t *testing.T) {
+	paramtable.Init()
+
 	t.Run("nil schema", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -816,9 +819,36 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
-
 		err := v.Validate(data, schema, 2)
+		assert.Error(t, err)
 
+		// Validate JSON length
+		longBytes := make([]byte, paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt()+1)
+		data = []*schemapb.FieldData{
+			{
+				FieldName: "json",
+				Type:      schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{longBytes, longBytes},
+							},
+						},
+					},
+				},
+			},
+		}
+		schema = &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "json",
+					FieldID:  104,
+					DataType: schemapb.DataType_JSON,
+				},
+			},
+		}
+		err = v.Validate(data, schema, 2)
 		assert.Error(t, err)
 	})
 
@@ -831,7 +861,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
-								Data: generateFloatVectors(10, 8),
+								Data: generateFloatVectors(2, 8),
 							},
 						},
 					},
@@ -843,7 +873,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(10, 8),
+							BinaryVector: generateBinaryVectors(2, 8),
 						},
 					},
 				},
@@ -855,7 +885,20 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(10, 8),
+								Data: generateVarCharArray(2, 8),
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test4",
+				Type:      schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{[]byte("{}"), []byte("{}")},
 							},
 						},
 					},
@@ -898,12 +941,17 @@ func Test_validateUtil_Validate(t *testing.T) {
 						},
 					},
 				},
+				{
+					Name:     "test4",
+					FieldID:  104,
+					DataType: schemapb.DataType_JSON,
+				},
 			},
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
 
-		err := v.Validate(data, schema, 10)
+		err := v.Validate(data, schema, 2)
 
 		assert.NoError(t, err)
 	})

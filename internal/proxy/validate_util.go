@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -63,8 +64,11 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_JSON:
+			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		default:
-
 		}
 	}
 
@@ -172,7 +176,21 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
-func verifyLengthPerRow(strArr []string, maxLength int64) error {
+func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	jsonArray := field.GetScalars().GetJsonData().GetData()
+	if jsonArray == nil {
+		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+	}
+
+	if v.checkMaxLen {
+		return verifyLengthPerRow(jsonArray, paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+	}
+
+	return nil
+}
+
+func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
 			msg := fmt.Sprintf("the length (%d) of %dth string exceeds max length (%d)", len(s), i, maxLength)
