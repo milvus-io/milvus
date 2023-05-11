@@ -121,6 +121,8 @@ func TestUpsert(t *testing.T) {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
 
+	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,

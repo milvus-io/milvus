@@ -87,8 +87,9 @@ type QueryNode struct {
 	lifetime lifetime.Lifetime[commonpb.StateCode]
 
 	// call once
-	initOnce sync.Once
-	stopOnce sync.Once
+	initOnce  sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
 
 	// internal components
 	manager             *segments.Manager
@@ -333,15 +334,18 @@ func (node *QueryNode) Init() error {
 
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
-	go node.scheduler.Schedule(node.ctx)
+	node.startOnce.Do(func() {
+		go node.scheduler.Schedule(node.ctx)
 
-	paramtable.SetCreateTime(time.Now())
-	paramtable.SetUpdateTime(time.Now())
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	log.Info("query node start successfully",
-		zap.Int64("queryNodeID", paramtable.GetNodeID()),
-		zap.String("Address", node.address),
-	)
+		paramtable.SetCreateTime(time.Now())
+		paramtable.SetUpdateTime(time.Now())
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		log.Info("query node start successfully",
+			zap.Int64("queryNodeID", paramtable.GetNodeID()),
+			zap.String("Address", node.address),
+		)
+	})
+
 	return nil
 }
 

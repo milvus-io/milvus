@@ -31,7 +31,7 @@ if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
 fi
 
 pushd tests/integration
-go test -race ${APPLE_SILICON_FLAG} -v --failfast
+go test -race ${APPLE_SILICON_FLAG} -v
 popd
 
 endTime=`date +%s`

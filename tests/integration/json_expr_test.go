@@ -199,6 +199,7 @@ func TestJsonExpr(t *testing.T) {
 	}
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

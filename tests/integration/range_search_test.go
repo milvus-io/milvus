@@ -119,6 +119,7 @@ func TestRangeSearchIP(t *testing.T) {
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
+	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -272,6 +273,7 @@ func TestRangeSearchL2(t *testing.T) {
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
+	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

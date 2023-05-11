@@ -302,6 +302,8 @@ func TestShowReplicas(t *testing.T) {
 	}
 	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
+	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
