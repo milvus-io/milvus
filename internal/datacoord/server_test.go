@@ -2476,6 +2476,243 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 }
 
+func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
+	t.Run("ab GC-ed, cde unIndexed", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: schema,
+		})
+		c := &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(c))
+		assert.Nil(t, err)
+		d := &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+		}
+		err = svr.meta.AddSegment(NewSegmentInfo(d))
+		assert.Nil(t, err)
+		e := &datapb.SegmentInfo{
+			ID:            3,
+			CollectionID:  0,
+			PartitionID:   1,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{1, 2}, // c, d
+		}
+
+		err = svr.meta.AddSegment(NewSegmentInfo(e))
+		assert.Nil(t, err)
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 0, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.UnflushedSegmentIds) // expected c, d
+	})
+
+	t.Run("a GC-ed, bcde unIndexed", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: schema,
+		})
+		a := &datapb.SegmentInfo{
+			ID:            99,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(a))
+		assert.Nil(t, err)
+
+		c := &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
+		}
+		err = svr.meta.AddSegment(NewSegmentInfo(c))
+		assert.Nil(t, err)
+		d := &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+		}
+		err = svr.meta.AddSegment(NewSegmentInfo(d))
+		assert.Nil(t, err)
+		e := &datapb.SegmentInfo{
+			ID:            3,
+			CollectionID:  0,
+			PartitionID:   1,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{1, 2}, // c, d
+		}
+
+		err = svr.meta.AddSegment(NewSegmentInfo(e))
+		assert.Nil(t, err)
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 0, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{c.GetID(), d.GetID()}, vchan.UnflushedSegmentIds) // expected c, d
+	})
+
+	t.Run("ab GC-ed, c unIndexed, de indexed", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: schema,
+		})
+		c := &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(c))
+		assert.Nil(t, err)
+		d := &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+		}
+		err = svr.meta.AddSegment(NewSegmentInfo(d))
+		assert.Nil(t, err)
+		e := &datapb.SegmentInfo{
+			ID:            3,
+			CollectionID:  0,
+			PartitionID:   0,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{1, 2, 3},
+				MsgGroup:    "",
+				Timestamp:   1,
+			},
+			CompactionFrom: []int64{1, 2}, // c, d
+		}
+		err = svr.meta.AddSegment(NewSegmentInfo(e))
+		assert.Nil(t, err)
+		mockResp := &indexpb.GetIndexInfoResponse{
+			Status: &commonpb.Status{},
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				d.ID: {
+					CollectionID: d.CollectionID,
+					SegmentID:    d.ID,
+					EnableIndex:  true,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: d.ID,
+							FieldID:   2,
+						},
+					},
+				},
+				e.ID: {
+					CollectionID: e.CollectionID,
+					SegmentID:    e.ID,
+					EnableIndex:  true,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: e.ID,
+							FieldID:   2,
+						},
+					},
+				},
+			},
+		}
+		svr.indexCoord = mocks.NewMockIndexCoord(t)
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		assert.Nil(t, err)
+
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 0, len(vchan.UnflushedSegmentIds))
+		assert.ElementsMatch(t, []int64{e.GetID()}, vchan.FlushedSegmentIds) // expected e
+	})
+}
+
 func TestShouldDropChannel(t *testing.T) {
 	type myRootCoord struct {
 		mocks.RootCoord
