@@ -195,7 +195,7 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/wayblink/pulsar-client-go v0.10.1
+	github.com/apache/pulsar-client-go => github.com/wayblink/pulsar-client-go v0.10.5
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt v3.2.2+incompatible // Fix security alert for jwt-go 3.2.0
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0

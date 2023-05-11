@@ -50,6 +50,11 @@ type PmsFactory struct {
 }
 
 func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
+	log.Info("wayblink",
+		zap.String("Address", config.Address),
+		zap.String("WebAddress", config.WebAddress),
+		zap.String("AuthPlugin", config.AuthPlugin),
+		zap.String("AuthParams", config.AuthParams))
 	return &PmsFactory{
 		PulsarBufSize:    1024,
 		ReceiveBufSize:   1024,
@@ -91,6 +96,12 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 		Authentication: auth,
 	}
 
+	log.Info("wayblink",
+		zap.String("PulsarAddress", f.PulsarAddress),
+		zap.String("PulsarWebAddress", f.PulsarWebAddress),
+		zap.String("PulsarAuthPlugin", f.PulsarAuthPlugin),
+		zap.String("PulsarAuthParams", f.PulsarAuthParams))
+
 	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
 	if err != nil {
 		return nil, err
@@ -118,6 +129,10 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 
 func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	return func(channels []string, subname string) error {
+		log.Info("wayblink",
+			zap.String("PulsarWebAddress", f.PulsarWebAddress),
+			zap.String("PulsarAuthPlugin", f.PulsarAuthPlugin),
+			zap.String("PulsarAuthParams", f.PulsarAuthParams))
 		// try to delete the old subscription
 		admin, err := pulsarmqwrapper.NewAdminClient(f.PulsarWebAddress, f.PulsarAuthPlugin, f.PulsarAuthParams)
 		if err != nil {

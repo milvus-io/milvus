@@ -678,8 +678,8 @@ github.com/uber/jaeger-lib v2.4.0+incompatible/go.mod h1:ComeNDZlWwrWnDv8aPp0Ba6
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
 github.com/ugorji/go/codec v1.2.11/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
 github.com/urfave/cli v1.22.2/go.mod h1:Gos4lmkARVdJ6EkW0WaNv/tZAAMe9V7XWyB60NtXRu0=
-github.com/wayblink/pulsar-client-go v0.10.1 h1:d2vZ9TjrxiogsjwCMJlW7se44v1Izr/YLd1Z9nNigcI=
-github.com/wayblink/pulsar-client-go v0.10.1/go.mod h1:l9ZNSafZdle1cpyFE5CkUL3uRYJMvoHjHHLlK0kL7c8=
+github.com/wayblink/pulsar-client-go v0.10.5 h1:Y+HO+QdXud/VKS73ZaOP7cGlJcDXXm6miub3Bg59OT8=
+github.com/wayblink/pulsar-client-go v0.10.5/go.mod h1:l9ZNSafZdle1cpyFE5CkUL3uRYJMvoHjHHLlK0kL7c8=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 h1:eY9dn8+vbi4tKz5Qo6v2eYzo7kUS51QINcR5jNpbZS8=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

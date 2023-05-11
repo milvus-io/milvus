@@ -324,17 +324,19 @@ type PulsarConfig struct {
 }
 
 func (p *PulsarConfig) init(base *BaseTable) {
+	log.Info("wayblink pulsar config init")
 	p.Base = base
 
 	// put initUseSSL first as following inits will use UseSSL
 	p.initUseSSL()
+	p.initAddress()
 	p.initWebAddress()
 	p.initMaxMessageSize()
 	p.initAuthPlugin()
 	p.initAuthParams()
 	p.initTenant()
 	p.initNamespace()
-	p.initAddress()
+	log.Info("wayblink pulsar config init done", zap.String("WebAddress", p.WebAddress))
 }
 
 func (p *PulsarConfig) initAddress() {
@@ -372,8 +374,13 @@ func (p *PulsarConfig) initWebAddress() {
 		p.WebAddress = ""
 		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
 	} else {
+		log.Info("wayblink",
+			zap.String("address", p.Address),
+			zap.String("pulsarURL", pulsarURL.String()),
+			zap.String("Hostname", pulsarURL.Hostname()))
 		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
 		p.WebAddress = webPrefix + pulsarURL.Hostname() + ":" + webport
+		log.Info("wayblink", zap.String("WebAddress", p.WebAddress))
 	}
 }
 

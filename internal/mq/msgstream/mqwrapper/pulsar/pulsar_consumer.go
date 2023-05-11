@@ -95,7 +95,9 @@ func (pc *Consumer) Chan() <-chan mqwrapper.Message {
 // the pointed messageID will be consumed after the seek in pulsar
 func (pc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 	messageID := id.(*pulsarID).messageID
+	log.Info("pulsar start seek", zap.String("messageID", messageID.String()))
 	err := pc.c.Seek(messageID)
+	log.Info("pulsar end seek", zap.String("messageID", messageID.String()))
 	if err == nil {
 		pc.hasSeek = true
 		// skip the first message when consume
