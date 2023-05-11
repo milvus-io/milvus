@@ -57,6 +57,10 @@ message ColumnExpr {
   ColumnInfo info = 1;
 }
 
+message ExistsExpr {
+  ColumnInfo info = 1;
+}
+
 message ValueExpr {
   GenericValue value = 1;
 }
@@ -138,6 +142,7 @@ message Expr {
     BinaryArithExpr binary_arith_expr = 8;
     ValueExpr value_expr = 9;
     ColumnExpr column_expr = 10;
+    ExistsExpr exists_expr = 11;
   };
 }
 

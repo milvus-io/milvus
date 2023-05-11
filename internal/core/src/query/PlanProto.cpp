@@ -31,26 +31,31 @@ ExtractTermExprImpl(FieldId field_id, DataType data_type, const planpb::TermExpr
     static_assert(IsScalar<T>);
     auto size = expr_proto.values_size();
     std::vector<T> terms(size);
+    auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     for (int i = 0; i < size; ++i) {
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
             terms[i] = static_cast<T>(value_proto.bool_val());
+            val_case = proto::plan::GenericValue::ValCase::kBoolVal;
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
             terms[i] = static_cast<T>(value_proto.int64_val());
+            val_case = proto::plan::GenericValue::ValCase::kInt64Val;
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
             terms[i] = static_cast<T>(value_proto.float_val());
+            val_case = proto::plan::GenericValue::ValCase::kFloatVal;
         } else if constexpr (std::is_same_v<T, std::string>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
             terms[i] = static_cast<T>(value_proto.string_val());
+            val_case = proto::plan::GenericValue::ValCase::kStringVal;
         } else {
             static_assert(always_false<T>);
         }
     }
     std::sort(terms.begin(), terms.end());
-    return std::make_unique<TermExprImpl<T>>(field_id, data_type, terms);
+    return std::make_unique<TermExprImpl<T>>(ColumnInfo(expr_proto.column_info()), terms, val_case);
 }
 
 template <typename T>
@@ -74,8 +79,9 @@ ExtractUnaryRangeExprImpl(FieldId field_id, DataType data_type, const planpb::Un
             static_assert(always_false<T>);
         }
     };
-    return std::make_unique<UnaryRangeExprImpl<T>>(field_id, data_type, static_cast<OpType>(expr_proto.op()),
-                                                   getValue(expr_proto.value()));
+    return std::make_unique<UnaryRangeExprImpl<T>>(ColumnInfo(expr_proto.column_info()),
+                                                   static_cast<OpType>(expr_proto.op()), getValue(expr_proto.value()),
+                                                   expr_proto.value().val_case());
 }
 
 template <typename T>
@@ -249,6 +255,21 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
             case DataType::VARCHAR: {
                 return ExtractUnaryRangeExprImpl<std::string>(field_id, data_type, expr_pb);
             }
+            case DataType::JSON: {
+                switch (expr_pb.value().val_case()) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        return ExtractUnaryRangeExprImpl<bool>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractUnaryRangeExprImpl<double>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractUnaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractUnaryRangeExprImpl<std::string>(field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo("unknown data type: " + std::to_string(expr_pb.value().val_case()) +
+                                  " in expression");
+                }
+            }
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -370,6 +391,24 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
             case DataType::VARCHAR: {
                 return ExtractTermExprImpl<std::string>(field_id, data_type, expr_pb);
             }
+            case DataType::JSON: {
+                if (expr_pb.values().size() == 0) {
+                    return ExtractTermExprImpl<bool>(field_id, data_type, expr_pb);
+                }
+                switch (expr_pb.values()[0].val_case()) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        return ExtractTermExprImpl<bool>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        return ExtractTermExprImpl<double>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        return ExtractTermExprImpl<int64_t>(field_id, data_type, expr_pb);
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        return ExtractTermExprImpl<std::string>(field_id, data_type, expr_pb);
+                    default:
+                        PanicInfo("unknown data type: " + std::to_string(expr_pb.values()[0].val_case()) +
+                                  " in expression");
+                }
+            }
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -440,6 +479,31 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(const proto::plan::BinaryArithOpEva
     return result;
 }
 
+std::unique_ptr<ExistsExprImpl>
+ExtractExistsExprImpl(const proto::plan::ExistsExpr& expr_proto) {
+    return std::make_unique<ExistsExprImpl>(ColumnInfo(expr_proto.info()));
+}
+
+ExprPtr
+ProtoParser::ParseExistExpr(const proto::plan::ExistsExpr& expr_pb) {
+    auto& column_info = expr_pb.info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+
+    auto result = [&]() -> ExprPtr {
+        switch (data_type) {
+            case DataType::JSON: {
+                return ExtractExistsExprImpl(expr_pb);
+            }
+            default: {
+                PanicInfo("unsupported data type");
+            }
+        }
+    }();
+    return result;
+}
+
 ExprPtr
 ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
     using ppe = proto::plan::Expr;
@@ -464,6 +528,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kBinaryArithOpEvalRangeExpr: {
             return ParseBinaryArithOpEvalRangeExpr(expr_pb.binary_arith_op_eval_range_expr());
+        }
+        case ppe::kExistsExpr: {
+            return ParseExistExpr(expr_pb.exists_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

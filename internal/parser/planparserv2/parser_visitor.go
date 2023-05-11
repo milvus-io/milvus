@@ -3,6 +3,9 @@ package planparserv2
 import (
 	"fmt"
 	"strconv"
+	"strings"
+
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -25,9 +28,16 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 }
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
-	field, err := v.schema.GetFieldFromName(identifier)
+	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
+	}
+	var nestedPath []string
+	if identifier != field.Name {
+		nestedPath = append(nestedPath, identifier)
+	}
+	if typeutil.IsJSONType(field.DataType) && len(nestedPath) == 0 {
+		return nil, fmt.Errorf("can not comparisons jsonField directly")
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -38,6 +48,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 						DataType:     field.DataType,
 						IsPrimaryKey: field.IsPrimaryKey,
 						IsAutoID:     field.AutoID,
+						NestedPath:   nestedPath,
 					},
 				},
 			},
@@ -175,8 +186,9 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
-	if !typeutil.IsArithmetic(leftExpr.dataType) || !typeutil.IsArithmetic(rightExpr.dataType) {
-		return fmt.Errorf("'%s' can only be used between integer or floating expressions", arithNameMap[ctx.GetOp().GetTokenType()])
+	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
+		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
+		return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
 	}
 
 	expr := &planpb.Expr{
@@ -252,13 +264,15 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
-	if !typeutil.IsArithmetic(leftExpr.dataType) || !typeutil.IsArithmetic(rightExpr.dataType) {
+	if (!typeutil.IsArithmetic(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
+		(!typeutil.IsArithmetic(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
 		return fmt.Errorf("'%s' can only be used between integer or floating expressions", arithNameMap[ctx.GetOp().GetTokenType()])
 	}
 
 	switch ctx.GetOp().GetTokenType() {
 	case parser.PlanParserMOD:
-		if !typeutil.IsIntegerType(leftExpr.dataType) || !typeutil.IsIntegerType(rightExpr.dataType) {
+		if (!typeutil.IsIntegerType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
+			(!typeutil.IsIntegerType(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
 			return fmt.Errorf("modulo can only apply on integer types")
 		}
 	default:
@@ -344,6 +358,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	}
 
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
+
 	if leftValue != nil && rightValue != nil {
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserLT:
@@ -395,8 +410,8 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return fmt.Errorf("the left operand of like is invalid")
 	}
 
-	if !typeutil.IsStringType(leftExpr.dataType) {
-		return fmt.Errorf("like operation on non-string field is unsupported")
+	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) {
+		return fmt.Errorf("like operation on non-string or no-json field is unsupported")
 	}
 
 	column := toColumnInfo(leftExpr)
@@ -531,16 +546,22 @@ func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{}
 	}
 }
 
-// VisitRange translates expr to range plan.
-func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	identifier := ctx.Identifier().GetText()
-	childExpr, err := v.translateIdentifier(identifier)
-	if err != nil {
-		return err
+func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+	if identifier != nil {
+		childExpr, err := v.translateIdentifier(identifier.GetText())
+		if err != nil {
+			return nil, err
+		}
+		return toColumnInfo(childExpr), nil
 	}
 
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil {
+	return v.getColumnInfoFromJSONIdentifier(child.GetText())
+}
+
+// VisitRange translates expr to range plan.
+func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	if columnInfo == nil || err != nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
@@ -562,7 +583,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
-	switch childExpr.dataType {
+	switch columnInfo.GetDataType() {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(lowerValue) || !IsString(upperValue) {
 			return fmt.Errorf("invalid range operations")
@@ -617,13 +638,10 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	identifier := ctx.Identifier().GetText()
-	childExpr, err := v.translateIdentifier(identifier)
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
-
-	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
@@ -646,7 +664,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
-	switch childExpr.dataType {
+	switch columnInfo.GetDataType() {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(lowerValue) || !IsString(upperValue) {
 			return fmt.Errorf("invalid range operations")
@@ -881,4 +899,113 @@ func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
 // VisitBitOr unsupported.
 func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 	return fmt.Errorf("BitOr is not supported: %s", ctx.GetText())
+}
+
+// getColumnInfoFromJSONIdentifier parse JSON field name and JSON nested path.
+// input: user["name"]["first"],
+// output: if user is JSON field name, and fieldID is 102
+/*
+&planpb.ColumnInfo{
+	FieldId:    102,
+	DataType:   JSON,
+	NestedPath: []string{"name", "first"},
+}, nil
+*/
+// if user is not JSON field name, and $SYS_META fieldID is 102:
+/*
+&planpb.ColumnInfo{
+	FieldId:    102,
+	DataType:   JSON,
+	NestedPath: []string{"user", "name", "first"},
+}, nil
+*/
+// input: user,
+// output: if user is JSON field name, return error.
+// if user is not JSON field name, and $SYS_META fieldID is 102:
+/*
+&planpb.ColumnInfo{
+	FieldId:    102,
+	DataType:   JSON,
+	NestedPath: []string{"user"},
+}, nil
+*/
+// More tests refer to plan_parser_v2_test.go::Test_JSONExpr
+func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
+	ss := strings.Split(identifier, "[")
+	fieldName := ss[0]
+	length := len(ss)
+	nestedPath := make([]string, 0, length)
+	jsonField, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
+	if err != nil {
+		return nil, err
+	}
+	if fieldName != jsonField.Name {
+		nestedPath = append(nestedPath, fieldName)
+	}
+	for i := 1; i < length; i++ {
+		path := strings.Trim(strings.Trim(ss[i], "[]"), "\"")
+		nestedPath = append(nestedPath, path)
+	}
+
+	if typeutil.IsJSONType(jsonField.DataType) && len(nestedPath) == 0 {
+		return nil, fmt.Errorf("can not comparisons jsonField directly")
+	}
+
+	return &planpb.ColumnInfo{
+		FieldId:    jsonField.FieldID,
+		DataType:   jsonField.DataType,
+		NestedPath: nestedPath,
+	}, nil
+}
+
+func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) interface{} {
+	jsonField, err := v.getColumnInfoFromJSONIdentifier(ctx.JSONIdentifier().GetText())
+	if err != nil {
+		return err
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:    jsonField.GetFieldId(),
+						DataType:   jsonField.GetDataType(),
+						NestedPath: jsonField.GetNestedPath(),
+					},
+				},
+			},
+		},
+		dataType: jsonField.GetDataType(),
+	}
+}
+
+func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
+	child := ctx.Expr().Accept(v)
+	if err := getError(child); err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(child.(*ExprWithType))
+	if columnInfo == nil {
+		return fmt.Errorf(
+			"exists operations are only supported on single fields now, got: %s", ctx.Expr().GetText())
+	}
+
+	if columnInfo.GetDataType() != schemapb.DataType_JSON {
+		return fmt.Errorf(
+			"exists oerations are only supportted on json field, got:%s", columnInfo.GetDataType())
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ExistsExpr{
+				ExistsExpr: &planpb.ExistsExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:    columnInfo.GetFieldId(),
+						DataType:   columnInfo.GetDataType(),
+						NestedPath: columnInfo.GetNestedPath(),
+					},
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
 }

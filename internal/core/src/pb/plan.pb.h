@@ -49,7 +49,7 @@ struct TableStruct_plan_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[17]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[18]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -83,6 +83,9 @@ extern ColumnInfoDefaultTypeInternal _ColumnInfo_default_instance_;
 class CompareExpr;
 class CompareExprDefaultTypeInternal;
 extern CompareExprDefaultTypeInternal _CompareExpr_default_instance_;
+class ExistsExpr;
+class ExistsExprDefaultTypeInternal;
+extern ExistsExprDefaultTypeInternal _ExistsExpr_default_instance_;
 class Expr;
 class ExprDefaultTypeInternal;
 extern ExprDefaultTypeInternal _Expr_default_instance_;
@@ -122,6 +125,7 @@ template<> ::milvus::proto::plan::BinaryRangeExpr* Arena::CreateMaybeMessage<::m
 template<> ::milvus::proto::plan::ColumnExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::ColumnExpr>(Arena*);
 template<> ::milvus::proto::plan::ColumnInfo* Arena::CreateMaybeMessage<::milvus::proto::plan::ColumnInfo>(Arena*);
 template<> ::milvus::proto::plan::CompareExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::CompareExpr>(Arena*);
+template<> ::milvus::proto::plan::ExistsExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::ExistsExpr>(Arena*);
 template<> ::milvus::proto::plan::Expr* Arena::CreateMaybeMessage<::milvus::proto::plan::Expr>(Arena*);
 template<> ::milvus::proto::plan::GenericValue* Arena::CreateMaybeMessage<::milvus::proto::plan::GenericValue>(Arena*);
 template<> ::milvus::proto::plan::PlanNode* Arena::CreateMaybeMessage<::milvus::proto::plan::PlanNode>(Arena*);
@@ -915,6 +919,140 @@ class ColumnExpr :
 };
 // -------------------------------------------------------------------
 
+class ExistsExpr :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.plan.ExistsExpr) */ {
+ public:
+  ExistsExpr();
+  virtual ~ExistsExpr();
+
+  ExistsExpr(const ExistsExpr& from);
+  ExistsExpr(ExistsExpr&& from) noexcept
+    : ExistsExpr() {
+    *this = ::std::move(from);
+  }
+
+  inline ExistsExpr& operator=(const ExistsExpr& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ExistsExpr& operator=(ExistsExpr&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ExistsExpr& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ExistsExpr* internal_default_instance() {
+    return reinterpret_cast<const ExistsExpr*>(
+               &_ExistsExpr_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    4;
+
+  friend void swap(ExistsExpr& a, ExistsExpr& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ExistsExpr* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ExistsExpr* New() const final {
+    return CreateMaybeMessage<ExistsExpr>(nullptr);
+  }
+
+  ExistsExpr* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ExistsExpr>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ExistsExpr& from);
+  void MergeFrom(const ExistsExpr& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ExistsExpr* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.plan.ExistsExpr";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_plan_2eproto);
+    return ::descriptor_table_plan_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kInfoFieldNumber = 1,
+  };
+  // .milvus.proto.plan.ColumnInfo info = 1;
+  bool has_info() const;
+  void clear_info();
+  const ::milvus::proto::plan::ColumnInfo& info() const;
+  ::milvus::proto::plan::ColumnInfo* release_info();
+  ::milvus::proto::plan::ColumnInfo* mutable_info();
+  void set_allocated_info(::milvus::proto::plan::ColumnInfo* info);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.plan.ExistsExpr)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::plan::ColumnInfo* info_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_plan_2eproto;
+};
+// -------------------------------------------------------------------
+
 class ValueExpr :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.plan.ValueExpr) */ {
  public:
@@ -957,7 +1095,7 @@ class ValueExpr :
                &_ValueExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    5;
 
   friend void swap(ValueExpr& a, ValueExpr& b) {
     a.Swap(&b);
@@ -1091,7 +1229,7 @@ class UnaryRangeExpr :
                &_UnaryRangeExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    6;
 
   friend void swap(UnaryRangeExpr& a, UnaryRangeExpr& b) {
     a.Swap(&b);
@@ -1242,7 +1380,7 @@ class BinaryRangeExpr :
                &_BinaryRangeExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    7;
 
   friend void swap(BinaryRangeExpr& a, BinaryRangeExpr& b) {
     a.Swap(&b);
@@ -1410,7 +1548,7 @@ class CompareExpr :
                &_CompareExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    8;
 
   friend void swap(CompareExpr& a, CompareExpr& b) {
     a.Swap(&b);
@@ -1561,7 +1699,7 @@ class TermExpr :
                &_TermExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    9;
 
   friend void swap(TermExpr& a, TermExpr& b) {
     a.Swap(&b);
@@ -1708,7 +1846,7 @@ class UnaryExpr :
                &_UnaryExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    10;
 
   friend void swap(UnaryExpr& a, UnaryExpr& b) {
     a.Swap(&b);
@@ -1879,7 +2017,7 @@ class BinaryExpr :
                &_BinaryExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    11;
 
   friend void swap(BinaryExpr& a, BinaryExpr& b) {
     a.Swap(&b);
@@ -2062,7 +2200,7 @@ class BinaryArithOp :
                &_BinaryArithOp_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(BinaryArithOp& a, BinaryArithOp& b) {
     a.Swap(&b);
@@ -2213,7 +2351,7 @@ class BinaryArithExpr :
                &_BinaryArithExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(BinaryArithExpr& a, BinaryArithExpr& b) {
     a.Swap(&b);
@@ -2364,7 +2502,7 @@ class BinaryArithOpEvalRangeExpr :
                &_BinaryArithOpEvalRangeExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    14;
 
   friend void swap(BinaryArithOpEvalRangeExpr& a, BinaryArithOpEvalRangeExpr& b) {
     a.Swap(&b);
@@ -2537,6 +2675,7 @@ class Expr :
     kBinaryArithExpr = 8,
     kValueExpr = 9,
     kColumnExpr = 10,
+    kExistsExpr = 11,
     EXPR_NOT_SET = 0,
   };
 
@@ -2546,7 +2685,7 @@ class Expr :
                &_Expr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    15;
 
   friend void swap(Expr& a, Expr& b) {
     a.Swap(&b);
@@ -2627,6 +2766,7 @@ class Expr :
     kBinaryArithExprFieldNumber = 8,
     kValueExprFieldNumber = 9,
     kColumnExprFieldNumber = 10,
+    kExistsExprFieldNumber = 11,
   };
   // .milvus.proto.plan.TermExpr term_expr = 1;
   bool has_term_expr() const;
@@ -2708,6 +2848,14 @@ class Expr :
   ::milvus::proto::plan::ColumnExpr* mutable_column_expr();
   void set_allocated_column_expr(::milvus::proto::plan::ColumnExpr* column_expr);
 
+  // .milvus.proto.plan.ExistsExpr exists_expr = 11;
+  bool has_exists_expr() const;
+  void clear_exists_expr();
+  const ::milvus::proto::plan::ExistsExpr& exists_expr() const;
+  ::milvus::proto::plan::ExistsExpr* release_exists_expr();
+  ::milvus::proto::plan::ExistsExpr* mutable_exists_expr();
+  void set_allocated_exists_expr(::milvus::proto::plan::ExistsExpr* exists_expr);
+
   void clear_expr();
   ExprCase expr_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.Expr)
@@ -2723,6 +2871,7 @@ class Expr :
   void set_has_binary_arith_expr();
   void set_has_value_expr();
   void set_has_column_expr();
+  void set_has_exists_expr();
 
   inline bool has_expr() const;
   inline void clear_has_expr();
@@ -2740,6 +2889,7 @@ class Expr :
     ::milvus::proto::plan::BinaryArithExpr* binary_arith_expr_;
     ::milvus::proto::plan::ValueExpr* value_expr_;
     ::milvus::proto::plan::ColumnExpr* column_expr_;
+    ::milvus::proto::plan::ExistsExpr* exists_expr_;
   } expr_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
@@ -2790,7 +2940,7 @@ class VectorANNS :
                &_VectorANNS_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    16;
 
   friend void swap(VectorANNS& a, VectorANNS& b) {
     a.Swap(&b);
@@ -2967,7 +3117,7 @@ class PlanNode :
                &_PlanNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    17;
 
   friend void swap(PlanNode& a, PlanNode& b) {
     a.Swap(&b);
@@ -3602,6 +3752,61 @@ inline void ColumnExpr::set_allocated_info(::milvus::proto::plan::ColumnInfo* in
   }
   info_ = info;
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.ColumnExpr.info)
+}
+
+// -------------------------------------------------------------------
+
+// ExistsExpr
+
+// .milvus.proto.plan.ColumnInfo info = 1;
+inline bool ExistsExpr::has_info() const {
+  return this != internal_default_instance() && info_ != nullptr;
+}
+inline void ExistsExpr::clear_info() {
+  if (GetArenaNoVirtual() == nullptr && info_ != nullptr) {
+    delete info_;
+  }
+  info_ = nullptr;
+}
+inline const ::milvus::proto::plan::ColumnInfo& ExistsExpr::info() const {
+  const ::milvus::proto::plan::ColumnInfo* p = info_;
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ExistsExpr.info)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::plan::ColumnInfo*>(
+      &::milvus::proto::plan::_ColumnInfo_default_instance_);
+}
+inline ::milvus::proto::plan::ColumnInfo* ExistsExpr::release_info() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.ExistsExpr.info)
+  
+  ::milvus::proto::plan::ColumnInfo* temp = info_;
+  info_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::plan::ColumnInfo* ExistsExpr::mutable_info() {
+  
+  if (info_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::plan::ColumnInfo>(GetArenaNoVirtual());
+    info_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.ExistsExpr.info)
+  return info_;
+}
+inline void ExistsExpr::set_allocated_info(::milvus::proto::plan::ColumnInfo* info) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete info_;
+  }
+  if (info) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      info = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, info, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  info_ = info;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.ExistsExpr.info)
 }
 
 // -------------------------------------------------------------------
@@ -5197,6 +5402,47 @@ inline ::milvus::proto::plan::ColumnExpr* Expr::mutable_column_expr() {
   return expr_.column_expr_;
 }
 
+// .milvus.proto.plan.ExistsExpr exists_expr = 11;
+inline bool Expr::has_exists_expr() const {
+  return expr_case() == kExistsExpr;
+}
+inline void Expr::set_has_exists_expr() {
+  _oneof_case_[0] = kExistsExpr;
+}
+inline void Expr::clear_exists_expr() {
+  if (has_exists_expr()) {
+    delete expr_.exists_expr_;
+    clear_has_expr();
+  }
+}
+inline ::milvus::proto::plan::ExistsExpr* Expr::release_exists_expr() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.Expr.exists_expr)
+  if (has_exists_expr()) {
+    clear_has_expr();
+      ::milvus::proto::plan::ExistsExpr* temp = expr_.exists_expr_;
+    expr_.exists_expr_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::plan::ExistsExpr& Expr::exists_expr() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.Expr.exists_expr)
+  return has_exists_expr()
+      ? *expr_.exists_expr_
+      : *reinterpret_cast< ::milvus::proto::plan::ExistsExpr*>(&::milvus::proto::plan::_ExistsExpr_default_instance_);
+}
+inline ::milvus::proto::plan::ExistsExpr* Expr::mutable_exists_expr() {
+  if (!has_exists_expr()) {
+    clear_expr();
+    set_has_exists_expr();
+    expr_.exists_expr_ = CreateMaybeMessage< ::milvus::proto::plan::ExistsExpr >(
+        GetArenaNoVirtual());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.Expr.exists_expr)
+  return expr_.exists_expr_;
+}
+
 inline bool Expr::has_expr() const {
   return expr_case() != EXPR_NOT_SET;
 }
@@ -5519,6 +5765,8 @@ inline PlanNode::NodeCase PlanNode::node_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

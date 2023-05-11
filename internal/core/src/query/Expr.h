@@ -106,14 +106,15 @@ struct LogicalBinaryExpr : BinaryExprBase {
 };
 
 struct TermExpr : Expr {
-    const FieldId field_id_;
-    const DataType data_type_;
+    const ColumnInfo column_;
+    const proto::plan::GenericValue::ValCase val_case_;
 
  protected:
     // prevent accidential instantiation
     TermExpr() = delete;
 
-    TermExpr(const FieldId field_id, const DataType data_type) : field_id_(field_id), data_type_(data_type) {
+    TermExpr(ColumnInfo column, const proto::plan::GenericValue::ValCase val_case)
+        : column_(std::move(column)), val_case_(val_case) {
     }
 
  public:
@@ -163,16 +164,16 @@ static const std::map<std::string, OpType> mapping_ = {
 };
 
 struct UnaryRangeExpr : Expr {
-    const FieldId field_id_;
-    const DataType data_type_;
+    ColumnInfo column_;
     const OpType op_type_;
+    const proto::plan::GenericValue::ValCase val_case_;
 
  protected:
     // prevent accidential instantiation
     UnaryRangeExpr() = delete;
 
-    UnaryRangeExpr(const FieldId field_id, const DataType data_type, const OpType op_type)
-        : field_id_(field_id), data_type_(data_type), op_type_(op_type) {
+    UnaryRangeExpr(ColumnInfo column, const OpType op_type, const proto::plan::GenericValue::ValCase val_case)
+        : column_(std::move(column)), op_type_(op_type), val_case_(val_case) {
     }
 
  public:
@@ -211,6 +212,21 @@ struct CompareExpr : Expr {
     DataType left_data_type_;
     DataType right_data_type_;
     OpType op_type_;
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
+struct ExistsExpr : Expr {
+    const ColumnInfo column_;
+
+ protected:
+    // prevent accidental instantiation
+    ExistsExpr() = delete;
+
+    explicit ExistsExpr(ColumnInfo column) : column_(std::move(column)) {
+    }
 
  public:
     void
