@@ -49,7 +49,7 @@ struct TableStruct_schema_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[16]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[17]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -104,6 +104,9 @@ extern SearchResultDataDefaultTypeInternal _SearchResultData_default_instance_;
 class StringArray;
 class StringArrayDefaultTypeInternal;
 extern StringArrayDefaultTypeInternal _StringArray_default_instance_;
+class ValueField;
+class ValueFieldDefaultTypeInternal;
+extern ValueFieldDefaultTypeInternal _ValueField_default_instance_;
 class VectorField;
 class VectorFieldDefaultTypeInternal;
 extern VectorFieldDefaultTypeInternal _VectorField_default_instance_;
@@ -126,6 +129,7 @@ template<> ::milvus::proto::schema::LongArray* Arena::CreateMaybeMessage<::milvu
 template<> ::milvus::proto::schema::ScalarField* Arena::CreateMaybeMessage<::milvus::proto::schema::ScalarField>(Arena*);
 template<> ::milvus::proto::schema::SearchResultData* Arena::CreateMaybeMessage<::milvus::proto::schema::SearchResultData>(Arena*);
 template<> ::milvus::proto::schema::StringArray* Arena::CreateMaybeMessage<::milvus::proto::schema::StringArray>(Arena*);
+template<> ::milvus::proto::schema::ValueField* Arena::CreateMaybeMessage<::milvus::proto::schema::ValueField>(Arena*);
 template<> ::milvus::proto::schema::VectorField* Arena::CreateMaybeMessage<::milvus::proto::schema::VectorField>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -315,6 +319,7 @@ class FieldSchema :
     kIndexParamsFieldNumber = 7,
     kNameFieldNumber = 2,
     kDescriptionFieldNumber = 4,
+    kDefaultValueFieldNumber = 11,
     kFieldIDFieldNumber = 1,
     kDataTypeFieldNumber = 5,
     kIsPrimaryKeyFieldNumber = 3,
@@ -366,6 +371,14 @@ class FieldSchema :
   std::string* release_description();
   void set_allocated_description(std::string* description);
 
+  // .milvus.proto.schema.ValueField default_value = 11;
+  bool has_default_value() const;
+  void clear_default_value();
+  const ::milvus::proto::schema::ValueField& default_value() const;
+  ::milvus::proto::schema::ValueField* release_default_value();
+  ::milvus::proto::schema::ValueField* mutable_default_value();
+  void set_allocated_default_value(::milvus::proto::schema::ValueField* default_value);
+
   // int64 fieldID = 1;
   void clear_fieldid();
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
@@ -405,6 +418,7 @@ class FieldSchema :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > index_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
+  ::milvus::proto::schema::ValueField* default_value_;
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   int data_type_;
   bool is_primary_key_;
@@ -1849,6 +1863,240 @@ class JSONArray :
 };
 // -------------------------------------------------------------------
 
+class ValueField :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.ValueField) */ {
+ public:
+  ValueField();
+  virtual ~ValueField();
+
+  ValueField(const ValueField& from);
+  ValueField(ValueField&& from) noexcept
+    : ValueField() {
+    *this = ::std::move(from);
+  }
+
+  inline ValueField& operator=(const ValueField& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ValueField& operator=(ValueField&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ValueField& default_instance();
+
+  enum DataCase {
+    kBoolData = 1,
+    kIntData = 2,
+    kLongData = 3,
+    kFloatData = 4,
+    kDoubleData = 5,
+    kStringData = 6,
+    kBytesData = 7,
+    DATA_NOT_SET = 0,
+  };
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ValueField* internal_default_instance() {
+    return reinterpret_cast<const ValueField*>(
+               &_ValueField_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    11;
+
+  friend void swap(ValueField& a, ValueField& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ValueField* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ValueField* New() const final {
+    return CreateMaybeMessage<ValueField>(nullptr);
+  }
+
+  ValueField* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ValueField>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ValueField& from);
+  void MergeFrom(const ValueField& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ValueField* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.schema.ValueField";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_schema_2eproto);
+    return ::descriptor_table_schema_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kBoolDataFieldNumber = 1,
+    kIntDataFieldNumber = 2,
+    kLongDataFieldNumber = 3,
+    kFloatDataFieldNumber = 4,
+    kDoubleDataFieldNumber = 5,
+    kStringDataFieldNumber = 6,
+    kBytesDataFieldNumber = 7,
+  };
+  // bool bool_data = 1;
+  private:
+  bool has_bool_data() const;
+  public:
+  void clear_bool_data();
+  bool bool_data() const;
+  void set_bool_data(bool value);
+
+  // int32 int_data = 2;
+  private:
+  bool has_int_data() const;
+  public:
+  void clear_int_data();
+  ::PROTOBUF_NAMESPACE_ID::int32 int_data() const;
+  void set_int_data(::PROTOBUF_NAMESPACE_ID::int32 value);
+
+  // int64 long_data = 3;
+  private:
+  bool has_long_data() const;
+  public:
+  void clear_long_data();
+  ::PROTOBUF_NAMESPACE_ID::int64 long_data() const;
+  void set_long_data(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // float float_data = 4;
+  private:
+  bool has_float_data() const;
+  public:
+  void clear_float_data();
+  float float_data() const;
+  void set_float_data(float value);
+
+  // double double_data = 5;
+  private:
+  bool has_double_data() const;
+  public:
+  void clear_double_data();
+  double double_data() const;
+  void set_double_data(double value);
+
+  // string string_data = 6;
+  private:
+  bool has_string_data() const;
+  public:
+  void clear_string_data();
+  const std::string& string_data() const;
+  void set_string_data(const std::string& value);
+  void set_string_data(std::string&& value);
+  void set_string_data(const char* value);
+  void set_string_data(const char* value, size_t size);
+  std::string* mutable_string_data();
+  std::string* release_string_data();
+  void set_allocated_string_data(std::string* string_data);
+
+  // bytes bytes_data = 7;
+  private:
+  bool has_bytes_data() const;
+  public:
+  void clear_bytes_data();
+  const std::string& bytes_data() const;
+  void set_bytes_data(const std::string& value);
+  void set_bytes_data(std::string&& value);
+  void set_bytes_data(const char* value);
+  void set_bytes_data(const void* value, size_t size);
+  std::string* mutable_bytes_data();
+  std::string* release_bytes_data();
+  void set_allocated_bytes_data(std::string* bytes_data);
+
+  void clear_data();
+  DataCase data_case() const;
+  // @@protoc_insertion_point(class_scope:milvus.proto.schema.ValueField)
+ private:
+  class _Internal;
+  void set_has_bool_data();
+  void set_has_int_data();
+  void set_has_long_data();
+  void set_has_float_data();
+  void set_has_double_data();
+  void set_has_string_data();
+  void set_has_bytes_data();
+
+  inline bool has_data() const;
+  inline void clear_has_data();
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  union DataUnion {
+    DataUnion() {}
+    bool bool_data_;
+    ::PROTOBUF_NAMESPACE_ID::int32 int_data_;
+    ::PROTOBUF_NAMESPACE_ID::int64 long_data_;
+    float float_data_;
+    double double_data_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr string_data_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr bytes_data_;
+  } data_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
+
+  friend struct ::TableStruct_schema_2eproto;
+};
+// -------------------------------------------------------------------
+
 class ScalarField :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.ScalarField) */ {
  public:
@@ -1904,7 +2152,7 @@ class ScalarField :
                &_ScalarField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(ScalarField& a, ScalarField& b) {
     a.Swap(&b);
@@ -2143,7 +2391,7 @@ class VectorField :
                &_VectorField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(VectorField& a, VectorField& b) {
     a.Swap(&b);
@@ -2318,7 +2566,7 @@ class FieldData :
                &_FieldData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    14;
 
   friend void swap(FieldData& a, FieldData& b) {
     a.Swap(&b);
@@ -2507,7 +2755,7 @@ class IDs :
                &_IDs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    15;
 
   friend void swap(IDs& a, IDs& b) {
     a.Swap(&b);
@@ -2663,7 +2911,7 @@ class SearchResultData :
                &_SearchResultData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    16;
 
   friend void swap(SearchResultData& a, SearchResultData& b) {
     a.Swap(&b);
@@ -3057,6 +3305,57 @@ inline void FieldSchema::set_element_type(::milvus::proto::schema::DataType valu
   
   element_type_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.element_type)
+}
+
+// .milvus.proto.schema.ValueField default_value = 11;
+inline bool FieldSchema::has_default_value() const {
+  return this != internal_default_instance() && default_value_ != nullptr;
+}
+inline void FieldSchema::clear_default_value() {
+  if (GetArenaNoVirtual() == nullptr && default_value_ != nullptr) {
+    delete default_value_;
+  }
+  default_value_ = nullptr;
+}
+inline const ::milvus::proto::schema::ValueField& FieldSchema::default_value() const {
+  const ::milvus::proto::schema::ValueField* p = default_value_;
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.default_value)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::schema::ValueField*>(
+      &::milvus::proto::schema::_ValueField_default_instance_);
+}
+inline ::milvus::proto::schema::ValueField* FieldSchema::release_default_value() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.FieldSchema.default_value)
+  
+  ::milvus::proto::schema::ValueField* temp = default_value_;
+  default_value_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::schema::ValueField* FieldSchema::mutable_default_value() {
+  
+  if (default_value_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::schema::ValueField>(GetArenaNoVirtual());
+    default_value_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.FieldSchema.default_value)
+  return default_value_;
+}
+inline void FieldSchema::set_allocated_default_value(::milvus::proto::schema::ValueField* default_value) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete default_value_;
+  }
+  if (default_value) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      default_value = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, default_value, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  default_value_ = default_value;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.default_value)
 }
 
 // -------------------------------------------------------------------
@@ -3634,6 +3933,344 @@ JSONArray::mutable_data() {
   return &data_;
 }
 
+// -------------------------------------------------------------------
+
+// ValueField
+
+// bool bool_data = 1;
+inline bool ValueField::has_bool_data() const {
+  return data_case() == kBoolData;
+}
+inline void ValueField::set_has_bool_data() {
+  _oneof_case_[0] = kBoolData;
+}
+inline void ValueField::clear_bool_data() {
+  if (has_bool_data()) {
+    data_.bool_data_ = false;
+    clear_has_data();
+  }
+}
+inline bool ValueField::bool_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.bool_data)
+  if (has_bool_data()) {
+    return data_.bool_data_;
+  }
+  return false;
+}
+inline void ValueField::set_bool_data(bool value) {
+  if (!has_bool_data()) {
+    clear_data();
+    set_has_bool_data();
+  }
+  data_.bool_data_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.bool_data)
+}
+
+// int32 int_data = 2;
+inline bool ValueField::has_int_data() const {
+  return data_case() == kIntData;
+}
+inline void ValueField::set_has_int_data() {
+  _oneof_case_[0] = kIntData;
+}
+inline void ValueField::clear_int_data() {
+  if (has_int_data()) {
+    data_.int_data_ = 0;
+    clear_has_data();
+  }
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 ValueField::int_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.int_data)
+  if (has_int_data()) {
+    return data_.int_data_;
+  }
+  return 0;
+}
+inline void ValueField::set_int_data(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  if (!has_int_data()) {
+    clear_data();
+    set_has_int_data();
+  }
+  data_.int_data_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.int_data)
+}
+
+// int64 long_data = 3;
+inline bool ValueField::has_long_data() const {
+  return data_case() == kLongData;
+}
+inline void ValueField::set_has_long_data() {
+  _oneof_case_[0] = kLongData;
+}
+inline void ValueField::clear_long_data() {
+  if (has_long_data()) {
+    data_.long_data_ = PROTOBUF_LONGLONG(0);
+    clear_has_data();
+  }
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ValueField::long_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.long_data)
+  if (has_long_data()) {
+    return data_.long_data_;
+  }
+  return PROTOBUF_LONGLONG(0);
+}
+inline void ValueField::set_long_data(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  if (!has_long_data()) {
+    clear_data();
+    set_has_long_data();
+  }
+  data_.long_data_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.long_data)
+}
+
+// float float_data = 4;
+inline bool ValueField::has_float_data() const {
+  return data_case() == kFloatData;
+}
+inline void ValueField::set_has_float_data() {
+  _oneof_case_[0] = kFloatData;
+}
+inline void ValueField::clear_float_data() {
+  if (has_float_data()) {
+    data_.float_data_ = 0;
+    clear_has_data();
+  }
+}
+inline float ValueField::float_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.float_data)
+  if (has_float_data()) {
+    return data_.float_data_;
+  }
+  return 0;
+}
+inline void ValueField::set_float_data(float value) {
+  if (!has_float_data()) {
+    clear_data();
+    set_has_float_data();
+  }
+  data_.float_data_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.float_data)
+}
+
+// double double_data = 5;
+inline bool ValueField::has_double_data() const {
+  return data_case() == kDoubleData;
+}
+inline void ValueField::set_has_double_data() {
+  _oneof_case_[0] = kDoubleData;
+}
+inline void ValueField::clear_double_data() {
+  if (has_double_data()) {
+    data_.double_data_ = 0;
+    clear_has_data();
+  }
+}
+inline double ValueField::double_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.double_data)
+  if (has_double_data()) {
+    return data_.double_data_;
+  }
+  return 0;
+}
+inline void ValueField::set_double_data(double value) {
+  if (!has_double_data()) {
+    clear_data();
+    set_has_double_data();
+  }
+  data_.double_data_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.double_data)
+}
+
+// string string_data = 6;
+inline bool ValueField::has_string_data() const {
+  return data_case() == kStringData;
+}
+inline void ValueField::set_has_string_data() {
+  _oneof_case_[0] = kStringData;
+}
+inline void ValueField::clear_string_data() {
+  if (has_string_data()) {
+    data_.string_data_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+    clear_has_data();
+  }
+}
+inline const std::string& ValueField::string_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.string_data)
+  if (has_string_data()) {
+    return data_.string_data_.GetNoArena();
+  }
+  return *&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited();
+}
+inline void ValueField::set_string_data(const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.string_data)
+  if (!has_string_data()) {
+    clear_data();
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.string_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.string_data)
+}
+inline void ValueField::set_string_data(std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.string_data)
+  if (!has_string_data()) {
+    clear_data();
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.string_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.schema.ValueField.string_data)
+}
+inline void ValueField::set_string_data(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  if (!has_string_data()) {
+    clear_data();
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.string_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.schema.ValueField.string_data)
+}
+inline void ValueField::set_string_data(const char* value, size_t size) {
+  if (!has_string_data()) {
+    clear_data();
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.string_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(
+      reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.schema.ValueField.string_data)
+}
+inline std::string* ValueField::mutable_string_data() {
+  if (!has_string_data()) {
+    clear_data();
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ValueField.string_data)
+  return data_.string_data_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ValueField::release_string_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ValueField.string_data)
+  if (has_string_data()) {
+    clear_has_data();
+    return data_.string_data_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  } else {
+    return nullptr;
+  }
+}
+inline void ValueField::set_allocated_string_data(std::string* string_data) {
+  if (has_data()) {
+    clear_data();
+  }
+  if (string_data != nullptr) {
+    set_has_string_data();
+    data_.string_data_.UnsafeSetDefault(string_data);
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.ValueField.string_data)
+}
+
+// bytes bytes_data = 7;
+inline bool ValueField::has_bytes_data() const {
+  return data_case() == kBytesData;
+}
+inline void ValueField::set_has_bytes_data() {
+  _oneof_case_[0] = kBytesData;
+}
+inline void ValueField::clear_bytes_data() {
+  if (has_bytes_data()) {
+    data_.bytes_data_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+    clear_has_data();
+  }
+}
+inline const std::string& ValueField::bytes_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ValueField.bytes_data)
+  if (has_bytes_data()) {
+    return data_.bytes_data_.GetNoArena();
+  }
+  return *&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited();
+}
+inline void ValueField::set_bytes_data(const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.bytes_data)
+  if (!has_bytes_data()) {
+    clear_data();
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.bytes_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.bytes_data)
+}
+inline void ValueField::set_bytes_data(std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ValueField.bytes_data)
+  if (!has_bytes_data()) {
+    clear_data();
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.bytes_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.schema.ValueField.bytes_data)
+}
+inline void ValueField::set_bytes_data(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  if (!has_bytes_data()) {
+    clear_data();
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.bytes_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.schema.ValueField.bytes_data)
+}
+inline void ValueField::set_bytes_data(const void* value, size_t size) {
+  if (!has_bytes_data()) {
+    clear_data();
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  data_.bytes_data_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(
+      reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.schema.ValueField.bytes_data)
+}
+inline std::string* ValueField::mutable_bytes_data() {
+  if (!has_bytes_data()) {
+    clear_data();
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ValueField.bytes_data)
+  return data_.bytes_data_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ValueField::release_bytes_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ValueField.bytes_data)
+  if (has_bytes_data()) {
+    clear_has_data();
+    return data_.bytes_data_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  } else {
+    return nullptr;
+  }
+}
+inline void ValueField::set_allocated_bytes_data(std::string* bytes_data) {
+  if (has_data()) {
+    clear_data();
+  }
+  if (bytes_data != nullptr) {
+    set_has_bytes_data();
+    data_.bytes_data_.UnsafeSetDefault(bytes_data);
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.ValueField.bytes_data)
+}
+
+inline bool ValueField::has_data() const {
+  return data_case() != DATA_NOT_SET;
+}
+inline void ValueField::clear_has_data() {
+  _oneof_case_[0] = DATA_NOT_SET;
+}
+inline ValueField::DataCase ValueField::data_case() const {
+  return ValueField::DataCase(_oneof_case_[0]);
+}
 // -------------------------------------------------------------------
 
 // ScalarField
@@ -4619,6 +5256,8 @@ SearchResultData::mutable_topks() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
