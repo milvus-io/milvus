@@ -104,20 +104,18 @@ type compactionPlanHandler struct {
 	wg               sync.WaitGroup
 	flushCh          chan UniqueID
 	segRefer         *SegmentReferenceManager
-	parallelCh       map[int64]chan struct{}
 }
 
 func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
 	allocator allocator, flush chan UniqueID, segRefer *SegmentReferenceManager) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		plans:      make(map[int64]*compactionTask),
-		chManager:  cm,
-		meta:       meta,
-		sessions:   sessions,
-		allocator:  allocator,
-		flushCh:    flush,
-		segRefer:   segRefer,
-		parallelCh: make(map[int64]chan struct{}),
+		plans:     make(map[int64]*compactionTask),
+		chManager: cm,
+		meta:      meta,
+		sessions:  sessions,
+		allocator: allocator,
+		flushCh:   flush,
+		segRefer:  segRefer,
 	}
 }
 
@@ -156,8 +154,6 @@ func (c *compactionPlanHandler) stop() {
 }
 
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.plans[planID] = c.plans[planID].shadowClone(opts...)
 }
 
@@ -182,31 +178,26 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 	c.plans[plan.PlanID] = task
 	c.executingTaskNum++
 
-	go func() {
-		log.Info("acquire queue", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
-		c.acquireQueue(nodeID)
-
-		ts, err := c.allocator.allocTimestamp(context.TODO())
-		if err != nil {
-			log.Warn("Alloc start time for CompactionPlan failed", zap.Int64("planID", plan.GetPlanID()))
-			// update plan ts to TIMEOUT ts
-			c.updateTask(plan.PlanID, setState(executing), setStartTime(tsTimeout))
-			return
-		}
-		c.updateTask(plan.PlanID, setStartTime(ts))
-		err = c.sessions.Compaction(nodeID, plan)
-		c.updateTask(plan.PlanID, setState(executing))
-		if err != nil {
-			log.Warn("try to Compaction but DataNode rejected",
-				zap.Int64("targetNodeID", nodeID),
-				zap.Int64("planID", plan.GetPlanID()),
-			)
-			// do nothing here, prevent double release, see issue#21014
-			// release queue will be done in `updateCompaction`
-			return
-		}
-		log.Info("start compaction", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
-	}()
+	ts, err := c.allocator.allocTimestamp(context.TODO())
+	if err != nil {
+		log.Warn("Alloc start time for CompactionPlan failed", zap.Int64("planID", plan.GetPlanID()))
+		// update plan ts to TIMEOUT ts
+		c.updateTask(plan.PlanID, setState(executing), setStartTime(tsTimeout))
+		return err
+	}
+	c.updateTask(plan.PlanID, setStartTime(ts))
+	err = c.sessions.Compaction(nodeID, plan)
+	c.updateTask(plan.PlanID, setState(executing))
+	if err != nil {
+		log.Warn("try to Compaction but DataNode rejected",
+			zap.Int64("targetNodeID", nodeID),
+			zap.Int64("planID", plan.GetPlanID()),
+		)
+		// do nothing here, prevent double release, see issue#21014
+		// release queue will be done in `updateCompaction`
+		return err
+	}
+	log.Info("start compaction", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
 	return nil
 }
 
@@ -244,9 +235,6 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 		c.flushCh <- result.GetSegmentID()
 	}
 	// TODO: when to clean task list
-
-	nodeID := c.plans[planID].dataNodeID
-	c.releaseQueue(nodeID)
 
 	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(getCompactedSegmentSize(result)))
 	return nil
@@ -331,7 +319,6 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 		c.setSegmentsCompacting(task.plan, false)
 		c.executingTaskNum--
-		c.releaseQueue(task.dataNodeID)
 	}
 
 	return nil
@@ -341,29 +328,6 @@ func (c *compactionPlanHandler) isTimeout(now Timestamp, start Timestamp, timeou
 	startTime, _ := tsoutil.ParseTS(start)
 	ts, _ := tsoutil.ParseTS(now)
 	return int32(ts.Sub(startTime).Seconds()) >= timeout
-}
-
-func (c *compactionPlanHandler) acquireQueue(nodeID int64) {
-	c.mu.Lock()
-	_, ok := c.parallelCh[nodeID]
-	if !ok {
-		c.parallelCh[nodeID] = make(chan struct{}, calculateParallel())
-	}
-	c.mu.Unlock()
-
-	c.mu.RLock()
-	ch := c.parallelCh[nodeID]
-	c.mu.RUnlock()
-	ch <- struct{}{}
-}
-
-func (c *compactionPlanHandler) releaseQueue(nodeID int64) {
-	log.Info("try to release queue", zap.Int64("nodeID", nodeID))
-	ch, ok := c.parallelCh[nodeID]
-	if !ok {
-		return
-	}
-	<-ch
 }
 
 // isFull return true if the task pool is full
