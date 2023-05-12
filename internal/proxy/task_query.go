@@ -287,7 +287,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get partitions in collection.", zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
-	//fetch search_growing from search param
+	//fetch search_growing from query param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
@@ -300,6 +300,20 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
+
+	//fetch iteration_extension_reduce from query param
+	var iterationExtensionReduce bool
+	for i, kv := range t.request.GetQueryParams() {
+		if kv.GetKey() == IterationExtensionReduceKey {
+			iterationExtensionReduce, err = strconv.ParseBool(kv.Value)
+			if err != nil {
+				return errors.New("parse query iteration_extension_reduce failed")
+			}
+			t.request.QueryParams = append(t.request.GetQueryParams()[:i], t.request.GetQueryParams()[i+1:]...)
+			break
+		}
+	}
+	t.RetrieveRequest.IterationExtensionReduce = iterationExtensionReduce
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {

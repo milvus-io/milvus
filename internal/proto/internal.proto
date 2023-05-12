@@ -133,6 +133,7 @@ message RetrieveRequest {
   int64 limit = 11; // Optional
   bool ignoreGrowing = 12;
   bool is_count = 13;
+  bool iteration_extension_reduce = 14;
 }
 
 message RetrieveResults {

@@ -3,7 +3,9 @@ package proxy
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,4 +27,13 @@ func Test_createMilvusReducer(t *testing.T) {
 	r = createMilvusReducer(nil, nil, nil, nil, n, "")
 	_, ok = r.(*cntReducer)
 	assert.True(t, ok)
+
+	req := &internalpb.RetrieveRequest{
+		IterationExtensionReduce: true,
+	}
+	params := &queryParams{}
+	r = createMilvusReducer(nil, params, req, nil, nil, "")
+	defaultReducer, typeOk := r.(*defaultLimitReducer)
+	assert.True(t, typeOk)
+	assert.Equal(t, defaultReducer.params.limit, typeutil.Unlimited)
 }

@@ -40,6 +40,12 @@ func (suite *ReducerFactorySuite) TestCreateInternalReducer() {
 	suite.ir = CreateInternalReducer(req, nil)
 	_, suite.ok = suite.ir.(*cntReducer)
 	suite.True(suite.ok)
+
+	req.GetReq().IsCount = false
+	req.GetReq().IterationExtensionReduce = true
+	suite.ir = CreateInternalReducer(req, nil)
+	_, suite.ok = suite.ir.(*extensionLimitReducer)
+	suite.True(suite.ok)
 }
 
 func (suite *ReducerFactorySuite) TestCreateSegCoreReducer() {
@@ -55,8 +61,13 @@ func (suite *ReducerFactorySuite) TestCreateSegCoreReducer() {
 	suite.True(suite.ok)
 
 	req.Req.IsCount = true
-
 	suite.sr = CreateSegCoreReducer(req, nil)
 	_, suite.ok = suite.sr.(*cntReducerSegCore)
+	suite.True(suite.ok)
+
+	req.GetReq().IsCount = false
+	req.GetReq().IterationExtensionReduce = true
+	suite.sr = CreateSegCoreReducer(req, nil)
+	_, suite.ok = suite.sr.(*extensionLimitSegcoreReducer)
 	suite.True(suite.ok)
 }
