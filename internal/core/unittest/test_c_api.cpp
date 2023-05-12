@@ -30,6 +30,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "query/generated/ExecExprVisitor.h"
 
 namespace chrono = std::chrono;
 
@@ -4418,4 +4419,42 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     DeleteSearchResult(search_result);
     DeleteCollection(c_collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, AssembeChunkTest) {
+    FixedVector<bool> chunk;
+    for (size_t i = 0; i < 1000; ++i) {
+        chunk.push_back(i % 2 == 0);
+    }
+    BitsetType result;
+    milvus::query::AppendOneChunk(result, chunk);
+    std::string s;
+    boost::to_string(result, s);
+    std::cout << s << std::endl;
+    int index = 0;
+    for (size_t i = 0; i < 1000; i++) {
+        ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
+
+    for (int i = 0; i < 934; ++i) {
+        chunk.push_back(i % 2 == 0);
+    }
+    milvus::query::AppendOneChunk(result, chunk);
+    for (size_t i = 0; i < 934; i++) {
+        ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
+    for (int i = 0; i < 62; ++i) {
+        chunk.push_back(i % 2 == 0);
+    }
+    milvus::query::AppendOneChunk(result, chunk);
+    for (size_t i = 0; i < 62; i++) {
+        ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
+    for (int i = 0; i < 105; ++i) {
+        chunk.push_back(i % 2 == 0);
+    }
+    milvus::query::AppendOneChunk(result, chunk);
+    for (size_t i = 0; i < 105; i++) {
+        ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
 }

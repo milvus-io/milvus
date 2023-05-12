@@ -224,7 +224,6 @@ ProtoParser::RetrievePlanNodeFromProto(
 
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
-    // std::cout << plan_node_proto.DebugString() << std::endl;
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);

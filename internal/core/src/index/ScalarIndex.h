@@ -45,16 +45,16 @@ class ScalarIndex : public IndexBase {
     virtual void
     Build(size_t n, const T* values) = 0;
 
-    virtual const TargetBitmapPtr
+    virtual const TargetBitmap
     In(size_t n, const T* values) = 0;
 
-    virtual const TargetBitmapPtr
+    virtual const TargetBitmap
     NotIn(size_t n, const T* values) = 0;
 
-    virtual const TargetBitmapPtr
+    virtual const TargetBitmap
     Range(T value, OpType op) = 0;
 
-    virtual const TargetBitmapPtr
+    virtual const TargetBitmap
     Range(T lower_bound_value,
           bool lb_inclusive,
           T upper_bound_value,
@@ -63,7 +63,7 @@ class ScalarIndex : public IndexBase {
     virtual T
     Reverse_Lookup(size_t offset) const = 0;
 
-    virtual const TargetBitmapPtr
+    virtual const TargetBitmap
     Query(const DatasetPtr& dataset);
 
     virtual int64_t
