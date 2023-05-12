@@ -1564,7 +1564,7 @@ func (p *dataCoordConfig) initSegmentProportion() {
 
 // compaction execution timeout
 func (p *dataCoordConfig) initCompactionTimeoutInSeconds() {
-	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*5)
+	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*10)
 }
 
 func (p *dataCoordConfig) initCompactionCheckIntervalInSeconds() {

@@ -114,7 +114,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
 			},
 			true,
-			nil,
+			errors.New(""),
 		},
 		{
 			"test_allocate_ts_failed",
@@ -156,17 +156,16 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
 			},
 			true,
-			nil,
+			errors.New("mocked"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:      tt.fields.plans,
-				sessions:   tt.fields.sessions,
-				chManager:  tt.fields.chManager,
-				parallelCh: make(map[int64]chan struct{}),
-				allocator:  tt.fields.allocatorFactory(),
+				plans:     tt.fields.plans,
+				sessions:  tt.fields.sessions,
+				chManager: tt.fields.chManager,
+				allocator: tt.fields.allocatorFactory(),
 			}
 			Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
 			c.start()
@@ -184,7 +183,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						func() bool {
 							c.mu.RLock()
 							defer c.mu.RUnlock()
-							return c.executingTaskNum == 0 && len(c.parallelCh[1]) == 0
+							return c.executingTaskNum == 0
 						},
 						5*time.Second, 100*time.Millisecond)
 				}
@@ -217,16 +216,13 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 				},
 			},
 		},
-		parallelCh: make(map[int64]chan struct{}),
-		allocator:  newMockAllocator(),
+		allocator: newMockAllocator(),
 	}
 
 	signal := &compactionSignal{id: 100}
 	plan1 := &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan2 := &datapb.CompactionPlan{PlanID: 2, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
 	plan3 := &datapb.CompactionPlan{PlanID: 3, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
-
-	c.parallelCh[1] = make(chan struct{}, 2)
 
 	var mut sync.RWMutex
 	called := 0
@@ -241,11 +237,6 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 		c.execCompactionPlan(signal, plan2)
 		c.execCompactionPlan(signal, plan3)
 	}()
-
-	// wait for dispatch signal
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
-	<-c.parallelCh[1]
 
 	// wait for compaction called
 	assert.Eventually(t, func() bool {
@@ -844,14 +835,13 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 			&compactionPlanHandler{
-				plans:      map[int64]*compactionTask{},
-				sessions:   &SessionManager{},
-				chManager:  &ChannelManager{},
-				meta:       &meta{},
-				allocator:  newMockAllocator(),
-				flushCh:    nil,
-				segRefer:   &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
-				parallelCh: make(map[int64]chan struct{}),
+				plans:     map[int64]*compactionTask{},
+				sessions:  &SessionManager{},
+				chManager: &ChannelManager{},
+				meta:      &meta{},
+				allocator: newMockAllocator(),
+				flushCh:   nil,
+				segRefer:  &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 		},
 	}
