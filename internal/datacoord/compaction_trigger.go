@@ -339,6 +339,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
+	log := log.With(zap.Int64("compactionID", signal.id))
 	m := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
@@ -404,13 +405,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 
 			if !signal.isForce && t.compactionHandler.isFull() {
 				log.Warn("compaction plan skipped due to handler full",
-					zap.Int64("collection", signal.collectionID),
+					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segment IDs", segIDs))
 				break
 			}
 			start := time.Now()
 			if err := t.fillOriginPlan(plan); err != nil {
 				log.Warn("failed to fill plan",
+					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segment IDs", segIDs),
 					zap.Error(err))
 				continue
@@ -418,7 +420,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			err := t.compactionHandler.execCompactionPlan(signal, plan)
 			if err != nil {
 				log.Warn("failed to execute compaction plan",
-					zap.Int64("collection", signal.collectionID),
+					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64("planID", plan.PlanID),
 					zap.Int64s("segment IDs", segIDs),
 					zap.Error(err))
