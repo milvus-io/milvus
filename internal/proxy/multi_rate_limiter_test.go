@@ -34,7 +34,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		Params.QuotaConfig.QuotaAndLimitsEnabled = true
 		multiLimiter := NewMultiRateLimiter()
-		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			if IsDDLRequest(internalpb.RateType(rt)) {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
@@ -58,14 +58,13 @@ func TestMultiRateLimiter(t *testing.T) {
 				errCode = multiLimiter.Check(collectionID, internalpb.RateType(rt), math.MaxInt)
 				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
 			}
-
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 	})
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
-		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		Params.QuotaConfig.QuotaAndLimitsEnabled = false
 		for _, rt := range internalpb.RateType_value {
@@ -161,8 +160,8 @@ func TestMultiRateLimiter(t *testing.T) {
 func TestRateLimiter(t *testing.T) {
 	Params.InitOnce()
 	t.Run("test limit", func(t *testing.T) {
-		limiter := newRateLimiter()
-		limiter.registerLimiters()
+		limiter := newRateLimiter(false)
+		limiter.registerLimiters(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
@@ -177,7 +176,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
@@ -217,7 +216,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test get error code", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}

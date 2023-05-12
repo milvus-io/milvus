@@ -63,20 +63,30 @@ type quotaConfig struct {
 	MaxCompactionRate      float64
 
 	// dml
-	DMLLimitEnabled    bool
-	DMLMaxInsertRate   float64
-	DMLMinInsertRate   float64
-	DMLMaxDeleteRate   float64
-	DMLMinDeleteRate   float64
-	DMLMaxBulkLoadRate float64
-	DMLMinBulkLoadRate float64
+	DMLLimitEnabled                 bool
+	DMLMaxInsertRate                float64
+	DMLMinInsertRate                float64
+	DMLMaxDeleteRate                float64
+	DMLMinDeleteRate                float64
+	DMLMaxBulkLoadRate              float64
+	DMLMinBulkLoadRate              float64
+	DMLMaxInsertRatePerCollection   float64
+	DMLMinInsertRatePerCollection   float64
+	DMLMaxDeleteRatePerCollection   float64
+	DMLMinDeleteRatePerCollection   float64
+	DMLMaxBulkLoadRatePerCollection float64
+	DMLMinBulkLoadRatePerCollection float64
 
 	// dql
-	DQLLimitEnabled  bool
-	DQLMaxSearchRate float64
-	DQLMinSearchRate float64
-	DQLMaxQueryRate  float64
-	DQLMinQueryRate  float64
+	DQLLimitEnabled               bool
+	DQLMaxSearchRate              float64
+	DQLMinSearchRate              float64
+	DQLMaxQueryRate               float64
+	DQLMinQueryRate               float64
+	DQLMaxSearchRatePerCollection float64
+	DQLMinSearchRatePerCollection float64
+	DQLMaxQueryRatePerCollection  float64
+	DQLMinQueryRatePerCollection  float64
 
 	// limits
 	MaxCollectionNum      int
@@ -131,6 +141,12 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initDMLMinDeleteRate()
 	p.initDMLMaxBulkLoadRate()
 	p.initDMLMinBulkLoadRate()
+	p.initDMLMaxInsertRatePerCollection()
+	p.initDMLMinInsertRatePerCollection()
+	p.initDMLMaxDeleteRatePerCollection()
+	p.initDMLMinDeleteRatePerCollection()
+	p.initDMLMaxBulkLoadRatePerCollection()
+	p.initDMLMinBulkLoadRatePerCollection()
 
 	// dql
 	p.initDQLLimitEnabled()
@@ -138,6 +154,10 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initDQLMinSearchRate()
 	p.initDQLMaxQueryRate()
 	p.initDQLMinQueryRate()
+	p.initDQLMaxSearchRatePerCollection()
+	p.initDQLMinSearchRatePerCollection()
+	p.initDQLMaxQueryRatePerCollection()
+	p.initDQLMinQueryRatePerCollection()
 
 	// limits
 	p.initMaxCollectionNum()
@@ -304,6 +324,38 @@ func (p *quotaConfig) initDMLMinInsertRate() {
 	}
 }
 
+func (p *quotaConfig) initDMLMaxInsertRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMaxInsertRatePerCollection = defaultMax
+		return
+	}
+	p.DMLMaxInsertRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.insertRate.collection.max", defaultMax)
+	if math.Abs(p.DMLMaxInsertRatePerCollection-defaultMax) > 0.001 { // maxRate != defaultMax
+		p.DMLMaxInsertRatePerCollection = megaBytes2Bytes(p.DMLMaxInsertRatePerCollection)
+	}
+	// [0, inf)
+	if p.DMLMaxInsertRatePerCollection < 0 {
+		p.DMLMaxInsertRatePerCollection = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDMLMinInsertRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMinInsertRatePerCollection = defaultMin
+		return
+	}
+	p.DMLMinInsertRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.insertRate.collection.min", defaultMin)
+	p.DMLMinInsertRatePerCollection = megaBytes2Bytes(p.DMLMinInsertRatePerCollection)
+	// [0, inf)
+	if p.DMLMinInsertRatePerCollection < 0 {
+		p.DMLMinInsertRatePerCollection = defaultMin
+	}
+	if !p.checkMinMaxLegal(p.DMLMinInsertRatePerCollection, p.DMLMaxInsertRatePerCollection) {
+		p.DMLMinInsertRatePerCollection = defaultMin
+		p.DMLMaxInsertRatePerCollection = defaultMax
+	}
+}
+
 func (p *quotaConfig) initDMLMaxDeleteRate() {
 	if !p.DMLLimitEnabled {
 		p.DMLMaxDeleteRate = defaultMax
@@ -333,6 +385,38 @@ func (p *quotaConfig) initDMLMinDeleteRate() {
 	if !p.checkMinMaxLegal(p.DMLMinDeleteRate, p.DMLMaxDeleteRate) {
 		p.DMLMinDeleteRate = defaultMin
 		p.DMLMaxDeleteRate = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDMLMaxDeleteRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMaxDeleteRatePerCollection = defaultMax
+		return
+	}
+	p.DMLMaxDeleteRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.deleteRate.collection.max", defaultMax)
+	if math.Abs(p.DMLMaxDeleteRatePerCollection-defaultMax) > 0.001 { // maxRate != defaultMax
+		p.DMLMaxDeleteRatePerCollection = megaBytes2Bytes(p.DMLMaxDeleteRatePerCollection)
+	}
+	// [0, inf)
+	if p.DMLMaxDeleteRatePerCollection < 0 {
+		p.DMLMaxDeleteRatePerCollection = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDMLMinDeleteRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMinDeleteRatePerCollection = defaultMin
+		return
+	}
+	p.DMLMinDeleteRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.deleteRate.collection.min", defaultMin)
+	p.DMLMinDeleteRatePerCollection = megaBytes2Bytes(p.DMLMinDeleteRatePerCollection)
+	// [0, inf)
+	if p.DMLMinDeleteRatePerCollection < 0 {
+		p.DMLMinDeleteRatePerCollection = defaultMin
+	}
+	if !p.checkMinMaxLegal(p.DMLMinDeleteRatePerCollection, p.DMLMaxDeleteRatePerCollection) {
+		p.DMLMinDeleteRatePerCollection = defaultMin
+		p.DMLMaxDeleteRatePerCollection = defaultMax
 	}
 }
 
@@ -368,6 +452,38 @@ func (p *quotaConfig) initDMLMinBulkLoadRate() {
 	}
 }
 
+func (p *quotaConfig) initDMLMaxBulkLoadRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMaxBulkLoadRatePerCollection = defaultMax
+		return
+	}
+	p.DMLMaxBulkLoadRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.bulkLoadRate.collection.max", defaultMax)
+	if math.Abs(p.DMLMaxBulkLoadRatePerCollection-defaultMax) > 0.001 { // maxRate != defaultMax
+		p.DMLMaxBulkLoadRatePerCollection = megaBytes2Bytes(p.DMLMaxBulkLoadRatePerCollection)
+	}
+	// [0, inf)
+	if p.DMLMaxBulkLoadRatePerCollection < 0 {
+		p.DMLMaxBulkLoadRatePerCollection = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDMLMinBulkLoadRatePerCollection() {
+	if !p.DMLLimitEnabled {
+		p.DMLMinBulkLoadRatePerCollection = defaultMin
+		return
+	}
+	p.DMLMinBulkLoadRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.bulkLoadRate.collection.min", defaultMin)
+	p.DMLMinBulkLoadRatePerCollection = megaBytes2Bytes(p.DMLMinBulkLoadRatePerCollection)
+	// [0, inf)
+	if p.DMLMinBulkLoadRatePerCollection < 0 {
+		p.DMLMinBulkLoadRatePerCollection = defaultMin
+	}
+	if !p.checkMinMaxLegal(p.DMLMinBulkLoadRatePerCollection, p.DMLMaxBulkLoadRatePerCollection) {
+		p.DMLMinBulkLoadRatePerCollection = defaultMin
+		p.DMLMaxBulkLoadRatePerCollection = defaultMax
+	}
+}
+
 func (p *quotaConfig) initDQLLimitEnabled() {
 	p.DQLLimitEnabled = p.Base.ParseBool("quotaAndLimits.dql.enabled", false)
 }
@@ -395,8 +511,36 @@ func (p *quotaConfig) initDQLMinSearchRate() {
 		p.DQLMinSearchRate = defaultMin
 	}
 	if !p.checkMinMaxLegal(p.DQLMinSearchRate, p.DQLMaxSearchRate) {
-		p.DQLMinSearchRate = defaultMax
+		p.DQLMinSearchRate = defaultMin
 		p.DQLMaxSearchRate = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDQLMaxSearchRatePerCollection() {
+	if !p.DQLLimitEnabled {
+		p.DQLMaxSearchRatePerCollection = defaultMax
+		return
+	}
+	p.DQLMaxSearchRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.searchRate.collection.max", defaultMax)
+	// [0, inf)
+	if p.DQLMaxSearchRatePerCollection < 0 {
+		p.DQLMaxSearchRatePerCollection = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDQLMinSearchRatePerCollection() {
+	if !p.DQLLimitEnabled {
+		p.DQLMinSearchRatePerCollection = defaultMin
+		return
+	}
+	p.DQLMinSearchRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.searchRate.collection.min", defaultMin)
+	// [0, inf)
+	if p.DQLMinSearchRatePerCollection < 0 {
+		p.DQLMinSearchRatePerCollection = defaultMin
+	}
+	if !p.checkMinMaxLegal(p.DQLMinSearchRatePerCollection, p.DQLMaxSearchRatePerCollection) {
+		p.DQLMinSearchRatePerCollection = defaultMin
+		p.DQLMaxSearchRatePerCollection = defaultMax
 	}
 }
 
@@ -425,6 +569,34 @@ func (p *quotaConfig) initDQLMinQueryRate() {
 	if !p.checkMinMaxLegal(p.DQLMinQueryRate, p.DQLMaxQueryRate) {
 		p.DQLMinQueryRate = defaultMin
 		p.DQLMaxQueryRate = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDQLMaxQueryRatePerCollection() {
+	if !p.DQLLimitEnabled {
+		p.DQLMaxQueryRatePerCollection = defaultMax
+		return
+	}
+	p.DQLMaxQueryRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.queryRate.collection.max", defaultMax)
+	// [0, inf)
+	if p.DQLMaxQueryRatePerCollection < 0 {
+		p.DQLMaxQueryRatePerCollection = defaultMax
+	}
+}
+
+func (p *quotaConfig) initDQLMinQueryRatePerCollection() {
+	if !p.DQLLimitEnabled {
+		p.DQLMinQueryRatePerCollection = defaultMin
+		return
+	}
+	p.DQLMinQueryRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.queryRate.collection.min", defaultMin)
+	// [0, inf)
+	if p.DQLMinQueryRatePerCollection < 0 {
+		p.DQLMinQueryRatePerCollection = defaultMin
+	}
+	if !p.checkMinMaxLegal(p.DQLMinQueryRatePerCollection, p.DQLMaxQueryRatePerCollection) {
+		p.DQLMinQueryRatePerCollection = defaultMin
+		p.DQLMaxQueryRatePerCollection = defaultMax
 	}
 }
 

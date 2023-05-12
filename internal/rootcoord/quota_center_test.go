@@ -266,8 +266,8 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = 100
 		Params.QuotaConfig.DQLLimitEnabled = true
-		Params.QuotaConfig.DQLMaxQueryRate = 500
-		Params.QuotaConfig.DQLMaxSearchRate = 500
+		Params.QuotaConfig.DQLMaxQueryRatePerCollection = 500
+		Params.QuotaConfig.DQLMaxSearchRatePerCollection = 500
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{

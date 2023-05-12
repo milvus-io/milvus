@@ -59,7 +59,7 @@ type MultiRateLimiter struct {
 func NewMultiRateLimiter() *MultiRateLimiter {
 	m := &MultiRateLimiter{
 		collectionLimiters: make(map[int64]*rateLimiter, 0),
-		globalDDLLimiter:   newRateLimiter(),
+		globalDDLLimiter:   newRateLimiter(true),
 	}
 	return m
 }
@@ -141,7 +141,7 @@ func (m *MultiRateLimiter) SetRates(rates []*proxypb.CollectionRate) error {
 		collectionSet.Insert(collectionRates.Collection)
 		rateLimiter, ok := m.collectionLimiters[collectionRates.GetCollection()]
 		if !ok {
-			rateLimiter = newRateLimiter()
+			rateLimiter = newRateLimiter(false)
 		}
 		err := rateLimiter.setRates(collectionRates)
 		if err != nil {
@@ -166,12 +166,12 @@ type rateLimiter struct {
 }
 
 // newRateLimiter returns a new RateLimiter.
-func newRateLimiter() *rateLimiter {
+func newRateLimiter(globalLevel bool) *rateLimiter {
 	rl := &rateLimiter{
 		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
 		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
 	}
-	rl.registerLimiters()
+	rl.registerLimiters(globalLevel)
 	return rl
 }
 
@@ -260,7 +260,7 @@ func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 }
 
 // registerLimiters register limiter for all rate types.
-func (rl *rateLimiter) registerLimiters() {
+func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 	for rt := range internalpb.RateType_name {
 		var r float64
 		switch internalpb.RateType(rt) {
@@ -275,15 +275,35 @@ func (rl *rateLimiter) registerLimiters() {
 		case internalpb.RateType_DDLCompaction:
 			r = Params.QuotaConfig.MaxCompactionRate
 		case internalpb.RateType_DMLInsert:
-			r = Params.QuotaConfig.DMLMaxInsertRate
+			if globalLevel {
+				r = Params.QuotaConfig.DMLMaxInsertRate
+			} else {
+				r = Params.QuotaConfig.DMLMaxInsertRatePerCollection
+			}
 		case internalpb.RateType_DMLDelete:
-			r = Params.QuotaConfig.DMLMaxDeleteRate
+			if globalLevel {
+				r = Params.QuotaConfig.DMLMaxDeleteRate
+			} else {
+				r = Params.QuotaConfig.DMLMaxDeleteRatePerCollection
+			}
 		case internalpb.RateType_DMLBulkLoad:
-			r = Params.QuotaConfig.DMLMaxBulkLoadRate
+			if globalLevel {
+				r = Params.QuotaConfig.DMLMaxBulkLoadRate
+			} else {
+				r = Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection
+			}
 		case internalpb.RateType_DQLSearch:
-			r = Params.QuotaConfig.DQLMaxSearchRate
+			if globalLevel {
+				r = Params.QuotaConfig.DQLMaxSearchRate
+			} else {
+				r = Params.QuotaConfig.DQLMaxSearchRatePerCollection
+			}
 		case internalpb.RateType_DQLQuery:
-			r = Params.QuotaConfig.DQLMaxQueryRate
+			if globalLevel {
+				r = Params.QuotaConfig.DQLMaxQueryRate
+			} else {
+				r = Params.QuotaConfig.DQLMaxQueryRatePerCollection
+			}
 		}
 		limit := ratelimitutil.Limit(r)
 		burst := r // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
