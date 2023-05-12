@@ -69,6 +69,43 @@ func TestMultiRateLimiter(t *testing.T) {
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 	})
 
+	t.Run("test global static limit", func(t *testing.T) {
+		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+		multiLimiter := NewMultiRateLimiter()
+		multiLimiter.collectionLimiters[1] = newRateLimiter()
+		multiLimiter.collectionLimiters[2] = newRateLimiter()
+		multiLimiter.collectionLimiters[3] = newRateLimiter()
+		for _, rt := range internalpb.RateType_value {
+			if IsDDLRequest(internalpb.RateType(rt)) {
+				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
+			} else {
+				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(2), 1))
+				multiLimiter.collectionLimiters[1].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(2), 1))
+				multiLimiter.collectionLimiters[2].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(2), 1))
+				multiLimiter.collectionLimiters[3].limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(2), 1))
+			}
+		}
+		for _, rt := range internalpb.RateType_value {
+			if IsDDLRequest(internalpb.RateType(rt)) {
+				errCode := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(1, internalpb.RateType(rt), 5)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+			} else {
+				errCode := multiLimiter.Check(1, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(2, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_Success, errCode)
+				errCode = multiLimiter.Check(3, internalpb.RateType(rt), 1)
+				assert.Equal(t, commonpb.ErrorCode_RateLimit, errCode)
+			}
+		}
+		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+	})
+
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
