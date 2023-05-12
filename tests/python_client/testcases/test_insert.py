@@ -1535,10 +1535,13 @@ class TestUpsertValid(TestcaseBase):
         upsert_nb = 1000
         collection_w = self.init_collection_general(pre_upsert, True)[0]
         # upsert
+        step = 500
         for i in range(10):
-            data = cf.gen_default_data_for_upsert(upsert_nb, start=i*500)[0]
+            data = cf.gen_default_data_for_upsert(upsert_nb, start=i*step)[0]
             collection_w.upsert(data)
-        assert collection_w.num_entities == upsert_nb*10 + ct.default_nb
+        # check the result
+        res = collection_w.query(expr="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_upsert_pk_string_multiple_times(self):
@@ -1554,12 +1557,17 @@ class TestUpsertValid(TestcaseBase):
         name = cf.gen_unique_str(pre_upsert)
         collection_w = self.init_collection_wrap(name, schema)
         collection_w.insert(cf.gen_default_list_data())
-
         # upsert
+        step = 500
         for i in range(10):
-            data = cf.gen_default_list_data(upsert_nb, start=i * 500)
+            data = cf.gen_default_list_data(upsert_nb, start=i * step)
             collection_w.upsert(data)
-        assert collection_w.num_entities == upsert_nb * 10 + ct.default_nb
+        # load
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+        # check the result
+        res = collection_w.query(expr="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
 
 
 class TestUpsertInvalid(TestcaseBase):

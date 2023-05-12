@@ -1250,8 +1250,8 @@ class TestDeleteString(TestcaseBase):
         # delete half and flush
         expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
         expr = expr.replace("'", "\"")
-        del_res, _ = collection_w.delete(expr)
-        assert collection_w.num_entities == ct.default_nb
+        collection_w.delete(expr)
+        collection_w.flush()
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
@@ -1260,6 +1260,8 @@ class TestDeleteString(TestcaseBase):
         assert collection_w.has_index()[0]
 
         collection_w.load()
+        res = collection_w.query(expr="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == ct.default_nb // 2
         search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
