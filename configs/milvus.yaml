@@ -487,10 +487,16 @@ quotaAndLimits:
   dml:
     enabled: false
     insertRate:
+      collection:
+        max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit
     deleteRate:
+      collection:
+        max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit
     bulkLoadRate: # not support yet. TODO: limit bulkLoad rate
+      collection:
+        max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit
 
   # dql limit rates, default no limit.
@@ -498,8 +504,12 @@ quotaAndLimits:
   dql:
     enabled: false
     searchRate:
+      collection:
+        max: -1 # vps (vectors per second), default no limit
       max: -1 # vps (vectors per second), default no limit
     queryRate:
+      collection:
+        max: -1 # qps, default no limit
       max: -1 # qps, default no limit
 
   # limitWriting decides whether dml requests are allowed.
