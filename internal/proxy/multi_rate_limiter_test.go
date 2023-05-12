@@ -40,7 +40,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
-		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			if IsDDLRequest(internalpb.RateType(rt)) {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
@@ -108,7 +108,7 @@ func TestMultiRateLimiter(t *testing.T) {
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
-		multiLimiter.collectionLimiters[collectionID] = newRateLimiter()
+		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
@@ -203,7 +203,7 @@ func TestMultiRateLimiter(t *testing.T) {
 
 func TestRateLimiter(t *testing.T) {
 	t.Run("test limit", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
@@ -218,7 +218,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
@@ -258,7 +258,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test get error code", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
@@ -287,7 +287,7 @@ func TestRateLimiter(t *testing.T) {
 	})
 
 	t.Run("tests refresh rate by config", func(t *testing.T) {
-		limiter := newRateLimiter()
+		limiter := newRateLimiter(false)
 
 		etcdCli, _ := etcd.GetEtcdClient(
 			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),

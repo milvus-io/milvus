@@ -62,7 +62,7 @@ type MultiRateLimiter struct {
 func NewMultiRateLimiter() *MultiRateLimiter {
 	m := &MultiRateLimiter{
 		collectionLimiters: make(map[int64]*rateLimiter, 0),
-		globalDDLLimiter:   newRateLimiter(),
+		globalDDLLimiter:   newRateLimiter(true),
 	}
 	return m
 }
@@ -151,7 +151,7 @@ func (m *MultiRateLimiter) SetRates(rates []*proxypb.CollectionRate) error {
 		collectionSet.Insert(collectionRates.Collection)
 		rateLimiter, ok := m.collectionLimiters[collectionRates.GetCollection()]
 		if !ok {
-			rateLimiter = newRateLimiter()
+			rateLimiter = newRateLimiter(false)
 		}
 		err := rateLimiter.setRates(collectionRates)
 		if err != nil {
@@ -176,12 +176,12 @@ type rateLimiter struct {
 }
 
 // newRateLimiter returns a new RateLimiter.
-func newRateLimiter() *rateLimiter {
+func newRateLimiter(globalLevel bool) *rateLimiter {
 	rl := &rateLimiter{
 		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
 		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
 	}
-	rl.registerLimiters()
+	rl.registerLimiters(globalLevel)
 	return rl
 }
 
@@ -270,7 +270,7 @@ func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 }
 
 // registerLimiters register limiter for all rate types.
-func (rl *rateLimiter) registerLimiters() {
+func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 	log := log.Ctx(context.TODO()).WithRateGroup("proxy.rateLimiter", 1.0, 60.0)
 	quotaConfig := &Params.QuotaConfig
 	for rt := range internalpb.RateType_name {
@@ -287,15 +287,35 @@ func (rl *rateLimiter) registerLimiters() {
 		case internalpb.RateType_DDLCompaction:
 			r = &quotaConfig.MaxCompactionRate
 		case internalpb.RateType_DMLInsert:
-			r = &quotaConfig.DMLMaxInsertRate
+			if globalLevel {
+				r = &quotaConfig.DMLMaxInsertRate
+			} else {
+				r = &quotaConfig.DMLMaxInsertRatePerCollection
+			}
 		case internalpb.RateType_DMLDelete:
-			r = &quotaConfig.DMLMaxDeleteRate
+			if globalLevel {
+				r = &quotaConfig.DMLMaxDeleteRate
+			} else {
+				r = &quotaConfig.DMLMaxDeleteRatePerCollection
+			}
 		case internalpb.RateType_DMLBulkLoad:
-			r = &quotaConfig.DMLMaxBulkLoadRate
+			if globalLevel {
+				r = &quotaConfig.DMLMaxBulkLoadRate
+			} else {
+				r = &quotaConfig.DMLMaxBulkLoadRatePerCollection
+			}
 		case internalpb.RateType_DQLSearch:
-			r = &quotaConfig.DQLMaxSearchRate
+			if globalLevel {
+				r = &quotaConfig.DQLMaxSearchRate
+			} else {
+				r = &quotaConfig.DQLMaxSearchRatePerCollection
+			}
 		case internalpb.RateType_DQLQuery:
-			r = &quotaConfig.DQLMaxQueryRate
+			if globalLevel {
+				r = &quotaConfig.DQLMaxQueryRate
+			} else {
+				r = &quotaConfig.DQLMaxQueryRatePerCollection
+			}
 		}
 		limit := ratelimitutil.Limit(r.GetAsFloat())
 		burst := r.GetAsFloat() // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
