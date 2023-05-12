@@ -75,8 +75,11 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_JSON:
+			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		default:
-
 		}
 	}
 
@@ -178,7 +181,7 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		if err != nil {
 			return err
 		}
-		return verifyLengthPerRow(strArr, maxLength)
+		return verifyStringsLength(strArr, maxLength)
 	}
 
 	return nil
@@ -205,10 +208,35 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
-func verifyLengthPerRow(strArr []string, maxLength int64) error {
-	for i, s := range strArr {
+func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	jsonArray := field.GetScalars().GetJsonData().GetData()
+	if jsonArray == nil {
+		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return errors.New(msg)
+	}
+
+	if v.checkMaxLen {
+		return verifyBytesArrayLength(jsonArray, int64(Params.CommonCfg.JSONMaxLength))
+	}
+
+	return nil
+}
+
+func verifyStringsLength(strArray []string, maxLength int64) error {
+	for i, s := range strArray {
 		if int64(len(s)) > maxLength {
 			msg := fmt.Sprintf("the length (%d) of %dth string exceeds max length (%d)", len(s), i, maxLength)
+			return errors.New(msg)
+		}
+	}
+
+	return nil
+}
+
+func verifyBytesArrayLength(bytesArray [][]byte, maxLength int64) error {
+	for i, s := range bytesArray {
+		if int64(len(s)) > maxLength {
+			msg := fmt.Sprintf("the length (%d) of %dth bytes exceeds max length (%d)", len(s), i, maxLength)
 			return errors.New(msg)
 		}
 	}

@@ -49,8 +49,9 @@ const (
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
 
-	DefaultGrpcRetryTimes    = 5
 	DefaultImportMaxFileSize = 16 * 1024 * 1024 * 1024
+	DefaultGrpcRetryTimes    = 5
+	DefaultJSONMaxLength     = 64 << 10 // 64KB
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -176,8 +177,10 @@ type commonConfig struct {
 	SessionTTL        int64
 	SessionRetryTimes int64
 
-	GrpcRetryTimes    uint
 	ImportMaxFileSize int64
+	GrpcRetryTimes    uint
+
+	JSONMaxLength int
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -233,6 +236,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initSessionRetryTimes()
 	p.initGrpcRetryTimes()
 	p.initImportMaxFileSize()
+	p.initJSONMaxLength()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -503,6 +507,10 @@ func (p *commonConfig) initGrpcRetryTimes() {
 
 func (p *commonConfig) initImportMaxFileSize() {
 	p.ImportMaxFileSize = p.Base.ParseInt64WithDefault("common.ImportMaxFileSize", DefaultImportMaxFileSize)
+}
+
+func (p *commonConfig) initJSONMaxLength() {
+	p.JSONMaxLength = p.Base.ParseIntWithDefault("common.jsonMaxLength", DefaultJSONMaxLength)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
