@@ -259,7 +259,6 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	)
 
 	log.Info("release collection request received")
-	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -286,7 +285,6 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	}
 
 	log.Info("collection released")
-	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
