@@ -214,6 +214,8 @@ type commonConfig struct {
 	PreCreatedTopicEnabled ParamItem `refreshable:"true"`
 	TopicNames             ParamItem `refreshable:"true"`
 	TimeTicker             ParamItem `refreshable:"true"`
+
+	JSONMaxLength ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -634,6 +636,13 @@ like the old password verification when updating the credential`,
 		Version: "2.3.0",
 	}
 	p.TimeTicker.Init(base.mgr)
+
+	p.JSONMaxLength = ParamItem{
+		Key:          "common.JSONMaxLength",
+		Version:      "2.2.9",
+		DefaultValue: fmt.Sprint(64 << 10),
+	}
+	p.JSONMaxLength.Init(base.mgr)
 }
 
 type traceConfig struct {
