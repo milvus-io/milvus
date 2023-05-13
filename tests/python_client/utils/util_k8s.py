@@ -315,6 +315,83 @@ def get_metrics_querynode_sq_req_count():
     else:
         raise Exception(-1, f"Failed to get metrics with status code {response.status_code}")
 
+def get_svc_ip(namespace, label_selector):
+    """ get svc ip from svc list """
+    init_k8s_client_config()
+    api_instance = client.CoreV1Api()
+    try:
+        api_response = api_instance.list_namespaced_service(namespace=namespace, label_selector=label_selector)
+    except ApiException as e:
+        log.error("Exception when calling CoreV1Api->list_namespaced_service: %s\n" % e)
+        raise Exception(str(e))
+    svc_ip = api_response.items[0].spec.cluster_ip
+    return svc_ip
+
+
+def parse_etcdctl_table_output(output):
+    """ parse etcdctl table output """
+    output = output.split("\n")
+    title = []
+    data = []
+    for line in output:
+        if "ENDPOINT" in line:
+            title = [x.strip(" ") for x in line.strip("|").split("|")]
+        if ":" in line:
+            data.append([x.strip(" ") for x in line.strip("|").split("|")])
+    return title, data
+
+
+def get_etcd_leader(release_name, deploy_tool="helm"):
+    """ get etcd leader by etcdctl """
+    pod_list = []
+    if deploy_tool == "helm":
+        label_selector = f"app.kubernetes.io/instance={release_name}-etcd, app.kubernetes.io/name=etcd"
+        pod_list = get_pod_list("chaos-testing", label_selector)
+        if len(pod_list) == 0:
+            label_selector = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/name=etcd"
+            pod_list = get_pod_list("chaos-testing", label_selector)
+    if deploy_tool == "operator":
+        label_selector = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/name=etcd"
+        pod_list = get_pod_list("chaos-testing", label_selector)
+    leader = None
+    for pod in pod_list:
+        endpoint = f"{pod.status.pod_ip}:2379"
+        cmd = f"etcdctl --endpoints={endpoint} endpoint status -w table"
+        output = os.popen(cmd).read()
+        log.info(f"etcdctl output: {output}")
+        title, data = parse_etcdctl_table_output(output)
+        idx = title.index("IS LEADER")
+        if data[0][idx] == "true":
+            leader = pod.metadata.name
+    log.info(f"etcd leader is {leader}")
+    return leader
+
+
+def get_etcd_followers(release_name, deploy_tool="helm"):
+    """ get etcd follower by etcdctl """
+    pod_list = []
+    if deploy_tool == "helm":
+        label_selector = f"app.kubernetes.io/instance={release_name}-etcd, app.kubernetes.io/name=etcd"
+        pod_list = get_pod_list("chaos-testing", label_selector)
+        if len(pod_list) == 0:
+            label_selector = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/name=etcd"
+            pod_list = get_pod_list("chaos-testing", label_selector)
+    if deploy_tool == "operator":
+        label_selector = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/name=etcd"
+        pod_list = get_pod_list("chaos-testing", label_selector)
+    followers = []
+    for pod in pod_list:
+        endpoint = f"{pod.status.pod_ip}:2379"
+        cmd = f"etcdctl --endpoints={endpoint} endpoint status -w table"
+        output = os.popen(cmd).read()
+        log.info(f"etcdctl output: {output}")
+        title, data = parse_etcdctl_table_output(output)
+        idx = title.index("IS LEADER")
+        if data[0][idx] == "false":
+            followers.append(pod.metadata.name)
+    log.info(f"etcd followers are {followers}")
+    return followers
+
 
 if __name__ == '__main__':
     label = "app.kubernetes.io/name=milvus, component=querynode"
