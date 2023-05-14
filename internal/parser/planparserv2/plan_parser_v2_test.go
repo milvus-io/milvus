@@ -830,6 +830,33 @@ func Test_JSONExpr(t *testing.T) {
 		RoundDecimal: 0,
 	})
 	assert.NoError(t, err)
+
+	expr = `A[B][0] > 100`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `A['B'][0] > 100`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+
+	expr = `JSONField[0] > 100`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
 }
 
 func Test_InvalidExprOnJSONField(t *testing.T) {

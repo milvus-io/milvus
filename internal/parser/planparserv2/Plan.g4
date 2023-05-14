@@ -85,7 +85,7 @@ FloatingConstant:
 Identifier: Nondigit (Nondigit | Digit)*;
 
 StringLiteral: EncodingPrefix? '"' SCharSequence? '"';
-JSONIdentifier: Identifier('[' (StringLiteral | IntegerConstant) ']')+;
+JSONIdentifier: Identifier('[' ('"' SCharSequence '"' | '\'' SCharSequence '\'' | SCharSequence | IntegerConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
