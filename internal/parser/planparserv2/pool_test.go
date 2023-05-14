@@ -3,11 +3,9 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+	"github.com/stretchr/testify/assert"
 )
 
 func genNaiveInputStream() *antlr.InputStream {

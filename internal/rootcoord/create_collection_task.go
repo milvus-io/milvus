@@ -101,8 +101,13 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 	if t.Req.GetCollectionName() != schema.GetName() {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
 	}
-	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}) {
-		return fmt.Errorf("schema contains system field: %s, %s", RowIDFieldName, TimeStampFieldName)
+	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName}) {
+		log.Info("schema contains system field",
+			zap.String("RowIDFieldName", RowIDFieldName),
+			zap.String("TimeStampFieldName", TimeStampFieldName),
+			zap.String("MetaFieldName", MetaFieldName))
+		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
+		return fmt.Errorf(msg)
 	}
 
 	if Params.AutoIndexConfig.Enable && hasBinaryVecField(schema) {
@@ -114,6 +119,17 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 func (t *createCollectionTask) assignFieldID(schema *schemapb.CollectionSchema) {
 	for idx := range schema.GetFields() {
 		schema.Fields[idx].FieldID = int64(idx + StartOfUserFieldID)
+	}
+}
+
+func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSchema) {
+	if schema.EnableDynamicField {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:        MetaFieldName,
+			Description: "dynamic schema",
+			DataType:    schemapb.DataType_JSON,
+			IsDynamic:   true,
+		})
 	}
 }
 
@@ -142,6 +158,7 @@ func (t *createCollectionTask) prepareSchema() error {
 	if err := t.validateSchema(&schema); err != nil {
 		return err
 	}
+	t.appendDynamicField(&schema)
 	t.assignFieldID(&schema)
 	t.appendSysFields(&schema)
 	t.schema = &schema
@@ -331,6 +348,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		State:                pb.CollectionState_CollectionCreating,
 		Partitions:           partitions,
 		Properties:           t.Req.Properties,
+		EnableDynamicField:   t.schema.EnableDynamicField,
 	}
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps

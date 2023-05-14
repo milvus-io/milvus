@@ -204,6 +204,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{Name: field1},
 			},
+			EnableDynamicField: true,
 		}
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)

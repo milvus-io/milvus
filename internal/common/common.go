@@ -41,6 +41,9 @@ const (
 	// TimeStampFieldName defines the name of the Timestamp field
 	TimeStampFieldName = "Timestamp"
 
+	// MetaFieldName is the field name of dynamic schema
+	MetaFieldName = "$meta"
+
 	// DefaultShardsNum defines the default number of shards when creating a collection
 	DefaultShardsNum = int32(1)
 

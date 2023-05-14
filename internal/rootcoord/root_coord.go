@@ -1101,10 +1101,11 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.
 	resp := &milvuspb.DescribeCollectionResponse{Status: succStatus()}
 
 	resp.Schema = &schemapb.CollectionSchema{
-		Name:        collInfo.Name,
-		Description: collInfo.Description,
-		AutoID:      collInfo.AutoID,
-		Fields:      model.MarshalFieldModels(collInfo.Fields),
+		Name:               collInfo.Name,
+		Description:        collInfo.Description,
+		AutoID:             collInfo.AutoID,
+		Fields:             model.MarshalFieldModels(collInfo.Fields),
+		EnableDynamicField: collInfo.EnableDynamicField,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames

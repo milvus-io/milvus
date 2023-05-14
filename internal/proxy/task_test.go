@@ -431,6 +431,26 @@ func TestTranslateOutputFields(t *testing.T) {
 	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	t.Run("enable dynamic schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "TestTranslateOutputFields",
+			Description:        "TestTranslateOutputFields",
+			AutoID:             false,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{Name: idFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: tsFieldName, DataType: schemapb.DataType_Int64},
+				{Name: floatVectorFieldName, DataType: schemapb.DataType_FloatVector},
+				{Name: binaryVectorFieldName, DataType: schemapb.DataType_BinaryVector},
+				{Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		outputFields, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
+		assert.Equal(t, nil, err)
+		assert.ElementsMatch(t, []string{common.MetaFieldName, idFieldName}, outputFields)
+	})
 }
 
 func TestCreateCollectionTask(t *testing.T) {
@@ -711,6 +731,41 @@ func TestCreateCollectionTask(t *testing.T) {
 		} else {
 			assert.Error(t, err)
 		}
+	})
+
+	t.Run("specify dynamic field", func(t *testing.T) {
+		dynamicField := &schemapb.FieldSchema{
+			Name:      "json",
+			IsDynamic: true,
+		}
+		var marshaledSchema []byte
+		schema2 := &schemapb.CollectionSchema{
+			Name:   collectionName,
+			Fields: append(schema.Fields, dynamicField),
+		}
+		marshaledSchema, err := proto.Marshal(schema2)
+		assert.NoError(t, err)
+
+		task2 := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		err = task2.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = task2.PreExecute(ctx)
+		assert.Error(t, err)
 	})
 }
 

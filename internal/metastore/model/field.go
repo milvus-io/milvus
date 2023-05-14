@@ -1,10 +1,9 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus/internal/common"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 type Field struct {
@@ -18,6 +17,7 @@ type Field struct {
 	AutoID         bool
 	State          schemapb.FieldState
 	IsPartitionKey bool // partition key mode, multi logic partitions share a physical partition
+	IsDynamic      bool
 }
 
 func (f Field) Available() bool {
@@ -36,6 +36,7 @@ func (f Field) Clone() *Field {
 		AutoID:         f.AutoID,
 		State:          f.State,
 		IsPartitionKey: f.IsPartitionKey,
+		IsDynamic:      f.IsDynamic,
 	}
 }
 
@@ -61,7 +62,8 @@ func (f Field) Equal(other Field) bool {
 		checkParamsEqual(f.TypeParams, f.TypeParams) &&
 		checkParamsEqual(f.IndexParams, other.IndexParams) &&
 		f.AutoID == other.AutoID &&
-		f.IsPartitionKey == other.IsPartitionKey
+		f.IsPartitionKey == other.IsPartitionKey &&
+		f.IsDynamic == other.IsDynamic
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -92,6 +94,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		IndexParams:    field.IndexParams,
 		AutoID:         field.AutoID,
 		IsPartitionKey: field.IsPartitionKey,
+		IsDynamic:      field.IsDynamic,
 	}
 }
 
@@ -122,6 +125,7 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 		IndexParams:    fieldSchema.IndexParams,
 		AutoID:         fieldSchema.AutoID,
 		IsPartitionKey: fieldSchema.IsPartitionKey,
+		IsDynamic:      fieldSchema.IsDynamic,
 	}
 }
 

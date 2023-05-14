@@ -50,10 +50,11 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 
 	return &schemapb.CollectionSchema{
-		Name:        "test",
-		Description: "schema for test used",
-		AutoID:      true,
-		Fields:      fields,
+		Name:               "test",
+		Description:        "schema for test used",
+		AutoID:             true,
+		Fields:             fields,
+		EnableDynamicField: true,
 	}
 }
 
