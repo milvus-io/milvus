@@ -101,6 +101,7 @@ message SearchRequest {
   int64  topk = 15;
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
+  int64 iteration_extension_reduce_rate = 18; // Optional
 }
 
 message SearchResults {
@@ -133,7 +134,7 @@ message RetrieveRequest {
   int64 limit = 11; // Optional
   bool ignoreGrowing = 12;
   bool is_count = 13;
-  bool iteration_extension_reduce = 14;
+  int64 iteration_extension_reduce_rate = 14;
 }
 
 message RetrieveResults {

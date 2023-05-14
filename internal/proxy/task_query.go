@@ -301,19 +301,19 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
 
-	//fetch iteration_extension_reduce from query param
-	var iterationExtensionReduce bool
+	//fetch iteration_extension_reduce_rate from query param
+	var iterationExtensionReduceRate int64
 	for i, kv := range t.request.GetQueryParams() {
-		if kv.GetKey() == IterationExtensionReduceKey {
-			iterationExtensionReduce, err = strconv.ParseBool(kv.Value)
+		if kv.GetKey() == IterationExtensionReduceRateKey {
+			iterationExtensionReduceRate, err = strconv.ParseInt(kv.Value, 0, 64)
 			if err != nil {
-				return errors.New("parse query iteration_extension_reduce failed")
+				return errors.New("parse query iteration_extension_reduce_rate failed")
 			}
 			t.request.QueryParams = append(t.request.GetQueryParams()[:i], t.request.GetQueryParams()[i+1:]...)
 			break
 		}
 	}
-	t.RetrieveRequest.IterationExtensionReduce = iterationExtensionReduce
+	t.RetrieveRequest.IterationExtensionReduceRate = iterationExtensionReduceRate
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {

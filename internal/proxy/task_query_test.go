@@ -152,7 +152,7 @@ func TestQueryTask_all(t *testing.T) {
 					Value: "false",
 				},
 				{
-					Key:   IterationExtensionReduceKey,
+					Key:   IterationExtensionReduceRateKey,
 					Value: "true",
 				},
 			},
@@ -176,7 +176,7 @@ func TestQueryTask_all(t *testing.T) {
 	// check iteration extension reduce
 	assert.True(t, task.RetrieveRequest.IterationExtensionReduce)
 	task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
-		Key:   IterationExtensionReduceKey,
+		Key:   IterationExtensionReduceRateKey,
 		Value: "trueXXX",
 	})
 	assert.Error(t, task.PreExecute(ctx))

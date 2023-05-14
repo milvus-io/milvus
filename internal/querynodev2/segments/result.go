@@ -52,7 +52,9 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		log.Debug("reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK))
+			zap.Int64("topk", sData.TopK),
+			//hc---
+		)
 	}
 
 	reducedResultData, err := ReduceSearchResultData(ctx, searchResultData, nq, topk)

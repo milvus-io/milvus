@@ -255,6 +255,20 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.IgnoreGrowing = ignoreGrowing
 
+	//fetch iteration_extension_reduce_rate from search param
+	var iterationExtensionReduceRate int64
+	for i, kv := range t.request.GetSearchParams() {
+		if kv.GetKey() == IterationExtensionReduceRateKey {
+			iterationExtensionReduceRate, err = strconv.ParseInt(kv.Value, 0, 64)
+			if err != nil {
+				return errors.New("parse query iteration_extension_reduce_rate failed")
+			}
+			t.request.SearchParams = append(t.request.GetSearchParams()[:i], t.request.GetSearchParams()[i+1:]...)
+			break
+		}
+	}
+	t.SearchRequest.IterationExtensionReduceRate = iterationExtensionReduceRate
+
 	// Manually update nq if not set.
 	nq, err := getNq(t.request)
 	if err != nil {

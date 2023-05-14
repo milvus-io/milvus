@@ -27,18 +27,20 @@ func newDefaultLimitReducer(req *querypb.QueryRequest, schema *schemapb.Collecti
 }
 
 type extensionLimitReducer struct {
-	req    *querypb.QueryRequest
-	schema *schemapb.CollectionSchema
+	req           *querypb.QueryRequest
+	schema        *schemapb.CollectionSchema
+	extendedLimit int64
 }
 
 func (r *extensionLimitReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, typeutil.Unlimited, r.req.GetReq().GetOutputFieldsId(), r.schema)
 }
 
-func newExtensionLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) *extensionLimitReducer {
+func newExtensionLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, etdLimit int64) *extensionLimitReducer {
 	return &extensionLimitReducer{
-		req:    req,
-		schema: schema,
+		req:           req,
+		schema:        schema,
+		extendedLimit: etdLimit,
 	}
 }
 

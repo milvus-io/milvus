@@ -29,11 +29,13 @@ func Test_createMilvusReducer(t *testing.T) {
 	assert.True(t, ok)
 
 	req := &internalpb.RetrieveRequest{
-		IterationExtensionReduce: true,
+		IterationExtensionReduceRate: 100,
+		Limit:                        100,
 	}
 	params := &queryParams{}
 	r = createMilvusReducer(nil, params, req, nil, nil, "")
 	defaultReducer, typeOk := r.(*defaultLimitReducer)
 	assert.True(t, typeOk)
 	assert.Equal(t, defaultReducer.params.limit, typeutil.Unlimited)
+
 }
