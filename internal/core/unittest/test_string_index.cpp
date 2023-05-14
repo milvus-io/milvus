@@ -60,16 +60,16 @@ TEST_F(StringIndexMarisaTest, In) {
     auto index = milvus::index::CreateStringIndexMarisa();
     index->Build(nb, strs.data());
     auto bitset = index->In(strs.size(), strs.data());
-    ASSERT_EQ(bitset->size(), strs.size());
-    ASSERT_TRUE(bitset->any());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(Any(bitset));
 }
 
 TEST_F(StringIndexMarisaTest, NotIn) {
     auto index = milvus::index::CreateStringIndexMarisa();
     index->Build(nb, strs.data());
     auto bitset = index->NotIn(strs.size(), strs.data());
-    ASSERT_EQ(bitset->size(), strs.size());
-    ASSERT_TRUE(bitset->none());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(BitSetNone(bitset));
 }
 
 TEST_F(StringIndexMarisaTest, Range) {
@@ -82,32 +82,32 @@ TEST_F(StringIndexMarisaTest, Range) {
 
     {
         auto bitset = index->Range("0", milvus::OpType::GreaterEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = index->Range("90", milvus::OpType::LessThan);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = index->Range("9", milvus::OpType::LessEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = index->Range("0", true, "9", true);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = index->Range("0", true, "90", false);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 }
 
@@ -127,8 +127,8 @@ TEST_F(StringIndexMarisaTest, PrefixMatch) {
     for (size_t i = 0; i < strs.size(); i++) {
         auto str = strs[i];
         auto bitset = index->PrefixMatch(str);
-        ASSERT_EQ(bitset->size(), strs.size());
-        ASSERT_TRUE(bitset->test(i));
+        ASSERT_EQ(bitset.size(), strs.size());
+        ASSERT_TRUE(bitset[i]);
     }
 }
 
@@ -140,14 +140,14 @@ TEST_F(StringIndexMarisaTest, Query) {
         auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::In);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(bitset->any());
+        ASSERT_TRUE(Any(bitset));
     }
 
     {
         auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::NotIn);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(bitset->none());
+        ASSERT_TRUE(BitSetNone(bitset));
     }
 
     {
@@ -155,8 +155,8 @@ TEST_F(StringIndexMarisaTest, Query) {
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::GreaterEqual);
         ds->Set<std::string>(milvus::index::RANGE_VALUE, "0");
         auto bitset = index->Query(ds);
-        ASSERT_EQ(bitset->size(), strs.size());
-        ASSERT_EQ(bitset->count(), strs.size());
+        ASSERT_EQ(bitset.size(), strs.size());
+        ASSERT_EQ(Count(bitset), strs.size());
     }
 
     {
@@ -167,7 +167,7 @@ TEST_F(StringIndexMarisaTest, Query) {
         ds->Set<bool>(milvus::index::LOWER_BOUND_INCLUSIVE, true);
         ds->Set<bool>(milvus::index::UPPER_BOUND_INCLUSIVE, true);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(bitset->any());
+        ASSERT_TRUE(Any(bitset));
     }
 
     {
@@ -176,8 +176,8 @@ TEST_F(StringIndexMarisaTest, Query) {
             ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::PrefixMatch);
             ds->Set<std::string>(milvus::index::PREFIX_VALUE, std::move(strs[i]));
             auto bitset = index->Query(ds);
-            ASSERT_EQ(bitset->size(), strs.size());
-            ASSERT_TRUE(bitset->test(i));
+            ASSERT_EQ(bitset.size(), strs.size());
+            ASSERT_TRUE(bitset[i]);
         }
     }
 }
@@ -201,58 +201,58 @@ TEST_F(StringIndexMarisaTest, Codec) {
 
     {
         auto bitset = copy_index->In(nb, strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->any());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(Any(bitset));
     }
 
     {
         auto bitset = copy_index->In(1, invalid_strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->none());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
     }
 
     {
         auto bitset = copy_index->NotIn(nb, strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->none());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
     }
 
     {
         auto bitset = copy_index->Range("0", milvus::OpType::GreaterEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("90", milvus::OpType::LessThan);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("9", milvus::OpType::LessEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("0", true, "9", true);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("0", true, "90", false);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         for (size_t i = 0; i < nb; i++) {
             auto str = strings[i];
             auto bitset = copy_index->PrefixMatch(str);
-            ASSERT_EQ(bitset->size(), nb);
-            ASSERT_TRUE(bitset->test(i));
+            ASSERT_EQ(bitset.size(), nb);
+            ASSERT_TRUE(bitset[i]);
         }
     }
 }
@@ -278,58 +278,58 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
 
     {
         auto bitset = copy_index->In(nb, strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->any());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(Any(bitset));
     }
 
     {
         auto bitset = copy_index->In(1, invalid_strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->none());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
     }
 
     {
         auto bitset = copy_index->NotIn(nb, strings.data());
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_TRUE(bitset->none());
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_TRUE(BitSetNone(bitset));
     }
 
     {
         auto bitset = copy_index->Range("0", milvus::OpType::GreaterEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("90", milvus::OpType::LessThan);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("9", milvus::OpType::LessEqual);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("0", true, "9", true);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         auto bitset = copy_index->Range("0", true, "90", false);
-        ASSERT_EQ(bitset->size(), nb);
-        ASSERT_EQ(bitset->count(), nb);
+        ASSERT_EQ(bitset.size(), nb);
+        ASSERT_EQ(Count(bitset), nb);
     }
 
     {
         for (size_t i = 0; i < nb; i++) {
             auto str = strings[i];
             auto bitset = copy_index->PrefixMatch(str);
-            ASSERT_EQ(bitset->size(), nb);
-            ASSERT_TRUE(bitset->test(i));
+            ASSERT_EQ(bitset.size(), nb);
+            ASSERT_TRUE(bitset[i]);
         }
     }
 }

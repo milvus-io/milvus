@@ -115,7 +115,7 @@ template <typename Type>
 using FixedVector = boost::container::vector<Type>;
 
 using Config = nlohmann::json;
-using TargetBitmap = boost::dynamic_bitset<>;
+using TargetBitmap = FixedVector<bool>;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;
@@ -127,4 +127,7 @@ using IndexType = knowhere::IndexType;
 // TODO :: type define milvus index mode, add transfer func from milvus index mode to knowhere index mode
 using IndexMode = knowhere::IndexMode;
 
+using BitSetBlockType = BitsetType::block_type;
+constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
+constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
 }  // namespace milvus

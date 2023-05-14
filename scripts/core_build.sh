@@ -31,6 +31,51 @@ if [[ ! ${jobs+1} ]]; then
     fi
 fi
 
+function get_cpu_arch {
+  local CPU_ARCH=$1
+
+  local OS
+  OS=$(uname)
+  local MACHINE
+  MACHINE=$(uname -m)
+  ADDITIONAL_FLAGS=""
+
+  if [ -z "$CPU_ARCH" ]; then
+
+    if [ "$OS" = "Darwin" ]; then
+
+      if [ "$MACHINE" = "x86_64" ]; then
+        local CPU_CAPABILITIES
+        CPU_CAPABILITIES=$(sysctl -a | grep machdep.cpu.features | awk '{print tolower($0)}')
+
+        if [[ $CPU_CAPABILITIES =~ "avx" ]]; then
+          CPU_ARCH="avx"
+        else
+          CPU_ARCH="sse"
+        fi
+
+      elif [[ $(sysctl -a | grep machdep.cpu.brand_string) =~ "Apple" ]]; then
+        # Apple silicon.
+        CPU_ARCH="arm64"
+      fi
+
+    else [ "$OS" = "Linux" ];
+
+      local CPU_CAPABILITIES
+      CPU_CAPABILITIES=$(cat /proc/cpuinfo | grep flags | head -n 1| awk '{print tolower($0)}')
+
+      if [[ "$CPU_CAPABILITIES" =~ "avx" ]]; then
+            CPU_ARCH="avx"
+      elif [[ "$CPU_CAPABILITIES" =~ "sse" ]]; then
+            CPU_ARCH="sse"
+      elif [ "$MACHINE" = "aarch64" ]; then
+            CPU_ARCH="aarch64"
+      fi
+    fi
+  fi
+  echo -n $CPU_ARCH
+}
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -58,8 +103,9 @@ CUSTOM_THIRDPARTY_PATH=""
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
+OPEN_SIMD="OFF"
 
-while getopts "p:d:t:s:f:n:ulrcghzmeba" arg; do
+while getopts "p:d:t:s:f:n:i:ulrcghzmeba" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -109,6 +155,9 @@ while getopts "p:d:t:s:f:n:ulrcghzmeba" arg; do
   a)
     USE_ASAN="ON"
     BUILD_TYPE=Debug
+    ;;
+  i)
+    OPEN_SIMD=$OPTARG
     ;;
   h) # help
     echo "
@@ -213,6 +262,8 @@ case "${unameOut}" in
 esac
 
 
+CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
+
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
@@ -230,6 +281,8 @@ ${CMAKE_EXTRA_ARGS} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DUSE_ASAN=${USE_ASAN} \
+-DOPEN_SIMD=${OPEN_SIMD} \
+-DCPU_ARCH=${CPU_ARCH} \
 ${CPP_SRC_DIR}"
 
 echo ${CMAKE_CMD}
