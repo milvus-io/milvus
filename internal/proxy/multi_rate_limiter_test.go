@@ -73,9 +73,9 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
-		multiLimiter.collectionLimiters[1] = newRateLimiter()
-		multiLimiter.collectionLimiters[2] = newRateLimiter()
-		multiLimiter.collectionLimiters[3] = newRateLimiter()
+		multiLimiter.collectionLimiters[1] = newRateLimiter(false)
+		multiLimiter.collectionLimiters[2] = newRateLimiter(false)
+		multiLimiter.collectionLimiters[3] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			if IsDDLRequest(internalpb.RateType(rt)) {
 				multiLimiter.globalDDLLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(5), 1))
