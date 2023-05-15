@@ -20,15 +20,12 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -93,8 +90,8 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgID(task.ID()),
 		),
 		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         schema,
-		LoadMeta:       loadMeta,
+		Schema:         schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:       loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
 		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
@@ -143,8 +140,8 @@ func packSubChannelRequest(
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
 		Infos:        []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:       schema,
-		LoadMeta:     loadMeta,
+		Schema:       schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:     loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		ReplicaID:    task.ReplicaID(),
 		Version:      time.Now().UnixNano(),
 	}
@@ -155,13 +152,6 @@ func fillSubChannelRequest(
 	req *querypb.WatchDmChannelsRequest,
 	broker meta.Broker,
 ) error {
-	indexes, err := broker.DescribeIndex(ctx, req.GetCollectionID())
-	if err != nil {
-		log.Warn("fail to get index meta when fillSubChannelRequest",
-			zap.Int64("collectionId", req.GetCollectionID()))
-	} else {
-		req.IndexInfoList = indexes
-	}
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
 		segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)

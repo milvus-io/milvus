@@ -26,6 +26,8 @@ import "C"
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 	"sync"
 	"unsafe"
 
@@ -106,11 +108,13 @@ func (c *Collection) AddPartition(partitions ...int64) {
 	for i := range partitions {
 		c.partitions.Insert(partitions[i])
 	}
+	log.Info("add partitions", zap.Int64("collection", c.ID()), zap.Int64s("partitions", partitions))
 }
 
 // removePartitionID removes the partition id from partition id list of collection
 func (c *Collection) RemovePartition(partitionID int64) {
 	c.partitions.Remove(partitionID)
+	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
 }
 
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition

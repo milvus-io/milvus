@@ -42,10 +42,10 @@ type LoadCollectionJob struct {
 
 	dist           *meta.DistributionManager
 	meta           *meta.Meta
+	broker         meta.Broker
 	cluster        session.Cluster
 	targetMgr      *meta.TargetManager
 	targetObserver *observers.TargetObserver
-	broker         meta.Broker
 	nodeMgr        *session.NodeManager
 }
 
@@ -54,10 +54,10 @@ func NewLoadCollectionJob(
 	req *querypb.LoadCollectionRequest,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
+	broker meta.Broker,
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
-	broker meta.Broker,
 	nodeMgr *session.NodeManager,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
@@ -66,10 +66,10 @@ func NewLoadCollectionJob(
 		undo:           NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
 		dist:           dist,
 		meta:           meta,
+		broker:         broker,
 		cluster:        cluster,
 		targetMgr:      targetMgr,
 		targetObserver: targetObserver,
-		broker:         broker,
 		nodeMgr:        nodeMgr,
 	}
 }
@@ -131,22 +131,6 @@ func (job *LoadCollectionJob) Execute() error {
 	job.undo.LackPartitions = lackPartitionIDs
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
-	// 2. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, nil, false, req.GetCollectionID(), lackPartitionIDs...)
-	if err != nil {
-		return err
-	}
-	job.undo.PartitionsLoaded = true
-
-	// 3. update next target
-	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), partitionIDs...)
-	if err != nil {
-		msg := "failed to update next target"
-		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
-	}
-	job.undo.TargetUpdated = true
-
 	colExisted := job.meta.CollectionManager.Exist(req.GetCollectionID())
 	if !colExisted {
 		// Clear stale replicas, https://github.com/milvus-io/milvus/issues/20444
@@ -158,7 +142,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	}
 
-	// 4. create replica if not exist
+	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
 		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber())
@@ -173,6 +157,21 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		job.undo.NewReplicaCreated = true
 	}
+
+	// 3. loadPartitions on QueryNodes
+	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, req.GetCollectionID(), lackPartitionIDs...)
+	if err != nil {
+		return err
+	}
+
+	// 4. update next target
+	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), partitionIDs...)
+	if err != nil {
+		msg := "failed to update next target"
+		log.Error(msg, zap.Error(err))
+		return utils.WrapError(msg, err)
+	}
+	job.undo.TargetUpdated = true
 
 	// 5. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
@@ -221,10 +220,10 @@ type LoadPartitionJob struct {
 
 	dist           *meta.DistributionManager
 	meta           *meta.Meta
+	broker         meta.Broker
 	cluster        session.Cluster
 	targetMgr      *meta.TargetManager
 	targetObserver *observers.TargetObserver
-	broker         meta.Broker
 	nodeMgr        *session.NodeManager
 }
 
@@ -233,10 +232,10 @@ func NewLoadPartitionJob(
 	req *querypb.LoadPartitionsRequest,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
+	broker meta.Broker,
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
-	broker meta.Broker,
 	nodeMgr *session.NodeManager,
 ) *LoadPartitionJob {
 	return &LoadPartitionJob{
@@ -245,10 +244,10 @@ func NewLoadPartitionJob(
 		undo:           NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
 		dist:           dist,
 		meta:           meta,
+		broker:         broker,
 		cluster:        cluster,
 		targetMgr:      targetMgr,
 		targetObserver: targetObserver,
-		broker:         broker,
 		nodeMgr:        nodeMgr,
 	}
 }
@@ -305,22 +304,7 @@ func (job *LoadPartitionJob) Execute() error {
 	job.undo.LackPartitions = lackPartitionIDs
 	log.Info("find partitions to load", zap.Int64s("partitions", lackPartitionIDs))
 
-	// 2. loadPartitions on QueryNodes
-	err := loadPartitions(job.ctx, job.meta, job.cluster, nil, false, req.GetCollectionID(), lackPartitionIDs...)
-	if err != nil {
-		return err
-	}
-	job.undo.PartitionsLoaded = true
-
-	// 3. update next target
-	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), append(loadedPartitionIDs, lackPartitionIDs...)...)
-	if err != nil {
-		msg := "failed to update next target"
-		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
-	}
-	job.undo.TargetUpdated = true
-
+	var err error
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
 		// Clear stale replicas, https://github.com/milvus-io/milvus/issues/20444
 		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
@@ -331,7 +315,7 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 	}
 
-	// 4. create replica if not exist
+	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
 		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber())
@@ -346,6 +330,21 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 		job.undo.NewReplicaCreated = true
 	}
+
+	// 3. loadPartitions on QueryNodes
+	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, req.GetCollectionID(), lackPartitionIDs...)
+	if err != nil {
+		return err
+	}
+
+	// 4. update next target
+	_, err = job.targetObserver.UpdateNextTarget(req.GetCollectionID(), append(loadedPartitionIDs, lackPartitionIDs...)...)
+	if err != nil {
+		msg := "failed to update next target"
+		log.Error(msg, zap.Error(err))
+		return utils.WrapError(msg, err)
+	}
+	job.undo.TargetUpdated = true
 
 	// 5. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {

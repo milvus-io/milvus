@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -35,6 +34,7 @@ type SyncNewCreatedPartitionJob struct {
 	req     *querypb.SyncNewCreatedPartitionRequest
 	meta    *meta.Meta
 	cluster session.Cluster
+	broker  meta.Broker
 }
 
 func NewSyncNewCreatedPartitionJob(
@@ -42,12 +42,14 @@ func NewSyncNewCreatedPartitionJob(
 	req *querypb.SyncNewCreatedPartitionRequest,
 	meta *meta.Meta,
 	cluster session.Cluster,
+	broker meta.Broker,
 ) *SyncNewCreatedPartitionJob {
 	return &SyncNewCreatedPartitionJob{
 		BaseJob: NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
 		req:     req,
 		meta:    meta,
 		cluster: cluster,
+		broker:  broker,
 	}
 }
 
@@ -72,7 +74,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		zap.Int64("partitionID", req.GetPartitionID()),
 	)
 
-	err := loadPartitions(job.ctx, job.meta, job.cluster, req.GetSchema(), false, req.GetCollectionID(), req.GetPartitionID())
+	err := loadPartitions(job.ctx, job.meta, job.cluster, job.broker, req.GetCollectionID(), req.GetPartitionID())
 	if err != nil {
 		return err
 	}
@@ -94,10 +96,4 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	}
 
 	return nil
-}
-
-func (job *SyncNewCreatedPartitionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrPartitionNotInTarget) {
-		releasePartitions(job.ctx, job.meta, job.cluster, true, job.req.GetCollectionID(), job.req.GetPartitionID())
-	}
 }

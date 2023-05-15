@@ -124,6 +124,15 @@ func (suite *ServiceSuite) SetupTest() {
 	// start node
 	err = suite.node.Start()
 	suite.NoError(err)
+
+	// init collection
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	LoadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
 }
 
 func (suite *ServiceSuite) TearDownTest() {
@@ -223,7 +232,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -233,7 +241,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 		NodeID:       suite.node.session.ServerID,
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
-		Schema:       schema,
 		Infos: []*datapb.VchannelInfo{
 			{
 				CollectionID:      suite.collectionID,
@@ -242,11 +249,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 				FlushedSegmentIds: suite.flushedSegmentIDs,
 				DroppedSegmentIds: suite.droppedSegmentIDs,
 			},
-		},
-		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:     querypb.LoadType_LoadCollection,
-			CollectionID: suite.collectionID,
-			PartitionIDs: suite.partitionIDs,
 		},
 	}
 
@@ -272,7 +274,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar)
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -282,7 +283,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 		NodeID:       suite.node.session.ServerID,
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
-		Schema:       schema,
 		Infos: []*datapb.VchannelInfo{
 			{
 				CollectionID:      suite.collectionID,
@@ -291,11 +291,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 				FlushedSegmentIds: suite.flushedSegmentIDs,
 				DroppedSegmentIds: suite.droppedSegmentIDs,
 			},
-		},
-		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:     querypb.LoadType_LoadCollection,
-			CollectionID: suite.collectionID,
-			PartitionIDs: suite.partitionIDs,
 		},
 	}
 
@@ -321,7 +316,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	ctx := context.Background()
 
 	// data
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -331,7 +325,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		NodeID:       suite.node.session.ServerID,
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
-		Schema:       schema,
 		Infos: []*datapb.VchannelInfo{
 			{
 				CollectionID:      suite.collectionID,
@@ -476,7 +469,6 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 		},
 		CollectionID:   suite.collectionID,
 		DstNodeID:      suite.node.session.ServerID,
-		Schema:         schema,
 		Infos:          suite.genSegmentLoadInfos(schema),
 		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 		NeedTransfer:   true,
@@ -493,6 +485,13 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 	suite.TestWatchDmChannelsVarchar()
 	// data
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar)
+	LoadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}
+	suite.node.manager.Collection = segments.NewCollectionManager()
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -500,7 +499,6 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		},
 		CollectionID:   suite.collectionID,
 		DstNodeID:      suite.node.session.ServerID,
-		Schema:         schema,
 		Infos:          suite.genSegmentLoadInfos(schema),
 		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 		NeedTransfer:   true,
@@ -524,7 +522,6 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 		},
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
-		Schema:       schema,
 		Infos:        suite.genSegmentLoadInfos(schema),
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
@@ -548,7 +545,6 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 		},
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
-		Schema:       schema,
 		Infos:        suite.genSegmentLoadInfos(schema),
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
@@ -571,7 +567,6 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 		},
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
-		Schema:       schema,
 		Infos:        suite.genSegmentLoadInfos(schema),
 		NeedTransfer: true,
 	}
@@ -613,7 +608,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			},
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
-			Schema:       schema,
 			Infos:        suite.genSegmentLoadInfos(schema),
 			NeedTransfer: true,
 		}
@@ -634,7 +628,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			},
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
-			Schema:       schema,
 			Infos:        suite.genSegmentLoadInfos(schema),
 			NeedTransfer: true,
 		}
@@ -660,7 +653,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			},
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
-			Schema:       schema,
 			Infos:        suite.genSegmentLoadInfos(schema),
 			NeedTransfer: true,
 		}
@@ -1425,6 +1417,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	// collection not exist and schema is nil
+	suite.node.manager.Collection = segments.NewCollectionManager()
 	status, err = suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())

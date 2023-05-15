@@ -18,6 +18,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -120,6 +121,11 @@ func (suite *JobSuite) SetupSuite() {
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil)
 	}
 
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
+		Return(nil, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+		Return(nil, nil)
+
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().
 		LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
@@ -203,10 +209,10 @@ func (suite *JobSuite) TestLoadCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -230,10 +236,10 @@ func (suite *JobSuite) TestLoadCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -255,10 +261,10 @@ func (suite *JobSuite) TestLoadCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -282,10 +288,10 @@ func (suite *JobSuite) TestLoadCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -308,10 +314,10 @@ func (suite *JobSuite) TestLoadCollection() {
 		req,
 		suite.dist,
 		suite.meta,
+		suite.broker,
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.broker,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -329,10 +335,10 @@ func (suite *JobSuite) TestLoadCollection() {
 		req,
 		suite.dist,
 		suite.meta,
+		suite.broker,
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.broker,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -358,10 +364,10 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -390,10 +396,10 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -420,10 +426,10 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -451,10 +457,10 @@ func (suite *JobSuite) TestLoadPartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -481,10 +487,10 @@ func (suite *JobSuite) TestLoadPartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -508,10 +514,10 @@ func (suite *JobSuite) TestLoadPartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -535,10 +541,10 @@ func (suite *JobSuite) TestLoadPartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -561,10 +567,10 @@ func (suite *JobSuite) TestLoadPartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -577,7 +583,6 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.meta.ResourceManager.AddResourceGroup("rg3")
 
 	// test load 3 replica in 1 rg, should pass rg check
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(999)).Return(nil, nil, nil)
 	req := &querypb.LoadPartitionsRequest{
 		CollectionID:   999,
 		PartitionIDs:   []int64{888},
@@ -589,10 +594,10 @@ func (suite *JobSuite) TestLoadPartition() {
 		req,
 		suite.dist,
 		suite.meta,
+		suite.broker,
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.broker,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -600,7 +605,6 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
 
 	// test load 3 replica in 3 rg, should pass rg check
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(999)).Return(nil, nil, nil)
 	req = &querypb.LoadPartitionsRequest{
 		CollectionID:   999,
 		PartitionIDs:   []int64{888},
@@ -612,10 +616,10 @@ func (suite *JobSuite) TestLoadPartition() {
 		req,
 		suite.dist,
 		suite.meta,
+		suite.broker,
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.broker,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -639,10 +643,10 @@ func (suite *JobSuite) TestDynamicLoad() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		return job
@@ -657,10 +661,10 @@ func (suite *JobSuite) TestDynamicLoad() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		return job
@@ -756,10 +760,10 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -789,10 +793,10 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -821,10 +825,10 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -848,6 +852,8 @@ func (suite *JobSuite) TestReleaseCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
+			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
 		)
@@ -867,6 +873,8 @@ func (suite *JobSuite) TestReleaseCollection() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
+			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
 		)
@@ -893,6 +901,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
@@ -914,6 +923,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
@@ -937,6 +947,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
@@ -968,6 +979,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
@@ -983,6 +995,8 @@ func (suite *JobSuite) TestDynamicRelease() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
+			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
 		)
@@ -1076,10 +1090,10 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -1120,10 +1134,10 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -1147,16 +1161,169 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
-			suite.broker,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.ErrorIs(err, ErrFailedAllocateID)
 	}
+}
+
+func (suite *JobSuite) TestCallLoadPartitionFailed() {
+	// call LoadPartitions failed at get index info
+	getIndexErr := fmt.Errorf("mock get index error")
+	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "DescribeIndex"
+	})
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeIndex(mock.Anything, collection).Return(nil, getIndexErr)
+		loadCollectionReq := &querypb.LoadCollectionRequest{
+			CollectionID: collection,
+		}
+		loadCollectionJob := NewLoadCollectionJob(
+			context.Background(),
+			loadCollectionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(loadCollectionJob)
+		err := loadCollectionJob.Wait()
+		suite.T().Logf("%s", err)
+		suite.ErrorIs(err, getIndexErr)
+
+		loadPartitionReq := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+		}
+		loadPartitionJob := NewLoadPartitionJob(
+			context.Background(),
+			loadPartitionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(loadPartitionJob)
+		err = loadPartitionJob.Wait()
+		suite.ErrorIs(err, getIndexErr)
+	}
+
+	// call LoadPartitions failed at get schema
+	getSchemaErr := fmt.Errorf("mock get schema error")
+	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "GetCollectionSchema"
+	})
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().GetCollectionSchema(mock.Anything, collection).Return(nil, getSchemaErr)
+		loadCollectionReq := &querypb.LoadCollectionRequest{
+			CollectionID: collection,
+		}
+		loadCollectionJob := NewLoadCollectionJob(
+			context.Background(),
+			loadCollectionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(loadCollectionJob)
+		err := loadCollectionJob.Wait()
+		suite.ErrorIs(err, getSchemaErr)
+
+		loadPartitionReq := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+		}
+		loadPartitionJob := NewLoadPartitionJob(
+			context.Background(),
+			loadPartitionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+			suite.nodeMgr,
+		)
+		suite.scheduler.Add(loadPartitionJob)
+		err = loadPartitionJob.Wait()
+		suite.ErrorIs(err, getSchemaErr)
+	}
+
+	suite.broker.ExpectedCalls = lo.Filter(suite.broker.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "DescribeIndex" && call.Method != "GetCollectionSchema"
+	})
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(nil, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, nil)
+}
+
+func (suite *JobSuite) TestCallReleasePartitionFailed() {
+	ctx := context.Background()
+	suite.loadAll()
+
+	releasePartitionErr := fmt.Errorf("mock release partitions error")
+	suite.cluster.ExpectedCalls = lo.Filter(suite.cluster.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "ReleasePartitions"
+	})
+	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, releasePartitionErr)
+	for _, collection := range suite.collections {
+		releaseCollectionReq := &querypb.ReleaseCollectionRequest{
+			CollectionID: collection,
+		}
+		releaseCollectionJob := NewReleaseCollectionJob(
+			ctx,
+			releaseCollectionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+		)
+		suite.scheduler.Add(releaseCollectionJob)
+		err := releaseCollectionJob.Wait()
+		suite.NoError(err)
+
+		releasePartitionReq := &querypb.ReleasePartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+		}
+		releasePartitionJob := NewReleasePartitionJob(
+			ctx,
+			releasePartitionReq,
+			suite.dist,
+			suite.meta,
+			suite.broker,
+			suite.cluster,
+			suite.targetMgr,
+			suite.targetObserver,
+		)
+		suite.scheduler.Add(releasePartitionJob)
+		err = releasePartitionJob.Wait()
+		suite.NoError(err)
+	}
+
+	suite.cluster.ExpectedCalls = lo.Filter(suite.cluster.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "ReleasePartitions"
+	})
+	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 }
 
 func (suite *JobSuite) TestSyncNewCreatedPartition() {
@@ -1173,6 +1340,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 		req,
 		suite.meta,
 		suite.cluster,
+		suite.broker,
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
@@ -1191,6 +1359,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 		req,
 		suite.meta,
 		suite.cluster,
+		suite.broker,
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
@@ -1206,6 +1375,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 		req,
 		suite.meta,
 		suite.cluster,
+		suite.broker,
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
@@ -1224,10 +1394,10 @@ func (suite *JobSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.broker,
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
-				suite.broker,
 				suite.nodeMgr,
 			)
 			suite.scheduler.Add(job)
@@ -1248,10 +1418,10 @@ func (suite *JobSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.broker,
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
-				suite.broker,
 				suite.nodeMgr,
 			)
 			suite.scheduler.Add(job)
@@ -1277,6 +1447,8 @@ func (suite *JobSuite) releaseAll() {
 			req,
 			suite.dist,
 			suite.meta,
+			suite.broker,
+			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
 		)
