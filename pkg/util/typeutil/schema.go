@@ -23,9 +23,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 )
 
 const DynamicFieldMaxLength = 512
@@ -249,6 +248,7 @@ func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error)
 	var field *schemapb.FieldSchema
 	for _, f := range helper.schema.GetFields() {
 		// TODO @xiaocai2333: get $SYS_META json field
+		//if f.DataType == schemapb.DataType_JSON && f.GetIsDynamic() {
 		if f.DataType == schemapb.DataType_JSON {
 			if field != nil {
 				// TODO @xiaocai2333: will not return error after support $SYS_META
@@ -260,7 +260,7 @@ func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error)
 		}
 	}
 	if field == nil {
-		errMsg := "there is no json field in schema, need to specified field name"
+		errMsg := "there is no dynamic json field in schema, need to specified field name"
 		log.Warn(errMsg)
 		return nil, fmt.Errorf(errMsg)
 	}

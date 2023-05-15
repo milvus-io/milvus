@@ -84,6 +84,7 @@ func TestJsonExpr(t *testing.T) {
 			Name:        jsonField,
 			Description: "this is a json field",
 			DataType:    schemapb.DataType_JSON,
+			//IsDynamic:   true,
 		}
 		return &schemapb.CollectionSchema{
 			Name:        collectionName,
