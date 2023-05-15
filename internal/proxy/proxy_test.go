@@ -3596,6 +3596,9 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName, Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "NotExisted", RoleName: roleName, Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	wg.Add(1)
