@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -16,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -23,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -166,6 +168,21 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}, nil
 }
 
+func (t *queryTask) assignPartitionKeys(ctx context.Context, keys []*planpb.GenericValue) ([]string, error) {
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	partitionKeyFieldSchema, err := typeutil.GetPartitionFieldSchema(t.schema)
+	if err != nil {
+		return nil, err
+	}
+
+	hashedPartitionNames, err := typeutil.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
+	return hashedPartitionNames, err
+}
+
 func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.queryShardPolicy == nil {
 		t.queryShardPolicy = mergeRoundRobinPolicy
@@ -197,6 +214,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		zap.Int64("collectionID", t.CollectionID), zap.String("collection name", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
+	partitionKeyMode, _ := isPartitionKeyMode(ctx, collectionName)
+	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+
 	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			log.Ctx(ctx).Warn("invalid partition name", zap.String("partition name", tag),
@@ -206,16 +228,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Ctx(ctx).Debug("Validate partition names.",
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
-
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to get partitions in collection.", zap.String("collection name", collectionName),
-			zap.Error(err),
-			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
-		return err
-	}
-	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"), zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
 	//fetch search_growing from search param
 	var ignoreGrowing bool
@@ -267,6 +279,31 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	partitionNames := t.request.GetPartitionNames()
+	if partitionKeyMode {
+		expr, err := ParseExprFromPlan(plan)
+		if err != nil {
+			return err
+		}
+		partitionKeys := ParsePartitionKeys(expr)
+		hashedPartitionNames, err := t.assignPartitionKeys(ctx, partitionKeys)
+		if err != nil {
+			return err
+		}
+
+		partitionNames = append(partitionNames, hashedPartitionNames...)
+	}
+	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to get partitions in collection.", zap.String("collection name", collectionName),
+			zap.Error(err),
+			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		return err
+	}
+	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
+		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"), zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
+
 	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
 	if err != nil {
 		return err

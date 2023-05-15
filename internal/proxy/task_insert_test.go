@@ -4,12 +4,19 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
 func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
@@ -385,4 +392,83 @@ func TestInsertTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, channels, resChannels)
 	})
+}
+
+func TestAssignPartitionsByKey(t *testing.T) {
+	Params.InitOnce()
+
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+
+	ctx := context.Background()
+	err := InitMetaCache(ctx, rc, nil, nil)
+	assert.NoError(t, err)
+
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestAssignPartitionsByKey"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type["int64_field"] = schemapb.DataType_Int64
+	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+	partitionKeyField := &schemapb.FieldSchema{
+		Name:           "partition_key_field",
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+	schema.Fields = append(schema.Fields, partitionKeyField)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	task := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         "",
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+			NumPartitions:  common.DefaultPartitionsWithPartitionKey,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		schema:    nil,
+	}
+	err = task.PreExecute(ctx)
+	assert.NoError(t, err)
+	err = task.Execute(ctx)
+	assert.NoError(t, err)
+
+	nb := 100
+	partitionKeyFieldData := generateFieldData(schemapb.DataType_Int64, "partition_key_field", nb)
+	rowOffset := []int{10, 20, 30, 40}
+	it := &insertTask{
+		BaseInsertTask: BaseInsertTask{
+			BaseMsg: msgstream.BaseMsg{},
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Insert,
+					MsgID:    0,
+					SourceID: Params.ProxyCfg.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				NumRows:        uint64(nb),
+				Version:        internalpb.InsertDataVersion_ColumnBased,
+			},
+		},
+	}
+	partition2RowOffsets, err := it.assignPartitionsByKey(ctx, rowOffset, partitionKeyFieldData)
+	assert.NoError(t, err)
+	for _, offsets := range partition2RowOffsets {
+		for _, offset := range offsets {
+			assert.Contains(t, rowOffset, offset)
+		}
+	}
 }

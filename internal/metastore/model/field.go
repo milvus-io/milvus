@@ -8,15 +8,16 @@ import (
 )
 
 type Field struct {
-	FieldID      int64
-	Name         string
-	IsPrimaryKey bool
-	Description  string
-	DataType     schemapb.DataType
-	TypeParams   []*commonpb.KeyValuePair
-	IndexParams  []*commonpb.KeyValuePair
-	AutoID       bool
-	State        schemapb.FieldState
+	FieldID        int64
+	Name           string
+	IsPrimaryKey   bool
+	Description    string
+	DataType       schemapb.DataType
+	TypeParams     []*commonpb.KeyValuePair
+	IndexParams    []*commonpb.KeyValuePair
+	AutoID         bool
+	State          schemapb.FieldState
+	IsPartitionKey bool // partition key mode, multi logic partitions share a physical partition
 }
 
 func (f Field) Available() bool {
@@ -25,15 +26,16 @@ func (f Field) Available() bool {
 
 func (f Field) Clone() *Field {
 	return &Field{
-		FieldID:      f.FieldID,
-		Name:         f.Name,
-		IsPrimaryKey: f.IsPrimaryKey,
-		Description:  f.Description,
-		DataType:     f.DataType,
-		TypeParams:   common.CloneKeyValuePairs(f.TypeParams),
-		IndexParams:  common.CloneKeyValuePairs(f.IndexParams),
-		AutoID:       f.AutoID,
-		State:        f.State,
+		FieldID:        f.FieldID,
+		Name:           f.Name,
+		IsPrimaryKey:   f.IsPrimaryKey,
+		Description:    f.Description,
+		DataType:       f.DataType,
+		TypeParams:     common.CloneKeyValuePairs(f.TypeParams),
+		IndexParams:    common.CloneKeyValuePairs(f.IndexParams),
+		AutoID:         f.AutoID,
+		State:          f.State,
+		IsPartitionKey: f.IsPartitionKey,
 	}
 }
 
@@ -58,7 +60,8 @@ func (f Field) Equal(other Field) bool {
 		f.DataType == other.DataType &&
 		checkParamsEqual(f.TypeParams, f.TypeParams) &&
 		checkParamsEqual(f.IndexParams, other.IndexParams) &&
-		f.AutoID == other.AutoID
+		f.AutoID == other.AutoID &&
+		f.IsPartitionKey == other.IsPartitionKey
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -80,14 +83,15 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 	}
 
 	return &schemapb.FieldSchema{
-		FieldID:      field.FieldID,
-		Name:         field.Name,
-		IsPrimaryKey: field.IsPrimaryKey,
-		Description:  field.Description,
-		DataType:     field.DataType,
-		TypeParams:   field.TypeParams,
-		IndexParams:  field.IndexParams,
-		AutoID:       field.AutoID,
+		FieldID:        field.FieldID,
+		Name:           field.Name,
+		IsPrimaryKey:   field.IsPrimaryKey,
+		Description:    field.Description,
+		DataType:       field.DataType,
+		TypeParams:     field.TypeParams,
+		IndexParams:    field.IndexParams,
+		AutoID:         field.AutoID,
+		IsPartitionKey: field.IsPartitionKey,
 	}
 }
 
@@ -109,14 +113,15 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 	}
 
 	return &Field{
-		FieldID:      fieldSchema.FieldID,
-		Name:         fieldSchema.Name,
-		IsPrimaryKey: fieldSchema.IsPrimaryKey,
-		Description:  fieldSchema.Description,
-		DataType:     fieldSchema.DataType,
-		TypeParams:   fieldSchema.TypeParams,
-		IndexParams:  fieldSchema.IndexParams,
-		AutoID:       fieldSchema.AutoID,
+		FieldID:        fieldSchema.FieldID,
+		Name:           fieldSchema.Name,
+		IsPrimaryKey:   fieldSchema.IsPrimaryKey,
+		Description:    fieldSchema.Description,
+		DataType:       fieldSchema.DataType,
+		TypeParams:     fieldSchema.TypeParams,
+		IndexParams:    fieldSchema.IndexParams,
+		AutoID:         fieldSchema.AutoID,
+		IsPartitionKey: fieldSchema.IsPartitionKey,
 	}
 }
 

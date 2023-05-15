@@ -51,6 +51,7 @@ message ColumnInfo {
   bool is_primary_key = 3;
   bool is_autoID = 4;
   repeated string nested_path = 5;
+  bool is_partition_key = 6;
 }
 
 message ColumnExpr {

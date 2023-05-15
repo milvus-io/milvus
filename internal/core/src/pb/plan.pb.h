@@ -732,6 +732,7 @@ class ColumnInfo :
     kDataTypeFieldNumber = 2,
     kIsPrimaryKeyFieldNumber = 3,
     kIsAutoIDFieldNumber = 4,
+    kIsPartitionKeyFieldNumber = 6,
   };
   // repeated string nested_path = 5;
   int nested_path_size() const;
@@ -770,6 +771,11 @@ class ColumnInfo :
   bool is_autoid() const;
   void set_is_autoid(bool value);
 
+  // bool is_partition_key = 6;
+  void clear_is_partition_key();
+  bool is_partition_key() const;
+  void set_is_partition_key(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.ColumnInfo)
  private:
   class _Internal;
@@ -780,6 +786,7 @@ class ColumnInfo :
   int data_type_;
   bool is_primary_key_;
   bool is_autoid_;
+  bool is_partition_key_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -3697,6 +3704,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 ColumnInfo::mutable_nested_path() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.plan.ColumnInfo.nested_path)
   return &nested_path_;
+}
+
+// bool is_partition_key = 6;
+inline void ColumnInfo::clear_is_partition_key() {
+  is_partition_key_ = false;
+}
+inline bool ColumnInfo::is_partition_key() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ColumnInfo.is_partition_key)
+  return is_partition_key_;
+}
+inline void ColumnInfo::set_is_partition_key(bool value) {
+  
+  is_partition_key_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.is_partition_key)
 }
 
 // -------------------------------------------------------------------

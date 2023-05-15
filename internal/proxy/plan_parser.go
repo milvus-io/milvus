@@ -277,9 +277,10 @@ func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 
 func createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
 	return &planpb.ColumnInfo{
-		FieldId:      field.FieldID,
-		DataType:     field.DataType,
-		IsPrimaryKey: field.IsPrimaryKey,
+		FieldId:        field.FieldID,
+		DataType:       field.DataType,
+		IsPrimaryKey:   field.IsPrimaryKey,
+		IsPartitionKey: field.IsPartitionKey,
 	}
 }
 

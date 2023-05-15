@@ -2,8 +2,13 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"sync"
+
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -18,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type insertTask struct {
@@ -27,14 +31,19 @@ type insertTask struct {
 	Condition
 	ctx context.Context
 
-	result        *milvuspb.MutationResult
-	idAllocator   *allocator.IDAllocator
-	segIDAssigner *segIDAssigner
-	chMgr         channelsMgr
-	chTicker      channelsTimeTicker
-	vChannels     []vChan
-	pChannels     []pChan
-	schema        *schemapb.CollectionSchema
+	result             *milvuspb.MutationResult
+	idAllocator        *allocator.IDAllocator
+	segIDAssigner      *segIDAssigner
+	chMgr              channelsMgr
+	chTicker           channelsTimeTicker
+	vChannels          []vChan
+	pChannels          []pChan
+	schema             *schemapb.CollectionSchema
+	msgIDBegin         int64
+	msgIDEnd           int64
+	idMutex            sync.Mutex
+	isPartitionKeyMode bool
+	partitionKeys      *schemapb.FieldData
 }
 
 // TraceCtx returns insertTask context
@@ -128,7 +137,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	if !primaryFieldSchema.AutoID {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Error("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Info("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
 			return err
 		}
 	} else {
@@ -139,7 +148,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 		// if autoID == true, currently only support autoID for int64 PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, it.RowIDs)
 		if err != nil {
-			log.Error("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Warn("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
 			return err
 		}
 		// if autoID == true, set the primary field data
@@ -149,8 +158,30 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	it.result.IDs, err = parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Error("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+		log.Warn("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
 		return err
+	}
+
+	return nil
+}
+
+func (it *insertTask) checkPartitionKeys(collSchema *schemapb.CollectionSchema) error {
+	partitionKeyField, err := typeutil.GetPartitionFieldSchema(collSchema)
+	if err == nil {
+		it.isPartitionKeyMode = true
+		if len(it.PartitionName) > 0 {
+			return errors.New("not support manually specifying the partition names if partition key mode is used")
+		}
+
+		for _, fieldData := range it.GetFieldsData() {
+			if fieldData.GetFieldId() == partitionKeyField.FieldID {
+				it.partitionKeys = fieldData
+			}
+		}
+
+		if it.partitionKeys == nil {
+			return errors.New("partition key not specify when insert")
+		}
 	}
 
 	return nil
@@ -172,13 +203,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
-		return err
-	}
-
-	partitionTag := it.PartitionName
-	if err := validatePartitionTag(partitionTag, true); err != nil {
-		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+		log.Info("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -220,15 +245,35 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// set rowIDs as primary data if autoID == true
 	err = it.checkPrimaryFieldData()
 	if err != nil {
-		log.Error("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Info("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.GetFieldsData(), collSchema)
 	if err != nil {
-		log.Error("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Info("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
+	}
+
+	err = it.checkPartitionKeys(it.schema)
+	if err != nil {
+		log.Info("check partition keys failed", zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	if !it.isPartitionKeyMode {
+		// set default partition name if not use partition key
+		// insert to _default partition
+		if len(it.PartitionName) <= 0 {
+			it.PartitionName = Params.CommonCfg.DefaultPartitionName
+		}
+
+		partitionTag := it.PartitionName
+		if err := validatePartitionTag(partitionTag, true); err != nil {
+			log.Info("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			return err
+		}
 	}
 
 	if err := newValidateUtil(withNANCheck()).Validate(it.GetFieldsData(), it.schema, it.NRows()); err != nil {
@@ -240,22 +285,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack, error) {
-	threshold := Params.PulsarCfg.MaxMessageSize
-
-	result := &msgstream.MsgPack{
-		BeginTs: it.BeginTs(),
-		EndTs:   it.EndTs(),
-	}
-
+func (it *insertTask) assignChannelsByPK(channelNames []string) map[string][]int {
 	// generate hash value for every primary key
 	if len(it.HashValues) != 0 {
 		log.Warn("the hashvalues passed through client is not supported now, and will be overwritten")
 	}
 	it.HashValues = typeutil.HashPK2Channels(it.result.IDs, channelNames)
 	// groupedHashKeys represents the dmChannel index
-	channel2RowOffsets := make(map[string][]int)  //   channelName to count
-	channelMaxTSMap := make(map[string]Timestamp) //  channelName to max Timestamp
+	channel2RowOffsets := make(map[string][]int) //   channelName to count
 
 	// assert len(it.hashValues) < maxInt
 	for offset, channelID := range it.HashValues {
@@ -264,26 +301,50 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 			channel2RowOffsets[channelName] = []int{}
 		}
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
-
-		if _, ok := channelMaxTSMap[channelName]; !ok {
-			channelMaxTSMap[channelName] = typeutil.ZeroTimestamp
-		}
-		ts := it.Timestamps[offset]
-		if channelMaxTSMap[channelName] < ts {
-			channelMaxTSMap[channelName] = ts
-		}
 	}
 
-	// pre-alloc msg id by batch
-	var idBegin, idEnd int64
+	return channel2RowOffsets
+}
+
+func (it *insertTask) assignPartitionsByKey(ctx context.Context, rowOffsets []int, keys *schemapb.FieldData) (map[string][]int, error) {
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, it.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	partition2RowOffsets := make(map[string][]int) //   partitionNames to offset
+	hashValues, err := typeutil.HashKey2PartitionsWithFilter(rowOffsets, keys, partitionNames)
+	if err != nil {
+		return nil, err
+	}
+
+	for idx, index := range hashValues {
+		partitionName := partitionNames[index]
+		if _, ok := partition2RowOffsets[partitionName]; !ok {
+			partition2RowOffsets[partitionName] = []int{}
+		}
+		partition2RowOffsets[partitionName] = append(partition2RowOffsets[partitionName], rowOffsets[idx])
+	}
+
+	return partition2RowOffsets, nil
+}
+
+func (it *insertTask) getInsertMsgsByPartition(segmentID UniqueID,
+	partitionID UniqueID,
+	partitionName string,
+	rowOffsets []int,
+	channelName string) ([]msgstream.TsMsg, error) {
+	threshold := Params.PulsarCfg.MaxMessageSize
 	var err error
 
 	// fetch next id, if not id available, fetch next batch
 	// lazy fetch, get first batch after first getMsgID called
 	getMsgID := func() (int64, error) {
-		if idBegin == idEnd {
+		it.idMutex.Lock()
+		defer it.idMutex.Unlock()
+		if it.msgIDBegin == it.msgIDEnd {
 			err = retry.Do(it.ctx, func() error {
-				idBegin, idEnd, err = it.idAllocator.Alloc(16)
+				it.msgIDBegin, it.msgIDEnd, err = it.idAllocator.Alloc(16)
 				return err
 			})
 			if err != nil {
@@ -291,13 +352,17 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 				return 0, err
 			}
 		}
-		result := idBegin
-		idBegin++
+		result := it.msgIDBegin
+		it.msgIDBegin++
 		return result, nil
 	}
 
 	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string, msgID int64) *msgstream.InsertMsg {
+	createInsertMsg := func(segmentID UniqueID, channelName string) (*msgstream.InsertMsg, error) {
+		msgID, err := getMsgID()
+		if err != nil {
+			return nil, err
+		}
 		insertReq := internalpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
@@ -306,9 +371,9 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 				commonpbutil.WithSourceID(it.Base.SourceID),
 			),
 			CollectionID:   it.CollectionID,
-			PartitionID:    it.PartitionID,
+			PartitionID:    partitionID,
 			CollectionName: it.CollectionName,
-			PartitionName:  it.PartitionName,
+			PartitionName:  partitionName,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
 			Version:        internalpb.InsertDataVersion_ColumnBased,
@@ -322,75 +387,141 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 			InsertRequest: insertReq,
 		}
 
-		return insertMsg
+		return insertMsg, nil
 	}
 
-	// repack the row data corresponding to the offset to insertMsg
-	getInsertMsgsBySegmentID := func(segmentID UniqueID, rowOffsets []int, channelName string, maxMessageSize int) ([]msgstream.TsMsg, error) {
-		repackedMsgs := make([]msgstream.TsMsg, 0)
-		requestSize := 0
-		msgID, err := getMsgID()
+	repackedMsgs := make([]msgstream.TsMsg, 0)
+	requestSize := 0
+	insertMsg, err := createInsertMsg(segmentID, channelName)
+	if err != nil {
+		return nil, err
+	}
+	for _, offset := range rowOffsets {
+		curRowMessageSize, err := typeutil.EstimateEntitySize(it.InsertRequest.GetFieldsData(), offset)
 		if err != nil {
 			return nil, err
 		}
-		insertMsg := createInsertMsg(segmentID, channelName, msgID)
-		for _, offset := range rowOffsets {
-			curRowMessageSize, err := typeutil.EstimateEntitySize(it.InsertRequest.GetFieldsData(), offset)
+
+		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
+		if requestSize+curRowMessageSize >= threshold {
+			repackedMsgs = append(repackedMsgs, insertMsg)
+			insertMsg, err = createInsertMsg(segmentID, channelName)
 			if err != nil {
 				return nil, err
 			}
-
-			// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
-			if requestSize+curRowMessageSize >= maxMessageSize {
-				repackedMsgs = append(repackedMsgs, insertMsg)
-				msgID, err = getMsgID()
-				if err != nil {
-					return nil, err
-				}
-				insertMsg = createInsertMsg(segmentID, channelName, msgID)
-				requestSize = 0
-			}
-
-			typeutil.AppendFieldData(insertMsg.FieldsData, it.GetFieldsData(), int64(offset))
-			insertMsg.HashValues = append(insertMsg.HashValues, it.HashValues[offset])
-			insertMsg.Timestamps = append(insertMsg.Timestamps, it.Timestamps[offset])
-			insertMsg.RowIDs = append(insertMsg.RowIDs, it.RowIDs[offset])
-			insertMsg.NumRows++
-			requestSize += curRowMessageSize
+			requestSize = 0
 		}
-		repackedMsgs = append(repackedMsgs, insertMsg)
 
-		return repackedMsgs, nil
+		typeutil.AppendFieldData(insertMsg.FieldsData, it.GetFieldsData(), int64(offset))
+		insertMsg.HashValues = append(insertMsg.HashValues, it.HashValues[offset])
+		insertMsg.Timestamps = append(insertMsg.Timestamps, it.Timestamps[offset])
+		insertMsg.RowIDs = append(insertMsg.RowIDs, it.RowIDs[offset])
+		insertMsg.NumRows++
+		requestSize += curRowMessageSize
+	}
+	repackedMsgs = append(repackedMsgs, insertMsg)
+
+	return repackedMsgs, nil
+}
+
+func (it *insertTask) repackInsertDataByPartition(ctx context.Context,
+	partitionName string,
+	rowOffsets []int,
+	channelName string) ([]msgstream.TsMsg, error) {
+	res := make([]msgstream.TsMsg, 0)
+
+	maxTs := Timestamp(0)
+	for _, offset := range rowOffsets {
+		ts := it.Timestamps[offset]
+		if maxTs < ts {
+			maxTs = ts
+		}
 	}
 
-	// get allocated segmentID info for every dmChannel and repack insertMsgs for every segmentID
-	for channelName, rowOffsets := range channel2RowOffsets {
-		assignedSegmentInfos, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, uint32(len(rowOffsets)), channelMaxTSMap[channelName])
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, it.GetCollectionName(), partitionName)
+	if err != nil {
+		return nil, err
+	}
+	assignedSegmentInfos, err := it.segIDAssigner.GetSegmentID(it.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	if err != nil {
+		log.Warn("allocate segmentID for insert data failed",
+			zap.Int64("collectionID", it.CollectionID),
+			zap.String("channel name", channelName),
+			zap.Int("allocate count", len(rowOffsets)),
+			zap.Error(err))
+		return nil, err
+	}
+
+	startPos := 0
+	for segmentID, count := range assignedSegmentInfos {
+		subRowOffsets := rowOffsets[startPos : startPos+int(count)]
+		insertMsgs, err := it.getInsertMsgsByPartition(segmentID, partitionID, partitionName, subRowOffsets, channelName)
 		if err != nil {
-			log.Error("allocate segmentID for insert data failed",
+			log.Warn("repack insert data to insert msgs failed",
 				zap.Int64("collectionID", it.CollectionID),
-				zap.String("channel name", channelName),
-				zap.Int("allocate count", len(rowOffsets)),
+				zap.Int64("partitionID", partitionID),
 				zap.Error(err))
 			return nil, err
 		}
-
-		startPos := 0
-		for segmentID, count := range assignedSegmentInfos {
-			subRowOffsets := rowOffsets[startPos : startPos+int(count)]
-			insertMsgs, err := getInsertMsgsBySegmentID(segmentID, subRowOffsets, channelName, threshold)
-			if err != nil {
-				log.Error("repack insert data to insert msgs failed",
-					zap.Int64("collectionID", it.CollectionID),
-					zap.Error(err))
-				return nil, err
-			}
-			result.Msgs = append(result.Msgs, insertMsgs...)
-			startPos += int(count)
-		}
+		res = append(res, insertMsgs...)
+		startPos += int(count)
 	}
 
-	return result, nil
+	return res, nil
+}
+
+func (it *insertTask) repackInsertDataToMsgPack(ctx context.Context,
+	channelNames []string) (*msgstream.MsgPack, error) {
+	msgPack := &msgstream.MsgPack{
+		BeginTs: it.BeginTs(),
+		EndTs:   it.EndTs(),
+	}
+
+	var err error
+	channel2RowOffsets := it.assignChannelsByPK(channelNames)
+	for channel, rowOffsets := range channel2RowOffsets {
+		partition2RowOffsets := make(map[string][]int)
+		if it.isPartitionKeyMode {
+			// hash partition keys to multi default physical partitions
+			partition2RowOffsets, err = it.assignPartitionsByKey(ctx, rowOffsets, it.partitionKeys)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// 1. The insert request specifies the partition name
+			// 2. partition name not specified in insert request, use DefaultPartitionName (init when PreExecute)
+			partition2RowOffsets[it.PartitionName] = rowOffsets
+		}
+
+		errGroup, _ := errgroup.WithContext(ctx)
+		partition2Msgs := sync.Map{}
+		for partitionName, offsets := range partition2RowOffsets {
+			partitionName := partitionName
+			offsets := offsets
+			errGroup.Go(func() error {
+				insertMsgs, err := it.repackInsertDataByPartition(ctx, partitionName, offsets, channel)
+				if err != nil {
+					return err
+				}
+
+				partition2Msgs.Store(partitionName, insertMsgs)
+				return nil
+			})
+		}
+
+		err = errGroup.Wait()
+		if err != nil {
+			return nil, err
+		}
+
+		partition2Msgs.Range(func(k, v interface{}) bool {
+			insertMsgs := v.([]msgstream.TsMsg)
+			msgPack.Msgs = append(msgPack.Msgs, insertMsgs...)
+			return true
+		})
+	}
+
+	return msgPack, nil
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
@@ -405,19 +536,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	it.CollectionID = collID
-	var partitionID UniqueID
-	if len(it.PartitionName) > 0 {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, it.PartitionName)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.CommonCfg.DefaultPartitionName)
-		if err != nil {
-			return err
-		}
-	}
-	it.PartitionID = partitionID
 	getCacheDur := tr.RecordSpan()
 
 	stream, err := it.chMgr.getOrCreateDmlStream(collID)
@@ -438,20 +556,19 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.String("collection", it.GetCollectionName()),
 		zap.String("partition", it.GetPartitionName()),
 		zap.Int64("collection_id", collID),
-		zap.Int64("partition_id", partitionID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", it.ID()),
 		zap.Duration("get cache duration", getCacheDur),
 		zap.Duration("get msgStream duration", getMsgStreamDur))
 
-	// assign segmentID for insert data and repack data by segmentID
-	msgPack, err := it.assignSegmentID(channelNames)
+	msgPack, err := it.repackInsertDataToMsgPack(ctx, channelNames)
 	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("repack insert data to msgpack failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+
 	assignSegmentIDDur := tr.RecordSpan()
 	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID),
 		zap.String("collection name", it.CollectionName),

@@ -730,6 +730,7 @@ func (g *getPartitionStatisticsTask) OnEnqueue() error {
 func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
 	g.Base.SourceID = Params.ProxyCfg.GetNodeID()
+
 	return nil
 }
 
