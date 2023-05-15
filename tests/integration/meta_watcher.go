@@ -26,17 +26,19 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 // MetaWatcher to observe meta data of milvus cluster
 type MetaWatcher interface {
 	ShowSessions() ([]*sessionutil.Session, error)
 	ShowSegments() ([]*datapb.SegmentInfo, error)
-	ShowReplicas() ([]*milvuspb.ReplicaInfo, error)
+	ShowReplicas() ([]*querypb.Replica, error)
 }
 
 type EtcdMetaWatcher struct {
@@ -57,7 +59,7 @@ func (watcher *EtcdMetaWatcher) ShowSegments() ([]*datapb.SegmentInfo, error) {
 	})
 }
 
-func (watcher *EtcdMetaWatcher) ShowReplicas() ([]*milvuspb.ReplicaInfo, error) {
+func (watcher *EtcdMetaWatcher) ShowReplicas() ([]*querypb.Replica, error) {
 	metaBasePath := path.Join(watcher.rootPath, "/meta/querycoord-replica/")
 	return listReplicas(watcher.etcdCli, metaBasePath)
 }
@@ -111,7 +113,7 @@ func listSegments(cli *clientv3.Client, prefix string, filter func(*datapb.Segme
 	return segments, nil
 }
 
-func listReplicas(cli *clientv3.Client, prefix string) ([]*milvuspb.ReplicaInfo, error) {
+func listReplicas(cli *clientv3.Client, prefix string) ([]*querypb.Replica, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
@@ -120,10 +122,11 @@ func listReplicas(cli *clientv3.Client, prefix string) ([]*milvuspb.ReplicaInfo,
 		return nil, err
 	}
 
-	replicas := make([]*milvuspb.ReplicaInfo, 0, len(resp.Kvs))
+	replicas := make([]*querypb.Replica, 0, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
-		replica := &milvuspb.ReplicaInfo{}
-		if err != proto.Unmarshal(kv.Value, replica) {
+		replica := &querypb.Replica{}
+		if err := proto.Unmarshal(kv.Value, replica); err != nil {
+			log.Warn("failed to unmarshal replica info", zap.Error(err))
 			continue
 		}
 		replicas = append(replicas, replica)
@@ -132,11 +135,8 @@ func listReplicas(cli *clientv3.Client, prefix string) ([]*milvuspb.ReplicaInfo,
 	return replicas, nil
 }
 
-func PrettyReplica(replica *milvuspb.ReplicaInfo) string {
-	res := fmt.Sprintf("ReplicaID: %d CollectionID: %d\n", replica.ReplicaID, replica.CollectionID)
-	for _, shardReplica := range replica.ShardReplicas {
-		res = res + fmt.Sprintf("Channel %s leader %d\n", shardReplica.DmChannelName, shardReplica.LeaderID)
-	}
-	res = res + fmt.Sprintf("Nodes:%v\n", replica.NodeIds)
+func PrettyReplica(replica *querypb.Replica) string {
+	res := fmt.Sprintf("ReplicaID: %d CollectionID: %d\n", replica.ID, replica.CollectionID)
+	res = res + fmt.Sprintf("Nodes:%v\n", replica.Nodes)
 	return res
 }

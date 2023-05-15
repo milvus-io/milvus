@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"sync"
 	"time"
 
@@ -133,7 +134,7 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	for k, v := range cluster.params {
 		params.Save(k, v)
 	}
-	params.UpdateSourceOpiotns(config.WithEtcdSource(&config.EtcdInfo{
+	params.UpdateSourceOptions(config.WithEtcdSource(&config.EtcdInfo{
 		KeyPrefix:       cluster.params[EtcdRootPath],
 		RefreshInterval: 2 * time.Second,
 	}))
@@ -473,6 +474,7 @@ func DefaultParams() map[string]string {
 		MinioRootPath: testPath,
 		//"runtime.role": typeutil.StandaloneRole,
 		params.IntegrationTestCfg.IntegrationMode.Key: "true",
+		params.LocalStorageCfg.Path.Key:               path.Join("/tmp", testPath),
 		params.CommonCfg.StorageType.Key:              "local",
 		params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
 	}

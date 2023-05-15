@@ -212,7 +212,7 @@ jobs:
         run: |
           docker-compose up -d pulsar etcd minio
       - name: IntegrationTest
-        continue-on-error: true # do not impact ci-passed for now
+        #continue-on-error: true # do not impact ci-passed for now
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_intergration_test.sh
