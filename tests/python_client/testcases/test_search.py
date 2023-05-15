@@ -3062,6 +3062,33 @@ class TestCollectionSearch(TestcaseBase):
         # 3. check the result
         assert default_float_field_name, default_string_field_name in res[0][0].entity._row_data
         assert default_search_field in res[0][0].entity._row_data
+        assert len(res[0][0].entity._row_data) == 3
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_output_vector_field_and_pk_field(self):
+        """
+        target: test search with output vector field and pk field
+        method: 1. initialize a collection
+                2. search with output field vector
+                3. check no field missing
+        expected: search success
+        """
+        # 1. initialize a collection
+        collection_w = self.init_collection_general(prefix, True)[0]
+
+        # 2. search with output field vector
+        output_fields = [default_int64_field_name, default_string_field_name, default_search_field]
+        res = collection_w.search(vectors[:1], default_search_field,
+                                  default_search_params, default_limit, default_search_exp,
+                                  output_fields=output_fields,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": 1,
+                                               "limit": default_limit})[0]
+
+        # 3. check the result variables
+        assert default_int64_field_name, default_string_field_name in res[0][0].entity._row_data
+        assert default_search_field in res[0][0].entity._row_data
+        assert len(res[0][0].entity._row_data) == 3
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_field_vector_with_partition(self):
@@ -6660,3 +6687,1115 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
                                          "_async": _async})
+
+
+class TestCollectionLoadOperation(TestcaseBase):
+    """ Test case of search combining load and other functions """
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24040")
+    def test_delete_load_collection_release_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. delete half data in each partition
+                4. load the collection
+                5. release one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # load && release
+        collection_w.load()
+        partition_w1.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23532")
+    def test_delete_load_collection_release_collection(self):
+        """
+        target: test delete load collection release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. delete half data in each partition
+                4. load the collection
+                5. release the collection
+                6. load one partition
+                7. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # load && release
+        collection_w.load()
+        collection_w.release()
+        partition_w2.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_load_partition_release_collection(self):
+        """
+        target: test delete load partition release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. delete half data in each partition
+                4. load one partition
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # load && release
+        partition_w1.load()
+        collection_w.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24074")
+    def test_delete_release_collection_load_partition(self):
+        """
+        target: test delete load collection release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. delete half data in each partition
+                4. load one partition
+                5. release the collection
+                6. load the other partition
+                7. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # load && release
+        partition_w1.load()
+        collection_w.release()
+        partition_w2.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_delete_load_partition_drop_partition(self):
+        """
+        target: test delete load partition drop partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. delete half data in each partition
+                4. load one partition
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # load && release
+        partition_w2.load()
+        partition_w2.release()
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_collection_delete_release_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the collection
+                4. delete half data in each partition
+                5. release one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        collection_w.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        partition_w1.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24040")
+    def test_load_partition_delete_release_collection(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        collection_w.release()
+        partition_w1.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_partition_delete_drop_partition(self):
+        """
+        target: test load partition delete drop partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. delete half data in each partition
+                5. drop the non-loaded partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        partition_w1.load()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # release
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24040")
+    def test_load_collection_release_partition_delete(self):
+        """
+        target: test load collection release partition delete
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the collection
+                4. release one partition
+                5. delete half data in each partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        collection_w.load()
+        partition_w1.release()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23989")
+    def test_load_partition_release_collection_delete(self):
+        """
+        target: test load partition release collection delete
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. release the collection
+                5. delete half data in each partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        partition_w1.load()
+        collection_w.release()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        collection_w.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23989")
+    def test_load_partition_drop_partition_delete(self):
+        """
+        target: test load partition drop partition delete
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. release and drop the partition
+                5. delete half data in each partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        partition_w2.load()
+        partition_w2.release()
+        partition_w2.drop()
+        # delete data
+        delete_ids = [i for i in range(50, 150)]
+        collection_w.delete(f"int64 in {delete_ids}")
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_compact_load_collection_release_partition(self):
+        """
+        target: test compact load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. compact
+                4. load the collection
+                5. release one partition
+                6. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # load && release
+        collection_w.load()
+        partition_w1.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23532")
+    def test_compact_load_collection_release_collection(self):
+        """
+        target: test compact load collection release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. compact
+                4. load the collection
+                5. release the collection
+                6. load one partition
+                7. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # load && release
+        collection_w.load()
+        collection_w.release()
+        partition_w1.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 200})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue ")
+    def test_compact_load_partition_release_collection(self):
+        """
+        target: test compact load partition release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. compact
+                4. load one partition
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # load && release
+        partition_w2.load()
+        collection_w.release()
+        partition_w1.load()
+        partition_w2.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 300})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 200})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24048")
+    def test_load_collection_compact_drop_partition(self):
+        """
+        target: test load collection compact drop partition
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. load the collection
+                4. compact
+                5. release one partition and drop
+                6. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # load
+        collection_w.load()
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # release
+        partition_w2.release()
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 200})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 200})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_partition_compact_release_collection(self):
+        """
+        target: test load partition compact release collection
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. load one partition
+                4. compact
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # load
+        partition_w2.load()
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # release
+        collection_w.release()
+        partition_w2.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_collection_release_partition_compact(self):
+        """
+        target: test load collection release partition compact
+        method: 1. create a collection and 2 partitions
+                2. insert data multi times
+                3. load the collection
+                4. release one partition
+                5. compact
+                6. search
+        expected: No exception
+        """
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        df = cf.gen_default_dataframe_data()
+        # insert data
+        partition_w1.insert(df[:100])
+        partition_w1.insert(df[100:200])
+        partition_w2.insert(df[200:300])
+        # load && release
+        collection_w.load()
+        partition_w1.release()
+        # compact
+        collection_w.compact()
+        collection_w.get_compaction_state()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 300,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24040")
+    def test_flush_load_collection_release_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. flush
+                4. load the collection
+                5. release one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # flush
+        collection_w.flush()
+        # load && release
+        collection_w.load()
+        partition_w1.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23532 #24040")
+    def test_flush_load_collection_release_collection(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. flush
+                4. load the collection
+                5. release the collection
+                6. load one partition
+                7. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # flush
+        collection_w.flush()
+        # load && release
+        collection_w.load()
+        collection_w.release()
+        partition_w2.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_flush_load_partition_release_collection(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. flush
+                4. load one partition
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # flush
+        collection_w.flush()
+        # load && release
+        partition_w2.load()
+        collection_w.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_flush_load_partition_drop_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. flush
+                4. load one partition
+                5. release and drop the partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # flush
+        collection_w.flush()
+        # load && release
+        partition_w2.load()
+        partition_w2.release()
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_flush_load_collection_drop_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. flush
+                4. load collection
+                5. release and drop one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # flush
+        collection_w.flush()
+        # load && release
+        collection_w.load()
+        partition_w2.release()
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24039 #24042")
+    def test_load_collection_flush_release_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the collection
+                4. flush
+                5. search on the collection -> len(res)==200
+                5. release one partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        collection_w.load()
+        # flush
+        collection_w.flush()
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 200})
+        # release
+        partition_w2.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_partition_flush_release_collection(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. flush
+                5. release the collection
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        partition_w2.load()
+        # flush
+        collection_w.flush()
+        # release
+        collection_w.release()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24048")
+    def test_load_collection_flush_release_partition(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. flush
+                5. drop the non-loaded partition
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load
+        partition_w1.load()
+        # flush
+        collection_w.flush()
+        # release
+        partition_w2.drop()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24039")
+    def test_load_collection_release_partition_flush(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the collection
+                4. release one partition
+                5. flush
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        collection_w.load()
+        partition_w2.release()
+        # flush
+        collection_w.flush()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #23532")
+    def test_load_collection_release_collection_flush(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the collection
+                4. release the collection
+                5. load one partition
+                6. flush
+                7. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        collection_w.load()
+        collection_w.release()
+        partition_w2.load()
+        # flush
+        collection_w.flush()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name, partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_partition_release_collection_flush(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load the partition
+                4. release the collection
+                5. flush
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        partition_w2.load()
+        collection_w.release()
+        # flush
+        collection_w.flush()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_partition_drop_partition_flush(self):
+        """
+        target: test delete load collection release partition
+        method: 1. create a collection and 2 partitions
+                2. insert data
+                3. load one partition
+                4. release and drop the partition
+                5. flush
+                6. search
+        expected: No exception
+        """
+        # insert data
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load && release
+        partition_w2.load()
+        partition_w2.release()
+        partition_w2.drop()
+        # flush
+        collection_w.flush()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    # @pytest.mark.xfail(reason="issue #24040")
+    def test_load_release_collection_multi_times(self):
+        """
+        target: test load and release multiple times
+        method: 1. create a collection and 2 partitions
+                2. load and release multiple times
+                3. search
+        expected: No exception
+        """
+        # init the collection
+        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
+        partition_w1, partition_w2 = collection_w.partitions
+        collection_w.create_index(default_search_field, default_index_params)
+        # load and release
+        for i in range(5):
+            collection_w.release()
+            partition_w2.load()
+        # search on collection, partition1, partition2
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w1.name],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        collection_w.search(vectors[:1], field_name, default_search_params, 200,
+                            partition_names=[partition_w2.name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})

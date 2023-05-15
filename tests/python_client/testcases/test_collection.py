@@ -2727,7 +2727,7 @@ class TestLoadCollection(TestcaseBase):
                 2.create collection with 2 shards
                 3.insert and flush
                 4.load with 2 replica number
-                5.insert growng data
+                5.insert growing data
                 6.search and query
         expected: Verify search and query results
         """
