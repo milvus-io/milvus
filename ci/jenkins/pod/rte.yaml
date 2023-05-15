@@ -41,7 +41,7 @@ spec:
     - mountPath: /ci-logs
       name: ci-logs  
   - name: pytest
-    image: harbor.milvus.io/dockerhub/milvusdb/pytest:20230509-bfcf682
+    image: harbor.milvus.io/dockerhub/milvusdb/pytest:20230515-e869195
     resources:
       limits:
         cpu: "6"
