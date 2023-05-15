@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -188,10 +189,13 @@ func (ta *CachedAllocator) mainLoop() {
 			ta.failRemainRequest()
 
 		case first := <-ta.Reqs:
+			log.Info("wayblink append ToDoReqs", zap.Any("req", first))
 			ta.ToDoReqs = append(ta.ToDoReqs, first)
 			pending := len(ta.Reqs)
 			for i := 0; i < pending; i++ {
-				ta.ToDoReqs = append(ta.ToDoReqs, <-ta.Reqs)
+				req := <-ta.Reqs
+				log.Info("wayblink append ToDoReqs", zap.Any("req", req))
+				ta.ToDoReqs = append(ta.ToDoReqs, req)
 			}
 			ta.pickCanDo()
 			ta.finishRequest()
@@ -246,6 +250,7 @@ func (ta *CachedAllocator) finishSyncRequest() {
 }
 
 func (ta *CachedAllocator) failRemainRequest() {
+	log.Info("wayblink debug", zap.String("stack", string(debug.Stack())))
 	var err error
 	if ta.SyncErr != nil {
 		err = fmt.Errorf("%s failRemainRequest err:%w", ta.Role, ta.SyncErr)

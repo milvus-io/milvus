@@ -224,7 +224,7 @@ func (sa *segIDAssigner) pickCanDoFunc() {
 			sa.CanDoReqs = append(sa.CanDoReqs, req)
 		}
 	}
-	log.Debug("Proxy segIDAssigner pickCanDoFunc", zap.Any("records", records),
+	log.Info("Proxy segIDAssigner pickCanDoFunc", zap.Any("records", records),
 		zap.Any("len(newTodoReqs)", len(newTodoReqs)),
 		zap.Any("len(CanDoReqs)", len(sa.CanDoReqs)))
 	sa.ToDoReqs = newTodoReqs
