@@ -4,10 +4,12 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type validateUtil struct {
@@ -37,6 +39,11 @@ func (v *validateUtil) apply(opts ...validateOption) {
 
 func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.CollectionSchema, numRows uint64) error {
 	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return err
+	}
+
+	err = v.fillWithDefaultValue(data, helper, numRows)
 	if err != nil {
 		return err
 	}
@@ -133,6 +140,82 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (v *validateUtil) fillWithDefaultValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
+	for _, field := range data {
+		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
+		if err != nil {
+			return err
+		}
+
+		// if default value is not set, continue
+		// compatible with 2.2.x
+		if fieldSchema.GetDefaultValue() == nil {
+			continue
+		}
+
+		switch field.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			switch sd := field.GetScalars().GetData().(type) {
+			case *schemapb.ScalarField_BoolData:
+				if len(sd.BoolData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetBoolData()
+					sd.BoolData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_IntData:
+				if len(sd.IntData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetIntData()
+					sd.IntData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_LongData:
+				if len(sd.LongData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetLongData()
+					sd.LongData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_FloatData:
+				if len(sd.FloatData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetFloatData()
+					sd.FloatData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_DoubleData:
+				if len(sd.DoubleData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetDoubleData()
+					sd.DoubleData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_StringData:
+				if len(sd.StringData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetStringData()
+					sd.StringData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_ArrayData:
+				log.Error("array type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalid("not set default value", "", "array type not support default value")
+
+			case *schemapb.ScalarField_JsonData:
+				log.Error("json type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+
+			default:
+				panic("undefined data type " + field.Type.String())
+			}
+
+		case *schemapb.FieldData_Vectors:
+			log.Error("vectors not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+			return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+
+		default:
+			panic("undefined data type " + field.Type.String())
 		}
 	}
 

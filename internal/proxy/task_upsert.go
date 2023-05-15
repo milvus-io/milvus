@@ -147,6 +147,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 		return err
 	}
+
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")

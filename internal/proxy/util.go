@@ -892,16 +892,56 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 	return false, nil
 }
 
-func checkLengthOfFieldsData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	neededFieldsNum := 0
-	for _, field := range schema.Fields {
-		if !field.AutoID {
+	isPrimaryKeyNum := 0
+
+	var dataNameSet = typeutil.NewSet[string]()
+
+	for _, data := range insertMsg.FieldsData {
+		dataNameSet.Insert(data.GetFieldName())
+	}
+
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
+			log.Error("not primary key field, but set autoID true", zap.String("fieldSchemaName", fieldSchema.GetName()))
+			return merr.WrapErrParameterInvalid("only primary key field can set autoID true", "")
+		}
+		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
+			return merr.WrapErrParameterInvalid("no default data", "", "pk field schema can not set default value")
+		}
+		if !fieldSchema.AutoID {
 			neededFieldsNum++
+		}
+		// if has no field pass in, consider use default value
+		// so complete it with field schema
+		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
+			// primary key can not use default value
+			if fieldSchema.IsPrimaryKey {
+				isPrimaryKeyNum++
+				continue
+			}
+			dataToAppend := &schemapb.FieldData{
+				Type:      fieldSchema.GetDataType(),
+				FieldName: fieldSchema.GetName(),
+			}
+			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
 
-	if len(insertMsg.FieldsData) < neededFieldsNum {
-		return merr.WrapErrParameterInvalid(neededFieldsNum, len(insertMsg.FieldsData), "the length of passed fields is less than needed")
+	if isPrimaryKeyNum > 1 {
+		log.Error("the number of passed primary key fields is more than 1",
+			zap.Int64("primaryKeyNum", int64(isPrimaryKeyNum)),
+			zap.String("CollectionSchemaName", schema.GetName()))
+		return merr.WrapErrParameterInvalid("0 or 1", fmt.Sprint(isPrimaryKeyNum), "the number of passed primary key fields is more than 1")
+	}
+
+	if len(insertMsg.FieldsData) != neededFieldsNum {
+		log.Error("the length of passed fields is not equal to needed",
+			zap.Int("expectFieldNumber", neededFieldsNum),
+			zap.Int("passFieldNumber", len(insertMsg.FieldsData)),
+			zap.String("CollectionSchemaName", schema.GetName()))
+		return merr.WrapErrParameterInvalid(neededFieldsNum, len(insertMsg.FieldsData), "the length of passed fields is equal to needed")
 	}
 
 	return nil
@@ -914,7 +954,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkLengthOfFieldsData(schema, insertMsg); err != nil {
+	if err := fillFieldsDataBySchema(schema, insertMsg); err != nil {
 		return nil, err
 	}
 
@@ -1083,4 +1123,13 @@ func getPartitionProgress(
 	}
 
 	return
+}
+
+func memsetLoop[T any](v T, numRows int) []T {
+	ret := make([]T, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, v)
+	}
+
+	return ret
 }
