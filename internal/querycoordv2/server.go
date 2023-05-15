@@ -391,10 +391,10 @@ func (s *Server) startQueryCoord() error {
 		s.nodeMgr.Add(session.NewNodeInfo(node.ServerID, node.Address))
 		s.taskScheduler.AddExecutor(node.ServerID)
 	}
-	s.checkReplicas()
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
+	s.checkReplicas()
 
 	s.wg.Add(2)
 	go s.handleNodeUpLoop()
