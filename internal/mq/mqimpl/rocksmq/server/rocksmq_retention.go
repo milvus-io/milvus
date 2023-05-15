@@ -154,6 +154,7 @@ func (ri *retentionInfo) Stop() {
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	start := time.Now()
 	var deletedAckedSize int64
+	var lastAck int64
 	var pageCleaned UniqueID
 	var pageEndID UniqueID
 	var err error
@@ -199,6 +200,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		if err != nil {
 			return err
 		}
+		lastAck = ackedTs
 		if msgTimeExpiredCheck(ackedTs) {
 			pageEndID = pageID
 			pValue := pageIter.Value()
@@ -219,9 +221,9 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		return err
 	}
 
-	log.Info("Expired check by retention time", zap.Any("topic", topic),
-		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize),
-		zap.Any("pageCleaned", pageCleaned), zap.Any("time taken", time.Since(start).Milliseconds()))
+	log.Info("Expired check by retention time", zap.String("topic", topic),
+		zap.Int64("pageEndID", pageEndID), zap.Int64("deletedAckedSize", deletedAckedSize), zap.Int64("lastAck", lastAck),
+		zap.Int64("pageCleaned", pageCleaned), zap.Int64("time taken", time.Since(start).Milliseconds()))
 
 	for ; pageIter.Valid(); pageIter.Next() {
 		pValue := pageIter.Value()
