@@ -53,7 +53,6 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
-			//hc---
 		)
 	}
 

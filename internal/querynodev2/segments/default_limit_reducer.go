@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type defaultLimitReducer struct {
@@ -33,14 +32,14 @@ type extensionLimitReducer struct {
 }
 
 func (r *extensionLimitReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
-	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, typeutil.Unlimited, r.req.GetReq().GetOutputFieldsId(), r.schema)
+	return mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, r.extendedLimit, r.req.GetReq().GetOutputFieldsId(), r.schema)
 }
 
-func newExtensionLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, etdLimit int64) *extensionLimitReducer {
+func newExtensionLimitReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, extLimit int64) *extensionLimitReducer {
 	return &extensionLimitReducer{
 		req:           req,
 		schema:        schema,
-		extendedLimit: etdLimit,
+		extendedLimit: extLimit,
 	}
 }
 
@@ -61,17 +60,19 @@ func newDefaultLimitReducerSegcore(req *querypb.QueryRequest, schema *schemapb.C
 }
 
 type extensionLimitSegcoreReducer struct {
-	req    *querypb.QueryRequest
-	schema *schemapb.CollectionSchema
+	req           *querypb.QueryRequest
+	schema        *schemapb.CollectionSchema
+	extendedLimit int64
 }
 
 func (r *extensionLimitSegcoreReducer) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, typeutil.Unlimited, r.req.GetReq().GetOutputFieldsId(), r.schema)
+	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, r.extendedLimit, r.req.GetReq().GetOutputFieldsId(), r.schema)
 }
 
-func newExtensionLimitSegcoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) *extensionLimitSegcoreReducer {
+func newExtensionLimitSegcoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, extLimit int64) *extensionLimitSegcoreReducer {
 	return &extensionLimitSegcoreReducer{
-		req:    req,
-		schema: schema,
+		req:           req,
+		schema:        schema,
+		extendedLimit: extLimit,
 	}
 }
