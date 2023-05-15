@@ -239,9 +239,7 @@ class ResponseChecker:
                 search_res.done()
                 search_res = search_res.result()
         if check_items.get("output_fields", None):
-            for field in check_items['output_fields']:
-                assert field in search_res[0][0].entity._raw_data
-            assert len(check_items['output_fields']) == len(search_res[0][0].entity._raw_data)
+            assert set(search_res[0][0].entity.fields) == set(check_items["output_fields"])
             log.info('search_results_check: Output fields of query searched is correct')
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
