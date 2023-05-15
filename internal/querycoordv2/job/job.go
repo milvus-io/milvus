@@ -234,7 +234,6 @@ func (job *LoadCollectionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
-	metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 	return nil
 }
 
@@ -439,7 +438,6 @@ func (job *LoadPartitionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
-	metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 	return nil
 }
 

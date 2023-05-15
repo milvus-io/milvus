@@ -223,6 +223,11 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 		ob.meta.CollectionManager.UpdateCollection(updated)
 
 		elapsed := time.Since(updated.CreatedAt)
+
+		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
+		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
+		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
+
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 	} else {
 		ob.meta.CollectionManager.UpdateCollectionInMemory(updated)
