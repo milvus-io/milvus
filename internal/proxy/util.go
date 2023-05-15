@@ -373,6 +373,21 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 	return false, fmt.Errorf("invalid data type: %d", dataType)
 }
 
+func isPartitionKeyMode(ctx context.Context, colName string) (bool, error) {
+	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, colName)
+	if err != nil {
+		return false, err
+	}
+
+	for _, fieldSchema := range colSchema.GetFields() {
+		if fieldSchema.IsPartitionKey {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) error {
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
@@ -983,4 +998,29 @@ func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	}
 	progress /= int64(len(partitionIDs))
 	return progress, nil
+}
+
+func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, collectionName string) ([]string, error) {
+	partitions, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make sure the order of the partition names got every time is the same
+	partitionNames := make([]string, len(partitions))
+	for partitionName := range partitions {
+		splits := strings.Split(partitionName, "_")
+		if len(splits) < 2 {
+			err = fmt.Errorf("bad default partion name in partition ket mode: %s", partitionName)
+			return nil, err
+		}
+		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		partitionNames[index] = partitionName
+	}
+
+	return partitionNames, nil
 }

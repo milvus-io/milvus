@@ -17,6 +17,7 @@
 package typeutil
 
 import (
+	"errors"
 	"hash/crc32"
 	"unsafe"
 
@@ -24,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 
 const substringLengthForCRC = 100
@@ -93,4 +95,71 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
 	}
 
 	return hashValues
+}
+
+// HashKey2PartitionsWithFilter hash partition keys to partitions
+func HashKey2PartitionsWithFilter(rowOffsets []int, keys *schemapb.FieldData, partitionNames []string) ([]uint32, error) {
+	var hashValues []uint32
+	numPartitions := uint32(len(partitionNames))
+	switch keys.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := keys.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			longKeys := scalarField.GetLongData().Data
+			for _, offset := range rowOffsets {
+				value, _ := Hash32Int64(longKeys[offset])
+				hashValues = append(hashValues, value%numPartitions)
+			}
+		case *schemapb.ScalarField_StringData:
+			stringKeys := scalarField.GetStringData().Data
+			for _, offset := range rowOffsets {
+				value := HashString2Uint32(stringKeys[offset])
+				hashValues = append(hashValues, value%numPartitions)
+			}
+		default:
+			return nil, errors.New("currently only support DataType Int64 or VarChar as partition key Field")
+		}
+	default:
+		return nil, errors.New("currently not support vector field as partition keys")
+	}
+
+	return hashValues, nil
+}
+
+// HashKey2Partitions hash partition keys to partitions
+func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.GenericValue, partitionNames []string) ([]string, error) {
+	selectedPartitions := make(map[string]struct{})
+	numPartitions := uint32(len(partitionNames))
+	switch fieldSchema.GetDataType() {
+	case schemapb.DataType_Int64:
+		for _, key := range keys {
+			if int64Val, ok := key.GetVal().(*planpb.GenericValue_Int64Val); ok {
+				value, _ := Hash32Int64(int64Val.Int64Val)
+				partitionName := partitionNames[value%numPartitions]
+				selectedPartitions[partitionName] = struct{}{}
+			} else {
+				return nil, errors.New("the data type of the data and the schema do not match")
+			}
+		}
+	case schemapb.DataType_VarChar:
+		for _, key := range keys {
+			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
+				value := HashString2Uint32(stringVal.StringVal)
+				partitionName := partitionNames[value%numPartitions]
+				selectedPartitions[partitionName] = struct{}{}
+			} else {
+				return nil, errors.New("the data type of the data and the schema do not match")
+			}
+		}
+	default:
+		return nil, errors.New("currently only support DataType Int64 or VarChar as partition keys")
+	}
+
+	result := make([]string, 0)
+	for partitionName := range selectedPartitions {
+		result = append(result, partitionName)
+	}
+
+	return result, nil
 }

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -170,6 +171,14 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.DeleteRequest.CollectionID = collID
 	dt.collectionID = collID
+
+	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.CollectionName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode && len(dt.PartitionName) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
 
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.PartitionName) > 0 {

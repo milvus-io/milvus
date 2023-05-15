@@ -46,11 +46,12 @@ type collectionChannels struct {
 
 type createCollectionTask struct {
 	baseTask
-	Req      *milvuspb.CreateCollectionRequest
-	schema   *schemapb.CollectionSchema
-	collID   UniqueID
-	partID   UniqueID
-	channels collectionChannels
+	Req            *milvuspb.CreateCollectionRequest
+	schema         *schemapb.CollectionSchema
+	collID         UniqueID
+	partIDs        []UniqueID
+	channels       collectionChannels
+	partitionNames []string
 }
 
 func (t *createCollectionTask) validate() error {
@@ -158,10 +159,44 @@ func (t *createCollectionTask) assignCollectionID() error {
 	return err
 }
 
-func (t *createCollectionTask) assignPartitionID() error {
-	var err error
-	t.partID, err = t.core.idAllocator.AllocOne()
-	return err
+func (t *createCollectionTask) assignPartitionIDs() error {
+	t.partitionNames = make([]string, 0)
+	_, err := typeutil.GetPartitionFieldSchema(t.schema)
+	if err == nil {
+		partitionNums := t.Req.GetNumPartitions()
+		// double check, default num of physical partitions should be greater than 0
+		if partitionNums <= 0 {
+			return errors.New("the specified partitions should be greater than 0 if partition key is used")
+		}
+
+		cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum
+		if partitionNums > cfgMaxPartitionNum {
+			return fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+				partitionNums, cfgMaxPartitionNum, t.Req.CollectionName)
+		}
+
+		for i := int64(0); i < partitionNums; i++ {
+			t.partitionNames = append(t.partitionNames, fmt.Sprintf("%s_%d", Params.CommonCfg.DefaultPartitionName, i))
+		}
+	} else {
+		// compatible with old versions <= 2.2.8
+		t.partitionNames = append(t.partitionNames, Params.CommonCfg.DefaultPartitionName)
+	}
+
+	t.partIDs = make([]UniqueID, len(t.partitionNames))
+	start, end, err := t.core.idAllocator.Alloc(uint32(len(t.partitionNames)))
+	if err != nil {
+		return err
+	}
+
+	for i := start; i < end; i++ {
+		t.partIDs[i-start] = i
+	}
+	log.Info("assign partitions when create collection",
+		zap.String("collectionName", t.Req.GetCollectionName()),
+		zap.Strings("partitionNames", t.partitionNames))
+
+	return nil
 }
 
 func (t *createCollectionTask) assignChannels() error {
@@ -199,7 +234,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	if err := t.assignPartitionID(); err != nil {
+	if err := t.assignPartitionIDs(); err != nil {
 		return err
 	}
 
@@ -209,7 +244,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.MsgPack {
 	ts := t.GetTs()
 	collectionID := t.collID
-	partitionID := t.partID
+	partitionIDs := t.partIDs
 	// error won't happen here.
 	marshaledSchema, _ := proto.Marshal(t.schema)
 	pChannels := t.channels.physicalChannels
@@ -230,7 +265,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.M
 				commonpbutil.WithTimeStamp(ts),
 			),
 			CollectionID:         collectionID,
-			PartitionID:          partitionID,
+			PartitionIDs:         partitionIDs,
 			Schema:               marshaledSchema,
 			VirtualChannelNames:  vChannels,
 			PhysicalChannelNames: pChannels,
@@ -249,7 +284,7 @@ func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Conte
 func (t *createCollectionTask) Execute(ctx context.Context) error {
 	t.SetStep(typeutil.TaskStepExecute)
 	collID := t.collID
-	partID := t.partID
+	partIDs := t.partIDs
 	ts := t.GetTs()
 
 	vchanNames := t.channels.virtualChannels
@@ -260,6 +295,17 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		// ugly here, since we must get start positions first.
 		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
 		return err
+	}
+
+	partitions := make([]*model.Partition, len(partIDs))
+	for i, partID := range partIDs {
+		partitions[i] = &model.Partition{
+			PartitionID:               partID,
+			PartitionName:             t.partitionNames[i],
+			PartitionCreatedTimestamp: ts,
+			CollectionID:              collID,
+			State:                     pb.PartitionState_PartitionCreated,
+		}
 	}
 
 	collInfo := model.Collection{
@@ -275,23 +321,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		StartPositions:       toKeyDataPairs(startPositions),
 		CreateTime:           ts,
 		State:                pb.CollectionState_CollectionCreating,
-		Partitions: []*model.Partition{
-			{
-				PartitionID:               partID,
-				PartitionName:             Params.CommonCfg.DefaultPartitionName,
-				PartitionCreatedTimestamp: ts,
-				CollectionID:              collID,
-				State:                     pb.PartitionState_PartitionCreated,
-			},
-		},
-		Properties: t.Req.Properties,
+		Partitions:           partitions,
+		Properties:           t.Req.Properties,
 	}
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
 	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
 	// are not promised idempotent.
 	clone := collInfo.Clone()
-	clone.Partitions = []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName}}
 	// need double check in meta table if we can't promise the sequence execution.
 	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err == nil {

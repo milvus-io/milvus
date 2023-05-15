@@ -964,6 +964,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
 	resp.Properties = collInfo.Properties
+	resp.NumPartitions = int64(len(collInfo.Partitions))
 	return resp
 }
 

@@ -35,6 +35,7 @@ func TestStatisticTask_all(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
+	Params.InitOnce()
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().Start().Return(nil)
 	qc.EXPECT().Stop().Return(nil)
@@ -131,8 +132,9 @@ func TestStatisticTask_all(t *testing.T) {
 			},
 			CollectionName: collectionName,
 		},
-		qc:       qc,
-		shardMgr: mgr,
+		qc:            qc,
+		shardMgr:      mgr,
+		fromQueryNode: true,
 	}
 
 	assert.NoError(t, task.OnEnqueue())
@@ -199,6 +201,7 @@ func TestStatisticTask_all(t *testing.T) {
 
 	task.statisticShardPolicy = mergeRoundRobinPolicy
 	task.fromQueryNode = true
+	task.fromDataCoord = false
 	qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(nil, nil).Once()
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))

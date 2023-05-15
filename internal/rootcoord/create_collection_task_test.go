@@ -366,7 +366,6 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			Fields:               model.UnmarshalFieldModels(schema.GetFields()),
 			VirtualChannelNames:  channels.virtualChannels,
 			PhysicalChannelNames: channels.physicalChannels,
-			Partitions:           []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName}},
 		}
 
 		meta := newMockMetaTable()

@@ -63,10 +63,11 @@ message CreateCollectionRequest {
   // `schema` is the serialized `schema.CollectionSchema`
   int64 dbID = 5;
   int64 collectionID = 6;
-  int64 partitionID = 7;
+  int64 partitionID = 7; // deprecated
   bytes schema = 8;
   repeated string virtualChannelNames = 9;
   repeated string physicalChannelNames = 10;
+  repeated int64 partitionIDs = 11;
 }
 
 message DropCollectionRequest {

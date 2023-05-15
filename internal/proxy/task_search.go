@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -28,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -196,6 +197,21 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 	return req.GetNq(), nil
 }
 
+func (t *searchTask) assignPartitionKeys(ctx context.Context, keys []*planpb.GenericValue) ([]string, error) {
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	partitionKeyFieldSchema, err := typeutil.GetPartitionFieldSchema(t.schema)
+	if err != nil {
+		return nil, err
+	}
+
+	hashedPartitionNames, err := typeutil.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
+	return hashedPartitionNames, err
+}
+
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
 	defer sp.Finish()
@@ -218,10 +234,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.CollectionID = collID
 	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, collectionName)
 
-	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
-	if err != nil {
-		return err
+	partitionKeyMode, _ := isPartitionKeyMode(ctx, collectionName)
+	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
 	// check if collection/partitions are loaded into query node
@@ -254,6 +269,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.IgnoreGrowing = ignoreGrowing
 
+	partitionNames := t.request.GetPartitionNames()
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil {
@@ -277,6 +293,19 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 
+		if partitionKeyMode {
+			expr, err := ParseExprFromPlan(plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := t.assignPartitionKeys(ctx, partitionKeys)
+			if err != nil {
+				return err
+			}
+
+			partitionNames = append(partitionNames, hashedPartitionNames...)
+		}
 		outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 		if err != nil {
 			return err
@@ -296,6 +325,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute", zap.Int64("msgID", t.ID()),
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.String("plan", plan.String())) // may be very large if large term passed.
+	}
+
+	// translate partition name to partition ids. Use regex-pattern to match partition name.
+	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	if err != nil {
+		return err
 	}
 
 	travelTimestamp := t.request.TravelTimestamp

@@ -1107,7 +1107,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	log.Info(
-		rpcReceived("CreatePartition"),
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -1116,7 +1116,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
 		log.Warn(
-			rpcFailedToEnqueue("CreatePartition"),
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -1133,7 +1133,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	log.Info(
-		rpcEnqueued("CreatePartition"),
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cpt.ID()),
@@ -1145,7 +1145,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 	if err := cpt.WaitToFinish(); err != nil {
 		log.Warn(
-			rpcFailedToWaitToFinish("CreatePartition"),
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -1165,7 +1165,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	log.Info(
-		rpcDone("CreatePartition"),
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cpt.ID()),
@@ -2419,7 +2419,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetIndexState")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
@@ -2565,10 +2565,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		segIDAssigner: node.segAssigner,
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
-	}
-
-	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.CommonCfg.DefaultPartitionName
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
