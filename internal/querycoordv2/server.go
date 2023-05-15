@@ -311,7 +311,10 @@ func (s *Server) initMeta() error {
 	}
 	collections := s.meta.GetAll()
 	log.Info("recovering collections...", zap.Int64s("collections", collections))
-	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(collections)))
+
+	// We really update the metric after observers think the collection loaded.
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(0)
+
 	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(s.meta.GetAllPartitions())))
 
 	err = s.meta.ReplicaManager.Recover(collections)

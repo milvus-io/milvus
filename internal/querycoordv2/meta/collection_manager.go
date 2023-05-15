@@ -491,6 +491,11 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		saveCollection = true
 		newCollection.Status = querypb.LoadStatus_Loaded
 		elapsed := time.Since(newCollection.CreatedAt)
+
+		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
+		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
+		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
+
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 	}
 	return collectionPercent, m.putCollection(saveCollection, newCollection)
