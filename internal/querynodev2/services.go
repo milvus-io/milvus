@@ -25,6 +25,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -626,8 +628,68 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}, nil
 }
 
+// only used for shard delegator search segments from worker
+func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	channel := req.GetDmlChannels()[0]
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Int64("collectionID", req.Req.GetCollectionID()),
+		zap.String("channel", channel),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		return nil, merr.WrapErrServiceNotReady(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+	}
+	defer node.lifetime.Done()
+
+	log.Debug("start to search segments on worker",
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+	searchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	tr := timerecord.NewTimeRecorder("searchChannel")
+	log.Debug("search channel...")
+
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	if collection == nil {
+		log.Warn("failed to search channel", zap.Error(segments.ErrCollectionNotFound))
+		return nil, segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
+	}
+
+	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
+	if !node.scheduler.Add(task) {
+		err := merr.WrapErrTaskQueueFull()
+		log.Warn("failed to search channel", zap.Error(err))
+		return nil, err
+	}
+
+	err := task.Wait()
+	if err != nil {
+		log.Warn("failed to search channel", zap.Error(err))
+		return nil, err
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("search channel done, channel = %s, segmentIDs = %v",
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
+	return task.Result(), nil
+}
+
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	if req.FromShardLeader {
+		// for compatible with rolling upgrade from version before v2.2.9
+		return node.SearchSegments(ctx, req)
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("channels", req.GetDmlChannels()),
@@ -721,8 +783,71 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	return ret, nil
 }
 
+// only used for delegator query segments from worker
+func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
+	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
+	msgID := req.Req.Base.GetMsgID()
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	channel := req.GetDmlChannels()[0]
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
+		zap.String("channel", channel),
+		zap.String("scope", req.GetScope().String()),
+	)
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+		}
+	}()
+
+	if !node.lifetime.Add(commonpbutil.IsHealthy) {
+		err := merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
+		failRet.Status = merr.Status(err)
+		return failRet, nil
+	}
+	defer node.lifetime.Done()
+
+	log.Debug("start do query with channel",
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+	// add cancel when error occurs
+	queryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	tr := timerecord.NewTimeRecorder("queryChannel")
+	results, err := node.querySegments(queryCtx, req)
+	if err != nil {
+		log.Warn("failed to query channel", zap.Error(err))
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		traceID,
+		req.GetFromShardLeader(),
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	return results, nil
+}
+
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	if req.FromShardLeader {
+		// for compatible with rolling upgrade from version before v2.2.9
+		return node.querySegments(ctx, req)
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),

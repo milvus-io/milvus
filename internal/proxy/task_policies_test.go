@@ -53,10 +53,6 @@ func TestRoundRobinPolicy(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), mockerr.Error()))
 }
 
-func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode, error) {
-	return &QueryNodeMock{address: address}, nil
-}
-
 type mockQuery struct {
 	mu       sync.Mutex
 	queryset map[UniqueID][]string

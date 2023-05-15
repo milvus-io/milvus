@@ -1377,7 +1377,9 @@ type QueryNode interface {
 
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
+	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error)
 
 	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)

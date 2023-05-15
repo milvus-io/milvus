@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -36,8 +37,8 @@ type Worker interface {
 	LoadSegments(context.Context, *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(context.Context, *querypb.ReleaseSegmentsRequest) error
 	Delete(ctx context.Context, req *querypb.DeleteRequest) error
-	Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
-	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
+	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 
 	IsHealthy() bool
@@ -117,12 +118,24 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 	return nil
 }
 
-func (w *remoteWorker) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	return w.client.Search(ctx, req)
+func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	ret, err := w.client.SearchSegments(ctx, req)
+	if err != nil && funcutil.IsGrpcErr(err) {
+		// for compatible with rolling upgrade from version before v2.2.9
+		return w.client.Search(ctx, req)
+	}
+
+	return ret, err
 }
 
-func (w *remoteWorker) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	return w.client.Query(ctx, req)
+func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	ret, err := w.client.QuerySegments(ctx, req)
+	if err != nil && funcutil.IsGrpcErr(err) {
+		// for compatible with rolling upgrade from version before v2.2.9
+		return w.client.Query(ctx, req)
+	}
+
+	return ret, err
 }
 
 func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {

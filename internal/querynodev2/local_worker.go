@@ -75,12 +75,12 @@ func (w *LocalWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) er
 	return nil
 }
 
-func (w *LocalWorker) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	return w.node.Search(ctx, req)
+func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	return w.node.SearchSegments(ctx, req)
 }
 
-func (w *LocalWorker) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	return w.node.Query(ctx, req)
+func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	return w.node.querySegments(ctx, req)
 }
 
 func (w *LocalWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {

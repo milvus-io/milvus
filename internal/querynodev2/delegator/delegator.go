@@ -175,21 +175,23 @@ func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...Segme
 	sd.distribution.AddDistributions(entries...)
 }
 
-func modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
+func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
 	nodeReq := proto.Clone(req).(*querypb.SearchRequest)
 	nodeReq.Scope = scope
 	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
 	nodeReq.FromShardLeader = true
+	nodeReq.DmlChannels = []string{sd.vchannelName}
 	return nodeReq
 }
 
-func modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
+func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
 	nodeReq := proto.Clone(req).(*querypb.QueryRequest)
 	nodeReq.Scope = scope
 	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
 	nodeReq.FromShardLeader = true
+	nodeReq.DmlChannels = []string{sd.vchannelName}
 	return nodeReq
 }
 
@@ -225,14 +227,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, modifySearchRequest)
+	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
 
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		return worker.Search(ctx, req)
+		return worker.SearchSegments(ctx, req)
 	}, "Search", log)
 	if err != nil {
 		log.Warn("Delegator search failed", zap.Error(err))
@@ -280,14 +282,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, modifyQueryRequest)
+	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, sd.modifyQueryRequest)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
 
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return worker.Query(ctx, req)
+		return worker.QuerySegments(ctx, req)
 	}, "Query", log)
 	if err != nil {
 		log.Warn("Delegator query failed", zap.Error(err))

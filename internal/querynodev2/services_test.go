@@ -967,6 +967,27 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestSearchSegments_Normal() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	creq, err := suite.genCSearchRequest(10, IndexFaissIDMap, schema)
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+	}
+	suite.NoError(err)
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
 // Test Query
 func (suite *ServiceSuite) genCQueryRequest(nq int64, indexType string, schema *schemapb.CollectionSchema) (*internalpb.RetrieveRequest, error) {
 	expr, err := genSimpleRetrievePlanExpr(schema)
@@ -1043,6 +1064,27 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	resp, err = suite.node.Query(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestQuerySegments_Normal() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	req := &querypb.QueryRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+	}
+
+	rsp, err := suite.node.QuerySegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestSyncReplicaSegments_Normal() {
