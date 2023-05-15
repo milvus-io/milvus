@@ -86,7 +86,7 @@ func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 	})
 }
 
-func (gp *BaseTable) UpdateSourceOpiotns(opts ...config.Option) {
+func (gp *BaseTable) UpdateSourceOptions(opts ...config.Option) {
 	gp.mgr.UpdateSourceOptions(opts...)
 }
 

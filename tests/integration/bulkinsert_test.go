@@ -18,6 +18,7 @@ package integration
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -218,6 +220,7 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 		}
 		err := importutil.CreateNumpyFile(filePath, data)
 		if err != nil {
+			log.Warn("failed to create numpy file", zap.Error(err))
 			return err
 		}
 	}
@@ -245,6 +248,7 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 		}
 		err = importutil.CreateNumpyFile(filePath, data)
 		if err != nil {
+			log.Warn("failed to create numpy file", zap.Error(err))
 			return err
 		}
 	}
@@ -252,12 +256,13 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 }
 
 func TestGenerateNumpyFile(t *testing.T) {
-	err := GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
+	err := os.MkdirAll(TempFilesPath, os.ModePerm)
+	require.NoError(t, err)
+	err = GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
 			Value: strconv.Itoa(Dim),
 		},
 	})
 	assert.NoError(t, err)
-	log.Error("err", zap.Error(err))
 }
