@@ -204,9 +204,6 @@ func (job *LoadCollectionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
-	if !colExisted {
-		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
-	}
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
 	return nil
 }
@@ -380,7 +377,6 @@ func (job *LoadPartitionJob) Execute() error {
 			log.Error(msg, zap.Error(err))
 			return utils.WrapError(msg, err)
 		}
-		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 	} else { // collection exists, put partitions only
 		err = job.meta.CollectionManager.PutPartition(partitions...)
 		if err != nil {
