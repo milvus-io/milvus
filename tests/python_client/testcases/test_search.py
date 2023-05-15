@@ -13,6 +13,7 @@ from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 from common.constants import *
@@ -3715,6 +3716,60 @@ class TestCollectionSearch(TestcaseBase):
         res2 = collection_w.search(vectors[:nq], default_search_field, default_search_params, default_limit)[0]
         t.join()
         assert [res1[i].ids for i in range(nq)] == [res2[i].ids for i in range(nq)]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_after_delete(self, _async):
+        """
+        target: test query-nodeV2 of collection
+        method: init a collection, insert data, delete data, delete data, load collection and search
+        expected: search successfully
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=False, is_flush=False)[0]
+        delete_ids1 = [i for i in range(ct.default_nb // 2)]
+        delete_ids2 = [i for i in range(ct.default_nb // 2, ct.default_nb)]
+        collection_w.delete(f"int64 in {delete_ids1}")
+        collection_w.flush()
+        collection_w.delete(f"int64 in {delete_ids2}")
+        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.load()
+        res = collection_w.search(vectors[:1], field_name, default_search_params, default_limit,
+                                  _async=_async)[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert len(res[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_after_balance(self, _async):
+        """
+        target: test query-nodeV2 of collection
+        method: init a collection, insert data, delete data, load collection, delete data and search
+        expected: search successfully
+        """
+        collection_w = self.init_collection_general(prefix, True)[0]
+        delete_ids1 = [i for i in range(ct.default_nb // 2)]
+        delete_ids2 = [i for i in range(ct.default_nb // 2, ct.default_nb)]
+        collection_w.delete(f"int64 in {delete_ids1}")
+        # load balance
+        res = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        segment_distribution = cf.get_segment_distribution(res)
+        ms = MilvusSys()
+        all_querynodes = [node["identifier"] for node in ms.query_nodes]
+        all_querynodes = sorted(all_querynodes,
+                                key=lambda x: len(segment_distribution[x]["sealed"])
+                                if x in segment_distribution else 0, reverse=True)
+        src_node_id = all_querynodes[0]
+        des_node_ids = all_querynodes[1:]
+        sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
+        self.utility_wrap.load_balance(collection_w.name, src_node_id, des_node_ids, sealed_segment_ids)
+        # delete
+        collection_w.delete(f"int64 in {delete_ids2}")
+        res = collection_w.search(vectors[:1], field_name, default_search_params, default_limit,
+                                  _async=_async)[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert len(res[0]) == 0
 
 
 class TestSearchBase(TestcaseBase):
