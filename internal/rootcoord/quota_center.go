@@ -80,6 +80,7 @@ type collectionStates = map[milvuspb.QuotaState]commonpb.ErrorCode
 //  4. DQL Queue length protection ->   dqlRate = curDQLRate * CoolOffSpeed
 //  5. DQL queue latency protection ->  dqlRate = curDQLRate * CoolOffSpeed
 //  6. Search result protection ->	 	searchRate = curSearchRate * CoolOffSpeed
+//  7. GrowingSegsSize protection ->    dmlRate = maxDMLRate * (high - cur) / (high - low)
 //
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
@@ -422,14 +423,23 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	if err != nil {
 		return err
 	}
-	collectionFactors := q.getTimeTickDelayFactor(ts)
-	memFactors := q.getMemoryFactor()
-	for collection, factor := range memFactors {
-		_, ok := collectionFactors[collection]
-		if !ok || collectionFactors[collection] > factor {
-			collectionFactors[collection] = factor
+
+	var collectionFactors map[int64]float64
+	updateCollectionFactor := func(factors map[int64]float64) {
+		for collection, factor := range factors {
+			_, ok := collectionFactors[collection]
+			if !ok || collectionFactors[collection] > factor {
+				collectionFactors[collection] = factor
+			}
 		}
 	}
+
+	collectionFactors = q.getTimeTickDelayFactor(ts)
+	memFactors := q.getMemoryFactor()
+	updateCollectionFactor(memFactors)
+	growingSegFactors := q.getGrowingSegmentsSizeFactor()
+	updateCollectionFactor(growingSegFactors)
+
 	for collection, factor := range collectionFactors {
 		if factor <= 0 {
 			q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, collection)
@@ -594,6 +604,51 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 			zap.Float64("memoryWaterLevel", memoryWaterLevel),
 			zap.Float64("memoryLowWaterLevel", dataNodeMemoryLowWaterLevel))
 		updateCollectionFactor(factor, metric.Effect.CollectionIDs)
+	}
+	return collectionFactor
+}
+
+func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
+	if !Params.QuotaConfig.GrowingSegmentsSizeProtectionEnabled.GetAsBool() {
+		return make(map[int64]float64)
+	}
+
+	low := Params.QuotaConfig.GrowingSegmentsSizeLowWaterLevel.GetAsFloat()
+	high := Params.QuotaConfig.GrowingSegmentsSizeHighWaterLevel.GetAsFloat()
+
+	collectionFactor := make(map[int64]float64)
+	updateCollectionFactor := func(factor float64, collections []int64) {
+		for _, collection := range collections {
+			_, ok := collectionFactor[collection]
+			if !ok || collectionFactor[collection] > factor {
+				collectionFactor[collection] = factor
+			}
+		}
+	}
+	for nodeID, metric := range q.queryNodeMetrics {
+		cur := float64(metric.GrowingSegmentsSize) / float64(metric.Hms.Memory)
+		if cur <= low {
+			continue
+		}
+		if cur >= high {
+			log.RatedWarn(10, "QuotaCenter: QueryNode growing segments size to high water level",
+				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
+				zap.Int64s("collections", metric.Effect.CollectionIDs),
+				zap.Int64("segmentsSize", metric.GrowingSegmentsSize),
+				zap.Uint64("TotalMem", metric.Hms.Memory),
+				zap.Float64("highWaterLevel", high))
+			updateCollectionFactor(0, metric.Effect.CollectionIDs)
+			continue
+		}
+		factor := (high - cur) / (high - low)
+		updateCollectionFactor(factor, metric.Effect.CollectionIDs)
+		log.RatedWarn(10, "QuotaCenter: QueryNode growing segments size to low water level, limit writing rate",
+			zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
+			zap.Int64s("collections", metric.Effect.CollectionIDs),
+			zap.Int64("segmentsSize", metric.GrowingSegmentsSize),
+			zap.Uint64("TotalMem", metric.Hms.Memory),
+			zap.Float64("lowWaterLevel", low))
 	}
 	return collectionFactor
 }

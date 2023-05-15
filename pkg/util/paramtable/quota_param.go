@@ -91,17 +91,20 @@ type quotaConfig struct {
 	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
 
 	// limit writing
-	ForceDenyWriting              ParamItem `refreshable:"true"`
-	TtProtectionEnabled           ParamItem `refreshable:"true"`
-	MaxTimeTickDelay              ParamItem `refreshable:"true"`
-	MemProtectionEnabled          ParamItem `refreshable:"true"`
-	DataNodeMemoryLowWaterLevel   ParamItem `refreshable:"true"`
-	DataNodeMemoryHighWaterLevel  ParamItem `refreshable:"true"`
-	QueryNodeMemoryLowWaterLevel  ParamItem `refreshable:"true"`
-	QueryNodeMemoryHighWaterLevel ParamItem `refreshable:"true"`
-	DiskProtectionEnabled         ParamItem `refreshable:"true"`
-	DiskQuota                     ParamItem `refreshable:"true"`
-	DiskQuotaPerCollection        ParamItem `refreshable:"true"`
+	ForceDenyWriting                     ParamItem `refreshable:"true"`
+	TtProtectionEnabled                  ParamItem `refreshable:"true"`
+	MaxTimeTickDelay                     ParamItem `refreshable:"true"`
+	MemProtectionEnabled                 ParamItem `refreshable:"true"`
+	DataNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
+	DataNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
+	QueryNodeMemoryLowWaterLevel         ParamItem `refreshable:"true"`
+	QueryNodeMemoryHighWaterLevel        ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeProtectionEnabled ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeLowWaterLevel     ParamItem `refreshable:"true"`
+	GrowingSegmentsSizeHighWaterLevel    ParamItem `refreshable:"true"`
+	DiskProtectionEnabled                ParamItem `refreshable:"true"`
+	DiskQuota                            ParamItem `refreshable:"true"`
+	DiskQuotaPerCollection               ParamItem `refreshable:"true"`
 
 	// limit reading
 	ForceDenyReading        ParamItem `refreshable:"true"`
@@ -879,6 +882,52 @@ When memory usage < memoryLowWaterLevel, no action.`,
 		Export: true,
 	}
 	p.QueryNodeMemoryHighWaterLevel.Init(base.mgr)
+
+	p.GrowingSegmentsSizeProtectionEnabled = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.enabled",
+		Version:      "2.2.9",
+		DefaultValue: "false",
+		Doc: `1. No action will be taken if the ratio of growing segments size is less than the low water level.
+2. The DML rate will be reduced if the ratio of growing segments size is greater than the low water level and less than the high water level.
+3. All DML requests will be rejected if the ratio of growing segments size is greater than the high water level.`,
+		Export: true,
+	}
+	p.GrowingSegmentsSizeProtectionEnabled.Init(base.mgr)
+
+	defaultGrowingSegSizeLowWaterLevel := "0.2"
+	p.GrowingSegmentsSizeLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.lowWaterLevel",
+		Version:      "2.2.9",
+		DefaultValue: defaultGrowingSegSizeLowWaterLevel,
+		Formatter: func(v string) string {
+			level := getAsFloat(v)
+			if level <= 0 || level > 1 {
+				return defaultGrowingSegSizeLowWaterLevel
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.GrowingSegmentsSizeLowWaterLevel.Init(base.mgr)
+
+	defaultGrowingSegSizeHighWaterLevel := "0.4"
+	p.GrowingSegmentsSizeHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.highWaterLevel",
+		Version:      "2.2.9",
+		DefaultValue: defaultGrowingSegSizeHighWaterLevel,
+		Formatter: func(v string) string {
+			level := getAsFloat(v)
+			if level <= 0 || level > 1 {
+				return defaultGrowingSegSizeHighWaterLevel
+			}
+			if !p.checkMinMaxLegal(p.GrowingSegmentsSizeLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
+				return defaultGrowingSegSizeHighWaterLevel
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.GrowingSegmentsSizeHighWaterLevel.Init(base.mgr)
 
 	p.DiskProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.diskProtection.enabled",
