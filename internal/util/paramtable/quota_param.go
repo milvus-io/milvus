@@ -93,17 +93,20 @@ type quotaConfig struct {
 	MaxCollectionNumPerDB int
 
 	// limit writing
-	ForceDenyWriting              bool
-	TtProtectionEnabled           bool
-	MaxTimeTickDelay              time.Duration
-	MemProtectionEnabled          bool
-	DataNodeMemoryLowWaterLevel   float64
-	DataNodeMemoryHighWaterLevel  float64
-	QueryNodeMemoryLowWaterLevel  float64
-	QueryNodeMemoryHighWaterLevel float64
-	DiskProtectionEnabled         bool
-	DiskQuota                     float64
-	DiskQuotaPerCollection        float64
+	ForceDenyWriting                     bool
+	TtProtectionEnabled                  bool
+	MaxTimeTickDelay                     time.Duration
+	MemProtectionEnabled                 bool
+	DataNodeMemoryLowWaterLevel          float64
+	DataNodeMemoryHighWaterLevel         float64
+	QueryNodeMemoryLowWaterLevel         float64
+	QueryNodeMemoryHighWaterLevel        float64
+	GrowingSegmentsSizeProtectionEnabled bool
+	GrowingSegmentsSizeLowWaterLevel     float64
+	GrowingSegmentsSizeHighWaterLevel    float64
+	DiskProtectionEnabled                bool
+	DiskQuota                            float64
+	DiskQuotaPerCollection               float64
 
 	// limit reading
 	ForceDenyReading        bool
@@ -172,6 +175,9 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initDataNodeMemoryHighWaterLevel()
 	p.initQueryNodeMemoryLowWaterLevel()
 	p.initQueryNodeMemoryHighWaterLevel()
+	p.initGrowingSegmentsSizeProtectionEnabled()
+	p.initGrowingSegmentsSizeLowWaterLevel()
+	p.initGrowingSegmentsSizeHighWaterLevel()
 	p.initDiskProtectionEnabled()
 	p.initDiskQuota()
 	p.initDiskQuotaPerCollection()
@@ -689,6 +695,32 @@ func (p *quotaConfig) initQueryNodeMemoryHighWaterLevel() {
 	if !p.checkMinMaxLegal(p.QueryNodeMemoryLowWaterLevel, p.QueryNodeMemoryHighWaterLevel) {
 		p.QueryNodeMemoryHighWaterLevel = defaultHighWaterLevel
 		p.QueryNodeMemoryLowWaterLevel = defaultLowWaterLevel
+	}
+}
+
+func (p *quotaConfig) initGrowingSegmentsSizeProtectionEnabled() {
+	p.GrowingSegmentsSizeProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitWriting.growingSegmentsSizeProtection.enabled", false)
+}
+
+func (p *quotaConfig) initGrowingSegmentsSizeLowWaterLevel() {
+	defaultGrowingSegSizeLowWaterLevel := 0.2
+	p.GrowingSegmentsSizeLowWaterLevel = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.growingSegmentsSizeProtection.lowWaterLevel", defaultGrowingSegSizeLowWaterLevel)
+	if p.GrowingSegmentsSizeLowWaterLevel <= 0 || p.GrowingSegmentsSizeLowWaterLevel > 1 {
+		log.Warn("GrowingSegmentsSizeLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("default", defaultGrowingSegSizeLowWaterLevel))
+		p.GrowingSegmentsSizeLowWaterLevel = defaultGrowingSegSizeLowWaterLevel
+	}
+}
+
+func (p *quotaConfig) initGrowingSegmentsSizeHighWaterLevel() {
+	defaultGrowingSegSizeHighWaterLevel := 0.4
+	p.GrowingSegmentsSizeHighWaterLevel = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.growingSegmentsSizeProtection.highWaterLevel", defaultGrowingSegSizeHighWaterLevel)
+	if p.GrowingSegmentsSizeHighWaterLevel <= 0 || p.GrowingSegmentsSizeHighWaterLevel > 1 {
+		log.Warn("GrowingSegmentsSizeHighWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("default", defaultGrowingSegSizeHighWaterLevel))
+		p.GrowingSegmentsSizeHighWaterLevel = defaultGrowingSegSizeHighWaterLevel
+	}
+	if !p.checkMinMaxLegal(p.GrowingSegmentsSizeLowWaterLevel, p.GrowingSegmentsSizeHighWaterLevel) {
+		p.GrowingSegmentsSizeHighWaterLevel = defaultGrowingSegSizeHighWaterLevel
+		p.GrowingSegmentsSizeLowWaterLevel = 0.2
 	}
 }
 

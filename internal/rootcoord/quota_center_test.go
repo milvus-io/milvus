@@ -399,6 +399,61 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = highBackup
 	})
 
+	t.Run("test GrowingSegmentsSize factors", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
+		tests := []struct {
+			low            float64
+			high           float64
+			growingSize    int64
+			memTotal       uint64
+			expectedFactor float64
+		}{
+			{0.8, 0.9, 10, 100, 1},
+			{0.8, 0.9, 80, 100, 1},
+			{0.8, 0.9, 82, 100, 0.8},
+			{0.8, 0.9, 85, 100, 0.5},
+			{0.8, 0.9, 88, 100, 0.2},
+			{0.8, 0.9, 90, 100, 0},
+
+			{0.85, 0.95, 25, 100, 1},
+			{0.85, 0.95, 85, 100, 1},
+			{0.85, 0.95, 87, 100, 0.8},
+			{0.85, 0.95, 90, 100, 0.5},
+			{0.85, 0.95, 93, 100, 0.2},
+			{0.85, 0.95, 95, 100, 0},
+		}
+
+		quotaCenter.writableCollections = append(quotaCenter.writableCollections, 1, 2, 3)
+		lowBak := Params.QuotaConfig.GrowingSegmentsSizeLowWaterLevel
+		highBak := Params.QuotaConfig.GrowingSegmentsSizeHighWaterLevel
+		Params.QuotaConfig.GrowingSegmentsSizeProtectionEnabled = true
+		for _, test := range tests {
+			Params.QuotaConfig.GrowingSegmentsSizeLowWaterLevel = test.low
+			Params.QuotaConfig.GrowingSegmentsSizeHighWaterLevel = test.high
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms: metricsinfo.HardwareMetrics{
+						Memory: test.memTotal,
+					},
+					Effect: metricsinfo.NodeEffect{
+						NodeID:        1,
+						CollectionIDs: []int64{1, 2, 3},
+					},
+					GrowingSegmentsSize: test.growingSize,
+				},
+			}
+			factors := quotaCenter.getGrowingSegmentsSizeFactor()
+
+			for _, factor := range factors {
+				assert.True(t, math.Abs(factor-test.expectedFactor) < 0.01)
+			}
+		}
+		Params.QuotaConfig.GrowingSegmentsSizeProtectionEnabled = false
+		Params.QuotaConfig.GrowingSegmentsSizeLowWaterLevel = lowBak
+		Params.QuotaConfig.GrowingSegmentsSizeHighWaterLevel = highBak
+	})
+
 	t.Run("test checkDiskQuota", func(t *testing.T) {
 		qc := types.NewMockQueryCoord(t)
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
