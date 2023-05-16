@@ -2823,20 +2823,16 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields_empty: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        res = collection_w.search(vectors[:nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) == 0
-        assert res[0][0].entity.fields == []
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=[],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": []})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_field(self, auto_id, _async):
@@ -2859,12 +2855,8 @@ class TestCollectionSearch(TestcaseBase):
                                   check_items={"nq": default_nq,
                                                "ids": insert_ids,
                                                "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert default_int64_field_name in res[0][0].entity._row_data
+                                               "_async": _async,
+                                               "output_fields": [default_int64_field_name]})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_vector_field(self, auto_id, _async):
@@ -2878,20 +2870,16 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert field_name in res[0][0].entity._row_data
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=[field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields(self, nb, nq, dim, auto_id, _async):
@@ -2908,21 +2896,17 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        res = collection_w.search(vectors[:nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[default_int64_field_name,
-                                                 default_float_field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -2955,7 +2939,8 @@ class TestCollectionSearch(TestcaseBase):
                                   output_fields=[field_name],
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": 1,
-                                               "limit": default_limit})[0]
+                                               "limit": default_limit,
+                                               "output_fields": [field_name]})[0]
 
         # 4. check the result vectors should be equal to the inserted
         for _id in range(default_limit):
@@ -2965,6 +2950,8 @@ class TestCollectionSearch(TestcaseBase):
                 if vectorInsert != vectorRes:
                     getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
                     vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
+                log.info(data[field_name][res[0][_id].id][i])
+                log.info(res[0][_id].entity.float_vector[i])
                 assert float(str(vectorInsert)) == float(vectorRes)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3050,19 +3037,14 @@ class TestCollectionSearch(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # 2. search with output field vector
-        res = collection_w.search(vectors[:1], default_search_field,
-                                  default_search_params, default_limit, default_search_exp,
-                                  output_fields=[default_float_field_name,
-                                                 default_string_field_name,
-                                                 default_search_field],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": 1,
-                                               "limit": default_limit})[0]
-
-        # 3. check the result
-        assert default_float_field_name, default_string_field_name in res[0][0].entity._row_data
-        assert default_search_field in res[0][0].entity._row_data
-        assert len(res[0][0].entity._row_data) == 3
+        output_fields = [default_float_field_name, default_string_field_name, default_search_field]
+        collection_w.search(vectors[:1], default_search_field,
+                            default_search_params, default_limit, default_search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1,
+                                         "limit": default_limit,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_vector_field_and_pk_field(self):
@@ -3078,17 +3060,13 @@ class TestCollectionSearch(TestcaseBase):
 
         # 2. search with output field vector
         output_fields = [default_int64_field_name, default_string_field_name, default_search_field]
-        res = collection_w.search(vectors[:1], default_search_field,
-                                  default_search_params, default_limit, default_search_exp,
-                                  output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": 1,
-                                               "limit": default_limit})[0]
-
-        # 3. check the result variables
-        assert default_int64_field_name, default_string_field_name in res[0][0].entity._row_data
-        assert default_search_field in res[0][0].entity._row_data
-        assert len(res[0][0].entity._row_data) == 3
+        collection_w.search(vectors[:1], default_search_field,
+                            default_search_params, default_limit, default_search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1,
+                                         "limit": default_limit,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_field_vector_with_partition(self):
@@ -3129,8 +3107,9 @@ class TestCollectionSearch(TestcaseBase):
                 assert str(vectorInsert) == vectorRes
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
-    def test_search_with_output_field_wildcard(self, output_fields, auto_id, _async):
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name], ["*", default_search_field],
+                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
+    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async):
         """
         target: test search with output fields using wildcard
         method: search with one output_field (wildcard)
@@ -3141,21 +3120,17 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+        output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=wildcard_output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_multi_collections(self, nb, nq, dim, auto_id, _async):
@@ -5120,7 +5095,7 @@ class TestSearchDiskann(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -5246,7 +5221,7 @@ class TestSearchDiskann(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             travel_timestamp=0,
@@ -5285,7 +5260,7 @@ class TestSearchDiskann(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -5294,7 +5269,7 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": ids,
                                          "limit": default_limit,
-                                         "_async": _async}  
+                                         "_async": _async}
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5331,7 +5306,7 @@ class TestSearchDiskann(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             default_search_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -5340,7 +5315,7 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": ids,
                                          "limit": default_limit,
-                                         "_async": _async}  
+                                         "_async": _async}
                             )
     
     @pytest.mark.tags(CaseLabel.L1)
@@ -5373,7 +5348,7 @@ class TestSearchDiskann(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                default_search_params, limit, 
+                                default_search_params, limit,
                                 default_expr,
                                 output_fields=output_fields,
                                 _async=_async,
@@ -5382,7 +5357,7 @@ class TestSearchDiskann(TestcaseBase):
                                 check_items={"nq": default_nq,
                                             "ids": ids,
                                             "limit": limit,
-                                            "_async": _async}  
+                                            "_async": _async}
                                 )
 
     @pytest.mark.tags(CaseLabel.L2)

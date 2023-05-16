@@ -598,6 +598,28 @@ class TestQueryParams(TestcaseBase):
                                check_task=CheckTasks.check_query_results,
                                check_items={exp_res: res, "with_vec": True})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
+                                                        ["*", default_int_field_name],
+                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
+    def test_query_output_field_wildcard(self, wildcard_output_fields):
+        """
+        target: test query with output fields using wildcard
+        method: query with one output_field (wildcard)
+        expected: query success
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
+        output_fields.append(default_int_field_name)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        with_vec = True if ct.default_float_vec_field_name in output_fields else False
+        actual_res = collection_w.query(default_term_expr, output_fields=wildcard_output_fields)[0]
+        assert set(actual_res[0].keys()) == set(output_fields)
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
