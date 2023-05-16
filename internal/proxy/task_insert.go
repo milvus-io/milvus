@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -150,6 +152,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
+	if it.schema.EnableDynamicField {
+		err = it.checkDynamicFieldData()
+		if err != nil {
+			return err
+		}
+	}
+
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -266,5 +275,47 @@ func (it *insertTask) Execute(ctx context.Context) error {
 }
 
 func (it *insertTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+func (it *insertTask) verifyDynamicFieldData() error {
+	for _, field := range it.insertMsg.FieldsData {
+		if field.GetFieldName() == common.MetaFieldName {
+			if !it.schema.EnableDynamicField {
+				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
+			}
+			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
+				jsonData := make(map[string]interface{})
+				if err := json.Unmarshal(rowData, &jsonData); err != nil {
+					return err
+				}
+				if _, ok := jsonData[common.MetaFieldName]; ok {
+					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (it *insertTask) checkDynamicFieldData() error {
+	var dataNameSet = typeutil.NewSet[string]()
+
+	for _, data := range it.insertMsg.FieldsData {
+		dataNameSet.Insert(data.GetFieldName())
+	}
+	if _, ok := dataNameSet[common.MetaFieldName]; ok {
+		return it.verifyDynamicFieldData()
+	}
+	defaultData := make([][]byte, it.insertMsg.NRows())
+	for i := range defaultData {
+		defaultData[i] = []byte("{}")
+	}
+	dynamicData, err := autoGenDynamicFieldData(defaultData)
+	if err != nil {
+		return err
+	}
+	it.insertMsg.FieldsData = append(it.insertMsg.FieldsData, dynamicData)
 	return nil
 }

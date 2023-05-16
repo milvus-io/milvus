@@ -33,6 +33,7 @@ const (
 	floatField    = "floatField"
 	doubleField   = "doubleField"
 	varCharField  = "varCharField"
+	jsonField     = "jsonField"
 	floatVecField = "floatVecField"
 	binVecField   = "binVecField"
 )

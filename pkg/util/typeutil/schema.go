@@ -248,16 +248,8 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error) {
 	var field *schemapb.FieldSchema
 	for _, f := range helper.schema.GetFields() {
-		// TODO @xiaocai2333: get $SYS_META json field
-		//if f.DataType == schemapb.DataType_JSON && f.GetIsDynamic() {
-		if f.DataType == schemapb.DataType_JSON {
-			if field != nil {
-				// TODO @xiaocai2333: will not return error after support $SYS_META
-				errMsg := "there is multi json field in schema, need to specified field name"
-				log.Warn(errMsg)
-				return nil, fmt.Errorf(errMsg)
-			}
-			field = f
+		if f.DataType == schemapb.DataType_JSON && f.IsDynamic {
+			return f, nil
 		}
 	}
 	if field == nil {

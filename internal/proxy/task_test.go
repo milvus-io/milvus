@@ -712,6 +712,41 @@ func TestCreateCollectionTask(t *testing.T) {
 			assert.Error(t, err)
 		}
 	})
+
+	t.Run("specify dynamic field", func(t *testing.T) {
+		dynamicField := &schemapb.FieldSchema{
+			Name:      "json",
+			IsDynamic: true,
+		}
+		var marshaledSchema []byte
+		schema2 := &schemapb.CollectionSchema{
+			Name:   collectionName,
+			Fields: append(schema.Fields, dynamicField),
+		}
+		marshaledSchema, err := proto.Marshal(schema2)
+		assert.NoError(t, err)
+
+		task2 := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		err = task2.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = task2.PreExecute(ctx)
+		assert.Error(t, err)
+	})
 }
 
 func TestHasCollectionTask(t *testing.T) {

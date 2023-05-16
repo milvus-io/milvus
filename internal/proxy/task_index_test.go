@@ -457,4 +457,51 @@ func Test_parseIndexParams(t *testing.T) {
 				},
 			}, cit2.newTypeParams)
 	})
+	t.Run("create index on json field", func(t *testing.T) {
+		cit3 := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				Base:           nil,
+				DbName:         "",
+				CollectionName: "",
+				FieldName:      "",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "HNSW",
+					},
+					{
+						Key:   MetricTypeKey,
+						Value: "IP",
+					},
+					{
+						Key:   common.IndexParamsKey,
+						Value: "{\"M\": 48, \"efConstruction\": 64}",
+					},
+					{
+						Key:   DimKey,
+						Value: "128",
+					},
+				},
+				IndexName: "",
+			},
+			ctx:            nil,
+			rootCoord:      nil,
+			queryCoord:     nil,
+			result:         nil,
+			isAutoIndex:    false,
+			newIndexParams: nil,
+			newTypeParams:  nil,
+			collectionID:   0,
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err := cit3.parseIndexParams()
+		assert.Error(t, err)
+	})
 }
