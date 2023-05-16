@@ -194,7 +194,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := newValidateUtil(withNANCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
