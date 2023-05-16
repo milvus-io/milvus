@@ -54,7 +54,7 @@ func newServerHandler(s *Server) *ServerHandler {
 	return &ServerHandler{s: s}
 }
 
-// GetDataVChanPositions gets vchannel latest postitions with provided dml channel names for DataNode.
+// GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
 func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name && !s.GetIsFake()
@@ -99,7 +99,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 	}
 }
 
-// GetQueryVChanPositions gets vchannel latest postitions with provided dml channel names for QueryCoord,
+// GetQueryVChanPositions gets vchannel latest positions with provided dml channel names for QueryCoord,
 // we expect QueryCoord gets the indexed segments to load, so the flushed segments below are actually the indexed segments,
 // the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
