@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy"
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
+	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
@@ -163,7 +164,7 @@ func (meta *TtCollectionsMeta210) GenerateSaves() map[string]string {
 	var err error
 	for collection := range *meta {
 		for ts := range (*meta)[collection] {
-			k := rootcoord.ComposeSnapshotKey(rootcoord.SnapshotPrefix, rootcoord.BuildCollectionKey(collection), rootcoord.SnapshotsSep, ts)
+			k := rootcoord.ComposeSnapshotKey(rootcoord.SnapshotPrefix, rootcoord.BuildCollectionKey(util.NonDBID, collection), rootcoord.SnapshotsSep, ts)
 			record := (*meta)[collection][ts]
 			if record == nil {
 				v = rootcoord.ConstructTombstone()
@@ -189,7 +190,7 @@ func (meta *CollectionsMeta210) GenerateSaves() map[string]string {
 	var err error
 	for collection := range *meta {
 		record := (*meta)[collection]
-		k := rootcoord.BuildCollectionKey(collection)
+		k := rootcoord.BuildCollectionKey(util.NonDBID, collection)
 		if record == nil {
 			v = rootcoord.ConstructTombstone()
 		} else {

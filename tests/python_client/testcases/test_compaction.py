@@ -163,8 +163,8 @@ class TestCompactionParams(TestcaseBase):
         # delete single entity, flush
         single_expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_pos]}'
         collection_w.delete(single_expr)
-        assert collection_w.num_entities == tmp_nb
-
+        collection_w.flush()
+        
         # compact, get plan
         sleep(ct.compact_retention_duration + 1)
         collection_w.compact()

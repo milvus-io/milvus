@@ -1,16 +1,17 @@
 package model
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/samber/lo"
 )
 
 type Collection struct {
 	TenantID             string
-	DBName               string // TODO: @jiquan.long please help to assign, persistent and check
+	DBID                 int64
 	CollectionID         int64
 	Partitions           []*Partition
 	Name                 string
@@ -35,6 +36,7 @@ func (c Collection) Available() bool {
 func (c Collection) Clone() *Collection {
 	return &Collection{
 		TenantID:             c.TenantID,
+		DBID:                 c.DBID,
 		CollectionID:         c.CollectionID,
 		Name:                 c.Name,
 		Description:          c.Description,
@@ -62,6 +64,7 @@ func (c Collection) GetPartitionNum(filterUnavailable bool) int {
 
 func (c Collection) Equal(other Collection) bool {
 	return c.TenantID == other.TenantID &&
+		c.DBID == other.DBID &&
 		CheckPartitionsEqual(c.Partitions, other.Partitions) &&
 		c.Name == other.Name &&
 		c.Description == other.Description &&
@@ -88,6 +91,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 
 	return &Collection{
 		CollectionID:         coll.ID,
+		DBID:                 coll.DbId,
 		Name:                 coll.Schema.Name,
 		Description:          coll.Schema.Description,
 		AutoID:               coll.Schema.AutoID,
@@ -151,6 +155,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 
 	collectionPb := &pb.CollectionInfo{
 		ID:                   coll.CollectionID,
+		DbId:                 coll.DBID,
 		Schema:               collSchema,
 		CreateTime:           coll.CreateTime,
 		VirtualChannelNames:  coll.VirtualChannelNames,

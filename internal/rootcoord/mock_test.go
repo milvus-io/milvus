@@ -22,6 +22,8 @@ import (
 	"math/rand"
 	"os"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -40,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -50,6 +51,7 @@ const (
 
 type mockMetaTable struct {
 	IMetaTable
+	ListDatabasesFunc                func(ctx context.Context, ts Timestamp) ([]*model.Database, error)
 	ListCollectionsFunc              func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
 	AddCollectionFunc                func(ctx context.Context, coll *model.Collection) error
 	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
@@ -59,10 +61,10 @@ type mockMetaTable struct {
 	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
 	ChangePartitionStateFunc         func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
 	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	CreateAliasFunc                  func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
-	AlterAliasFunc                   func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
-	DropAliasFunc                    func(ctx context.Context, alias string, ts Timestamp) error
-	IsAliasFunc                      func(name string) bool
+	CreateAliasFunc                  func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
+	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
+	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
+	IsAliasFunc                      func(dbName, name string) bool
 	ListAliasesByIDFunc              func(collID UniqueID) []string
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
@@ -71,7 +73,11 @@ type mockMetaTable struct {
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 }
 
-func (m mockMetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+func (m mockMetaTable) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
+	return m.ListDatabasesFunc(ctx, ts)
+}
+
+func (m mockMetaTable) ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error) {
 	return m.ListCollectionsFunc(ctx, ts)
 }
 
@@ -79,11 +85,11 @@ func (m mockMetaTable) AddCollection(ctx context.Context, coll *model.Collection
 	return m.AddCollectionFunc(ctx, coll)
 }
 
-func (m mockMetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+func (m mockMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
 	return m.GetCollectionByNameFunc(ctx, collectionName, ts)
 }
 
-func (m mockMetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+func (m mockMetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	return m.GetCollectionByIDFunc(ctx, collectionID, ts, allowUnavailable)
 }
 
@@ -103,24 +109,24 @@ func (m mockMetaTable) ChangePartitionState(ctx context.Context, collectionID Un
 	return m.ChangePartitionStateFunc(ctx, collectionID, partitionID, state, ts)
 }
 
-func (m mockMetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+func (m mockMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	return m.RemovePartitionFunc(ctx, collectionID, partitionID, ts)
 }
 
-func (m mockMetaTable) CreateAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
-	return m.CreateAliasFunc(ctx, alias, collectionName, ts)
+func (m mockMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
+	return m.CreateAliasFunc(ctx, dbName, alias, collectionName, ts)
 }
 
-func (m mockMetaTable) AlterAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
-	return m.AlterAliasFunc(ctx, alias, collectionName, ts)
+func (m mockMetaTable) AlterAlias(ctx context.Context, dbName, alias string, collectionName string, ts Timestamp) error {
+	return m.AlterAliasFunc(ctx, dbName, alias, collectionName, ts)
 }
 
-func (m mockMetaTable) DropAlias(ctx context.Context, alias string, ts Timestamp) error {
-	return m.DropAliasFunc(ctx, alias, ts)
+func (m mockMetaTable) DropAlias(ctx context.Context, dbName, alias string, ts Timestamp) error {
+	return m.DropAliasFunc(ctx, dbName, alias, ts)
 }
 
-func (m mockMetaTable) IsAlias(name string) bool {
-	return m.IsAliasFunc(name)
+func (m mockMetaTable) IsAlias(dbName, name string) bool {
+	return m.IsAliasFunc(dbName, name)
 }
 
 func (m mockMetaTable) ListAliasesByID(collID UniqueID) []string {
@@ -131,7 +137,7 @@ func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Colle
 	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts)
 }
 
-func (m *mockMetaTable) RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error {
+func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error {
 	return m.RenameCollectionFunc(ctx, oldName, newName, ts)
 }
 
@@ -375,6 +381,9 @@ func withMeta(meta IMetaTable) Opt {
 
 func withInvalidMeta() Opt {
 	meta := newMockMetaTable()
+	meta.ListDatabasesFunc = func(ctx context.Context, ts Timestamp) ([]*model.Database, error) {
+		return nil, errors.New("error mock ListDatabases")
+	}
 	meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 		return nil, errors.New("error mock ListCollections")
 	}
@@ -390,13 +399,13 @@ func withInvalidMeta() Opt {
 	meta.ChangePartitionStateFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error {
 		return errors.New("error mock ChangePartitionState")
 	}
-	meta.CreateAliasFunc = func(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
+	meta.CreateAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
 		return errors.New("error mock CreateAlias")
 	}
-	meta.AlterAliasFunc = func(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
+	meta.AlterAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
 		return errors.New("error mock AlterAlias")
 	}
-	meta.DropAliasFunc = func(ctx context.Context, alias string, ts Timestamp) error {
+	meta.DropAliasFunc = func(ctx context.Context, dbName string, alias string, ts Timestamp) error {
 		return errors.New("error mock DropAlias")
 	}
 	return withMeta(meta)

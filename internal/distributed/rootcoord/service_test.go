@@ -42,6 +42,20 @@ type mockCore struct {
 	types.RootCoordComponent
 }
 
+func (m *mockCore) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (m *mockCore) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (m *mockCore) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return &milvuspb.ListDatabasesResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil
+}
+
 func (m *mockCore) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
@@ -51,6 +65,7 @@ func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReq
 		IsHealthy: true,
 	}, nil
 }
+
 func (m *mockCore) UpdateStateCode(commonpb.StateCode) {
 }
 
@@ -198,6 +213,23 @@ func TestRun(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("CreateDatabase", func(t *testing.T) {
+		ret, err := svr.CreateDatabase(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, ret.ErrorCode)
+	})
+
+	t.Run("DropDatabase", func(t *testing.T) {
+		ret, err := svr.DropDatabase(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, ret.ErrorCode)
+	})
+
+	t.Run("ListDatabases", func(t *testing.T) {
+		ret, err := svr.ListDatabases(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, ret.Status.ErrorCode)
+	})
 	err = svr.Stop()
 	assert.Nil(t, err)
 }

@@ -112,7 +112,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
 	g.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -258,7 +258,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	g.GetStatisticsRequest.PartitionIDs = g.loadedPartitionIDs
 
 	executeGetStatistics := func(withCache bool) error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, g.collectionName)
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, g.request.GetDbName(), g.collectionName)
 		if err != nil {
 			return err
 		}
@@ -277,7 +277,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 			zap.Error(err),
 		)
 		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.DeprecateShardCache(g.collectionName)
+		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		err = executeGetStatistics(WithoutCache)
 	}
 	if err != nil {
@@ -297,19 +297,19 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 	if err != nil {
 		log.Warn("QueryNode statistic return error", zap.Int64("msgID", g.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
-		globalMetaCache.DeprecateShardCache(g.collectionName)
+		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader", zap.Int64("msgID", g.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
-		globalMetaCache.DeprecateShardCache(g.collectionName)
+		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode statistic result error", zap.Int64("msgID", g.ID()),
 			zap.Int64("nodeID", nodeID), zap.String("reason", result.GetStatus().GetReason()))
-		globalMetaCache.DeprecateShardCache(g.collectionName)
+		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return fmt.Errorf("fail to get statistic, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 	g.resultBuf <- result
@@ -324,7 +324,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 	var unloadPartitionIDs []UniqueID
 
 	// TODO: Consider to check if partition loaded from cache to save rpc.
-	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+	info, err := globalMetaCache.GetCollectionInfo(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", collectionName, err)
 	}
@@ -646,7 +646,7 @@ func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -735,12 +735,12 @@ func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
 	g.collectionID = collID
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, g.CollectionName, g.PartitionName)
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, g.GetDbName(), g.CollectionName, g.PartitionName)
 	if err != nil {
 		return err
 	}

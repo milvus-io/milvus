@@ -94,7 +94,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectNameIndexs := privilegeExt.ObjectNameIndexs
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
-	dbName := GetCurDBNameFromContext(ctx)
+	dbName := GetCurDBNameFromContextOrDefault(ctx)
 	policyInfo := strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ",")
 
 	logWithCurrentRequestInfo := log.With(zap.String("username", username), zap.Strings("role_names", roleNames),

@@ -509,6 +509,7 @@ type rootCoordConfig struct {
 	NodeID atomic.Value
 
 	DmlChannelNum               int64
+	MaxDatabaseNum              int64
 	MaxPartitionNum             int64
 	MinSegmentSizeToEnableIndex int64
 
@@ -529,6 +530,7 @@ type rootCoordConfig struct {
 func (p *rootCoordConfig) init(base *BaseTable) {
 	p.Base = base
 	p.DmlChannelNum = p.Base.ParseInt64WithDefault("rootCoord.dmlChannelNum", 256)
+	p.MaxDatabaseNum = p.Base.ParseInt64WithDefault("rootCoord.maxDatabaseNum", 64)
 	p.MaxPartitionNum = p.Base.ParseInt64WithDefault("rootCoord.maxPartitionNum", 4096)
 	p.MinSegmentSizeToEnableIndex = p.Base.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
 	p.ImportTaskExpiration = p.Base.ParseFloatWithDefault("rootCoord.importTaskExpiration", 15*60)

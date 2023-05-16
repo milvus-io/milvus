@@ -20,18 +20,17 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
 )
 
 //go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord
 type GarbageCollector interface {
 	ReDropCollection(collMeta *model.Collection, ts Timestamp)
 	RemoveCreatingCollection(collMeta *model.Collection)
-	ReDropPartition(pChannels []string, partition *model.Partition, ts Timestamp)
+	ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts Timestamp)
 	GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error)
 	GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (ddlTs Timestamp, err error)
 }
@@ -47,16 +46,8 @@ func newBgGarbageCollector(s *Core) *bgGarbageCollector {
 func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
 	c.s.chanTimeTick.addDmlChannels(collMeta.PhysicalChannelNames...)
-	aliases := c.s.meta.ListAliasesByID(collMeta.CollectionID)
 
 	redo := newBaseRedoTask(c.s.stepExecutor)
-	redo.AddAsyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: c.s},
-		collectionNames: append(aliases, collMeta.Name),
-		collectionID:    collMeta.CollectionID,
-		ts:              ts,
-		opts:            []expireCacheOpt{expireCacheWithDropFlag()},
-	})
 	redo.AddAsyncStep(&releaseCollectionStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
@@ -115,16 +106,11 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 	_ = redo.Execute(context.Background())
 }
 
-func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *model.Partition, ts Timestamp) {
+func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
 	c.s.chanTimeTick.addDmlChannels(pChannels...)
 
 	redo := newBaseRedoTask(c.s.stepExecutor)
-	redo.AddAsyncStep(&expireCacheStep{
-		baseStep:     baseStep{core: c.s},
-		collectionID: partition.CollectionID,
-		ts:           ts,
-	})
 	redo.AddAsyncStep(&deletePartitionDataStep{
 		baseStep:  baseStep{core: c.s},
 		pchans:    pChannels,
@@ -141,6 +127,7 @@ func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *mode
 	})
 	redo.AddAsyncStep(&removePartitionMetaStep{
 		baseStep:     baseStep{core: c.s},
+		dbID:         dbID,
 		collectionID: partition.CollectionID,
 		partitionID:  partition.PartitionID,
 		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already

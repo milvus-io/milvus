@@ -20,6 +20,14 @@ message FieldIndexInfo{
   int64 indexID = 2;
 }
 
+enum DatabaseState {
+  DatabaseUnknown = 0;
+  DatabaseCreated = 1;
+  DatabaseCreating = 2;
+  DatabaseDropping = 3;
+  DatabaseDropped = 4;
+}
+
 enum CollectionState {
   CollectionCreated = 0;
   CollectionCreating = 1;
@@ -60,6 +68,7 @@ message CollectionInfo {
   common.ConsistencyLevel consistency_level = 12;
   CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
   repeated common.KeyValuePair properties = 14;
+  int64 db_id = 15;
 }
 
 message PartitionInfo {
@@ -75,6 +84,15 @@ message AliasInfo {
   int64 collection_id = 2;
   uint64 created_time = 3;
   AliasState state = 4; // To keep compatible with older version, default state is `Created`.
+  int64 db_id = 5;
+}
+
+message DatabaseInfo {
+  string tenant_id = 1;
+  string  name = 2;
+  int64 id = 3;
+  DatabaseState state = 4;
+  uint64 created_time = 5;
 }
 
 message SegmentIndexInfo {

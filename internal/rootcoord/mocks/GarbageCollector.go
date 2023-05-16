@@ -62,7 +62,7 @@ func (_m *GarbageCollector) ReDropCollection(collMeta *model.Collection, ts uint
 }
 
 // ReDropPartition provides a mock function with given fields: pChannels, partition, ts
-func (_m *GarbageCollector) ReDropPartition(pChannels []string, partition *model.Partition, ts uint64) {
+func (_m *GarbageCollector) ReDropPartition(dbID int64, pChannels []string, partition *model.Partition, ts uint64) {
 	_m.Called(pChannels, partition, ts)
 }
 

@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type GetCollectionNameFunc func(collID, partitionID UniqueID) (string, string, error)
+type GetCollectionNameFunc func(dbName string, collID, partitionID UniqueID) (string, string, error)
 type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
@@ -82,8 +82,8 @@ func NewImportFactory(c *Core) ImportFactory {
 }
 
 func GetCollectionNameWithCore(c *Core) GetCollectionNameFunc {
-	return func(collID, partitionID UniqueID) (string, string, error) {
-		colInfo, err := c.meta.GetCollectionByID(c.ctx, collID, typeutil.MaxTimestamp, false)
+	return func(dbName string, collID, partitionID UniqueID) (string, string, error) {
+		colInfo, err := c.meta.GetCollectionByID(c.ctx, dbName, collID, typeutil.MaxTimestamp, false)
 		if err != nil {
 			log.Error("Core failed to get collection name by id", zap.Int64("ID", collID), zap.Error(err))
 			return "", "", err
