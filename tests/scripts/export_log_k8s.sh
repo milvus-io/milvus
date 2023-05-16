@@ -44,8 +44,8 @@ echo "export logs start"
 for pod in ${array[*]}
 do
 echo "export logs for pod $pod "
-kubectl logs $pod -n ${ns_name} > ./$log_dir/pod_log/$pod.log 2>&1
+kubectl logs $pod -n ${ns_name} > ./$log_dir/pod_log/$pod.log 2>&1 || echo "export log for pod $pod failed"
 kubectl logs $pod --previous -n ${ns_name} > ./$log_dir/pod_log_previous/$pod.log 2>&1 || echo "pod $pod has no previous log"
-kubectl describe pod $pod -n ${ns_name} > ./$log_dir/pod_describe/$pod.log
+kubectl describe pod $pod -n ${ns_name} > ./$log_dir/pod_describe/$pod.log 2>&1 || echo "describe pod $pod failed"
 done
 echo "export logs done"
