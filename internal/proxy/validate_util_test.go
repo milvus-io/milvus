@@ -853,6 +853,39 @@ func Test_validateUtil_Validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("has overflow", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test1",
+				Type:      schemapb.DataType_Int8,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: []int32{int32(math.MinInt8) - 1, int32(math.MaxInt8) + 1},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test1",
+					FieldID:  101,
+					DataType: schemapb.DataType_Int8,
+				},
+			},
+		}
+
+		v := newValidateUtil(withOverflowCheck())
+
+		err := v.Validate(data, schema, 2)
+		assert.Error(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -905,6 +938,19 @@ func Test_validateUtil_Validate(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldName: "test5",
+				Type:      schemapb.DataType_Int8,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: []int32{int32(math.MinInt8) + 1, int32(math.MaxInt8) - 1},
+							},
+						},
+					},
+				},
+			},
 		}
 
 		schema := &schemapb.CollectionSchema{
@@ -947,10 +993,15 @@ func Test_validateUtil_Validate(t *testing.T) {
 					FieldID:  104,
 					DataType: schemapb.DataType_JSON,
 				},
+				{
+					Name:     "test5",
+					FieldID:  105,
+					DataType: schemapb.DataType_Int8,
+				},
 			},
 		}
 
-		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
+		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck())
 
 		err := v.Validate(data, schema, 2)
 
@@ -1832,6 +1883,170 @@ func Test_validateUtil_fillWithDefaultValue(t *testing.T) {
 
 		flag := checkFillWithDefaultValueData(data[0].GetScalars().GetStringData().Data, stringData[0], 1)
 		assert.True(t, flag)
+	})
+
+}
+
+func Test_verifyOverflowByRange(t *testing.T) {
+	var err error
+
+	err = verifyOverflowByRange(
+		[]int32{int32(math.MinInt8 - 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.Error(t, err)
+
+	err = verifyOverflowByRange(
+		[]int32{int32(math.MaxInt8 + 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.Error(t, err)
+
+	err = verifyOverflowByRange(
+		[]int32{int32(math.MinInt8 - 1), int32(math.MaxInt8 + 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.Error(t, err)
+
+	err = verifyOverflowByRange(
+		[]int32{int32(math.MaxInt8 + 1), int32(math.MinInt8 - 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.Error(t, err)
+
+	err = verifyOverflowByRange(
+		[]int32{1, 2, 3, int32(math.MinInt8 - 1), int32(math.MaxInt8 + 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.Error(t, err)
+
+	err = verifyOverflowByRange(
+		[]int32{1, 2, 3, int32(math.MinInt8 + 1), int32(math.MaxInt8 - 1)},
+		math.MinInt8,
+		math.MaxInt8,
+	)
+	assert.NoError(t, err)
+}
+
+func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
+	t.Run("no check", func(t *testing.T) {
+		v := newValidateUtil()
+		assert.NoError(t, v.checkIntegerFieldData(nil, nil))
+	})
+
+	t.Run("tiny int, type mismatch", func(t *testing.T) {
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int8,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("tiny int, overflow", func(t *testing.T) {
+
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int8,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt8 - 1)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("tiny int, normal case", func(t *testing.T) {
+
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int8,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt8 + 1), int32(math.MaxInt8 - 1)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.NoError(t, err)
+	})
+
+	t.Run("small int, overflow", func(t *testing.T) {
+
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int16,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt16 - 1)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("small int, normal case", func(t *testing.T) {
+
+		v := newValidateUtil(withOverflowCheck())
+
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int16,
+		}
+		data := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{int32(math.MinInt16 + 1), int32(math.MaxInt16 - 1)},
+						},
+					},
+				},
+			},
+		}
+
+		err := v.checkIntegerFieldData(data, f)
+		assert.NoError(t, err)
 	})
 
 }
