@@ -19,6 +19,8 @@ package querynode
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -74,6 +76,13 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}
 	minFGChannel, minFGTt := rateCol.getMinTSafe()
 	defer rateCol.rtCounter.resetQueueTime()
+
+	growingSegments := node.metaReplica.getGrowingSegments()
+	growingSegmentsSize := lo.SumBy(growingSegments, func(segment *Segment) int64 {
+		return segment.getMemSize()
+	})
+	collections := node.metaReplica.getCollectionIDs()
+
 	return &metricsinfo.QueryNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
@@ -82,8 +91,13 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			MinFlowGraphTt:      minFGTt,
 			NumFlowGraph:        node.dataSyncService.getFlowGraphNum(),
 		},
-		SearchQueue: rateCol.rtCounter.getSearchNQInQueue(),
-		QueryQueue:  rateCol.rtCounter.getQueryTasksInQueue(),
+		SearchQueue:         rateCol.rtCounter.getSearchNQInQueue(),
+		QueryQueue:          rateCol.rtCounter.getQueryTasksInQueue(),
+		GrowingSegmentsSize: growingSegmentsSize,
+		Effect: metricsinfo.NodeEffect{
+			NodeID:        Params.QueryNodeCfg.GetNodeID(),
+			CollectionIDs: collections,
+		},
 	}, nil
 }
 
