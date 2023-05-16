@@ -191,7 +191,7 @@ func (cct *createCollectionTask) validatePartitionKey() error {
 
 	if idx == -1 {
 		if cct.GetNumPartitions() != 0 {
-			return fmt.Errorf("num_partitions should only be speicified with partition key field enbaled, field name = %s", cct.schema.Fields[idx].Name)
+			return fmt.Errorf("num_partitions should only be speicified with partition key field enbaled")
 		}
 	} else {
 		log.Info("create collection with partition key mode",
