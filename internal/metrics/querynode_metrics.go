@@ -149,6 +149,20 @@ var (
 			queryTypeLabelName,
 		})
 
+	QueryNodeSQPerUserLatencyInQueue = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "sq_queue_user_latency",
+			Help:      "latency per user of search or query in queue",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			usernameLabelName,
+		},
+	)
+
 	QueryNodeSQSegmentLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -380,6 +394,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQCount)
 	registry.MustRegister(QueryNodeSQReqLatency)
 	registry.MustRegister(QueryNodeSQLatencyInQueue)
+	registry.MustRegister(QueryNodeSQPerUserLatencyInQueue)
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
@@ -422,5 +437,4 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 					collectionIDLabelName: fmt.Sprint(collectionID),
 				})
 	}
-
 }

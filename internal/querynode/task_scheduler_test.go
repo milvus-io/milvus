@@ -71,6 +71,7 @@ type mockReadTask struct {
 	timeoutError error
 	step         typeutil.TaskStep
 	readyError   error
+	merged       bool
 }
 
 func (m *mockReadTask) GetCollectionID() UniqueID {
@@ -82,7 +83,7 @@ func (m *mockReadTask) Ready() (bool, error) {
 }
 
 func (m *mockReadTask) Merge(o readTask) {
-
+	m.merged = true
 }
 
 func (m *mockReadTask) CPUUsage() int32 {

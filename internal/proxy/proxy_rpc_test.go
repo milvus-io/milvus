@@ -45,7 +45,7 @@ func TestProxyRpcLimit(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 
-	ctx := GetContext(context.Background(), "root:123456")
+	ctx := getContextWithAuthorization(context.Background(), "root:123456")
 	localMsg := true
 	factory := dependency.NewDefaultFactory(localMsg)
 

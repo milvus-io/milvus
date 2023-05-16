@@ -41,7 +41,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NotNil(t, err)
 
-		ctx = GetContext(context.Background(), "alice:123456")
+		ctx = getContextWithAuthorization(context.Background(), "alice:123456")
 		client := &MockRootCoordClientInterface{}
 		queryCoord := &MockQueryCoordClientInterface{}
 		mgr := newShardClientMgr()
@@ -65,13 +65,13 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			}, nil
 		}
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "foo:123456"), &milvuspb.LoadCollectionRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "foo:123456"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NotNil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "root:123456"), &milvuspb.LoadCollectionRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "root:123456"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
@@ -103,7 +103,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.Nil(t, err)
 
-		fooCtx := GetContext(context.Background(), "foo:123456")
+		fooCtx := getContextWithAuthorization(context.Background(), "foo:123456")
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
@@ -130,7 +130,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
@@ -148,7 +148,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			go func() {
 				defer g.Done()
 				assert.NotPanics(t, func() {
-					PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+					PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
 						DbName:         "db_test",
 						CollectionName: "col1",
 					})
@@ -161,7 +161,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			getPolicyModel("foo")
 		})
 	})
-
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {
@@ -173,7 +172,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.ListResourceGroupsRequest{})
 		assert.NotNil(t, err)
 
-		ctx = GetContext(context.Background(), "fooo:123456")
+		ctx = getContextWithAuthorization(context.Background(), "fooo:123456")
 		client := &MockRootCoordClientInterface{}
 		queryCoord := &MockQueryCoordClientInterface{}
 		mgr := newShardClientMgr()
@@ -198,29 +197,28 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		}
 		InitMetaCache(ctx, client, queryCoord, mgr)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropResourceGroupRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.DropResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeResourceGroupRequest{
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.DescribeResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListResourceGroupsRequest{})
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.ListResourceGroupsRequest{})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferNodeRequest{})
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.TransferNodeRequest{})
 		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferReplicaRequest{})
+		_, err = PrivilegeInterceptor(getContextWithAuthorization(context.Background(), "fooo:123456"), &milvuspb.TransferReplicaRequest{})
 		assert.Nil(t, err)
 	})
-
 }

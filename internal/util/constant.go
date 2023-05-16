@@ -38,6 +38,8 @@ const (
 
 	HeaderAuthorize = "authorization"
 	HeaderDBName    = "dbName"
+	// HeaderUser is the key of username in metadata of grpc.
+	HeaderUser = "user"
 	// HeaderSourceID identify requests from Milvus members and client requests
 	HeaderSourceID = "sourceId"
 	// MemberCredID id for Milvus members (data/index/query node/coord component)

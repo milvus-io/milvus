@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
@@ -127,9 +128,11 @@ type ShardSegmentDetector interface {
 type ShardNodeBuilder func(nodeID int64, addr string) shardQueryNode
 
 // withStreaming function type to let search detects corresponding search streaming is done.
-type searchWithStreaming func(ctx context.Context) (error, *internalpb.SearchResults)
-type queryWithStreaming func(ctx context.Context) (error, *internalpb.RetrieveResults)
-type getStatisticsWithStreaming func(ctx context.Context) (error, *internalpb.GetStatisticsResponse)
+type (
+	searchWithStreaming        func(ctx context.Context) (error, *internalpb.SearchResults)
+	queryWithStreaming         func(ctx context.Context) (error, *internalpb.RetrieveResults)
+	getStatisticsWithStreaming func(ctx context.Context) (error, *internalpb.GetStatisticsResponse)
+)
 
 // ShardCluster maintains the ShardCluster information and perform shard level operations
 type ShardCluster struct {
@@ -156,7 +159,8 @@ type ShardCluster struct {
 
 // NewShardCluster create a ShardCluster with provided information.
 func NewShardCluster(collectionID int64, replicaID int64, vchannelName string, version int64,
-	nodeDetector ShardNodeDetector, segmentDetector ShardSegmentDetector, nodeBuilder ShardNodeBuilder) *ShardCluster {
+	nodeDetector ShardNodeDetector, segmentDetector ShardSegmentDetector, nodeBuilder ShardNodeBuilder,
+) *ShardCluster {
 	sc := &ShardCluster{
 		state: atomic.NewInt32(int32(unavailable)),
 
@@ -933,6 +937,13 @@ func getSearchWithStreamingFunc(searchCtx context.Context, req *querypb.SearchRe
 			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
+		// In queue latency per user.
+		metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
+			fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel,
+			contextutil.GetUserFromGrpcMetadata(streamingTask.Ctx()),
+		).Observe(float64(streamingTask.queueDur.Milliseconds()))
+
 		return nil, streamingTask.Ret
 	}
 }
@@ -943,7 +954,6 @@ func getQueryWithStreamingFunc(queryCtx context.Context, req *querypb.QueryReque
 		streamingTask.DataScope = querypb.DataScope_Streaming
 		streamingTask.QS = qs
 		err := node.scheduler.AddReadTask(queryCtx, streamingTask)
-
 		if err != nil {
 			return err, nil
 		}
@@ -955,6 +965,13 @@ func getQueryWithStreamingFunc(queryCtx context.Context, req *querypb.QueryReque
 			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
+
+		// In queue latency per user.
+		metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
+			fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel,
+			contextutil.GetUserFromGrpcMetadata(streamingTask.Ctx()),
+		).Observe(float64(streamingTask.queueDur.Milliseconds()))
 		return nil, streamingTask.Ret
 	}
 }

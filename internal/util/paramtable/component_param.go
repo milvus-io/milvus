@@ -34,11 +34,11 @@ const (
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize        = 16
-	DefaultGracefulTime          = 5000 //ms
+	DefaultGracefulTime          = 5000 // ms
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 20 //s
+	DefaultSessionTTL        = 20 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -1117,11 +1117,23 @@ type queryNodeConfig struct {
 	CPURatio             float64
 	MaxTimestampLag      time.Duration
 
+	// schedule
+	ScheduleReadPolicy queryNodeConfigScheduleReadPolicy
+
 	GCHelperEnabled   bool
 	MinimumGOGCConfig int
 	MaximumGOGCConfig int
 
 	GracefulStopTimeout int64
+}
+
+type queryNodeConfigScheduleReadPolicy struct {
+	Name            string
+	UserTaskPolling queryNodeConfigScheduleUserTaskPolling
+}
+
+type queryNodeConfigScheduleUserTaskPolling struct {
+	TaskQueueExpire time.Duration
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1152,6 +1164,9 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initEnableDisk()
 	p.initDiskCapacity()
 	p.initMaxDiskUsagePercentage()
+
+	// Initialize scheduler.
+	p.initScheduleReadPolicy()
 
 	p.initGCTunerEnbaled()
 	p.initMaximumGOGC()
@@ -1346,6 +1361,11 @@ func (p *queryNodeConfig) initDiskCapacity() {
 	p.DiskCapacityLimit = diskSize * 1024 * 1024 * 1024
 }
 
+func (p *queryNodeConfig) initScheduleReadPolicy() {
+	p.ScheduleReadPolicy.Name = p.Base.LoadWithDefault("queryNode.scheduler.scheduleReadPolicy.name", "fifo")
+	p.ScheduleReadPolicy.UserTaskPolling.TaskQueueExpire = time.Duration(p.Base.ParseInt64WithDefault("queryNode.scheduler.scheduleReadPolicy.taskQueueExpire", 60)) * time.Second
+}
+
 func (p *queryNodeConfig) initGCTunerEnbaled() {
 	p.GCHelperEnabled = p.Base.ParseBool("queryNode.gchelper.enabled", true)
 }
@@ -1514,7 +1534,6 @@ func (p *dataCoordConfig) initSegmentMinSizeFromIdleToSealed() {
 func (p *dataCoordConfig) initSegmentExpansionRate() {
 	p.SegmentExpansionRate = p.Base.ParseFloatWithDefault("dataCoord.segment.expansionRate", 1.25)
 	log.Info("init segment expansion rate", zap.Float64("value", p.SegmentExpansionRate))
-
 }
 
 func (p *dataCoordConfig) initSegmentMaxBinlogFileNumber() {
@@ -1647,7 +1666,7 @@ type dataNodeConfig struct {
 	Base *BaseTable
 
 	// ID of the current node
-	//NodeID atomic.Value
+	// NodeID atomic.Value
 	NodeID atomic.Value
 	// IP of the current DataNode
 	IP string

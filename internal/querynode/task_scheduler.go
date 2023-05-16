@@ -40,7 +40,6 @@ type taskScheduler struct {
 
 	// for search and query start
 	unsolvedReadTasks *list.List
-	readyReadTasks    *list.List
 
 	receiveReadTaskChan chan readTask
 	executeReadTaskChan chan readTask
@@ -50,7 +49,8 @@ type taskScheduler struct {
 	// tSafeReplica
 	tSafeReplica TSafeReplicaInterface
 
-	schedule scheduleReadTaskPolicy
+	// schedule policy for ready read task.
+	readySchedulePolicy scheduleReadPolicy
 	// for search and query end
 
 	cpuUsage        int32 // 1200 means 1200% 12 cores
@@ -77,13 +77,12 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		ctx:                 ctx1,
 		cancel:              cancel,
 		unsolvedReadTasks:   list.New(),
-		readyReadTasks:      list.New(),
 		receiveReadTaskChan: make(chan readTask, Params.QueryNodeCfg.MaxReceiveChanSize),
 		executeReadTaskChan: make(chan readTask, maxExecuteReadChanLen),
 		notifyChan:          make(chan struct{}, 1),
 		tSafeReplica:        tSafeReplica,
 		maxCPUUsage:         int32(getNumCPU() * 100),
-		schedule:            defaultScheduleReadPolicy,
+		readySchedulePolicy: newReadScheduleTaskPolicy(Params.QueryNodeCfg.ScheduleReadPolicy.Name),
 	}
 	s.queue = newQueryNodeTaskQueue(s)
 	return s
@@ -248,7 +247,7 @@ func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
 func (s *taskScheduler) popAndAddToExecute() {
 	readConcurrency := atomic.LoadInt32(&s.readConcurrency)
 	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(readConcurrency))
-	if s.readyReadTasks.Len() == 0 {
+	if s.readySchedulePolicy.len() == 0 {
 		return
 	}
 	curUsage := atomic.LoadInt32(&s.cpuUsage)
@@ -266,7 +265,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 		return
 	}
 
-	tasks, deltaUsage := s.schedule(s.readyReadTasks, targetUsage, remain)
+	tasks, deltaUsage := s.readySchedulePolicy.schedule(targetUsage, remain)
 	atomic.AddInt32(&s.cpuUsage, deltaUsage)
 	for _, t := range tasks {
 		s.executeReadTaskChan <- t
@@ -366,23 +365,12 @@ func (s *taskScheduler) tryMergeReadTasks() {
 		}
 		if ready {
 			if !Params.QueryNodeCfg.GroupEnabled {
-				s.readyReadTasks.PushBack(t)
+				s.readySchedulePolicy.addTask(t)
 				rateCol.rtCounter.add(t, readyQueueType)
 			} else {
-				merged := false
-				for m := s.readyReadTasks.Back(); m != nil; m = m.Prev() {
-					mTask, ok := m.Value.(readTask)
-					if !ok {
-						continue
-					}
-					if mTask.CanMergeWith(t) {
-						mTask.Merge(t)
-						merged = true
-						break
-					}
-				}
-				if !merged {
-					s.readyReadTasks.PushBack(t)
+				// Try to merge task first, otherwise add it.
+				if !s.readySchedulePolicy.mergeTask(t) {
+					s.readySchedulePolicy.addTask(t)
 					rateCol.rtCounter.add(t, readyQueueType)
 				}
 			}
@@ -391,5 +379,5 @@ func (s *taskScheduler) tryMergeReadTasks() {
 		}
 	}
 	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))
-	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.readyReadTasks.Len()))
+	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.readySchedulePolicy.len()))
 }

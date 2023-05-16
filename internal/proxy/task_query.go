@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -229,7 +230,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("Validate partition names.",
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
-	//fetch search_growing from search param
+	// fetch search_growing from search param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
@@ -357,6 +358,11 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 	log := log.Ctx(ctx)
+
+	// Add user name into context if it's exists.
+	if username, _ := GetCurUserFromContext(ctx); username != "" {
+		ctx = contextutil.WithUserInGrpcMetadata(ctx, username)
+	}
 
 	executeQuery := func() error {
 		shards, err := globalMetaCache.GetShards(ctx, true, t.collectionName)

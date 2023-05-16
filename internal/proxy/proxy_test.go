@@ -353,12 +353,12 @@ func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *int
 func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p paramtable.GrpcServerConfig) {
 	defer wg.Done()
 
-	var kaep = keepalive.EnforcementPolicy{
+	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
 	}
 
-	var kasp = keepalive.ServerParameters{
+	kasp := keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
@@ -425,7 +425,7 @@ func TestProxy(t *testing.T) {
 	defer os.RemoveAll(path)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = GetContext(ctx, "root:123456")
+	ctx = getContextWithAuthorization(ctx, "root:123456")
 	localMsg := true
 	Params.InitOnce()
 	factory := dependency.MockDefaultFactory(localMsg, &Params)
@@ -758,7 +758,6 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 	})
 
 	wg.Add(1)
@@ -842,7 +841,6 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
-
 	})
 
 	wg.Add(1)
@@ -1423,7 +1421,7 @@ func TestProxy(t *testing.T) {
 			},
 		}
 
-		//resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
+		// resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
 		_, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
 			Base:    nil,
 			OpLeft:  opLeft,
@@ -2109,7 +2107,7 @@ func TestProxy(t *testing.T) {
 	t.Run("credential UPDATE api", func(t *testing.T) {
 		defer wg.Done()
 		rootCtx := ctx
-		fooCtx := GetContext(context.Background(), "foo:123456")
+		fooCtx := getContextWithAuthorization(context.Background(), "foo:123456")
 		ctx = fooCtx
 		originUsers := Params.CommonCfg.SuperUsers
 		Params.CommonCfg.SuperUsers = []string{"root"}
@@ -3863,7 +3861,6 @@ func TestProxy_ListImportTasks(t *testing.T) {
 }
 
 func TestProxy_GetStatistics(t *testing.T) {
-
 }
 
 func TestProxy_GetLoadState(t *testing.T) {
