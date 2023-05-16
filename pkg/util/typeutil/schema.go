@@ -550,7 +550,7 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 }
 
 // MergeFieldData appends fields data to dst
-func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
+func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
 	for _, data := range dst {
 		fieldID2Data[data.FieldId] = data
@@ -632,8 +632,19 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data...)
 				}
+			case *schemapb.ScalarField_JsonData:
+				if dstScalar.GetJsonData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: srcScalar.JsonData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data...)
+				}
 			default:
-				log.Error("Not supported field type", zap.String("field type", srcFieldData.Type.String()))
+				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
+				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
@@ -673,10 +684,13 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 					dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data...)
 				}
 			default:
-				log.Error("Not supported field type", zap.String("field type", srcFieldData.Type.String()))
+				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
+				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		}
 	}
+
+	return nil
 }
 
 // GetPrimaryFieldSchema get primary field schema from collection schema
