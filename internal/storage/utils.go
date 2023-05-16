@@ -178,7 +178,7 @@ func GetDimFromParams(params []*commonpb.KeyValuePair) (int, error) {
 	var dim int
 	var err error
 	for _, t := range params {
-		if t.Key == "dim" {
+		if t.Key == common.DimKey {
 			dim, err = strconv.Atoi(t.Value)
 			if err != nil {
 				return -1, err

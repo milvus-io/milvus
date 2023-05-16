@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type mockIDAllocator struct {
@@ -280,7 +281,7 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 					AutoID:       true,
 					DataType:     schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "max_length", Value: "1024"},
+						{Key: common.MaxLengthKey, Value: "1024"},
 					},
 				},
 			},

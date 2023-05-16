@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -64,13 +65,13 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					CreateTime:   1,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "128",
 						},
 					},
 					IndexParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "metrics_type",
+							Key:   common.MetricTypeKey,
 							Value: "L2",
 						},
 					},

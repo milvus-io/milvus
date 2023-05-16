@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -166,7 +167,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	it.newIndexParams = indexParams
 	it.statistic.IndexParams = it.req.GetIndexParams()
 	// ugly codes to get dimension
-	if dimStr, ok := typeParams["dim"]; ok {
+	if dimStr, ok := typeParams[common.DimKey]; ok {
 		var err error
 		it.statistic.Dim, err = strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
@@ -241,7 +242,7 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 
 func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	// support build diskann index
-	indexType := it.newIndexParams["index_type"]
+	indexType := it.newIndexParams[common.IndexTypeKey]
 	if indexType == indexparamcheck.IndexDISKANN {
 		return it.BuildDiskAnnIndex(ctx)
 	}
@@ -314,7 +315,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 	// check index node support disk index
 	if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 		log.Ctx(ctx).Error("IndexNode don't support build disk index",
-			zap.String("index type", it.newIndexParams["index_type"]),
+			zap.String("index type", it.newIndexParams[common.IndexTypeKey]),
 			zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk.GetAsBool()))
 		return errors.New("index node don't support build disk index")
 	}
@@ -414,7 +415,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 
 func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	// support build diskann index
-	indexType := it.newIndexParams["index_type"]
+	indexType := it.newIndexParams[common.IndexTypeKey]
 	if indexType == indexparamcheck.IndexDISKANN {
 		return it.SaveDiskAnnIndexFiles(ctx)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -73,7 +74,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "2",
 				},
 			},
@@ -102,7 +103,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "4",
 				},
 			},
@@ -131,7 +132,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "2",
 				},
 			},
@@ -279,7 +280,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -320,7 +321,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -406,7 +407,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "128",
 						},
 					},
@@ -445,7 +446,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -488,7 +489,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "8",
 						},
 					},
@@ -556,7 +557,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -567,7 +568,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -578,7 +579,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "8",
 						},
 					},
@@ -638,7 +639,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "8",
 						},
 					},
@@ -702,7 +703,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "1",
 						},
 					},
@@ -713,7 +714,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -724,7 +725,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "8",
 						},
 					},
@@ -788,7 +789,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "1",
 						},
 					},
@@ -799,7 +800,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -810,7 +811,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "2",
 						},
 					},
@@ -914,7 +915,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -925,7 +926,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "8",
 						},
 					},
@@ -936,7 +937,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					DataType: schemapb.DataType_VarChar,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "max_length",
+							Key:   common.MaxLengthKey,
 							Value: "8",
 						},
 					},

@@ -123,21 +123,21 @@ import (
 //			DataPaths:    paths,
 //			TypeParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "dim",
+//					Key:   common.DimKey,
 //					Value: "8",
 //				},
 //			},
 //			IndexParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "index_type",
+//					Key:   common.IndexTypeKey,
 //					Value: "IVF_SQ8",
 //				},
 //				{
-//					Key:   "params",
+//					Key:   common.IndexParamsKey,
 //					Value: "{\"nlist\": 128}",
 //				},
 //				{
-//					Key:   "metric_type",
+//					Key:   common.MetricTypeKey,
 //					Value: "L2",
 //				},
 //			},
@@ -238,17 +238,17 @@ import (
 //			DataPaths:    paths,
 //			TypeParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "dim",
+//					Key:   common.DimKey,
 //					Value: "8",
 //				},
 //			},
 //			IndexParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "index_type",
+//					Key:   common.IndexTypeKey,
 //					Value: "BIN_FLAT",
 //				},
 //				{
-//					Key:   "metric_type",
+//					Key:   common.MetricTypeKey,
 //					Value: "JACCARD",
 //				},
 //			},
@@ -351,21 +351,21 @@ import (
 //			DataPaths:    paths,
 //			TypeParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "dim",
+//					Key:   common.DimKey,
 //					Value: "8",
 //				},
 //			},
 //			IndexParams: []*commonpb.KeyValuePair{
 //				{
-//					Key:   "index_type",
+//					Key:   common.IndexTypeKey,
 //					Value: "IVF_SQ8",
 //				},
 //				{
-//					Key:   "params",
+//					Key:   common.IndexParamsKey,
 //					Value: "{\"nlist\": 128}",
 //				},
 //				{
-//					Key:   "metric_type",
+//					Key:   common.MetricTypeKey,
 //					Value: "L2",
 //				},
 //			},

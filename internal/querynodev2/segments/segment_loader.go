@@ -681,7 +681,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	// load on disk index
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+	if indexParams[common.IndexTypeKey] == indexparamcheck.IndexDISKANN {
 		return segment.LoadIndex(nil, indexInfo, fieldType)
 	}
 	// load in memory index
@@ -929,7 +929,7 @@ func JoinIDPath(ids ...UniqueID) string {
 }
 
 func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, error) {
-	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV("index_type", indexInfo.IndexParams)
+	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
 	if err != nil {
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}

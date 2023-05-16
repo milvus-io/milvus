@@ -336,7 +336,7 @@ func GetFileNameAndExt(filePath string) (string, string) {
 func getFieldDimension(schema *schemapb.FieldSchema) (int, error) {
 	for _, kvPair := range schema.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		if key == "dim" {
+		if key == common.DimKey {
 			dim, err := strconv.Atoi(value)
 			if err != nil {
 				return 0, fmt.Errorf("illegal vector dimension '%s' for field '%s', error: %w", value, schema.GetName(), err)

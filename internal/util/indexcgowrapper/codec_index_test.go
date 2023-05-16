@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -161,14 +162,14 @@ func genScalarIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type": "inverted_index",
+				common.IndexTypeKey: "inverted_index",
 			},
 		},
 		{
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type": "flat",
+				common.IndexTypeKey: "flat",
 			},
 		},
 	}
@@ -180,14 +181,14 @@ func genStringIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type": "inverted_index",
+				common.IndexTypeKey: "inverted_index",
 			},
 		},
 		{
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type": "marisa-trie",
+				common.IndexTypeKey: "marisa-trie",
 			},
 		},
 	}
@@ -199,22 +200,22 @@ func genFloatVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type":  IndexFaissIVFPQ,
-				"metric_type": L2,
-				"dim":         strconv.Itoa(dim),
-				"nlist":       strconv.Itoa(nlist),
-				"m":           strconv.Itoa(m),
-				"nbits":       strconv.Itoa(nbits),
+				common.IndexTypeKey:  IndexFaissIVFPQ,
+				common.MetricTypeKey: L2,
+				common.DimKey:        strconv.Itoa(dim),
+				"nlist":              strconv.Itoa(nlist),
+				"m":                  strconv.Itoa(m),
+				"nbits":              strconv.Itoa(nbits),
 			},
 		},
 		{
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type":  IndexFaissIVFFlat,
-				"metric_type": L2,
-				"dim":         strconv.Itoa(dim),
-				"nlist":       strconv.Itoa(nlist),
+				common.IndexTypeKey:  IndexFaissIVFFlat,
+				common.MetricTypeKey: L2,
+				common.DimKey:        strconv.Itoa(dim),
+				"nlist":              strconv.Itoa(nlist),
 			},
 		},
 	}
@@ -226,11 +227,11 @@ func genBinaryVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				"index_type":  IndexFaissBinIVFFlat,
-				"metric_type": Jaccard,
-				"dim":         strconv.Itoa(dim),
-				"nlist":       strconv.Itoa(nlist),
-				"nbits":       strconv.Itoa(nbits),
+				common.IndexTypeKey:  IndexFaissBinIVFFlat,
+				common.MetricTypeKey: Jaccard,
+				common.DimKey:        strconv.Itoa(dim),
+				"nlist":              strconv.Itoa(nlist),
+				"nbits":              strconv.Itoa(nbits),
 			},
 		},
 	}

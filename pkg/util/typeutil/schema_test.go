@@ -87,7 +87,7 @@ func TestSchema(t *testing.T) {
 				DataType:     21,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "max_length",
+						Key:   common.MaxLengthKey,
 						Value: "125",
 					},
 				},
@@ -100,7 +100,7 @@ func TestSchema(t *testing.T) {
 				DataType:     101,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: "128",
 					},
 				},
@@ -119,7 +119,7 @@ func TestSchema(t *testing.T) {
 				DataType:     100,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: "128",
 					},
 				},
@@ -957,7 +957,7 @@ func TestCalcColumnSize(t *testing.T) {
 				DataType:     schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "max_length",
+						Key:   common.MaxLengthKey,
 						Value: "125",
 					},
 				},

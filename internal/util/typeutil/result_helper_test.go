@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -92,7 +93,7 @@ func TestGenEmptyFieldData(t *testing.T) {
 		assert.Error(t, err)
 	}
 
-	field.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}
+	field.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
 	for _, dataType := range vectorTypes {
 		field.DataType = dataType
 		fieldData, err := typeutil.GenEmptyFieldData(field)

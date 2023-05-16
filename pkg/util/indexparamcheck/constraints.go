@@ -1,5 +1,7 @@
 package indexparamcheck
 
+import "github.com/milvus-io/milvus/pkg/common"
+
 const (
 	// L2 represents Euclidean distance
 	L2 = "L2"
@@ -50,9 +52,9 @@ const (
 	HNSWMaxM              = 64
 
 	// DIM is a constant used to represent dimension
-	DIM = "dim"
+	DIM = common.DimKey
 	// Metric is a constant used to metric type
-	Metric = "metric_type"
+	Metric = common.MetricTypeKey
 	// NLIST is a constant used to nlist in Index IVFxxx
 	NLIST = "nlist"
 	NBITS = "nbits"

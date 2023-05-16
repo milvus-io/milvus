@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -94,7 +95,7 @@ func sampleSchema() *schemapb.CollectionSchema {
 				Description:  "string",
 				DataType:     schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length", Value: "128"},
+					{Key: common.MaxLengthKey, Value: "128"},
 				},
 			},
 			{
@@ -104,7 +105,7 @@ func sampleSchema() *schemapb.CollectionSchema {
 				Description:  "binary_vector",
 				DataType:     schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "16"},
+					{Key: common.DimKey, Value: "16"},
 				},
 			},
 			{
@@ -114,7 +115,7 @@ func sampleSchema() *schemapb.CollectionSchema {
 				Description:  "float_vector",
 				DataType:     schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "4"},
+					{Key: common.DimKey, Value: "4"},
 				},
 			},
 		},
@@ -154,7 +155,7 @@ func strKeySchema() *schemapb.CollectionSchema {
 				Description:  "uid",
 				DataType:     schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length", Value: "1024"},
+					{Key: common.MaxLengthKey, Value: "1024"},
 				},
 			},
 			{
@@ -178,7 +179,7 @@ func strKeySchema() *schemapb.CollectionSchema {
 				Description:  "string_scalar",
 				DataType:     schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length", Value: "128"},
+					{Key: common.MaxLengthKey, Value: "128"},
 				},
 			},
 			{
@@ -195,7 +196,7 @@ func strKeySchema() *schemapb.CollectionSchema {
 				Description:  "vectors",
 				DataType:     schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "4"},
+					{Key: common.DimKey, Value: "4"},
 				},
 			},
 		},
@@ -421,7 +422,7 @@ func Test_InitValidators(t *testing.T) {
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
-				{Key: "dim", Value: "aa"},
+				{Key: common.DimKey, Value: "aa"},
 			},
 		})
 
@@ -436,7 +437,7 @@ func Test_InitValidators(t *testing.T) {
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
-				{Key: "dim", Value: "aa"},
+				{Key: common.DimKey, Value: "aa"},
 			},
 		})
 
@@ -472,7 +473,7 @@ func Test_GetFieldDimension(t *testing.T) {
 		Description:  "float_vector",
 		DataType:     schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "4"},
+			{Key: common.DimKey, Value: "4"},
 		},
 	}
 
@@ -481,7 +482,7 @@ func Test_GetFieldDimension(t *testing.T) {
 	assert.Equal(t, 4, dim)
 
 	schema.TypeParams = []*commonpb.KeyValuePair{
-		{Key: "dim", Value: "abc"},
+		{Key: common.DimKey, Value: "abc"},
 	}
 	dim, err = getFieldDimension(schema)
 	assert.NotNil(t, err)

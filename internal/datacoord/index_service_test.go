@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestServerId(t *testing.T) {
@@ -50,13 +51,13 @@ func TestServer_CreateIndex(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -123,7 +124,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.meta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		req.IndexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "DISKANN",
 			},
 		}
@@ -138,7 +139,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.meta.catalog = &datacoord.Catalog{MetaKv: &saveFailKV{}}
 		req.IndexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -158,13 +159,13 @@ func TestServer_GetIndexState(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -349,13 +350,13 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -486,13 +487,13 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -677,13 +678,13 @@ func TestServer_DescribeIndex(t *testing.T) {
 		indexName    = "default_idx"
 		typeParams   = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -959,13 +960,13 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		indexName    = "default_idx"
 		typeParams   = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -1239,13 +1240,13 @@ func TestServer_DropIndex(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
@@ -1435,13 +1436,13 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}

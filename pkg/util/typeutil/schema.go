@@ -23,8 +23,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 const DynamicFieldMaxLength = 512
@@ -40,8 +42,7 @@ func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 
 	switch fieldSchema.DataType {
 	case schemapb.DataType_VarChar:
-		maxLengthPerRowKey := "max_length"
-		maxLengthPerRowValue, ok := paramsMap[maxLengthPerRowKey]
+		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
 			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
 		}
@@ -84,7 +85,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			res += maxLengthPerRow
 		case schemapb.DataType_BinaryVector:
 			for _, kv := range fs.TypeParams {
-				if kv.Key == "dim" {
+				if kv.Key == common.DimKey {
 					v, err := strconv.Atoi(kv.Value)
 					if err != nil {
 						return -1, err
@@ -95,7 +96,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			}
 		case schemapb.DataType_FloatVector:
 			for _, kv := range fs.TypeParams {
-				if kv.Key == "dim" {
+				if kv.Key == common.DimKey {
 					v, err := strconv.Atoi(kv.Value)
 					if err != nil {
 						return -1, err
@@ -286,7 +287,7 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 		return 0, fmt.Errorf("field type = %s not has dim", schemapb.DataType_name[int32(sch.DataType)])
 	}
 	for _, kv := range sch.TypeParams {
-		if kv.Key == "dim" {
+		if kv.Key == common.DimKey {
 			dim, err := strconv.Atoi(kv.Value)
 			if err != nil {
 				return 0, err

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
@@ -155,7 +156,7 @@ func TestValidateDimension(t *testing.T) {
 		DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "1",
 			},
 		},
@@ -163,7 +164,7 @@ func TestValidateDimension(t *testing.T) {
 	assert.Nil(t, validateDimension(fieldSchema))
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: Params.ProxyCfg.MaxDimension.GetValue(),
 		},
 	}
@@ -172,14 +173,14 @@ func TestValidateDimension(t *testing.T) {
 	// invalid dim
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "-1",
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
 		},
 	}
@@ -188,21 +189,21 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.DataType = schemapb.DataType_BinaryVector
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "8",
 		},
 	}
 	assert.Nil(t, validateDimension(fieldSchema))
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt()),
 		},
 	}
 	assert.Nil(t, validateDimension(fieldSchema))
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "9",
 		},
 	}
@@ -229,7 +230,7 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 	}
 	assert.NotNil(t, validateVectorFieldMetricType(field1))
 	field1.IndexParams = append(field1.IndexParams, &commonpb.KeyValuePair{
-		Key:   "metric_type",
+		Key:   common.MetricTypeKey,
 		Value: "",
 	})
 	assert.Nil(t, validateVectorFieldMetricType(field1))
@@ -266,7 +267,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 		DataType:     schemapb.DataType_VarChar,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "max_length",
+				Key:   common.MaxLengthKey,
 				Value: "100",
 			},
 		},
@@ -454,21 +455,21 @@ func TestValidateSchema(t *testing.T) {
 
 	tp3Good := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "128",
 		},
 	}
 
 	tp3Bad1 := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "asdfa",
 		},
 	}
 
 	tp3Bad2 := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "-1",
 		},
 	}
@@ -482,43 +483,43 @@ func TestValidateSchema(t *testing.T) {
 
 	tp3Bad4 := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "128",
 		},
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "64",
 		},
 	}
 
 	ip3Good := []*commonpb.KeyValuePair{
 		{
-			Key:   "metric_type",
+			Key:   common.MetricTypeKey,
 			Value: "IP",
 		},
 	}
 
 	ip3Bad1 := []*commonpb.KeyValuePair{
 		{
-			Key:   "metric_type",
+			Key:   common.MetricTypeKey,
 			Value: "JACCARD",
 		},
 	}
 
 	ip3Bad2 := []*commonpb.KeyValuePair{
 		{
-			Key:   "metric_type",
+			Key:   common.MetricTypeKey,
 			Value: "xxxxxx",
 		},
 	}
 
 	ip3Bad3 := []*commonpb.KeyValuePair{
 		{
-			Key:   "metric_type",
+			Key:   common.MetricTypeKey,
 			Value: "L2",
 		},
 		{
-			Key:   "metric_type",
+			Key:   common.MetricTypeKey,
 			Value: "IP",
 		},
 	}
