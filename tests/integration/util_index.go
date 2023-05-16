@@ -130,7 +130,7 @@ func getSearchParams(indexType string, metricType string) map[string]any {
 	params := make(map[string]any)
 	switch indexType {
 	case IndexFaissIDMap, IndexFaissBinIDMap:
-		params["metric_type"] = metricType
+		params[common.MetricTypeKey] = metricType
 	case IndexFaissIvfFlat, IndexFaissBinIvfFlat, IndexFaissIvfSQ8, IndexFaissIvfPQ:
 		params["nprobe"] = 8
 	case IndexHNSW:

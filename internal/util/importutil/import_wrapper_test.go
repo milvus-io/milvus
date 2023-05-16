@@ -475,7 +475,7 @@ func perfSchema(dim int) *schemapb.CollectionSchema {
 				Description:  "float_vector",
 				DataType:     schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: strconv.Itoa(dim)},
+					{Key: common.DimKey, Value: strconv.Itoa(dim)},
 				},
 			},
 		},

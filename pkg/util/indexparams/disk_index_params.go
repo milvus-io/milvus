@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -182,7 +183,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 // SetDiskIndexBuildParams set index build params with ratio params on indexNode
 // IndexNode cal build param with ratio params and cpu count, memory count...
 func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error {
-	dimStr, ok := indexParams["dim"]
+	dimStr, ok := indexParams[common.DimKey]
 	if !ok {
 		// type param dim has been put into index params before build index
 		return fmt.Errorf("type param dim not exist")
@@ -220,7 +221,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 // SetDiskIndexLoadParams set disk index load params with ratio params on queryNode
 // QueryNode cal load params with ratio params ans cpu count...
 func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[string]string, numRows int64) error {
-	dimStr, ok := indexParams["dim"]
+	dimStr, ok := indexParams[common.DimKey]
 	if !ok {
 		// type param dim has been put into index params before build index
 		return fmt.Errorf("type param dim not exist")

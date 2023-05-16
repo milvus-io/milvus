@@ -38,7 +38,7 @@ var (
 		IndexName:    indexName,
 		IndexID:      1,
 		FieldID:      1,
-		IndexParams:  []*commonpb.KeyValuePair{{Key: "index_type", Value: "STL_SORT"}},
+		IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
 		IsDeleted:    true,
 	}
 )

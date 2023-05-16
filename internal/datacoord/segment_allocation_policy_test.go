@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 
@@ -54,7 +55,7 @@ func TestUpperLimitCalBySchema(t *testing.T) {
 					{
 						DataType: schemapb.DataType_FloatVector,
 						TypeParams: []*commonpb.KeyValuePair{
-							{Key: "dim", Value: "bad_dim"},
+							{Key: common.DimKey, Value: "bad_dim"},
 						},
 					},
 				},
@@ -74,7 +75,7 @@ func TestUpperLimitCalBySchema(t *testing.T) {
 					{
 						DataType: schemapb.DataType_FloatVector,
 						TypeParams: []*commonpb.KeyValuePair{
-							{Key: "dim", Value: "128"},
+							{Key: common.DimKey, Value: "128"},
 						},
 					},
 				},

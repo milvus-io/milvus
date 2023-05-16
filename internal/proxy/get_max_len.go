@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -16,7 +17,7 @@ func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_VarChar, field.GetDataType(), msg)
 	}
 	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
-	maxLengthStr, err := h.Get("max_length")
+	maxLengthStr, err := h.Get(common.MaxLengthKey)
 	if err != nil {
 		msg := "max length not found"
 		return 0, merr.WrapErrParameterInvalid("max length key in type parameters", "not found", msg)

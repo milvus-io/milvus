@@ -169,7 +169,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	for k, v := range indexParamsMap {
 		//Currently, it is required that type_params and index_params do not have same keys.
-		if k == DimKey || k == maxVarCharLengthKey {
+		if k == DimKey || k == common.MaxLengthKey {
 			delete(indexParamsMap, k)
 			continue
 		}

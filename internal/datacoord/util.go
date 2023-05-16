@@ -177,7 +177,7 @@ func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, err
 
 func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 	for _, param := range indexParams {
-		if param.Key == "index_type" {
+		if param.Key == common.IndexTypeKey {
 			return param.Value
 		}
 	}

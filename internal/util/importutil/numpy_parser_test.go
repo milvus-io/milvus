@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -187,7 +188,7 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 			Description:  "float_vector",
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
-				{Key: "dim", Value: "99"},
+				{Key: common.DimKey, Value: "99"},
 			},
 		}
 		err = validateHeader(data3, schema)
@@ -215,7 +216,7 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 			Description:  "binary_vector",
 			DataType:     schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
-				{Key: "dim", Value: "99"},
+				{Key: common.DimKey, Value: "99"},
 			},
 		}
 		err = validateHeader(data3, schema)

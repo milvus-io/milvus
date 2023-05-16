@@ -90,7 +90,7 @@ func constructCollectionSchema(
 		DataType:     schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: strconv.Itoa(dim),
 			},
 		},
@@ -119,7 +119,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_BinaryVector {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(testVecDim),
 				},
 			}
@@ -127,7 +127,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 		if dataType == schemapb.DataType_VarChar {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: strconv.Itoa(testMaxVarCharLength),
 				},
 			}
@@ -211,7 +211,7 @@ func constructCollectionSchemaWithAllType(
 		DataType:     schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: strconv.Itoa(dim),
 			},
 		},
@@ -226,7 +226,7 @@ func constructCollectionSchemaWithAllType(
 		DataType:     schemapb.DataType_BinaryVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: strconv.Itoa(dim),
 			},
 		},
@@ -678,7 +678,7 @@ func TestCreateCollectionTask(t *testing.T) {
 				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
 				schema.Fields[idx].TypeParams = []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: "not int",
 					},
 				}
@@ -696,7 +696,7 @@ func TestCreateCollectionTask(t *testing.T) {
 				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
 				schema.Fields[idx].TypeParams = []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() + 1),
 					},
 				}
@@ -712,7 +712,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		schema.Fields[1].DataType = schemapb.DataType_BinaryVector
 		schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() + 1),
 			},
 		}
@@ -731,7 +731,7 @@ func TestCreateCollectionTask(t *testing.T) {
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(128),
 				},
 			},
@@ -2023,7 +2023,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 						TypeParams:   nil,
 						IndexParams: []*commonpb.KeyValuePair{
 							{
-								Key:   "dim",
+								Key:   common.DimKey,
 								Value: "128",
 							},
 						},
@@ -2104,12 +2104,12 @@ func Test_fillDimension(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			IndexParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "128",
 				},
 			},
 		}
-		assert.Error(t, fillDimension(f, map[string]string{"dim": "8"}))
+		assert.Error(t, fillDimension(f, map[string]string{common.DimKey: "8"}))
 	})
 
 	t.Run("normal", func(t *testing.T) {
@@ -2117,14 +2117,14 @@ func Test_fillDimension(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			IndexParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "128",
 				},
 			},
 		}
 		m := map[string]string{}
 		assert.NoError(t, fillDimension(f, m))
-		assert.Equal(t, "128", m["dim"])
+		assert.Equal(t, "128", m[common.DimKey])
 	})
 }
 
@@ -2134,15 +2134,15 @@ func Test_checkTrain(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			IndexParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "128",
 				},
 			},
 		}
 		m := map[string]string{
-			"index_type":  "IVF_FLAT",
-			"nlist":       "1024",
-			"metric_type": "L2",
+			common.IndexTypeKey:  "IVF_FLAT",
+			"nlist":              "1024",
+			common.MetricTypeKey: "L2",
 		}
 		assert.NoError(t, checkTrain(f, m))
 	})
@@ -2152,7 +2152,7 @@ func Test_checkTrain(t *testing.T) {
 			DataType: schemapb.DataType_Int64,
 		}
 		m := map[string]string{
-			"index_type": "scalar",
+			common.IndexTypeKey: "scalar",
 		}
 		assert.NoError(t, checkTrain(f, m))
 	})
@@ -2162,16 +2162,16 @@ func Test_checkTrain(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			IndexParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "128",
 				},
 			},
 		}
 		m := map[string]string{
-			"index_type":  "IVF_FLAT",
-			"nlist":       "1024",
-			"metric_type": "L2",
-			"dim":         "8",
+			common.IndexTypeKey:  "IVF_FLAT",
+			"nlist":              "1024",
+			common.MetricTypeKey: "L2",
+			common.DimKey:        "8",
 		}
 		assert.Error(t, checkTrain(f, m))
 	})
@@ -2181,14 +2181,14 @@ func Test_checkTrain(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			IndexParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "128",
 				},
 			},
 		}
 		m := map[string]string{
-			"index_type":  "IVF_FLAT",
-			"metric_type": "L2",
+			common.IndexTypeKey:  "IVF_FLAT",
+			common.MetricTypeKey: "L2",
 		}
 		assert.Error(t, checkTrain(f, m))
 	})
@@ -2236,7 +2236,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 						TypeParams:   nil,
 						IndexParams: []*commonpb.KeyValuePair{
 							{
-								Key:   "dim",
+								Key:   common.DimKey,
 								Value: "128",
 							},
 						},
@@ -2248,7 +2248,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 		globalMetaCache = cache
 		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 			{
@@ -2256,7 +2256,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 				Value: "1024",
 			},
 			{
-				Key:   "metric_type",
+				Key:   common.MetricTypeKey,
 				Value: "L2",
 			},
 		}

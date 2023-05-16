@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
@@ -60,7 +61,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams := make(map[string]string)
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
-		indexParams["index_type"] = "DISKANN"
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
@@ -87,7 +88,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams := make(map[string]string)
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
-		indexParams["index_type"] = "DISKANN"
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		str, err := json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
@@ -108,7 +109,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams = make(map[string]string)
 		indexParams["max_degree"] = "56"
 		indexParams["search_list"] = "100" // should be search_list_size
-		indexParams["index_type"] = "DISKANN"
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
@@ -126,7 +127,7 @@ func TestDiskIndexParams(t *testing.T) {
 		err := SetDiskIndexBuildParams(indexParams, 100)
 		assert.Error(t, err)
 
-		indexParams["dim"] = "128"
+		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100)
 		assert.NoError(t, err)
 
@@ -146,7 +147,7 @@ func TestDiskIndexParams(t *testing.T) {
 		err := SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
-		indexParams["dim"] = "128"
+		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.NoError(t, err)
 
@@ -209,7 +210,7 @@ func TestDiskIndexParams(t *testing.T) {
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
-		indexParams["dim"] = "128"
+		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.NoError(t, err)
 
@@ -243,11 +244,11 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams := make(map[string]string)
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
-		indexParams["index_type"] = "DISKANN"
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		str, err := json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
-		indexParams["dim"] = "128"
+		indexParams[common.DimKey] = "128"
 
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
@@ -268,7 +269,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams = make(map[string]string)
 		indexParams["max_degree"] = "56"
 		indexParams["search_list"] = "100" // should be search_list_size
-		indexParams["index_type"] = "DISKANN"
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))

@@ -81,7 +81,7 @@ const (
 	defaultDim        = 128
 	defaultMetricType = "L2"
 
-	dimKey = "dim"
+	dimKey = common.DimKey
 
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
@@ -211,7 +211,7 @@ func genPKFieldSchema(param constFieldParam) *schemapb.FieldSchema {
 
 	if param.dataType == schemapb.DataType_VarChar {
 		field.TypeParams = []*commonpb.KeyValuePair{
-			{Key: "max_length", Value: "12"},
+			{Key: common.MaxLengthKey, Value: "12"},
 		}
 	}
 	return field
@@ -890,11 +890,11 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 func genIndexParams(indexType, metricType string) (map[string]string, map[string]string) {
 	typeParams := make(map[string]string)
-	typeParams["dim"] = strconv.Itoa(defaultDim)
+	typeParams[common.DimKey] = strconv.Itoa(defaultDim)
 
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = indexType
-	indexParams["metric_type"] = metricType
+	indexParams[common.IndexTypeKey] = indexType
+	indexParams[common.MetricTypeKey] = metricType
 	indexParams["index_mode"] = "cpu"
 	if indexType == IndexFaissIDMap { // float vector
 	} else if indexType == IndexFaissIVFFlat {
@@ -915,7 +915,7 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexFaissBinIDMap {
-		//indexParams["dim"] = strconv.Itoa(defaultDim)
+		//indexParams[common.DimKey] = strconv.Itoa(defaultDim)
 	} else {
 		panic("")
 	}

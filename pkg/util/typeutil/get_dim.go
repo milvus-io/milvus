@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // GetDim get dimension of field. Maybe also helpful outside.
@@ -13,7 +14,7 @@ func GetDim(field *schemapb.FieldSchema) (int64, error) {
 		return 0, fmt.Errorf("%s is not of vector type", field.GetDataType())
 	}
 	h := NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
-	dimStr, err := h.Get("dim")
+	dimStr, err := h.Get(common.DimKey)
 	if err != nil {
 		return 0, fmt.Errorf("dim not found")
 	}

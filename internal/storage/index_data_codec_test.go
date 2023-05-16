@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -35,7 +36,7 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	indexName := funcutil.GenRandomStr()
 	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = "IVF_FLAT"
+	indexParams[common.IndexTypeKey] = "IVF_FLAT"
 	datas := []*Blob{
 		{
 			Key:   "ivf1",
@@ -103,7 +104,7 @@ func TestIndexFileBinlogCodecError(t *testing.T) {
 	indexName := funcutil.GenRandomStr()
 	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = "IVF_FLAT"
+	indexParams[common.IndexTypeKey] = "IVF_FLAT"
 	datas := []*Blob{
 		{
 			Key:   "ivf1",

@@ -71,8 +71,8 @@ func TestBulkInsert(t *testing.T) {
 
 	schema := constructSchema(collectionName, dim, true,
 		&schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-		&schemapb.FieldSchema{Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}}},
-		&schemapb.FieldSchema{Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		&schemapb.FieldSchema{Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}},
+		&schemapb.FieldSchema{Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 	)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
@@ -98,14 +98,14 @@ func TestBulkInsert(t *testing.T) {
 
 	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: strconv.Itoa(Dim),
 		},
 	})
 	assert.NoError(t, err)
 	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 		{
-			Key:   "max_length",
+			Key:   common.MaxLengthKey,
 			Value: strconv.Itoa(65535),
 		},
 	})
@@ -225,7 +225,7 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, t
 		}
 	}
 	if dType == schemapb.DataType_FloatVector {
-		dimStr, ok := funcutil.KeyValuePair2Map(typeParams)["dim"]
+		dimStr, ok := funcutil.KeyValuePair2Map(typeParams)[common.DimKey]
 		if !ok {
 			return errors.New("FloatVector field needs dim parameter")
 		}
@@ -260,7 +260,7 @@ func TestGenerateNumpyFile(t *testing.T) {
 	require.NoError(t, err)
 	err = GenerateNumpyFile(TempFilesPath+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: strconv.Itoa(Dim),
 		},
 	})

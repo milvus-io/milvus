@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -284,7 +285,7 @@ func Test_parseIndexParams(t *testing.T) {
 			FieldName:      "",
 			ExtraParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "index_type",
+					Key:   common.IndexTypeKey,
 					Value: "HNSW",
 				},
 				{
@@ -292,7 +293,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "IP",
 				},
 				{
-					Key:   "params",
+					Key:   common.IndexParamsKey,
 					Value: "{\"M\": 48, \"efConstruction\": 64}",
 				},
 				{
@@ -335,7 +336,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.ElementsMatch(t,
 			[]*commonpb.KeyValuePair{
 				{
-					Key:   "index_type",
+					Key:   common.IndexTypeKey,
 					Value: "HNSW",
 				},
 				{
@@ -369,7 +370,7 @@ func Test_parseIndexParams(t *testing.T) {
 			FieldName:      "",
 			ExtraParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "index_type",
+					Key:   common.IndexTypeKey,
 					Value: "IVF_FLAT",
 				},
 				{
@@ -377,7 +378,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "L2",
 				},
 				{
-					Key:   "params",
+					Key:   common.IndexParamsKey,
 					Value: "{\"nlist\": 100}",
 				},
 				{
@@ -415,9 +416,9 @@ func Test_parseIndexParams(t *testing.T) {
 	t.Run("parse index params 2", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
 		indexParams := map[string]any{
-			"index_type":     "HNSW",
-			"M":              10,
-			"efConstruction": 100,
+			common.IndexTypeKey: "HNSW",
+			"M":                 10,
+			"efConstruction":    100,
 		}
 		indexParamsStr, err := json.Marshal(indexParams)
 		assert.NoError(t, err)
@@ -428,7 +429,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.ElementsMatch(t,
 			[]*commonpb.KeyValuePair{
 				{
-					Key:   "index_type",
+					Key:   common.IndexTypeKey,
 					Value: "HNSW",
 				},
 				{

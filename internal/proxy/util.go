@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -49,9 +50,6 @@ const (
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = false
-
-	// maximum length of variable-length strings
-	maxVarCharLengthKey = "max_length"
 
 	defaultMaxVarCharLength = 65535
 
@@ -216,7 +214,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	exist := false
 	var dim int64
 	for _, param := range field.TypeParams {
-		if param.Key == "dim" {
+		if param.Key == common.DimKey {
 			exist = true
 			tmp, err := strconv.ParseInt(param.Value, 10, 64)
 			if err != nil {
@@ -242,7 +240,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
 	exist := false
 	for _, param := range field.TypeParams {
-		if param.Key != maxVarCharLengthKey {
+		if param.Key != common.MaxLengthKey {
 			return fmt.Errorf("type param key(max_length) should be specified for varChar field, not %s", param.Key)
 		}
 
@@ -268,7 +266,7 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 		return nil
 	}
 	for _, params := range field.IndexParams {
-		if params.Key == "metric_type" {
+		if params.Key == common.MetricTypeKey {
 			return nil
 		}
 	}
@@ -440,7 +438,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 			if err2 != nil {
 				return err2
 			}
-			dimStr, ok := typeKv["dim"]
+			dimStr, ok := typeKv[common.DimKey]
 			if !ok {
 				return fmt.Errorf("dim not found in type_params for vector field %s(%d)", field.Name, field.FieldID)
 			}
@@ -449,7 +447,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 				return fmt.Errorf("invalid dim; %s", dimStr)
 			}
 
-			metricTypeStr, ok := indexKv["metric_type"]
+			metricTypeStr, ok := indexKv[common.MetricTypeKey]
 			if ok {
 				err4 := validateMetricType(field.DataType, metricTypeStr)
 				if err4 != nil {

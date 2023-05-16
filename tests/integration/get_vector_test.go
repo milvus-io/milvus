@@ -51,7 +51,7 @@ type TestGetVectorSuite struct {
 	vecType    schemapb.DataType
 }
 
-func (suite *TestGetVectorSuite) SetupSuite() {
+func (suite *TestGetVectorSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), time.Second*180)
 
 	var err error
@@ -59,6 +59,12 @@ func (suite *TestGetVectorSuite) SetupSuite() {
 	suite.Require().NoError(err)
 	err = suite.cluster.Start()
 	suite.Require().NoError(err)
+}
+
+func (suite *TestGetVectorSuite) TearDownTest() {
+	err := suite.cluster.Stop()
+	suite.Require().NoError(err)
+	suite.cancel()
 }
 
 func (suite *TestGetVectorSuite) run() {
@@ -80,7 +86,7 @@ func (suite *TestGetVectorSuite) run() {
 		DataType:     suite.pkType,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "max_length",
+				Key:   common.MaxLengthKey,
 				Value: "100",
 			},
 		},
@@ -357,12 +363,6 @@ func (suite *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
 //	suite.vecType = schemapb.DataType_FloatVector
 //	suite.run()
 //}
-
-func (suite *TestGetVectorSuite) TearDownSuite() {
-	err := suite.cluster.Stop()
-	suite.Require().NoError(err)
-	suite.cancel()
-}
 
 func TestGetVector(t *testing.T) {
 	suite.Run(t, new(TestGetVectorSuite))

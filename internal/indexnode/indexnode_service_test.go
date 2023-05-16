@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
@@ -70,17 +71,17 @@ func TestIndexNodeSimple(t *testing.T) {
 		vecDim        int64 = 8
 		typeParams          = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", vecDim),
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "metric_type",
+				Key:   common.MetricTypeKey,
 				Value: "L2",
 			},
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 			{
@@ -199,15 +200,15 @@ func TestIndexNodeComplex(t *testing.T) {
 		idxID0           int64 = 40000
 		typesParamsLists       = [][]*commonpb.KeyValuePair{
 			{{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", 8),
 			}},
 			{{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", 16),
 			}},
 			{{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", 32),
 			}},
 		}
@@ -219,11 +220,11 @@ func TestIndexNodeComplex(t *testing.T) {
 				Value: "128",
 			},
 			{
-				Key:   "metric_type",
+				Key:   common.MetricTypeKey,
 				Value: "L2",
 			},
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 		}
