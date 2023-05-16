@@ -49,9 +49,13 @@ const (
 	RoleAdmin           = "admin"
 	RolePublic          = "public"
 	DefaultDBName       = "default"
+	DefaultDBID         = int64(1)
+	NonDBID             = int64(0)
 
 	PrivilegeWord = "Privilege"
 	AnyWord       = "*"
+
+	HeaderDatabase = "dbname"
 )
 
 const (

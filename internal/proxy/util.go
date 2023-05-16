@@ -135,6 +135,31 @@ func ValidateResourceGroupName(entity string) error {
 	return nil
 }
 
+func ValidateDatabaseName(dbName string) error {
+	if dbName == "" {
+		return errors.New("database name couldn't be empty")
+	}
+
+	invalidMsg := fmt.Sprintf("Invalid database name %s,", dbName)
+	if int64(len(dbName)) > Params.ProxyCfg.MaxNameLength {
+		return fmt.Errorf("%s the length of a database name must be less than %d characters",
+			invalidMsg, Params.ProxyCfg.MaxNameLength)
+	}
+
+	firstChar := dbName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return fmt.Errorf("%s the first character of a database name must be an underscore or letter", invalidMsg)
+	}
+
+	for i := 1; i < len(dbName); i++ {
+		c := dbName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return fmt.Errorf("%s database name can only contain numbers, letters and underscores", invalidMsg)
+		}
+	}
+	return nil
+}
+
 // ValidateCollectionAlias returns true if collAlias is a valid alias name for collection, otherwise returns false.
 func ValidateCollectionAlias(collAlias string) error {
 	return validateCollectionNameOrAlias(collAlias, "alias")
@@ -373,8 +398,8 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 	return false, fmt.Errorf("invalid data type: %d", dataType)
 }
 
-func isPartitionKeyMode(ctx context.Context, colName string) (bool, error) {
-	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, colName)
+func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (bool, error) {
+	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
 	if err != nil {
 		return false, err
 	}
@@ -744,7 +769,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return username, nil
 }
 
-func GetCurDBNameFromContext(ctx context.Context) string {
+func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return util.DefaultDBName
@@ -925,7 +950,7 @@ func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 		),
 		CollectionIDs: []int64{collectionID},
 	})
@@ -958,7 +983,7 @@ func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	IDs2Names := make(map[int64]string)
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName, partitionName)
 		if err != nil {
 			return 0, err
 		}
@@ -1000,8 +1025,8 @@ func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
 	return progress, nil
 }
 
-func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, collectionName)
+func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, collectionName string) ([]string, error) {
+	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}

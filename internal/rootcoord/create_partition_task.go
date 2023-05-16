@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -42,7 +41,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreatePartition); err != nil {
 		return err
 	}
-	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), t.GetTs())
+	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.GetTs())
 	if err != nil {
 		return err
 	}
@@ -81,6 +80,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
+		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),

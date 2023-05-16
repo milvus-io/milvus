@@ -141,6 +141,10 @@ service RootCoord {
     rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
     rpc RenameCollection(milvus.RenameCollectionRequest) returns (common.Status) {}
+
+    rpc CreateDatabase(milvus.CreateDatabaseRequest) returns (common.Status) {}
+    rpc DropDatabase(milvus.DropDatabaseRequest) returns (common.Status) {}
+    rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
 }
 
 message AllocTimestampRequest {

@@ -51,6 +51,7 @@ type createCollectionTask struct {
 	collID         UniqueID
 	partIDs        []UniqueID
 	channels       collectionChannels
+	dbID           UniqueID
 	partitionNames []string
 }
 
@@ -224,6 +225,12 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
+	db, err := t.core.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	t.dbID = db.ID
+
 	if err := t.prepareSchema(); err != nil {
 		return err
 	}
@@ -310,6 +317,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 
 	collInfo := model.Collection{
 		CollectionID:         collID,
+		DBID:                 t.dbID,
 		Name:                 t.schema.Name,
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
@@ -330,7 +338,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	// are not promised idempotent.
 	clone := collInfo.Clone()
 	// need double check in meta table if we can't promise the sequence execution.
-	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err == nil {
 		equal := existedCollInfo.Equal(*clone)
 		if !equal {
@@ -341,11 +349,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	// check collection number quota for the entire the instance
-	existedCollInfos, err := t.core.meta.ListCollections(ctx, typeutil.MaxTimestamp)
+	existedCollInfos, err := t.core.meta.ListCollections(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp, true)
 	if err != nil {
 		log.Warn("fail to list collections for checking the collection count", zap.Error(err))
-		return fmt.Errorf("fail to list collections for checking the collection count")
+		return fmt.Errorf("fail to list collections for checking the collection count, err: %s", err.Error())
 	}
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum
 	if len(existedCollInfos) >= maxCollectionNum {
@@ -354,7 +361,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 	// check collection number quota for DB
 	existedColsInDB := lo.Filter(existedCollInfos, func(collection *model.Collection, _ int) bool {
-		return t.Req.GetDbName() != "" && collection.DBName == t.Req.GetDbName()
+		return t.Req.GetDbName() != "" && collection.DBID == t.dbID
 	})
 	maxColNumPerDB := Params.QuotaConfig.MaxCollectionNumPerDB
 	if len(existedColsInDB) >= maxColNumPerDB {
@@ -365,6 +372,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
+		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.Req.GetCollectionName()},
 		collectionID:    InvalidCollectionID,
 		ts:              ts,

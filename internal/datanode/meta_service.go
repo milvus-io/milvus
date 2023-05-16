@@ -65,7 +65,7 @@ func (mService *metaService) getCollectionInfo(ctx context.Context, collID Uniqu
 			commonpbutil.WithTimeStamp(0), //GOOSE TODO
 			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
 		),
-		DbName:       "default", // GOOSE TODO
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collID,
 		TimeStamp:    timestamp,
 	}

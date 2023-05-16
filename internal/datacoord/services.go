@@ -657,6 +657,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -797,6 +798,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -1304,6 +1306,7 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			),
+			// please do not specify the collection name alone after database feature.
 			CollectionID: collection,
 		})
 		if err = VerifyResponse(describeColRsp, err); err != nil {

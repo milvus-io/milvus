@@ -84,7 +84,7 @@ func (it *insertTask) getChannels() ([]pChan, error) {
 	if len(it.pChannels) != 0 {
 		return it.pChannels, nil
 	}
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.GetDbName(), it.CollectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, it.GetDbName(), collectionName)
 	if err != nil {
 		log.Error("get collection schema from global meta cache failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
@@ -307,7 +307,7 @@ func (it *insertTask) assignChannelsByPK(channelNames []string) map[string][]int
 }
 
 func (it *insertTask) assignPartitionsByKey(ctx context.Context, rowOffsets []int, keys *schemapb.FieldData) (map[string][]int, error) {
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, it.CollectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, it.GetDbName(), it.CollectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (it *insertTask) repackInsertDataByPartition(ctx context.Context,
 		}
 	}
 
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, it.GetCollectionName(), partitionName)
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, it.GetDbName(), it.GetCollectionName(), partitionName)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +531,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
 
 	collectionName := it.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, it.GetDbName(), collectionName)
 	if err != nil {
 		return err
 	}

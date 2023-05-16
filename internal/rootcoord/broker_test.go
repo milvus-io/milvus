@@ -21,13 +21,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -318,11 +319,15 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("get meta fail", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
-		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
-				return nil, errors.New("err")
-			},
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("err"))
+		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
@@ -331,11 +336,15 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
-		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
-				return collMeta, nil
-			},
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(collMeta, nil)
+		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
@@ -344,11 +353,15 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("non success error code on execute", func(t *testing.T) {
 		c := newTestCore(withFailedDataCoord())
-		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
-				return collMeta, nil
-			},
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(collMeta, nil)
+		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
@@ -357,11 +370,15 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
-		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
-				return collMeta, nil
-			},
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(collMeta, nil)
+		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
 

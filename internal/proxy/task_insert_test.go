@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
@@ -361,10 +363,12 @@ func TestInsertTask(t *testing.T) {
 		collectionID := UniqueID(0)
 		collectionName := "col-0"
 		channels := []pChan{"mock-chan-0", "mock-chan-1"}
-		cache := newMockCache()
-		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (UniqueID, error) {
-			return collectionID, nil
-		})
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(collectionID, nil)
 		globalMetaCache = cache
 		chMgr := newMockChannelsMgr()
 		chMgr.getChannelsFunc = func(collectionID UniqueID) ([]pChan, error) {

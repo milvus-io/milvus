@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -232,10 +231,18 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.On("GetDatabaseByName",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(model.NewDefaultDatabase(), nil)
+
 	t.Run("invalid schema", func(t *testing.T) {
+		core := newTestCore(withMeta(meta))
 		collectionName := funcutil.GenRandomStr()
 		task := &createCollectionTask{
-			baseTask: newBaseTask(context.TODO(), nil),
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -260,7 +267,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
-		core := newTestCore(withInvalidIDAllocator())
+		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
 			baseTask: newBaseTask(context.TODO(), core),
@@ -282,7 +289,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 
 		ticker := newRocksMqTtSynchronizer()
 
-		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker))
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
 		schema := &schemapb.CollectionSchema{
 			Name:        collectionName,
@@ -321,13 +328,13 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		field1 := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
 
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll, nil
-		}
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			return []*model.Collection{}, nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll, nil)
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -368,13 +375,13 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			PhysicalChannelNames: channels.physicalChannels,
 		}
 
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll, nil
-		}
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			return []*model.Collection{}, nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll, nil)
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -419,16 +426,23 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		ticker := newRocksMqTtSynchronizer()
 		pchans := ticker.getDmlChannelNames(shardNum)
 
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return nil, errors.New("error mock GetCollectionByName")
-		}
-		meta.AddCollectionFunc = func(ctx context.Context, coll *model.Collection) error {
-			return nil
-		}
-		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {
-			return nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock GetCollectionByName"))
+		meta.On("AddCollection",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta.On("ChangeCollectionState",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
 
 		dc := newMockDataCoord()
 		dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -476,36 +490,33 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			schema:   schema,
 		}
 
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			return nil, errors.New("mock error")
-		}
+		meta.On("ListCollections",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("mock error")).Once()
+
 		err = task.Execute(context.Background())
 		assert.Error(t, err)
 
-		originValue := Params.QuotaConfig.MaxCollectionNum
-		Params.QuotaConfig.MaxCollectionNum = 10
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			maxNum := Params.QuotaConfig.MaxCollectionNum
-			return make([]*model.Collection, maxNum), nil
-		}
-		err = task.Execute(context.Background())
-		assert.Error(t, err)
-		Params.QuotaConfig.MaxCollectionNum = originValue
-
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			maxNum := Params.QuotaConfig.MaxCollectionNumPerDB
-			collections := make([]*model.Collection, 0, maxNum)
-			for i := 0; i < maxNum; i++ {
-				collections = append(collections, &model.Collection{DBName: task.Req.GetDbName()})
-			}
-			return collections, nil
-		}
+		// testing for number of collection equal the limits
+		meta.On("ListCollections",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(make([]*model.Collection, Params.QuotaConfig.MaxCollectionNum), nil).Once()
 		err = task.Execute(context.Background())
 		assert.Error(t, err)
 
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			return []*model.Collection{}, nil
-		}
+		// testing for number of collection less than the limits
+		meta.On("ListCollections",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return([]*model.Collection{}, nil).Once()
 		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
@@ -520,27 +531,41 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		ticker := newRocksMqTtSynchronizer()
 		pchans := ticker.getDmlChannelNames(shardNum)
 
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return nil, errors.New("error mock GetCollectionByName")
-		}
-		meta.AddCollectionFunc = func(ctx context.Context, coll *model.Collection) error {
-			return nil
-		}
-		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
-			return []*model.Collection{}, nil
-		}
-		// inject error here.
-		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {
-			return errors.New("error mock ChangeCollectionState")
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock GetCollectionByName"))
+		meta.On("AddCollection",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta.On("ChangeCollectionState",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("error mock ChangeCollectionState"))
+		meta.On("ListCollections",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return([]*model.Collection{}, nil)
+
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+		meta.On("RemoveCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, collID UniqueID, ts Timestamp) error {
 			removeCollectionCalled = true
 			removeCollectionChan <- struct{}{}
 			return nil
-		}
+		})
 
 		broker := newMockBroker()
 		broker.WatchChannelsFunc = func(ctx context.Context, info *watchInfo) error {

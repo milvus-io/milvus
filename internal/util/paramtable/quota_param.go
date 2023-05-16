@@ -605,7 +605,7 @@ func (p *quotaConfig) initMaxCollectionNum() {
 }
 
 func (p *quotaConfig) initMaxCollectionNumPerDB() {
-	p.MaxCollectionNumPerDB = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNumPerDB", 64)
+	p.MaxCollectionNumPerDB = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNumPerDB", 65536)
 }
 
 func (p *quotaConfig) initForceDenyWriting() {

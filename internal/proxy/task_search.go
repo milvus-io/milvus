@@ -64,7 +64,7 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 		}
 	}
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 }
 
 func (t *searchTask) assignPartitionKeys(ctx context.Context, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.collectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -225,16 +225,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
-	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 
-	partitionKeyMode, _ := isPartitionKeyMode(ctx, collectionName)
+	partitionKeyMode, _ := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -381,7 +381,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx)
 
 	executeSearch := func() error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, true, t.collectionName)
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, true, t.request.GetDbName(), t.collectionName)
 		if err != nil {
 			return err
 		}
@@ -402,7 +402,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		}
 		if searchErr != nil {
 			log.Warn("first search failed, updating shardleader caches and retry search", zap.Int64("msgId", t.ID()), zap.Error(searchErr))
-			globalMetaCache.DeprecateShardCache(t.collectionName)
+			globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		}
 		return searchErr
 	}, retry.Attempts(Params.CommonCfg.GrpcRetryTimes))
@@ -496,14 +496,14 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode search return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
 	errCode := result.GetStatus().GetErrorCode()
 	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
 	if errCode != commonpb.ErrorCode_Success {
@@ -562,7 +562,7 @@ func (t *searchTask) collectSearchResults(ctx context.Context) error {
 
 // checkIfLoaded check if collection was loaded into QueryNode
 func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName string, searchPartitionIDs []UniqueID) (bool, error) {
-	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+	info, err := globalMetaCache.GetCollectionInfo(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	if err != nil {
 		return false, fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", collectionName, err)
 	}

@@ -49,7 +49,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return errors.New("only support alter collection properties, but collection properties is empty")
 	}
 
-	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetCollectionName(), a.ts)
+	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
 	if err != nil {
 		log.Warn("get collection failed during changing collection state",
 			zap.String("collectionName", a.Req.GetCollectionName()), zap.Uint64("ts", a.ts))
@@ -70,6 +70,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: a.core},
+		dbName:          a.Req.GetDbName(),
 		collectionNames: []string{oldColl.Name},
 		collectionID:    oldColl.CollectionID,
 		ts:              ts,

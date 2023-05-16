@@ -62,13 +62,13 @@ func (_m *IMetaTable) AddPartition(ctx context.Context, partition *model.Partiti
 	return r0
 }
 
-// AlterAlias provides a mock function with given fields: ctx, alias, collectionName, ts
-func (_m *IMetaTable) AlterAlias(ctx context.Context, alias string, collectionName string, ts uint64) error {
-	ret := _m.Called(ctx, alias, collectionName, ts)
+// AlterAlias provides a mock function with given fields: ctx, dbName, alias, collectionName, ts
+func (_m *IMetaTable) AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, alias, collectionName, ts)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
-		r0 = rf(ctx, alias, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, alias, collectionName, ts)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -132,13 +132,27 @@ func (_m *IMetaTable) ChangePartitionState(ctx context.Context, collectionID int
 	return r0
 }
 
-// CreateAlias provides a mock function with given fields: ctx, alias, collectionName, ts
-func (_m *IMetaTable) CreateAlias(ctx context.Context, alias string, collectionName string, ts uint64) error {
-	ret := _m.Called(ctx, alias, collectionName, ts)
+// CreateAlias provides a mock function with given fields: ctx, dbName, alias, collectionName, ts
+func (_m *IMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, alias, collectionName, ts)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
-		r0 = rf(ctx, alias, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, alias, collectionName, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// CreateDatabase provides a mock function with given fields: ctx, db, ts
+func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
+	ret := _m.Called(ctx, db, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Database, uint64) error); ok {
+		r0 = rf(ctx, db, ts)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -174,13 +188,27 @@ func (_m *IMetaTable) DeleteCredential(username string) error {
 	return r0
 }
 
-// DropAlias provides a mock function with given fields: ctx, alias, ts
-func (_m *IMetaTable) DropAlias(ctx context.Context, alias string, ts uint64) error {
-	ret := _m.Called(ctx, alias, ts)
+// DropAlias provides a mock function with given fields: ctx, dbName, alias, ts
+func (_m *IMetaTable) DropAlias(ctx context.Context, dbName string, alias string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, alias, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, alias, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DropDatabase provides a mock function with given fields: ctx, dbName, ts
+func (_m *IMetaTable) DropDatabase(ctx context.Context, dbName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, ts)
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) error); ok {
-		r0 = rf(ctx, alias, ts)
+		r0 = rf(ctx, dbName, ts)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -216,13 +244,13 @@ func (_m *IMetaTable) DropRole(tenant string, roleName string) error {
 	return r0
 }
 
-// GetCollectionByID provides a mock function with given fields: ctx, collectionID, ts, allowUnavailable
-func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64, ts uint64, allowUnavailable bool) (*model.Collection, error) {
-	ret := _m.Called(ctx, collectionID, ts, allowUnavailable)
+// GetCollectionByID provides a mock function with given fields: ctx, dbName, collectionID, ts, allowUnavailable
+func (_m *IMetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID int64, ts uint64, allowUnavailable bool) (*model.Collection, error) {
+	ret := _m.Called(ctx, dbName, collectionID, ts, allowUnavailable)
 
 	var r0 *model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64, bool) *model.Collection); ok {
-		r0 = rf(ctx, collectionID, ts, allowUnavailable)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, uint64, bool) *model.Collection); ok {
+		r0 = rf(ctx, dbName, collectionID, ts, allowUnavailable)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.Collection)
@@ -230,8 +258,8 @@ func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64,
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, int64, uint64, bool) error); ok {
-		r1 = rf(ctx, collectionID, ts, allowUnavailable)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, uint64, bool) error); ok {
+		r1 = rf(ctx, dbName, collectionID, ts, allowUnavailable)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -239,13 +267,13 @@ func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64,
 	return r0, r1
 }
 
-// GetCollectionByName provides a mock function with given fields: ctx, collectionName, ts
-func (_m *IMetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts uint64) (*model.Collection, error) {
-	ret := _m.Called(ctx, collectionName, ts)
+// GetCollectionByName provides a mock function with given fields: ctx, dbName, collectionName, ts
+func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts uint64) (*model.Collection, error) {
+	ret := _m.Called(ctx, dbName, collectionName, ts)
 
 	var r0 *model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) *model.Collection); ok {
-		r0 = rf(ctx, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) *model.Collection); ok {
+		r0 = rf(ctx, dbName, collectionName, ts)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.Collection)
@@ -253,8 +281,8 @@ func (_m *IMetaTable) GetCollectionByName(ctx context.Context, collectionName st
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, string, uint64) error); ok {
-		r1 = rf(ctx, collectionName, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64) error); ok {
+		r1 = rf(ctx, dbName, collectionName, ts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -294,6 +322,52 @@ func (_m *IMetaTable) GetCredential(username string) (*internalpb.CredentialInfo
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(username)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetDatabaseByID provides a mock function with given fields: ctx, dbID, ts
+func (_m *IMetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts uint64) (*model.Database, error) {
+	ret := _m.Called(ctx, dbID, ts)
+
+	var r0 *model.Database
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) *model.Database); ok {
+		r0 = rf(ctx, dbID, ts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.Database)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, int64, uint64) error); ok {
+		r1 = rf(ctx, dbID, ts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetDatabaseByName provides a mock function with given fields: ctx, dbName, ts
+func (_m *IMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts uint64) (*model.Database, error) {
+	ret := _m.Called(ctx, dbName, ts)
+
+	var r0 *model.Database
+	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) *model.Database); ok {
+		r0 = rf(ctx, dbName, ts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.Database)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, string, uint64) error); ok {
+		r1 = rf(ctx, dbName, ts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -343,41 +417,18 @@ func (_m *IMetaTable) GetPartitionNameByID(collID int64, partitionID int64, ts u
 	return r0, r1
 }
 
-// IsAlias provides a mock function with given fields: name
-func (_m *IMetaTable) IsAlias(name string) bool {
-	ret := _m.Called(name)
+// IsAlias provides a mock function with given fields: db, name
+func (_m *IMetaTable) IsAlias(db string, name string) bool {
+	ret := _m.Called(db, name)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(name)
+	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
+		r0 = rf(db, name)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	return r0
-}
-
-// ListAbnormalCollections provides a mock function with given fields: ctx, ts
-func (_m *IMetaTable) ListAbnormalCollections(ctx context.Context, ts uint64) ([]*model.Collection, error) {
-	ret := _m.Called(ctx, ts)
-
-	var r0 []*model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) []*model.Collection); ok {
-		r0 = rf(ctx, ts)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*model.Collection)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
-		r1 = rf(ctx, ts)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
 }
 
 // ListAliasesByID provides a mock function with given fields: collID
@@ -412,13 +463,13 @@ func (_m *IMetaTable) ListCollectionPhysicalChannels() map[int64][]string {
 	return r0
 }
 
-// ListCollections provides a mock function with given fields: ctx, ts
-func (_m *IMetaTable) ListCollections(ctx context.Context, ts uint64) ([]*model.Collection, error) {
-	ret := _m.Called(ctx, ts)
+// ListCollections provides a mock function with given fields: ctx, dbName, ts, onlyAvail
+func (_m *IMetaTable) ListCollections(ctx context.Context, dbName string, ts uint64, onlyAvail bool) ([]*model.Collection, error) {
+	ret := _m.Called(ctx, dbName, ts, onlyAvail)
 
 	var r0 []*model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) []*model.Collection); ok {
-		r0 = rf(ctx, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, uint64, bool) []*model.Collection); ok {
+		r0 = rf(ctx, dbName, ts, onlyAvail)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*model.Collection)
@@ -426,8 +477,8 @@ func (_m *IMetaTable) ListCollections(ctx context.Context, ts uint64) ([]*model.
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
-		r1 = rf(ctx, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, string, uint64, bool) error); ok {
+		r1 = rf(ctx, dbName, ts, onlyAvail)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -451,6 +502,29 @@ func (_m *IMetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse
 	var r1 error
 	if rf, ok := ret.Get(1).(func() error); ok {
 		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ListDatabases provides a mock function with given fields: ctx, ts
+func (_m *IMetaTable) ListDatabases(ctx context.Context, ts uint64) ([]*model.Database, error) {
+	ret := _m.Called(ctx, ts)
+
+	var r0 []*model.Database
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) []*model.Database); ok {
+		r0 = rf(ctx, ts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.Database)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
+		r1 = rf(ctx, ts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -546,13 +620,13 @@ func (_m *IMetaTable) RemoveCollection(ctx context.Context, collectionID int64, 
 	return r0
 }
 
-// RemovePartition provides a mock function with given fields: ctx, collectionID, partitionID, ts
-func (_m *IMetaTable) RemovePartition(ctx context.Context, collectionID int64, partitionID int64, ts uint64) error {
-	ret := _m.Called(ctx, collectionID, partitionID, ts)
+// RemovePartition provides a mock function with given fields: ctx, dbName, collectionID, partitionID, ts
+func (_m *IMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
+	ret := _m.Called(ctx, dbID, collectionID, partitionID, ts)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, uint64) error); ok {
-		r0 = rf(ctx, collectionID, partitionID, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, uint64) error); ok {
+		r0 = rf(ctx, dbID, collectionID, partitionID, ts)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -560,13 +634,13 @@ func (_m *IMetaTable) RemovePartition(ctx context.Context, collectionID int64, p
 	return r0
 }
 
-// RenameCollection provides a mock function with given fields: ctx, oldName, newName, ts
-func (_m *IMetaTable) RenameCollection(ctx context.Context, oldName string, newName string, ts uint64) error {
-	ret := _m.Called(ctx, oldName, newName, ts)
+// RenameCollection provides a mock function with given fields: ctx, dbName, oldName, newName, ts
+func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, oldName, newName, ts)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) error); ok {
-		r0 = rf(ctx, oldName, newName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, oldName, newName, ts)
 	} else {
 		r0 = ret.Error(0)
 	}

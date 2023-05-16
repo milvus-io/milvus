@@ -169,7 +169,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 }
 
 func (t *queryTask) assignPartitionKeys(ctx context.Context, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.collectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("Validate collection name.", zap.Any("collectionName", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
 			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
@@ -214,7 +214,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		zap.Int64("collectionID", t.CollectionID), zap.String("collection name", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
-	partitionKeyMode, _ := isPartitionKeyMode(ctx, collectionName)
+	partitionKeyMode, _ := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -258,7 +258,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("collection:%v or partition:%v not loaded into memory when query", collectionName, t.request.GetPartitionNames())
 	}
 
-	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	schema, _ := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	t.schema = schema
 
 	if t.ids != nil {
@@ -359,7 +359,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx)
 
 	executeQuery := func() error {
-		shards, err := globalMetaCache.GetShards(ctx, true, t.collectionName)
+		shards, err := globalMetaCache.GetShards(ctx, true, t.request.GetDbName(), t.collectionName)
 		if err != nil {
 			return err
 		}
@@ -381,7 +381,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		if queryError != nil {
 			log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
 				zap.Error(queryError))
-			globalMetaCache.DeprecateShardCache(t.collectionName)
+			globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		}
 		return queryError
 	}, retry.Attempts(Params.CommonCfg.GrpcRetryTimes))
@@ -437,7 +437,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		return nil
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.CollectionName)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.request.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -479,13 +479,13 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode query return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
 	errCode := result.GetStatus().GetErrorCode()
 	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
 	if errCode != commonpb.ErrorCode_Success {

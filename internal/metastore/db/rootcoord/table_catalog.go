@@ -37,6 +37,22 @@ func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain
 	}
 }
 
+func (tc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
+	//TODO
+	return nil
+}
+
+func (tc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error {
+	//TODO
+	return nil
+
+}
+
+func (tc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Database, error) {
+	//TODO
+	return make(map[string]*model.Database), nil
+}
+
 func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
 	tenantID := contextutil.TenantID(ctx)
 
@@ -154,7 +170,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Colle
 	})
 }
 
-func (tc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
+func (tc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error) {
 	tenantID := contextutil.TenantID(ctx)
 
 	// get latest timestamp less than or equals to param ts
@@ -218,7 +234,7 @@ func (tc *Catalog) populateCollection(ctx context.Context, collectionID typeutil
 	return mCollection, nil
 }
 
-func (tc *Catalog) GetCollectionByName(ctx context.Context, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+func (tc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
 	tenantID := contextutil.TenantID(ctx)
 
 	// Since collection name will not change for different ts
@@ -227,7 +243,7 @@ func (tc *Catalog) GetCollectionByName(ctx context.Context, collectionName strin
 		return nil, err
 	}
 
-	return tc.GetCollectionByID(ctx, collectionID, ts)
+	return tc.GetCollectionByID(ctx, dbID, ts, collectionID)
 }
 
 // ListCollections For time travel (ts > 0), find only one record respectively for each collection no matter `is_deleted` is true or false
@@ -237,7 +253,7 @@ func (tc *Catalog) GetCollectionByName(ctx context.Context, collectionName strin
 // [collection3, t3, is_deleted=false]
 // t1, t2, t3 are the largest timestamp that less than or equal to @param ts
 // the final result will only return collection2 and collection3 since collection1 is deleted
-func (tc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
+func (tc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
 	tenantID := contextutil.TenantID(ctx)
 
 	// 1. find each collection_id with latest ts <= @param ts
@@ -280,7 +296,7 @@ func (tc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (
 	return r, nil
 }
 
-func (tc *Catalog) CollectionExists(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
+func (tc *Catalog) CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
 	tenantID := contextutil.TenantID(ctx)
 
 	// get latest timestamp less than or equals to param ts
@@ -434,7 +450,7 @@ func (tc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	return fmt.Errorf("altering collection doesn't support %s", alterType.String())
 }
 
-func (tc *Catalog) CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error {
+func (tc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error {
 	tenantID := contextutil.TenantID(ctx)
 
 	p := &dbmodel.Partition{
@@ -455,7 +471,7 @@ func (tc *Catalog) CreatePartition(ctx context.Context, partition *model.Partiti
 	return nil
 }
 
-func (tc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
+func (tc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
 	tenantID := contextutil.TenantID(ctx)
 
 	p := &dbmodel.Partition{
@@ -491,7 +507,7 @@ func (tc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Part
 	return tc.metaDomain.PartitionDb(ctx).Update(p)
 }
 
-func (tc *Catalog) AlterPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, alterType metastore.AlterType, ts typeutil.Timestamp) error {
+func (tc *Catalog) AlterPartition(ctx context.Context, dbID int64, oldPart *model.Partition, newPart *model.Partition, alterType metastore.AlterType, ts typeutil.Timestamp) error {
 	if alterType == metastore.MODIFY {
 		return tc.alterModifyPartition(ctx, oldPart, newPart, ts)
 	}
@@ -516,7 +532,7 @@ func (tc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	return nil
 }
 
-func (tc *Catalog) DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error {
+func (tc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts typeutil.Timestamp) error {
 	tenantID := contextutil.TenantID(ctx)
 
 	collectionID, err := tc.metaDomain.CollAliasDb(ctx).GetCollectionIDByAlias(tenantID, alias, ts)
@@ -552,7 +568,7 @@ func (tc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 }
 
 // ListAliases query collection ID and aliases only, other information are not needed
-func (tc *Catalog) ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
+func (tc *Catalog) ListAliases(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Alias, error) {
 	tenantID := contextutil.TenantID(ctx)
 
 	// 1. find each collection with latest ts
