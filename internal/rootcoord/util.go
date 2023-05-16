@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -134,4 +135,88 @@ func getTravelTs(req TimeTravelRequest) Timestamp {
 
 func isMaxTs(ts Timestamp) bool {
 	return ts == typeutil.MaxTimestamp
+}
+
+func getCollectionRateLimitConfigDefaultValue(configKey string) float64 {
+	switch configKey {
+	case common.CollectionInsertRateMaxKey:
+		return Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
+	case common.CollectionInsertRateMinKey:
+		return Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat()
+	case common.CollectionDeleteRateMaxKey:
+		return Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat()
+	case common.CollectionDeleteRateMinKey:
+		return Params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat()
+	case common.CollectionBulkLoadRateMaxKey:
+		return Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat()
+	case common.CollectionBulkLoadRateMinKey:
+		return Params.QuotaConfig.DMLMinBulkLoadRatePerCollection.GetAsFloat()
+	case common.CollectionQueryRateMaxKey:
+		return Params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat()
+	case common.CollectionQueryRateMinKey:
+		return Params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat()
+	case common.CollectionSearchRateMaxKey:
+		return Params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat()
+	case common.CollectionSearchRateMinKey:
+		return Params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat()
+	case common.CollectionDiskQuotaKey:
+		return Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+
+	default:
+		return float64(0)
+	}
+}
+
+func getCollectionRateLimitConfig(properties map[string]string, configKey string) float64 {
+	megaBytes2Bytes := func(v float64) float64 {
+		return v * 1024.0 * 1024.0
+	}
+	toBytesIfNecessary := func(rate float64) float64 {
+		switch configKey {
+		case common.CollectionInsertRateMaxKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionInsertRateMinKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionDeleteRateMaxKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionDeleteRateMinKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionBulkLoadRateMaxKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionBulkLoadRateMinKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionQueryRateMaxKey:
+			return rate
+		case common.CollectionQueryRateMinKey:
+			return rate
+		case common.CollectionSearchRateMaxKey:
+			return rate
+		case common.CollectionSearchRateMinKey:
+			return rate
+		case common.CollectionDiskQuotaKey:
+			return megaBytes2Bytes(rate)
+
+		default:
+			return float64(0)
+		}
+	}
+
+	v, ok := properties[configKey]
+	if ok {
+		rate, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			log.Warn("invalid configuration for collection dml rate",
+				zap.String("config item", configKey),
+				zap.String("config value", v))
+			return getCollectionRateLimitConfigDefaultValue(configKey)
+		}
+
+		rateInBytes := toBytesIfNecessary(rate)
+		if rateInBytes < 0 {
+			return getCollectionRateLimitConfigDefaultValue(configKey)
+		}
+		return rateInBytes
+	}
+
+	return getCollectionRateLimitConfigDefaultValue(configKey)
 }

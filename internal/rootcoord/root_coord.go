@@ -445,7 +445,7 @@ func (c *Core) initInternal() error {
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
-	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator)
+	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
 	if err := c.initImportManager(); err != nil {

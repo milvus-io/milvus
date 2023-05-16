@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -88,6 +89,7 @@ type QuotaCenter struct {
 	proxies    *proxyClientManager
 	queryCoord types.QueryCoord
 	dataCoord  types.DataCoord
+	meta       IMetaTable
 
 	// metrics
 	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
@@ -111,7 +113,7 @@ type QuotaCenter struct {
 }
 
 // NewQuotaCenter returns a new QuotaCenter.
-func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, dataCoord types.DataCoord, tsoAllocator tso.Allocator) *QuotaCenter {
+func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, dataCoord types.DataCoord, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
 	return &QuotaCenter{
 		proxies:             proxies,
 		queryCoord:          queryCoord,
@@ -119,6 +121,7 @@ func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, da
 		currentRates:        make(map[int64]map[internalpb.RateType]Limit),
 		quotaStates:         make(map[int64]map[milvuspb.QuotaState]commonpb.ErrorCode),
 		tsoAllocator:        tsoAllocator,
+		meta:                meta,
 		readableCollections: make([]int64, 0),
 		writableCollections: make([]int64, 0),
 
@@ -403,10 +406,14 @@ func (q *QuotaCenter) calculateReadRates() {
 					zap.Int64("collectionID", collection),
 					zap.Any("queryRate", q.currentRates[collection][internalpb.RateType_DQLQuery]))
 			}
+
+			collectionProps := q.getCollectionLimitConfig(collection)
+			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionSearchRateMinKey), internalpb.RateType_DQLSearch, collection)
+			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMinKey), internalpb.RateType_DQLQuery, collection)
 		}
 
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat(), internalpb.RateType_DQLSearch, collections...)
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat(), internalpb.RateType_DQLQuery, collections...)
+		log.RatedInfo(10, "QueryNodeMetrics when cool-off",
+			zap.Any("metrics", q.queryNodeMetrics))
 	}
 
 	// TODO: unify search and query?
@@ -417,6 +424,7 @@ func (q *QuotaCenter) calculateReadRates() {
 
 // calculateWriteRates calculates and sets dml rates.
 func (q *QuotaCenter) calculateWriteRates() error {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
 		q.forceDenyWriting(commonpb.ErrorCode_ForceDeny)
 		return nil
@@ -463,8 +471,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		if q.currentRates[collection][internalpb.RateType_DMLDelete] != Inf {
 			q.currentRates[collection][internalpb.RateType_DMLDelete] *= Limit(factor)
 		}
-		q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat(), internalpb.RateType_DMLInsert)
-		q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat(), internalpb.RateType_DMLDelete)
+
+		collectionProps := q.getCollectionLimitConfig(collection)
+		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMinKey), internalpb.RateType_DMLInsert, collection)
+		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMinKey), internalpb.RateType_DMLDelete, collection)
+		log.RatedDebug(10, "QuotaCenter cool write rates off done",
+			zap.Int64("collectionID", collection),
+			zap.Float64("factor", factor))
 	}
 
 	return nil
@@ -700,21 +713,41 @@ func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64)
 	if q.quotaStates[collection] == nil {
 		q.quotaStates[collection] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
 	}
+
+	collectionProps := q.getCollectionLimitConfig(collection)
 	switch rt {
 	case internalpb.RateType_DMLInsert:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMaxKey))
 	case internalpb.RateType_DMLDelete:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMaxKey))
 	case internalpb.RateType_DMLBulkLoad:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionBulkLoadRateMaxKey))
 	case internalpb.RateType_DQLSearch:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionSearchRateMaxKey))
 	case internalpb.RateType_DQLQuery:
-		q.currentRates[collection][rt] = Limit(Params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMaxKey))
 	}
 	if q.currentRates[collection][rt] < 0 {
 		q.currentRates[collection][rt] = Inf // no limit
 	}
+}
+
+func (q *QuotaCenter) getCollectionLimitConfig(collection int64) map[string]string {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
+	collectionInfo, err := q.meta.GetCollectionByID(context.TODO(), collection, typeutil.MaxTimestamp, false)
+	if err != nil {
+		log.RatedWarn(10, "failed to get collection rate limit config",
+			zap.Int64("collectionID", collection),
+			zap.Error(err))
+		return make(map[string]string)
+	}
+
+	properties := make(map[string]string)
+	for _, pair := range collectionInfo.Properties {
+		properties[pair.GetKey()] = pair.GetValue()
+	}
+
+	return properties
 }
 
 // checkDiskQuota checks if disk quota exceeded.
@@ -729,8 +762,9 @@ func (q *QuotaCenter) checkDiskQuota() {
 	}
 	collections := typeutil.NewUniqueSet()
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
-	colDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	for collection, binlogSize := range q.dataCoordMetrics.CollectionBinlogSize {
+		collectionProps := q.getCollectionLimitConfig(collection)
+		colDiskQuota := getCollectionRateLimitConfig(collectionProps, common.CollectionDiskQuotaKey)
 		if float64(binlogSize) >= colDiskQuota {
 			log.RatedWarn(10, "collection disk quota exceeded",
 				zap.Int64("collection", collection),
