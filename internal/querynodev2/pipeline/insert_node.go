@@ -58,7 +58,11 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		}
 		insertDatas[msg.SegmentID] = iData
 	} else {
-		typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
+		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
+		if err != nil {
+			log.Error("failed to merge field data", zap.Error(err))
+			panic(err)
+		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
@@ -79,7 +83,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		zap.Uint64("timestampMax", msg.EndTimestamp))
 }
 
-//Insert task
+// Insert task
 func (iNode *insertNode) Operate(in Msg) Msg {
 	nodeMsg := in.(*insertNodeMsg)
 
