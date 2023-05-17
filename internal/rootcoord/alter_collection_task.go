@@ -22,9 +22,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 )
 
@@ -55,7 +57,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	newColl := oldColl.Clone()
-	newColl.Properties = a.Req.GetProperties()
+	updateCollectionProperties(newColl, a.Req.GetProperties())
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
@@ -81,4 +83,26 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	return redoTask.Execute(ctx)
+}
+
+func updateCollectionProperties(coll *model.Collection, updatedProps []*commonpb.KeyValuePair) {
+	props := make(map[string]string)
+	for _, prop := range coll.Properties {
+		props[prop.Key] = prop.Value
+	}
+
+	for _, prop := range updatedProps {
+		props[prop.Key] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	coll.Properties = propKV
 }
