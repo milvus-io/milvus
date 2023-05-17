@@ -14,6 +14,7 @@ from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common import common_func as cf
 from chaos import constants
+from bulk_insert.minio_comm import get_milvus_data_storage_used
 from delayed_assert import expect, assert_expectations
 
 
@@ -61,7 +62,6 @@ class TestChaosBase:
 
 class TestChaos(TestChaosBase):
 
-
     def teardown(self):
         sleep(10)
         log.info(f'Alive threads: {threading.enumerate()}')
@@ -83,10 +83,16 @@ class TestChaos(TestChaosBase):
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
 
     def init_health_checkers(self, collection_name=None, create_index=True, is_loaded=True, dim=2048):
-        log.info(f"init health checkers with params: collection_name: {collection_name}, create_index: {create_index}, is_loaded: {is_loaded}")
-        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        log.info(
+            f"init health checkers with params: collection_name: {collection_name}, create_index: {create_index}, is_loaded: {is_loaded}")
+        if collection_name is not None:
+            c_name = collection_name
+            use_one_collection = True
+        else:
+            c_name = cf.gen_unique_str("Checker_")
+            use_one_collection = False
         checkers = {
-            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False,
+            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=use_one_collection,
                                               dim=dim, create_index=create_index, is_loaded=is_loaded),
         }
         self.health_checkers = checkers
@@ -106,6 +112,7 @@ class TestChaos(TestChaosBase):
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         minio_endpoint = f"{minio_ip}:{minio_port}"
+        self.minio_endpoint = minio_endpoint
         bucket_name = ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         schema = cf.gen_default_collection_schema(dim=dim)
         data = cf.gen_default_list_data_for_bulk_insert(nb=nb, dim=dim)
@@ -127,11 +134,12 @@ class TestChaos(TestChaosBase):
         log.info("prepare data for bulk load done")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_bulk_insert_perf(self, file_type, create_index, is_loaded, nb, dim, use_same_collection):
+    def test_bulk_insert_rate_limit(self, file_type, create_index, is_loaded, nb, dim, use_same_collection):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
-        log.info(f"file_type: {file_type}, create_index: {create_index}")
+        log.info(f"file_type: {file_type}, create_index: {create_index}, is_loaded: {is_loaded}, nb: {nb}, "
+                 f"dim: {dim}, use_same_collection: {use_same_collection}")
         if create_index == "create_index":
             create_index = True
         else:
@@ -154,7 +162,15 @@ class TestChaos(TestChaosBase):
             nb = int(nb)
         self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim))
         cc.start_monitor_threads(self.health_checkers)
-        # wait 600s
+        # wait minio usage to reach rate limit
+        per_collection_disk_usage_rate_limit = 1024  # unit MB
+        total_disk_usage_rate_limit = 1024 * 10  # unit MB
+        total_disk_usage = get_milvus_data_storage_used(self.minio_endpoint)
+        while total_disk_usage < total_disk_usage_rate_limit:
+            log.info(f"total disk usage: {total_disk_usage} MB, rate limit: {total_disk_usage_rate_limit} MB")
+            sleep(5)
+            total_disk_usage = get_milvus_data_storage_used(self.minio_endpoint)
+
         while self.health_checkers[Op.bulk_insert].total() <= 10:
             sleep(constants.WAIT_PER_OP)
         assert_statistic(self.health_checkers)

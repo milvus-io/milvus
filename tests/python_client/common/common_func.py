@@ -110,6 +110,12 @@ def gen_float_field(name=ct.default_float_field_name, is_primary=False, descript
     return float_field
 
 
+def gen_json_field(name=ct.default_json_field_name, is_primary=False, description=ct.default_desc):
+    json_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.JSON, description=description,
+                                                              is_primary=is_primary)
+    return json_field
+
+
 def gen_double_field(name=ct.default_double_field_name, is_primary=False, description=ct.default_desc):
     double_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.DOUBLE,
                                                                 description=description, is_primary=is_primary)
@@ -134,7 +140,7 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, dim=ct.default_dim):
-    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
@@ -343,8 +349,9 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int_values = [i for i in range(start, start + nb)]
     float_values = [np.float32(i) for i in range(start, start + nb)]
     string_values = [str(i) for i in range(start, start + nb)]
+    json_values = [{"key": i} for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
-    data = [int_values, float_values, string_values, float_vec_values]
+    data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
 
 
@@ -352,8 +359,9 @@ def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
     string_values = [str(i) for i in range(nb)]
+    json_values = [json.dumps({"key": i}) for i in range(nb)]
     float_vec_values = []  # placeholder for float_vec
-    data = [int_values, float_values, string_values, float_vec_values]
+    data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
 
 
@@ -607,7 +615,7 @@ def gen_normal_string_expressions(field):
     return expressions
 
 
-def gen_invaild_string_expressions():
+def gen_invalid_string_expressions():
     expressions = [
         "varchar in [0,  \"1\"]",
         "varchar not in [\"0\", 1, 2]"
