@@ -501,6 +501,13 @@ quotaAndLimits:
       dataNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in DataNodes
       queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
       queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
+    growingSegmentsSizeProtection:
+      # 1. No action will be taken if the ratio of growing segments size is less than the low water level.
+      # 2. The DML rate will be reduced if the ratio of growing segments size is greater than the low water level and less than the high water level.
+      # 3. All DML requests will be rejected if the ratio of growing segments size is greater than the high water level.
+      enabled: false
+      lowWaterLevel: 0.2
+      highWaterLevel: 0.4
     diskProtection:
       enabled: true # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
       diskQuota: -1 # MB, (0, +inf), default no limit

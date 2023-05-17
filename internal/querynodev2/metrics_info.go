@@ -20,9 +20,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -104,6 +107,18 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}
 
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
+
+	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+	growingSegmentsSize := lo.SumBy(growingSegments, func(seg segments.Segment) int64 {
+		return seg.MemSize()
+	})
+
+	allSegments := node.manager.Segment.GetBy()
+	collections := typeutil.NewUniqueSet()
+	for _, segment := range allSegments {
+		collections.Insert(segment.Collection())
+	}
+
 	return &metricsinfo.QueryNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
@@ -112,8 +127,13 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			MinFlowGraphTt:      minTsafe,
 			NumFlowGraph:        node.pipelineManager.Num(),
 		},
-		SearchQueue: sqms,
-		QueryQueue:  qqms,
+		SearchQueue:         sqms,
+		QueryQueue:          qqms,
+		GrowingSegmentsSize: growingSegmentsSize,
+		Effect: metricsinfo.NodeEffect{
+			NodeID:        paramtable.GetNodeID(),
+			CollectionIDs: collections.Collect(),
+		},
 	}, nil
 }
 
