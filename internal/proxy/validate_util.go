@@ -3,6 +3,7 @@ package proxy
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -10,8 +11,9 @@ import (
 )
 
 type validateUtil struct {
-	checkNAN    bool
-	checkMaxLen bool
+	checkNAN      bool
+	checkMaxLen   bool
+	checkOverflow bool
 }
 
 type validateOption func(*validateUtil)
@@ -25,6 +27,12 @@ func withNANCheck() validateOption {
 func withMaxLenCheck() validateOption {
 	return func(v *validateUtil) {
 		v.checkMaxLen = true
+	}
+}
+
+func withOverflowCheck() validateOption {
+	return func(v *validateUtil) {
+		v.checkOverflow = true
 	}
 }
 
@@ -61,6 +69,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		case schemapb.DataType_VarChar:
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Int8, schemapb.DataType_Int16:
+			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		default:
@@ -172,6 +184,27 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
+func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if !v.checkOverflow {
+		return nil
+	}
+
+	data := field.GetScalars().GetIntData().GetData()
+	if data == nil {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return errors.New(msg)
+	}
+
+	switch fieldSchema.GetDataType() {
+	case schemapb.DataType_Int8:
+		return verifyOverflowByRange(data, math.MinInt8, math.MaxInt8)
+	case schemapb.DataType_Int16:
+		return verifyOverflowByRange(data, math.MinInt16, math.MaxInt16)
+	}
+
+	return nil
+}
+
 func verifyLengthPerRow(strArr []string, maxLength int64) error {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
@@ -183,10 +216,21 @@ func verifyLengthPerRow(strArr []string, maxLength int64) error {
 	return nil
 }
 
+func verifyOverflowByRange(arr []int32, lb int64, ub int64) error {
+	for idx, e := range arr {
+		if lb > int64(e) || ub < int64(e) {
+			msg := fmt.Sprintf("the %dth element (%d) out of range: [%d, %d]", idx, e, lb, ub)
+			return errors.New(msg)
+		}
+	}
+	return nil
+}
+
 func newValidateUtil(opts ...validateOption) *validateUtil {
 	v := &validateUtil{
-		checkNAN:    true,
-		checkMaxLen: false,
+		checkNAN:      true,
+		checkMaxLen:   false,
+		checkOverflow: false,
 	}
 
 	v.apply(opts...)

@@ -276,7 +276,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck()).Validate(it.GetFieldsData(), it.schema, it.NRows()); err != nil {
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck()).
+		Validate(it.GetFieldsData(), it.schema, it.NRows()); err != nil {
 		return err
 	}
 
