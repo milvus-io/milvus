@@ -818,6 +818,20 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		}
 		rst = data
 
+	case schemapb.DataType_JSON:
+		var data = &storage.JSONFieldData{
+			Data: make([][]byte, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.([]byte)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
 	case schemapb.DataType_FloatVector:
 		var data = &storage.FloatVectorFieldData{
 			Data: []float32{},
