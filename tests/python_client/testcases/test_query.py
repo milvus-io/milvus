@@ -340,7 +340,7 @@ class TestQueryParams(TestcaseBase):
             res.extend(df.iloc[i:i + 1, :-1].to_dict('records'))
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
-        self.collection_wrap.query(term_expr, output_fields=["*"],
+        self.collection_wrap.query(term_expr, output_fields=["float", "int64", "int8", "varchar"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.fixture(scope="function", params=cf.gen_normal_expressions())
@@ -411,7 +411,7 @@ class TestQueryParams(TestcaseBase):
         pos = 100
         term_expr = f'{field} not in {values[pos:]}'
         res = df.iloc[:pos, :3].to_dict('records')
-        self.collection_wrap.query(term_expr, output_fields=["*"],
+        self.collection_wrap.query(term_expr, output_fields=["float", "int64", "varchar"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -678,7 +678,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res, "with_vec": True})
 
         # query with wildcard %
-        collection_w.query(default_term_expr, output_fields=["%"],
+        collection_w.query(default_term_expr, output_fields=["*"],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
 
@@ -739,7 +739,7 @@ class TestQueryParams(TestcaseBase):
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
-        method: specify output_fields as "*" and "*", "%"
+        method: specify output_fields as "*" 
         expected: output all scale field; output all fields
         """
         # init collection with fields: int64, float, float_vec, float_vector1
@@ -747,24 +747,9 @@ class TestQueryParams(TestcaseBase):
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         df = vectors[0]
 
-        # query with wildcard scale(*)
-        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
-        res = df.loc[:1, output_fields].to_dict('records')
-        collection_w.query(default_term_expr, output_fields=["*"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res})
-
-        # query with wildcard % output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name,
-        # ct.another_float_vec_field_name]
-        output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name]
-        res2 = df.loc[:1, output_fields2].to_dict('records')
-        collection_w.query(default_term_expr, output_fields=["%"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res2, "with_vec": True})
-
-        # query with wildcard all fields: vector(%) and scale(*)
+        # query with wildcard all fields
         res3 = df.iloc[:2].to_dict('records')
-        collection_w.query(default_term_expr, output_fields=["*", "%"],
+        collection_w.query(default_term_expr, output_fields=["*"],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res3, "with_vec": True})
 
@@ -780,44 +765,12 @@ class TestQueryParams(TestcaseBase):
         df = vectors[0]
 
         # query with output_fields=["*", float_vector)
-        res = df.iloc[:2, :4].to_dict('records')
+        res = df.iloc[:2].to_dict('records')
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=["*", ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
-
-        # query with output_fields=["*", float)
-        res2 = df.iloc[:2, :3].to_dict('records')
-        collection_w.load()
-        collection_w.query(default_term_expr, output_fields=["*", ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res2})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
-    def test_query_output_fields_part_vector_wildcard(self):
-        """
-        target: test query output_fields with part wildcard
-        method: specify output_fields as wildcard and part field
-        expected: verify query result
-        """
-        # init collection with fields: int64, float, float_vec, float_vector1
-        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
-        collection_w.load()
-
-        # query with output_fields=["%", float), expected: all fields
-        res = df.iloc[:2].to_dict('records')
-        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "with_vec": True})
-
-        # query with output_fields=["%", float_vector), expected: int64, float_vector, float_vector1
-        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
-        res2 = df.loc[:1, output_fields].to_dict('records')
-        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res2, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
@@ -1766,7 +1719,7 @@ class TestQueryString(TestcaseBase):
         df_dict_list = []
         for df in df_list:
             df_dict_list += df.to_dict('records')
-        output_fields = ["*", "%"]
+        output_fields = ["*"]
         expression = "int64 >= 0"
         collection_w.query(expression, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results,

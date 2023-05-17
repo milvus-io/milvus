@@ -449,7 +449,7 @@ class TestDeleteOperation(TestcaseBase):
         """
         # init collection with nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
-        entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
+        entity, _ = collection_w.query(tmp_expr, output_fields=["*"])
         search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
@@ -1318,7 +1318,7 @@ class TestDeleteString(TestcaseBase):
         # init collection with nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True,
                                                                primary_field=ct.default_string_field_name)[0:4]
-        entity, _ = collection_w.query(default_string_expr, output_fields=["%"])
+        entity, _ = collection_w.query(default_string_expr, output_fields=["*"])
         search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)

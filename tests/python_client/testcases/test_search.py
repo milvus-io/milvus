@@ -831,7 +831,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="Now support output vector field")
-    @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"]])
+    @pytest.mark.parametrize("output_fields", [[default_search_field], ["*"]])
     def test_search_output_field_vector(self, output_fields):
         """
         target: test search with vector as output field
