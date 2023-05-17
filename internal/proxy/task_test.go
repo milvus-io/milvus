@@ -725,21 +725,40 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	prefix := "TestCreateCollectionTaskWithPartitionKey"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	int64Field := "int64"
-	floatVecField := "fvec"
-	varCharField := "varChar"
-
-	fieldName2Type := make(map[string]schemapb.DataType)
-	fieldName2Type[int64Field] = schemapb.DataType_Int64
-	fieldName2Type[varCharField] = schemapb.DataType_VarChar
-	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
-	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+	int64Field := &schemapb.FieldSchema{
+		Name:         "int64",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	varCharField := &schemapb.FieldSchema{
+		Name:     "varChar",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "max_length",
+				Value: strconv.Itoa(testMaxVarCharLength),
+			},
+		},
+	}
+	floatVecField := &schemapb.FieldSchema{
+		Name:     "fvec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: strconv.Itoa(testVecDim),
+			},
+		},
+	}
 	partitionKeyField := &schemapb.FieldSchema{
 		Name:           "partition_key",
 		DataType:       schemapb.DataType_Int64,
 		IsPartitionKey: true,
 	}
-	schema.Fields = append(schema.Fields, partitionKeyField)
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		Fields: []*schemapb.FieldSchema{int64Field, varCharField, partitionKeyField, floatVecField},
+	}
 	var marshaledSchema []byte
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
@@ -764,6 +783,30 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 	t.Run("PreExecute", func(t *testing.T) {
 		var err error
+
+		// test default num partitions
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, common.DefaultPartitionsWithPartitionKey, task.GetNumPartitions())
+
+		// test specify num partition without partition key field
+		partitionKeyField.IsPartitionKey = false
+		task.NumPartitions = common.DefaultPartitionsWithPartitionKey * 2
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		partitionKeyField.IsPartitionKey = true
+
+		// test multi partition key field
+		varCharField.IsPartitionKey = true
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		varCharField.IsPartitionKey = false
 
 		// test partitions < 0
 		task.NumPartitions = -2

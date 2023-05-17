@@ -24,19 +24,23 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc/metadata"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -1036,4 +1040,25 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	}
 
 	return partitionNames, nil
+}
+
+func setMsgID(ctx context.Context,
+	msgs []msgstream.TsMsg,
+	idAllocator *allocator.IDAllocator) error {
+	var idBegin int64
+	var err error
+
+	err = retry.Do(ctx, func() error {
+		idBegin, _, err = idAllocator.Alloc(uint32(len(msgs)))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	for i, msg := range msgs {
+		msg.SetID(idBegin + UniqueID(i))
+	}
+
+	return nil
 }

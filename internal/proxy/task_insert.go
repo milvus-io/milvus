@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -39,9 +38,6 @@ type insertTask struct {
 	vChannels          []vChan
 	pChannels          []pChan
 	schema             *schemapb.CollectionSchema
-	msgIDBegin         int64
-	msgIDEnd           int64
-	idMutex            sync.Mutex
 	isPartitionKeyMode bool
 	partitionKeys      *schemapb.FieldData
 }
@@ -336,38 +332,12 @@ func (it *insertTask) getInsertMsgsByPartition(segmentID UniqueID,
 	rowOffsets []int,
 	channelName string) ([]msgstream.TsMsg, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize
-	var err error
-
-	// fetch next id, if not id available, fetch next batch
-	// lazy fetch, get first batch after first getMsgID called
-	getMsgID := func() (int64, error) {
-		it.idMutex.Lock()
-		defer it.idMutex.Unlock()
-		if it.msgIDBegin == it.msgIDEnd {
-			err = retry.Do(it.ctx, func() error {
-				it.msgIDBegin, it.msgIDEnd, err = it.idAllocator.Alloc(16)
-				return err
-			})
-			if err != nil {
-				log.Error("failed to allocate msg id", zap.Int64("base.MsgID", it.Base.MsgID), zap.Error(err))
-				return 0, err
-			}
-		}
-		result := it.msgIDBegin
-		it.msgIDBegin++
-		return result, nil
-	}
 
 	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string) (*msgstream.InsertMsg, error) {
-		msgID, err := getMsgID()
-		if err != nil {
-			return nil, err
-		}
+	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
 		insertReq := internalpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-				commonpbutil.WithMsgID(msgID),
 				commonpbutil.WithTimeStamp(it.BeginTimestamp), // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
 				commonpbutil.WithSourceID(it.Base.SourceID),
 			),
@@ -388,15 +358,12 @@ func (it *insertTask) getInsertMsgsByPartition(segmentID UniqueID,
 			InsertRequest: insertReq,
 		}
 
-		return insertMsg, nil
+		return insertMsg
 	}
 
 	repackedMsgs := make([]msgstream.TsMsg, 0)
 	requestSize := 0
-	insertMsg, err := createInsertMsg(segmentID, channelName)
-	if err != nil {
-		return nil, err
-	}
+	insertMsg := createInsertMsg(segmentID, channelName)
 	for _, offset := range rowOffsets {
 		curRowMessageSize, err := typeutil.EstimateEntitySize(it.InsertRequest.GetFieldsData(), offset)
 		if err != nil {
@@ -406,10 +373,7 @@ func (it *insertTask) getInsertMsgsByPartition(segmentID UniqueID,
 		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
 		if requestSize+curRowMessageSize >= threshold {
 			repackedMsgs = append(repackedMsgs, insertMsg)
-			insertMsg, err = createInsertMsg(segmentID, channelName)
-			if err != nil {
-				return nil, err
-			}
+			insertMsg = createInsertMsg(segmentID, channelName)
 			requestSize = 0
 		}
 
@@ -567,6 +531,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		log.Warn("repack insert data to msgpack failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
+		return err
+	}
+	err = setMsgID(ctx, msgPack.Msgs, it.idAllocator)
+	if err != nil {
+		log.Error("failed to allocate msg id", zap.Error(err))
 		return err
 	}
 
