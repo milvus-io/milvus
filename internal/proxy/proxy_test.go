@@ -552,7 +552,7 @@ func TestProxy(t *testing.T) {
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(dim),
 				},
 			},
@@ -635,7 +635,7 @@ func TestProxy(t *testing.T) {
 			IndexName:      indexName,
 			ExtraParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(dim),
 				},
 				{
@@ -643,7 +643,7 @@ func TestProxy(t *testing.T) {
 					Value: distance.L2,
 				},
 				{
-					Key:   "index_type",
+					Key:   common.IndexTypeKey,
 					Value: "IVF_FLAT",
 				},
 				{
@@ -3326,7 +3326,7 @@ func TestProxy(t *testing.T) {
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(dim),
 				},
 			},
@@ -3595,6 +3595,9 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName, Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "NotExisted", RoleName: roleName, Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 

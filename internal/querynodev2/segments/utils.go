@@ -61,7 +61,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 			offset += 8
 		case schemapb.DataType_FloatVector:
 			for _, t := range field.TypeParams {
-				if t.Key == "dim" {
+				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
 						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
@@ -72,7 +72,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 			}
 		case schemapb.DataType_BinaryVector:
 			for _, t := range field.TypeParams {
-				if t.Key == "dim" {
+				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
 						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)

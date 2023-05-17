@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -372,42 +373,6 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 
 }
 
-func TestSessionRevoke(t *testing.T) {
-	s := &Session{}
-	assert.NotPanics(t, func() {
-		s.Revoke(time.Second)
-	})
-
-	s = (*Session)(nil)
-	assert.NotPanics(t, func() {
-		s.Revoke(time.Second)
-	})
-
-	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
-
-	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	defer etcdCli.Close()
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix("")
-	assert.NoError(t, err)
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix("")
-
-	s = NewSession(ctx, metaRoot, etcdCli)
-	s.Init("revoketest", "testAddr", false, false)
-	assert.NotPanics(t, func() {
-		s.Revoke(time.Second)
-	})
-}
-
 func TestSession_Registered(t *testing.T) {
 	session := &Session{}
 	session.UpdateRegistered(false)
@@ -744,4 +709,161 @@ func TestIntegrationMode(t *testing.T) {
 	s1.Init("inittest1", "testAddr1", false, false)
 	s1.Init("inittest2", "testAddr2", false, false)
 	assert.NotEqual(t, s1.ServerID, s2.ServerID)
+}
+
+type SessionSuite struct {
+	suite.Suite
+	tmpDir     string
+	etcdServer *embed.Etcd
+
+	metaRoot   string
+	serverName string
+	client     *clientv3.Client
+}
+
+func (s *SessionSuite) SetupSuite() {
+	paramtable.Init()
+	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	s.Require().NoError(err)
+	s.tmpDir = dir
+	s.T().Log("using tmp dir:", dir)
+
+	config := embed.NewConfig()
+
+	config.Dir = os.TempDir()
+	config.LogLevel = "warn"
+	config.LogOutputs = []string{"default"}
+	u, err := url.Parse("http://localhost:0")
+	s.Require().NoError(err)
+
+	config.LCUrls = []url.URL{*u}
+	u, err = url.Parse("http://localhost:0")
+	s.Require().NoError(err)
+	config.LPUrls = []url.URL{*u}
+
+	etcdServer, err := embed.StartEtcd(config)
+	s.Require().NoError(err)
+	s.etcdServer = etcdServer
+}
+
+func (s *SessionSuite) TearDownSuite() {
+	if s.etcdServer != nil {
+		s.etcdServer.Close()
+	}
+	if s.tmpDir != "" {
+		os.RemoveAll(s.tmpDir)
+	}
+}
+
+func (s *SessionSuite) SetupTest() {
+	client := v3client.New(s.etcdServer.Server)
+	s.client = client
+
+	s.metaRoot = fmt.Sprintf("milvus-ut/session-%s/", funcutil.GenRandomStr())
+}
+
+func (s *SessionSuite) TearDownTest() {
+	_, err := s.client.Delete(context.Background(), s.metaRoot, clientv3.WithPrefix())
+	s.Require().NoError(err)
+
+	if s.client != nil {
+		s.client.Close()
+		s.client = nil
+	}
+}
+
+func (s *SessionSuite) TestDisconnected() {
+	st := &Session{}
+	st.SetDisconnected(true)
+	sf := &Session{}
+	sf.SetDisconnected(false)
+
+	cases := []struct {
+		tag    string
+		input  *Session
+		expect bool
+	}{
+		{"not_set", &Session{}, false},
+		{"set_true", st, true},
+		{"set_false", sf, false},
+	}
+
+	for _, c := range cases {
+		s.Run(c.tag, func() {
+			s.Equal(c.expect, c.input.Disconnected())
+		})
+	}
+}
+
+func (s *SessionSuite) TestGoingStop() {
+	ctx := context.Background()
+	sdisconnect := NewSession(ctx, s.metaRoot, s.client)
+	sdisconnect.SetDisconnected(true)
+
+	sess := NewSession(ctx, s.metaRoot, s.client)
+	sess.Init("test", "normal", false, false)
+	sess.Register()
+
+	cases := []struct {
+		tag         string
+		input       *Session
+		expectError bool
+	}{
+		{"nil", nil, true},
+		{"not_inited", &Session{}, true},
+		{"disconnected", sdisconnect, true},
+		{"normal", sess, false},
+	}
+
+	for _, c := range cases {
+		s.Run(c.tag, func() {
+			err := c.input.GoingStop()
+			if c.expectError {
+				s.Error(err)
+			} else {
+				s.NoError(err)
+			}
+		})
+	}
+}
+
+func (s *SessionSuite) TestRevoke() {
+	ctx := context.Background()
+	disconnected := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	disconnected.Init("test", "disconnected", false, false)
+	disconnected.Register()
+	disconnected.SetDisconnected(true)
+
+	sess := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	sess.Init("test", "normal", false, false)
+	sess.Register()
+
+	cases := []struct {
+		tag      string
+		input    *Session
+		preExist bool
+		success  bool
+	}{
+		{"not_inited", &Session{}, false, true},
+		{"disconnected", disconnected, true, false},
+		{"normal", sess, false, true},
+	}
+
+	for _, c := range cases {
+		s.Run(c.tag, func() {
+			c.input.Revoke(time.Second)
+			resp, err := s.client.Get(ctx, c.input.getCompleteKey())
+			s.Require().NoError(err)
+			if !c.preExist || c.success {
+				s.Equal(0, len(resp.Kvs))
+			}
+			if c.preExist && !c.success {
+				s.Equal(1, len(resp.Kvs))
+			}
+		})
+	}
+}
+
+func TestSessionSuite(t *testing.T) {
+	suite.Run(t, new(SessionSuite))
 }

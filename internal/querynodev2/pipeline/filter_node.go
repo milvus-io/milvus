@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -67,7 +68,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 
 	metrics.QueryNodeConsumeTimeTickLag.
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(fNode.collectionID)).
-		Set(float64(streamMsgPack.EndTs))
+		Set(float64(tsoutil.SubByNow(streamMsgPack.EndTs)))
 
 	//Get collection from collection manager
 	collection := fNode.manager.Collection.Get(fNode.collectionID)

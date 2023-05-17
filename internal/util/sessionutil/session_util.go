@@ -103,7 +103,8 @@ type Session struct {
 
 	metaRoot string
 
-	registered atomic.Value
+	registered   atomic.Value
+	disconnected atomic.Value
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -522,6 +523,10 @@ func (s *Session) GoingStop() error {
 		return errors.New("the session hasn't been init")
 	}
 
+	if s.Disconnected() {
+		return errors.New("this session has disconnected")
+	}
+
 	completeKey := s.getCompleteKey()
 	resp, err := s.etcdCli.Get(s.ctx, completeKey, clientv3.WithCountOnly())
 	if err != nil {
@@ -719,6 +724,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				}
 				// not ok, connection lost
 				log.Warn("connection lost detected, shuting down")
+				s.SetDisconnected(true)
 				if callback != nil {
 					go callback()
 				}
@@ -791,6 +797,9 @@ func (s *Session) Revoke(timeout time.Duration) {
 	if s.etcdCli == nil || s.leaseID == nil {
 		return
 	}
+	if s.Disconnected() {
+		return
+	}
 	// can NOT use s.ctx, it may be Done here
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -806,6 +815,18 @@ func (s *Session) UpdateRegistered(b bool) {
 // Registered check if session was registered into etcd.
 func (s *Session) Registered() bool {
 	b, ok := s.registered.Load().(bool)
+	if !ok {
+		return false
+	}
+	return b
+}
+
+func (s *Session) SetDisconnected(b bool) {
+	s.disconnected.Store(b)
+}
+
+func (s *Session) Disconnected() bool {
+	b, ok := s.disconnected.Load().(bool)
 	if !ok {
 		return false
 	}

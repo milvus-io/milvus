@@ -73,7 +73,7 @@ func TestJsonExpr(t *testing.T) {
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: strconv.Itoa(dim),
 				},
 			},
@@ -84,6 +84,7 @@ func TestJsonExpr(t *testing.T) {
 			Name:        jsonField,
 			Description: "this is a json field",
 			DataType:    schemapb.DataType_JSON,
+			//IsDynamic:   true,
 		}
 		return &schemapb.CollectionSchema{
 			Name:        collectionName,
@@ -177,7 +178,7 @@ func TestJsonExpr(t *testing.T) {
 		IndexName:      "_default",
 		ExtraParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: strconv.Itoa(dim),
 			},
 			{
@@ -185,7 +186,7 @@ func TestJsonExpr(t *testing.T) {
 				Value: distance.L2,
 			},
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "IVF_FLAT",
 			},
 			{

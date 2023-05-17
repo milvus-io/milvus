@@ -2,17 +2,21 @@ package proxy
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type validateUtil struct {
-	checkNAN    bool
-	checkMaxLen bool
+	checkNAN      bool
+	checkMaxLen   bool
+	checkOverflow bool
 }
 
 type validateOption func(*validateUtil)
@@ -29,6 +33,12 @@ func withMaxLenCheck() validateOption {
 	}
 }
 
+func withOverflowCheck() validateOption {
+	return func(v *validateUtil) {
+		v.checkOverflow = true
+	}
+}
+
 func (v *validateUtil) apply(opts ...validateOption) {
 	for _, opt := range opts {
 		opt(v)
@@ -37,6 +47,11 @@ func (v *validateUtil) apply(opts ...validateOption) {
 
 func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.CollectionSchema, numRows uint64) error {
 	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return err
+	}
+
+	err = v.fillWithDefaultValue(data, helper, numRows)
 	if err != nil {
 		return err
 	}
@@ -66,6 +81,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		case schemapb.DataType_JSON:
 			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Int8, schemapb.DataType_Int16:
+			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		default:
@@ -139,6 +158,82 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 	return nil
 }
 
+func (v *validateUtil) fillWithDefaultValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
+	for _, field := range data {
+		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
+		if err != nil {
+			return err
+		}
+
+		// if default value is not set, continue
+		// compatible with 2.2.x
+		if fieldSchema.GetDefaultValue() == nil {
+			continue
+		}
+
+		switch field.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			switch sd := field.GetScalars().GetData().(type) {
+			case *schemapb.ScalarField_BoolData:
+				if len(sd.BoolData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetBoolData()
+					sd.BoolData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_IntData:
+				if len(sd.IntData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetIntData()
+					sd.IntData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_LongData:
+				if len(sd.LongData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetLongData()
+					sd.LongData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_FloatData:
+				if len(sd.FloatData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetFloatData()
+					sd.FloatData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_DoubleData:
+				if len(sd.DoubleData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetDoubleData()
+					sd.DoubleData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_StringData:
+				if len(sd.StringData.Data) == 0 {
+					defaultValue := fieldSchema.GetDefaultValue().GetStringData()
+					sd.StringData.Data = memsetLoop(defaultValue, int(numRows))
+				}
+
+			case *schemapb.ScalarField_ArrayData:
+				log.Error("array type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalid("not set default value", "", "array type not support default value")
+
+			case *schemapb.ScalarField_JsonData:
+				log.Error("json type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+				return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+
+			default:
+				panic("undefined data type " + field.Type.String())
+			}
+
+		case *schemapb.FieldData_Vectors:
+			log.Error("vectors not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+			return merr.WrapErrParameterInvalid("not set default value", "", "json type not support default value")
+
+		default:
+			panic("undefined data type " + field.Type.String())
+		}
+	}
+
+	return nil
+}
+
 func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	floatArray := field.GetVectors().GetFloatVector().GetData()
 	if floatArray == nil {
@@ -190,6 +285,27 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	return nil
 }
 
+func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if !v.checkOverflow {
+		return nil
+	}
+
+	data := field.GetScalars().GetIntData().GetData()
+	if data == nil {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need int array", "got nil", msg)
+	}
+
+	switch fieldSchema.GetDataType() {
+	case schemapb.DataType_Int8:
+		return verifyOverflowByRange(data, math.MinInt8, math.MaxInt8)
+	case schemapb.DataType_Int16:
+		return verifyOverflowByRange(data, math.MinInt16, math.MaxInt16)
+	}
+
+	return nil
+}
+
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) error {
 	for i, s := range strArr {
 		if int64(len(s)) > maxLength {
@@ -201,10 +317,21 @@ func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength 
 	return nil
 }
 
+func verifyOverflowByRange(arr []int32, lb int64, ub int64) error {
+	for idx, e := range arr {
+		if lb > int64(e) || ub < int64(e) {
+			msg := fmt.Sprintf("the %dth element (%d) out of range: [%d, %d]", idx, e, lb, ub)
+			return merr.WrapErrParameterInvalid("integer doesn't overflow", "out of range", msg)
+		}
+	}
+	return nil
+}
+
 func newValidateUtil(opts ...validateOption) *validateUtil {
 	v := &validateUtil{
-		checkNAN:    true,
-		checkMaxLen: false,
+		checkNAN:      true,
+		checkMaxLen:   false,
+		checkOverflow: false,
 	}
 
 	v.apply(opts...)

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 
@@ -429,7 +430,7 @@ func TestPrintIndexFile(t *testing.T) {
 	indexName := funcutil.GenRandomStr()
 	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = "IVF_FLAT"
+	indexParams[common.IndexTypeKey] = "IVF_FLAT"
 	datas := []*Blob{
 		{
 			Key:   "ivf1",

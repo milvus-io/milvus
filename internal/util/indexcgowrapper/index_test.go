@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -79,34 +80,34 @@ func generateTestCases() []vecTestCase {
 func generateParams(indexType, metricType string) (map[string]string, map[string]string) {
 	typeParams := make(map[string]string)
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = indexType
-	indexParams["metric_type"] = metricType
+	indexParams[common.IndexTypeKey] = indexType
+	indexParams[common.MetricTypeKey] = metricType
 	if indexType == IndexFaissIDMap { // float vector
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 	} else if indexType == IndexFaissIVFFlat {
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 	} else if indexType == IndexFaissIVFPQ {
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexFaissIVFSQ8 {
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexHNSW {
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		indexParams["ef"] = strconv.Itoa(ef)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexFaissBinIDMap {
-		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams[common.DimKey] = strconv.Itoa(dim)
 	} else {
 		panic("")
 	}
@@ -215,8 +216,8 @@ func TestCIndex_Delete(t *testing.T) {
 
 func TestCIndex_Error(t *testing.T) {
 	indexParams := make(map[string]string)
-	indexParams["index_type"] = "IVF_FLAT"
-	indexParams["metric_type"] = "L2"
+	indexParams[common.IndexTypeKey] = "IVF_FLAT"
+	indexParams[common.MetricTypeKey] = "L2"
 	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, indexParams, genStorageConfig())
 	assert.Nil(t, err)
 

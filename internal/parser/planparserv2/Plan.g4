@@ -85,7 +85,7 @@ FloatingConstant:
 Identifier: Nondigit (Nondigit | Digit)*;
 
 StringLiteral: EncodingPrefix? '"' SCharSequence? '"';
-JSONIdentifier: Identifier('[' ('"' SCharSequence '"' | '\'' SCharSequence '\'' | SCharSequence | IntegerConstant) ']')+;
+JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
@@ -95,7 +95,7 @@ fragment SChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment Nondigit: [a-zA-Z_];
 fragment Digit: [0-9];
 fragment BinaryConstant: '0' [bB] [0-1]+;
-fragment DecimalConstant: NonzeroDigit Digit*;
+fragment DecimalConstant: NonzeroDigit Digit* | '0';
 fragment OctalConstant: '0' OctalDigit*;
 fragment HexadecimalConstant: '0' [xX] HexadecimalDigitSequence;
 fragment NonzeroDigit: [1-9];

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -419,7 +420,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-						{Key: "dim", Value: "64"},
+						{Key: common.DimKey, Value: "64"},
 					}},
 				}},
 			}, dm)
@@ -456,7 +457,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-						{Key: "dim", Value: "dim"},
+						{Key: common.DimKey, Value: "bad_dim"},
 					}},
 				}}}, dm)
 			assert.Error(t, err)

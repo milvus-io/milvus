@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -41,8 +42,7 @@ func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 
 	switch fieldSchema.DataType {
 	case schemapb.DataType_VarChar:
-		maxLengthPerRowKey := "max_length"
-		maxLengthPerRowValue, ok := paramsMap[maxLengthPerRowKey]
+		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
 			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
 		}
@@ -85,7 +85,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			res += maxLengthPerRow
 		case schemapb.DataType_BinaryVector:
 			for _, kv := range fs.TypeParams {
-				if kv.Key == "dim" {
+				if kv.Key == common.DimKey {
 					v, err := strconv.Atoi(kv.Value)
 					if err != nil {
 						return -1, err
@@ -96,7 +96,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			}
 		case schemapb.DataType_FloatVector:
 			for _, kv := range fs.TypeParams {
-				if kv.Key == "dim" {
+				if kv.Key == common.DimKey {
 					v, err := strconv.Atoi(kv.Value)
 					if err != nil {
 						return -1, err
@@ -249,6 +249,7 @@ func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error)
 	var field *schemapb.FieldSchema
 	for _, f := range helper.schema.GetFields() {
 		// TODO @xiaocai2333: get $SYS_META json field
+		//if f.DataType == schemapb.DataType_JSON && f.GetIsDynamic() {
 		if f.DataType == schemapb.DataType_JSON {
 			if field != nil {
 				// TODO @xiaocai2333: will not return error after support $SYS_META
@@ -260,7 +261,7 @@ func (helper *SchemaHelper) getDefaultJSONField() (*schemapb.FieldSchema, error)
 		}
 	}
 	if field == nil {
-		errMsg := "there is no json field in schema, need to specified field name"
+		errMsg := "there is no dynamic json field in schema, need to specified field name"
 		log.Warn(errMsg)
 		return nil, fmt.Errorf(errMsg)
 	}
@@ -286,7 +287,7 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 		return 0, fmt.Errorf("field type = %s not has dim", schemapb.DataType_name[int32(sch.DataType)])
 	}
 	for _, kv := range sch.TypeParams {
-		if kv.Key == "dim" {
+		if kv.Key == common.DimKey {
 			dim, err := strconv.Atoi(kv.Value)
 			if err != nil {
 				return 0, err
@@ -550,7 +551,7 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 }
 
 // MergeFieldData appends fields data to dst
-func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
+func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
 	for _, data := range dst {
 		fieldID2Data[data.FieldId] = data
@@ -632,8 +633,19 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data...)
 				}
+			case *schemapb.ScalarField_JsonData:
+				if dstScalar.GetJsonData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: srcScalar.JsonData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data...)
+				}
 			default:
-				log.Error("Not supported field type", zap.String("field type", srcFieldData.Type.String()))
+				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
+				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
@@ -673,10 +685,13 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 					dstVector.GetFloatVector().Data = append(dstVector.GetFloatVector().Data, srcVector.FloatVector.Data...)
 				}
 			default:
-				log.Error("Not supported field type", zap.String("field type", srcFieldData.Type.String()))
+				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
+				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		}
 	}
+
+	return nil
 }
 
 // GetPrimaryFieldSchema get primary field schema from collection schema

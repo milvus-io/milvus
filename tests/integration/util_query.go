@@ -37,8 +37,8 @@ const (
 	AnnsFieldKey    = "anns_field"
 	TopKKey         = "topk"
 	NQKey           = "nq"
-	MetricTypeKey   = "metric_type"
-	SearchParamsKey = "params"
+	MetricTypeKey   = common.MetricTypeKey
+	SearchParamsKey = common.IndexParamsKey
 	RoundDecimalKey = "round_decimal"
 	OffsetKey       = "offset"
 	LimitKey        = "limit"

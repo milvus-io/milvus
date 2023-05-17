@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -561,7 +560,10 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode)
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
-	if columnInfo == nil || err != nil {
+	if err != nil {
+		return err
+	}
+	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
@@ -931,10 +933,8 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 */
 // More tests refer to plan_parser_v2_test.go::Test_JSONExpr
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
-	ss := strings.Split(identifier, "[")
-	fieldName := ss[0]
-	length := len(ss)
-	nestedPath := make([]string, 0, length)
+	fieldName := strings.Split(identifier, "[")[0]
+	nestedPath := make([]string, 0)
 	jsonField, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
 	if err != nil {
 		return nil, err
@@ -942,8 +942,18 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	if fieldName != jsonField.Name {
 		nestedPath = append(nestedPath, fieldName)
 	}
-	for i := 1; i < length; i++ {
-		path := strings.Trim(strings.Trim(ss[i], "[]"), "\"")
+	jsonKeyStr := identifier[len(fieldName):]
+	ss := strings.Split(jsonKeyStr, "][")
+	for i := 0; i < len(ss); i++ {
+		path := strings.Trim(ss[i], "[]")
+		if path == "" {
+			return nil, fmt.Errorf("invalid identifier: %s", identifier)
+		}
+		if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
+			path = path[1 : len(path)-1]
+		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
+			return nil, fmt.Errorf("json key must be enclosed in double quotes: \"%s\"", path)
+		}
 		nestedPath = append(nestedPath, path)
 	}
 

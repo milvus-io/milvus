@@ -49,10 +49,12 @@ type manager struct {
 
 	tSafeManager TSafeManager
 	dispatcher   msgdispatcher.Client
-	mu           sync.Mutex
+	mu           sync.RWMutex
 }
 
 func (m *manager) Num() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return len(m.channel2Pipeline)
 }
 
@@ -162,6 +164,5 @@ func NewManager(dataManager *DataManager,
 		delegators:       delegators,
 		tSafeManager:     tSafeManager,
 		dispatcher:       dispatcher,
-		mu:               sync.Mutex{},
 	}
 }

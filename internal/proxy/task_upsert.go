@@ -147,6 +147,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 		return err
 	}
+
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
@@ -193,7 +194,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := newValidateUtil(withNANCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}

@@ -239,7 +239,7 @@ func TestGetDimFromParams(t *testing.T) {
 	dim := 8
 	params1 := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: strconv.Itoa(dim),
 		},
 	}
@@ -249,7 +249,7 @@ func TestGetDimFromParams(t *testing.T) {
 
 	params2 := []*commonpb.KeyValuePair{
 		{
-			Key:   "dim",
+			Key:   common.DimKey,
 			Value: "not in int format",
 		},
 	}
@@ -345,7 +345,7 @@ func genAllFieldsSchema(fVecDim, bVecDim int) (schema *schemapb.CollectionSchema
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: strconv.Itoa(fVecDim),
 					},
 				},
@@ -354,7 +354,7 @@ func genAllFieldsSchema(fVecDim, bVecDim int) (schema *schemapb.CollectionSchema
 				DataType: schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: strconv.Itoa(bVecDim),
 					},
 				},

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -62,7 +63,7 @@ func Test_AdjustBufSize(t *testing.T) {
 
 	// huge row
 	schema.Fields[9].TypeParams = []*commonpb.KeyValuePair{
-		{Key: "dim", Value: "32768"},
+		{Key: common.DimKey, Value: "32768"},
 	}
 	parser = NewJSONParser(ctx, schema, nil)
 	assert.NotNil(t, parser)

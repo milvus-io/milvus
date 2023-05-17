@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // Meta Prefix consts
@@ -58,7 +59,7 @@ const (
 
 const (
 	// ParamsKeyToParse is the key of the param to build index.
-	ParamsKeyToParse = "params"
+	ParamsKeyToParse = common.IndexParamsKey
 )
 
 var (

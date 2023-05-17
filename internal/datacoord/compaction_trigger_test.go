@@ -241,7 +241,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -261,7 +261,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -281,7 +281,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -326,7 +326,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128error",
 											},
 										},
@@ -343,7 +343,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -365,7 +365,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 								TypeParams:   nil,
 								IndexParams: []*commonpb.KeyValuePair{
 									{
-										Key:   "index_type",
+										Key:   common.IndexTypeKey,
 										Value: "HNSW",
 									},
 								},
@@ -385,7 +385,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 								TypeParams:   nil,
 								IndexParams: []*commonpb.KeyValuePair{
 									{
-										Key:   "index_type",
+										Key:   common.IndexTypeKey,
 										Value: "DISKANN",
 									},
 								},
@@ -689,7 +689,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -881,7 +881,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -1034,7 +1034,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},
@@ -1433,7 +1433,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 										DataType: schemapb.DataType_FloatVector,
 										TypeParams: []*commonpb.KeyValuePair{
 											{
-												Key:   "dim",
+												Key:   common.DimKey,
 												Value: "128",
 											},
 										},

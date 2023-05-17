@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/pkg/common"
 
 	"github.com/stretchr/testify/assert"
 
@@ -32,7 +33,7 @@ func TestGetMaxLength(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "not_int_aha",
 				},
 			},
@@ -46,7 +47,7 @@ func TestGetMaxLength(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "100",
 				},
 			},

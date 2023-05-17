@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestMeta_CanCreateIndex(t *testing.T) {
@@ -45,13 +46,13 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		}
@@ -118,7 +119,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
-		req.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: "64"}}
+		req.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}}
 		tmpIndexID, err = m.CanCreateIndex(req)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
@@ -129,7 +130,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
-		req.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}}
+		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
 		tmpIndexID, err = m.CanCreateIndex(req)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
@@ -166,13 +167,13 @@ func TestMeta_HasSameReq(t *testing.T) {
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		}
@@ -249,13 +250,13 @@ func TestMeta_CreateIndex(t *testing.T) {
 		CreateTime:   12,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		},
 		IndexParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		},
@@ -376,13 +377,13 @@ func TestMeta_GetIndexIDByName(t *testing.T) {
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		}
@@ -434,13 +435,13 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		}
@@ -555,13 +556,13 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "dim",
+				Key:   common.DimKey,
 				Value: "128",
 			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "index_type",
+				Key:   common.IndexTypeKey,
 				Value: "FLAT",
 			},
 		}
@@ -839,13 +840,13 @@ func TestMeta_GetTypeParams(t *testing.T) {
 					CreateTime:   0,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "128",
 						},
 					},
 					IndexParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "index_type",
+							Key:   common.IndexTypeKey,
 							Value: "HNSW",
 						},
 					},
@@ -884,13 +885,13 @@ func TestMeta_GetIndexParams(t *testing.T) {
 					CreateTime:   0,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "dim",
+							Key:   common.DimKey,
 							Value: "128",
 						},
 					},
 					IndexParams: []*commonpb.KeyValuePair{
 						{
-							Key:   "index_type",
+							Key:   common.IndexTypeKey,
 							Value: "HNSW",
 						},
 					},

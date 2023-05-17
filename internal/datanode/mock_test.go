@@ -402,7 +402,7 @@ func (mf *MetaFactory) GetFieldSchema() []*schemapb.FieldSchema {
 			DataType:    schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "2",
 				},
 			},
@@ -420,7 +420,7 @@ func (mf *MetaFactory) GetFieldSchema() []*schemapb.FieldSchema {
 			DataType:    schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "dim",
+					Key:   common.DimKey,
 					Value: "32",
 				},
 			},
@@ -494,7 +494,7 @@ func (mf *MetaFactory) GetFieldSchema() []*schemapb.FieldSchema {
 			DataType:    schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length",
+					Key:   common.MaxLengthKey,
 					Value: "100",
 				},
 			},

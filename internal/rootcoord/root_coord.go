@@ -2140,11 +2140,14 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
-	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
-		errMsg := "not found the user, maybe the user isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+	if in.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
+			errMsg := "not found the user, maybe the user isn't existed or internal system error"
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+		}
 	}
+
 	updateCache := true
 	if err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type); err != nil {
 		if !common.IsIgnorableError(err) {

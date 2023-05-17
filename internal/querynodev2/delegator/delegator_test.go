@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -110,7 +111,7 @@ func (s *DelegatorSuite) SetupTest() {
 				DataType:     schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: "128",
 					},
 				},
@@ -125,17 +126,17 @@ func (s *DelegatorSuite) SetupTest() {
 				IndexName:    "binary_index",
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "dim",
+						Key:   common.DimKey,
 						Value: "128",
 					},
 				},
 				IndexParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "index_type",
+						Key:   common.IndexTypeKey,
 						Value: "BIN_IVF_FLAT",
 					},
 					{
-						Key:   "metric_type",
+						Key:   common.MetricTypeKey,
 						Value: "TANIMOTO",
 					},
 				},

@@ -85,6 +85,7 @@ const (
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"
 	DimKey         = "dim"
+	MaxLengthKey   = "max_length"
 )
 
 //  Collection properties key
