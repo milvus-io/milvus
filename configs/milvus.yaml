@@ -460,6 +460,9 @@ common:
     ttl: 20 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
 
+  ImportMaxFileSize: 17179869184  # 16 * 1024 * 1024 * 1024
+  # max file size to import for bulkInsert
+
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
 #   1. TT protection;
