@@ -86,6 +86,8 @@ func (job *ReleaseCollectionJob) Execute() error {
 	waitCollectionReleased(job.dist, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(lenPartitions))
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
 }
 
