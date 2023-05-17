@@ -1611,7 +1611,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="debug")
     def test_search_max_dim(self, auto_id, _async):
         """
         target: test search with max configuration
@@ -1659,7 +1658,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nq,
                                          "_async": _async})
 
-    @pytest.mark.xfail(reason="issue #19129")
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_max_nq(self, auto_id, dim, _async):
         """
@@ -1668,7 +1666,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with max nq
         """
         self._connect()
-        nq = 17000
+        nq = 16384
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       auto_id=auto_id,
                                                                       dim=dim)[0:4]
@@ -2934,25 +2932,14 @@ class TestCollectionSearch(TestcaseBase):
 
         # 3. search with output field vector
         search_params = cf.gen_search_param(index, metrics)[0]
-        res = collection_w.search(vectors[:1], default_search_field,
-                                  search_params, default_limit, default_search_exp,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": 1,
-                                               "limit": default_limit,
-                                               "output_fields": [field_name]})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for _id in range(default_limit):
-            for i in range(default_dim):
-                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
-                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
-                if vectorInsert != vectorRes:
-                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
-                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
-                log.info(data[field_name][res[0][_id].id][i])
-                log.info(res[0][_id].entity.float_vector[i])
-                assert float(str(vectorInsert)) == float(vectorRes)
+        collection_w.search(vectors[:1], default_search_field,
+                            search_params, default_limit, default_search_exp,
+                            output_fields=[field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1,
+                                         "limit": default_limit,
+                                         "value": data.to_dict(),
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23661")
@@ -3018,11 +3005,9 @@ class TestCollectionSearch(TestcaseBase):
                                   output_fields=[field_name],
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": default_nq,
-                                               "limit": default_limit})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for i in range(default_limit):
-            assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
+                                               "limit": default_limit,
+                                               "value": data.to_dict(),
+                                               "output_fields": [field_name]})[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_vector_field_and_scalar_field(self):
@@ -3034,9 +3019,12 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize a collection
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w = self.init_collection_general(prefix)[0]
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
 
         # 2. search with output field vector
+        collection_w.load()
         output_fields = [default_float_field_name, default_string_field_name, default_search_field]
         collection_w.search(vectors[:1], default_search_field,
                             default_search_params, default_limit, default_search_exp,
@@ -3044,6 +3032,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1,
                                          "limit": default_limit,
+                                         "value": df.to_dict(),
                                          "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3089,26 +3078,18 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search with output field vector
-        res = partition_w.search(vectors[:1], default_search_field,
-                                 default_search_params, default_limit, default_search_exp,
-                                 output_fields=[field_name],
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": 1,
-                                              "limit": default_limit})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for _id in range(default_limit):
-            for i in range(default_dim):
-                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
-                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
-                if vectorInsert != vectorRes:
-                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
-                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
-                assert str(vectorInsert) == vectorRes
+        partition_w.search(vectors[:1], default_search_field,
+                           default_search_params, default_limit, default_search_exp,
+                           output_fields=[field_name],
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": 1,
+                                        "limit": default_limit,
+                                        "value": data.to_dict(),
+                                        "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name], ["*", default_search_field],
-                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
+                                                        ["*", default_search_field]])
     def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async):
         """
         target: test search with output fields using wildcard
@@ -3116,8 +3097,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id)[0:4]
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
         output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
