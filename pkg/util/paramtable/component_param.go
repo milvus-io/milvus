@@ -216,6 +216,8 @@ type commonConfig struct {
 	TimeTicker             ParamItem `refreshable:"true"`
 
 	JSONMaxLength ParamItem `refreshable:"false"`
+
+	ImportMaxFileSize ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -643,6 +645,13 @@ like the old password verification when updating the credential`,
 		DefaultValue: fmt.Sprint(64 << 10),
 	}
 	p.JSONMaxLength.Init(base.mgr)
+
+	p.ImportMaxFileSize = ParamItem{
+		Key:          "common.ImportMaxFileSize",
+		Version:      "2.2.9",
+		DefaultValue: fmt.Sprint(16 << 30),
+	}
+	p.ImportMaxFileSize.Init(base.mgr)
 }
 
 type traceConfig struct {
