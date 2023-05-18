@@ -117,7 +117,7 @@ func (p *NumpyParser) IDRange() []int64 {
 // Parse is the function entry
 func (p *NumpyParser) Parse(filePaths []string) error {
 	// check redundant files for column-based import
-	// if the field is primary key and autoid is false, the file is required
+	// if the field is primary key and autoID is false, the file is required
 	// any redundant file is not allowed
 	err := p.validateFileNames(filePaths)
 	if err != nil {
@@ -126,7 +126,7 @@ func (p *NumpyParser) Parse(filePaths []string) error {
 
 	// open files and verify file header
 	readers, err := p.createReaders(filePaths)
-	// make sure all the files are closed finially, must call this method before the function return
+	// make sure all the files are closed finally, must call this method before the function return
 	defer closeReaders(readers)
 	if err != nil {
 		return err

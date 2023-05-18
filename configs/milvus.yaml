@@ -420,6 +420,9 @@ common:
     # need to set a separated topic to stand for currently consumed timestamp for each channel
     timeticker: "timetick-channel"
 
+  ImportMaxFileSize: 17179869184 # 16 * 1024 * 1024 * 1024
+  # max file size to import for bulkInsert
+
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
 #   1. TT protection;

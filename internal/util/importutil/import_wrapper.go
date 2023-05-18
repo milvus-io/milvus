@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -42,11 +43,6 @@ const (
 
 	// supposed size of a single block, to control a binlog file size, the max biglog file size is no more than 2*SingleBlockSize
 	SingleBlockSize = 16 * 1024 * 1024 // 16MB
-
-	// this limitation is to avoid this OOM risk:
-	// for column-based file, we read all its data into memory, if user input a large file, the read() method may
-	// cost extra memory and lear to OOM.
-	MaxFileSize = 16 * 1024 * 1024 * 1024 // 16GB
 
 	// this limitation is to avoid this OOM risk:
 	// simetimes system segment max size is a large number, a single segment fields data might cause OOM.
@@ -239,10 +235,10 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 			return rowBased, fmt.Errorf("the file '%s' size is zero", filePath)
 		}
 
-		if size > MaxFileSize {
+		if size > params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() {
 			log.Error("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
-				zap.Int64("fileSize", size), zap.Int64("MaxFileSize", MaxFileSize))
-			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %d bytes", filePath, MaxFileSize)
+				zap.Int64("fileSize", size), zap.Int64("MaxFileSize", params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64()))
+			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %d bytes", filePath, params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64())
 		}
 		totalSize += size
 	}

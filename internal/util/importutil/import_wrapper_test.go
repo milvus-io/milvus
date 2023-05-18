@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -228,6 +229,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -618,7 +620,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 	segmentSize := 512 // unit: MB
 
 	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
-
+	params.Params.Init()
 	t.Run("unsupported file type", func(t *testing.T) {
 		files := []string{"uid.txt"}
 		rowBased, err := wrapper.fileValidation(files)
@@ -675,7 +677,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
 		files := []string{"a/1.json"}
-		cm.size = MaxFileSize + 1
+		cm.size = params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
 		wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.NotNil(t, err)
