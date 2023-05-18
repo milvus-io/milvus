@@ -340,6 +340,8 @@ func TestQuotaCenter(t *testing.T) {
 			Effect: metricsinfo.NodeEffect{CollectionIDs: []int64{1, 2, 3}},
 		}
 		err = quotaCenter.calculateWriteRates()
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_MemoryQuotaExhausted, quotaCenter.quotaStates[1][milvuspb.QuotaState_DenyToWrite])
 		Params.QuotaConfig.TtProtectionEnabled = disableTtBak
 	})
 

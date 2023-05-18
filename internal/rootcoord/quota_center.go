@@ -424,7 +424,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		return err
 	}
 
-	var collectionFactors map[int64]float64
+	collectionFactors := make(map[int64]float64)
 	updateCollectionFactor := func(factors map[int64]float64) {
 		for collection, factor := range factors {
 			_, ok := collectionFactors[collection]
@@ -434,7 +434,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		}
 	}
 
-	collectionFactors = q.getTimeTickDelayFactor(ts)
+	ttFactors := q.getTimeTickDelayFactor(ts)
+	updateCollectionFactor(ttFactors)
 	memFactors := q.getMemoryFactor()
 	updateCollectionFactor(memFactors)
 	growingSegFactors := q.getGrowingSegmentsSizeFactor()
@@ -442,7 +443,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 	for collection, factor := range collectionFactors {
 		if factor <= 0 {
-			q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, collection)
+			if _, ok := ttFactors[collection]; ok && factor == ttFactors[collection] {
+				// factor comes from ttFactor
+				q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, collection)
+			} else {
+				// factor comes from memFactor or growingSegFactor, all about mem exhausted
+				q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted, collection)
+			}
 		}
 
 		if q.currentRates[collection][internalpb.RateType_DMLInsert] != Inf {
