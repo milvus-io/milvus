@@ -18,6 +18,7 @@ type Field struct {
 	AutoID       bool
 	State        schemapb.FieldState
 	IsDynamic    bool
+	DefaultValue *schemapb.ValueField
 }
 
 func (f Field) Available() bool {
@@ -36,6 +37,7 @@ func (f Field) Clone() *Field {
 		AutoID:       f.AutoID,
 		State:        f.State,
 		IsDynamic:    f.IsDynamic,
+		DefaultValue: f.DefaultValue,
 	}
 }
 
@@ -61,7 +63,8 @@ func (f Field) Equal(other Field) bool {
 		checkParamsEqual(f.TypeParams, f.TypeParams) &&
 		checkParamsEqual(f.IndexParams, other.IndexParams) &&
 		f.AutoID == other.AutoID &&
-		f.IsDynamic == other.IsDynamic
+		f.IsDynamic == other.IsDynamic &&
+		f.DefaultValue == other.DefaultValue
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -92,6 +95,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		IndexParams:  field.IndexParams,
 		AutoID:       field.AutoID,
 		IsDynamic:    field.IsDynamic,
+		DefaultValue: field.DefaultValue,
 	}
 }
 
