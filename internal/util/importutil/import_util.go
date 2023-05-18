@@ -103,6 +103,10 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.Fi
 			segmentData[schema.GetFieldID()] = &storage.StringFieldData{
 				Data: make([]string, 0),
 			}
+		case schemapb.DataType_JSON:
+			segmentData[schema.GetFieldID()] = &storage.JSONFieldData{
+				Data: make([][]byte, 0),
+			}
 		default:
 			log.Error("Import util: unsupported data type", zap.String("DataType", getTypeName(schema.DataType)))
 			return nil
@@ -303,6 +307,20 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				}
 				return nil
 			}
+		case schemapb.DataType_JSON:
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				if value, ok := obj.(string); ok {
+					var dummy interface{}
+					err := json.Unmarshal([]byte(value), &dummy)
+					if err != nil {
+						return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", value, schema.GetName(), err)
+					}
+					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(value))
+				} else {
+					return fmt.Errorf("illegal value '%v' for JSON type field '%s'", obj, schema.GetName())
+				}
+				return nil
+			}
 		default:
 			return fmt.Errorf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType))
 		}
@@ -495,6 +513,8 @@ func getTypeName(dt schemapb.DataType) string {
 		return "BinaryVector"
 	case schemapb.DataType_FloatVector:
 		return "FloatVector"
+	case schemapb.DataType_JSON:
+		return "JSON"
 	default:
 		return "InvalidType"
 	}
