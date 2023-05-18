@@ -189,6 +189,7 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test BackGroundGC", func(t *testing.T) {
 		vchanNameCh := make(chan string)
 		node.clearSignal = vchanNameCh
+		node.wg.Add(1)
 		go node.BackGroundGC(vchanNameCh)
 
 		testDataSyncs := []struct {
@@ -385,7 +386,7 @@ func TestWatchChannel(t *testing.T) {
 				chDel <- struct{}{}
 			}, time.Millisecond*100,
 		)
-		node.eventManagerMap.Store(ch, m)
+		node.eventManagerMap.Insert(ch, m)
 		m.Run()
 		defer m.Close()
 
@@ -422,7 +423,7 @@ func TestWatchChannel(t *testing.T) {
 				chDel <- struct{}{}
 			}, time.Millisecond*100,
 		)
-		node.eventManagerMap.Store(ch, m)
+		node.eventManagerMap.Insert(ch, m)
 		m.Run()
 		defer m.Close()
 		e := &event{
