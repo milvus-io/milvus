@@ -554,6 +554,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 					TypeParams:     field.TypeParams,
 					IndexParams:    field.IndexParams,
 					IsPartitionKey: field.IsPartitionKey,
+					IsDynamic:      field.IsDynamic,
 				})
 			}
 		}
