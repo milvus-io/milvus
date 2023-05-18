@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
@@ -227,6 +228,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -391,6 +393,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -487,6 +490,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -581,6 +585,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 
 func Test_ImportWrapperFileValidation(t *testing.T) {
 	ctx := context.Background()
+	params.Params.Init()
 
 	cm := &MockChunkManager{
 		size: 1,
@@ -667,7 +672,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
 		files := []string{"a/1.json"}
-		cm.size = MaxFileSize + 1
+		cm.size = params.Params.CommonCfg.ImportMaxFileSize + 1
 		wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
 		assert.NotNil(t, err)
@@ -687,6 +692,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -748,6 +754,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -798,6 +805,7 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
+	params.Params.Init()
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
 	// NewChunkManagerFactory() can specify the root path
@@ -863,6 +871,7 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 
 func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	ctx := context.Background()
+	params.Params.Init()
 
 	cm := &MockChunkManager{
 		size: 1,
@@ -923,6 +932,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 func Test_ImportWrapperReportPersisted(t *testing.T) {
 	ctx := context.Background()
 	tr := timerecord.NewTimeRecorder("test")
+	params.Params.Init()
 
 	importResult := &rootcoordpb.ImportResult{
 		Status: &commonpb.Status{
@@ -972,6 +982,7 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 
 func Test_ImportWrapperUpdateProgressPercent(t *testing.T) {
 	ctx := context.Background()
+	params.Params.Init()
 
 	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, nil, nil, nil, nil)
 	assert.NotNil(t, wrapper)

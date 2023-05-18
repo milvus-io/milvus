@@ -139,6 +139,11 @@ func TestComponentParam(t *testing.T) {
 		Params.initGrpcRetryTimes()
 		assert.Equal(t, Params.GrpcRetryTimes, uint(6))
 
+		assert.Equal(t, Params.ImportMaxFileSize, int64(DefaultImportMaxFileSize))
+		Params.Base.Save("common.ImportMaxFileSize", "600")
+		Params.initImportMaxFileSize()
+		assert.Equal(t, int64(600), Params.ImportMaxFileSize)
+
 		Params.Base.Save("common.security.superUsers", "super1,super2,super3")
 		Params.initSuperUsers()
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers)
