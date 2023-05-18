@@ -38,8 +38,9 @@ import (
 )
 
 const (
-	distReqTimeout  = 3 * time.Second
-	maxFailureTimes = 3
+	distReqTimeout         = 3 * time.Second
+	heartBeatLagBehindWarn = 3 * time.Second
+	maxFailureTimes        = 3
 )
 
 type distHandler struct {
@@ -71,16 +72,18 @@ func (dh *distHandler) start(ctx context.Context) {
 			log.Info("close dist handler")
 			return
 		case <-ticker.C:
-			err := dh.getDistribution(ctx)
+			resp, err := dh.getDistribution(ctx)
 			if err != nil {
 				node := dh.nodeManager.Get(dh.nodeID)
 				fields := []zap.Field{zap.Int("times", failures)}
 				if node != nil {
 					fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
 				}
+				fields = append(fields, zap.Error(err))
 				log.RatedWarn(30.0, "failed to get data distribution", fields...)
 			} else {
 				failures = 0
+				dh.handleDistResp(resp)
 			}
 		}
 	}
@@ -93,6 +96,10 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 		)
+		if time.Since(node.LastHeartbeat()) > heartBeatLagBehindWarn {
+			log.Warn("node last heart beat time lag too behind", zap.Time("now", time.Now()),
+				zap.Time("lastHeartBeatTime", node.LastHeartbeat()), zap.Int64("nodeID", node.ID()))
+		}
 		node.SetLastHeartbeat(time.Now())
 	}
 
@@ -201,7 +208,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
 }
 
-func (dh *distHandler) getDistribution(ctx context.Context) error {
+func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDistributionResponse, error) {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 
@@ -225,14 +232,12 @@ func (dh *distHandler) getDistribution(ctx context.Context) error {
 	})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		return merr.Error(resp.GetStatus())
+		return nil, merr.Error(resp.GetStatus())
 	}
-
-	dh.handleDistResp(resp)
-	return nil
+	return resp, nil
 }
 
 func (dh *distHandler) stop() {
