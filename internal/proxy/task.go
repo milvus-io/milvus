@@ -499,6 +499,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 					DataType:     field.DataType,
 					TypeParams:   field.TypeParams,
 					IndexParams:  field.IndexParams,
+					IsDynamic:    field.IsDynamic,
 				})
 			}
 		}
