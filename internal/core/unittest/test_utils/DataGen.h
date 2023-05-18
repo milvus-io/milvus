@@ -298,10 +298,8 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = R"({"int":)" + std::to_string(er()) +
-                               R"(,"double":)" +
-                               std::to_string(static_cast<double>(er())) +
-                               R"(,"string":")" + std::to_string(er()) +
+                    auto str = R"({"int":)" + std::to_string(er()) + R"(,"double":)" +
+                               std::to_string(static_cast<double>(er())) + R"(,"string":")" + std::to_string(er()) +
                                R"(","bool": true)" + "}";
                     data[i] = str;
                 }

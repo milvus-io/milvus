@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/FieldData.h"
+#include "common/Json.h"
 
 namespace milvus::storage {
 
@@ -92,6 +93,15 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(const std::shared_ptr<arrow::Array
             std::vector<std::string> values(element_count);
             for (size_t index = 0; index < element_count; ++index) {
                 values[index] = string_array->GetString(index);
+            }
+            return FillFieldData(values.data(), element_count);
+        }
+        case DataType::JSON: {
+            AssertInfo(array->type()->id() == arrow::Type::type::BINARY, "inconsistent data type");
+            auto binary_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            std::vector<std::string> values(element_count);
+            for (size_t index = 0; index < element_count; ++index) {
+                values[index] = binary_array->GetString(index);
             }
             return FillFieldData(values.data(), element_count);
         }

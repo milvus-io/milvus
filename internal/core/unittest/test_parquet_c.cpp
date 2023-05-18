@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <fstream>
 
+#include "common/Types.h"
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
@@ -219,6 +220,31 @@ TEST(storage, stringarray) {
     ReleasePayloadWriter(payload);
     st = ReleasePayloadReader(reader);
     ASSERT_EQ(st.error_code, ErrorCode::Success);
+}
+
+TEST(storage, jsonarray) {
+    auto payload = NewPayloadWriter(int(milvus::DataType::JSON));
+    auto st = AddOneJSONToPayload(payload, (uint8_t*)"{}", 2);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
+    st = AddOneJSONToPayload(payload, (uint8_t*)"{\"key\":123}", 11);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
+
+    st = FinishPayloadWriter(payload);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
+    auto cb = GetPayloadBufferFromWriter(payload);
+    ASSERT_GT(cb.length, 0);
+    ASSERT_NE(cb.data, nullptr);
+    auto nums = GetPayloadLengthFromWriter(payload);
+    ASSERT_EQ(nums, 2);
+
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::JSON), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
+    int length = GetPayloadLengthFromReader(reader);
+    ASSERT_EQ(length, 2);
+
+    ReleasePayloadWriter(payload);
+    ReleasePayloadReader(reader);
 }
 
 TEST(storage, binary_vector) {

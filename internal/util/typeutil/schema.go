@@ -543,6 +543,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetDoubleData().Data = dstScalar.GetDoubleData().Data[:len(dstScalar.GetDoubleData().Data)-1]
 			case *schemapb.ScalarField_StringData:
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
+			case *schemapb.ScalarField_JsonData:
+				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			default:
 				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
 			}
@@ -648,6 +650,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 					}
 				} else {
 					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data...)
+				}
+			case *schemapb.ScalarField_JsonData:
+				if dstScalar.GetJsonData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: srcScalar.JsonData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetJsonData().Data = append(dstScalar.GetJsonData().Data, srcScalar.JsonData.Data...)
 				}
 			default:
 				log.Error("Not supported field type", zap.String("field type", srcFieldData.Type.String()))
