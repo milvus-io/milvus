@@ -10,6 +10,8 @@ image:
     tag: master-latest
     pullPolicy: IfNotPresent
 standalone:
+  heaptrack:
+    enabled: true
   resources:
     limits:
       cpu: 8
