@@ -22,7 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"go.uber.org/zap"
 )
@@ -131,6 +133,13 @@ func (merger *Merger[K, R]) triggerExecution(id K) {
 		return tasks[i].Priority() > tasks[j].Priority()
 	})
 
+	// If we saw OOM error for this collection, we won't merge tasks
+	key := any(id).(segmentIndex)
+	mergeCap := int(Params.QueryCoordCfg.TaskMergeCap)
+	if meta.GlobalFailedLoadCache.Exist(key.CollectionID, commonpb.ErrorCode_InsufficientMemoryToLoad) {
+		mergeCap = 1
+	}
+
 	var task MergeableTask[K, R]
 	merged := 0
 	for i := 0; i < len(tasks); i++ {
@@ -140,7 +149,7 @@ func (merger *Merger[K, R]) triggerExecution(id K) {
 			task.Merge(tasks[i])
 		}
 		merged++
-		if merged >= int(Params.QueryCoordCfg.TaskMergeCap) {
+		if merged >= mergeCap {
 			merger.outCh <- task
 			merged = 0
 		}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/stretchr/testify/suite"
 )
@@ -110,6 +111,7 @@ func (suite *MergerSuite) SetupSuite() {
 
 func (suite *MergerSuite) SetupTest() {
 	suite.merger = NewMerger[segmentIndex, *querypb.LoadSegmentsRequest]()
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 }
 
 func (suite *MergerSuite) TestMerge() {
