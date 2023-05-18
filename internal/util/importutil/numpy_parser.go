@@ -18,6 +18,7 @@ package importutil
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/cockroachdb/errors"
@@ -314,11 +315,15 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 				shape[1]*8, columnReader.fieldName, columnReader.dimension)
 		}
 	} else {
-		if elementType != columnReader.dataType {
-			log.Error("Numpy parser: illegal data type of numpy file for scalar field", zap.Any("numpyDataType", elementType),
-				zap.String("fieldName", columnReader.fieldName), zap.Any("fieldDataType", columnReader.dataType))
-			return fmt.Errorf("illegal data type %s of numpy file for scalar field '%s' with type %s",
-				getTypeName(elementType), columnReader.fieldName, getTypeName(columnReader.dataType))
+		// JSON field and VARCHAR field are using string type numpy
+		// legal input if columnReader.dataType is JSON and elementType is VARCHAR
+		if elementType != schemapb.DataType_VarChar && columnReader.dataType != schemapb.DataType_JSON {
+			if elementType != columnReader.dataType {
+				log.Error("Numpy parser: illegal data type of numpy file for scalar field", zap.Any("numpyDataType", elementType),
+					zap.String("fieldName", columnReader.fieldName), zap.Any("fieldDataType", columnReader.dataType))
+				return fmt.Errorf("illegal data type %s of numpy file for scalar field '%s' with type %s",
+					getTypeName(elementType), columnReader.fieldName, getTypeName(columnReader.dataType))
+			}
 		}
 
 		// scalar field, the shape should be 1
@@ -529,6 +534,30 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		return &storage.StringFieldData{
 			Data: data,
 		}, nil
+	case schemapb.DataType_JSON:
+		// JSON field read data from string array numpy
+		data, err := columnReader.reader.ReadString(rowCount)
+		if err != nil {
+			log.Error("Numpy parser: failed to read json string array", zap.Error(err))
+			return nil, fmt.Errorf("failed to read json string array: %s", err.Error())
+		}
+
+		byteArr := make([][]byte, 0)
+		for _, str := range data {
+			var dummy interface{}
+			err := json.Unmarshal([]byte(str), &dummy)
+			if err != nil {
+				log.Error("Numpy parser: illegal string value for JSON field",
+					zap.String("value", str), zap.String("FieldName", columnReader.fieldName), zap.Error(err))
+				return nil, fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w",
+					str, columnReader.fieldName, err)
+			}
+			byteArr = append(byteArr, []byte(str))
+		}
+
+		return &storage.JSONFieldData{
+			Data: byteArr,
+		}, nil
 	case schemapb.DataType_BinaryVector:
 		data, err := columnReader.reader.ReadUint8(rowCount * (columnReader.dimension / 8))
 		if err != nil {
@@ -653,6 +682,12 @@ func (p *NumpyParser) appendFunc(schema *schemapb.FieldSchema) func(src storage.
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.StringFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(string))
+			return nil
+		}
+	case schemapb.DataType_JSON:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.JSONFieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).([]byte))
 			return nil
 		}
 	default:
