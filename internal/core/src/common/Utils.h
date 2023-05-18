@@ -200,6 +200,10 @@ MatchKnowhereError(knowhere::Status status) {
             return "err: invalid value in json";
         case knowhere::Status::arithmetic_overflow:
             return "err: arithmetic overflow";
+        case knowhere::Status::raft_inner_error:
+            return "err: raft inner error";
+        case knowhere::Status::invalid_binary_set:
+            return "err: invalid binary set";
         default:
             return "not match the error type in knowhere";
     }
