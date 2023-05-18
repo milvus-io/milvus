@@ -359,6 +359,7 @@ func TestProxy_FlushAll(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
+	Params.ProxyCfg.MaxTaskNum = 1000
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	assert.NoError(t, err)
 	err = node.sched.Start()
@@ -380,6 +381,8 @@ func TestProxy_FlushAll(t *testing.T) {
 		Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
 	node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 		Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
+	node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+		Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
 
 	t.Run("FlushAll", func(t *testing.T) {
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
@@ -427,8 +430,24 @@ func TestProxy_FlushAll(t *testing.T) {
 
 	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
 		node.rootCoord.(*mocks.RootCoord).ExpectedCalls = nil
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
 		node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 			Return(&milvuspb.ShowCollectionsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err",
+				},
+			}, nil).Maybe()
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
+		node.rootCoord.(*mocks.RootCoord).ExpectedCalls = nil
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    "mock err",
