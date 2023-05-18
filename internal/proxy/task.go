@@ -1288,7 +1288,6 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 				ft.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			),
-			DbID:         0,
 			CollectionID: collID,
 			IsImport:     false,
 		}
@@ -1308,7 +1307,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		DbName:          "",
+		DbName:          ft.GetDbName(),
 		CollSegIDs:      coll2Segments,
 		FlushCollSegIDs: flushColl2Segments,
 		CollSealTimes:   coll2SealTimes,

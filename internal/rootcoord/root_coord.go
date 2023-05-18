@@ -606,7 +606,6 @@ func (c *Core) initRbac() (initError error) {
 	return nil
 }
 
-// TODO: database implement
 func (c *Core) restore(ctx context.Context) error {
 	dbs, err := c.meta.ListDatabases(ctx, typeutil.MaxTimestamp)
 	if err != nil {
