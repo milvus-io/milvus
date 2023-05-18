@@ -134,6 +134,7 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             for (int i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = std::string();
             }
+            break;
         }
         default: {
             PanicInfo("unsupported datatype");
