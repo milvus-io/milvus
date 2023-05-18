@@ -32,7 +32,7 @@ func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	adapter, err = adapterMgr.GetChecker(IndexFaissIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*baseChecker)
+	_, ok = adapter.(*flatChecker)
 	assert.Equal(t, true, ok)
 
 	adapter, err = adapterMgr.GetChecker(IndexFaissIvfFlat)
@@ -86,7 +86,7 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	adapter, err = adapterMgr.GetChecker(IndexFaissIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*baseChecker)
+	_, ok = adapter.(*flatChecker)
 	assert.Equal(t, true, ok)
 
 	adapter, err = adapterMgr.GetChecker(IndexFaissIvfFlat)
