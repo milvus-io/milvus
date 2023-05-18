@@ -14,18 +14,20 @@ import (
 )
 
 const (
-	mqTypeDefault = "default"
-	mqTypeNatsmq  = "natsmq"
-	mqTypeRocksmq = "rocksmq"
-	mqTypeKafka   = "kafka"
-	mqTypePulsar  = "pulsar"
+	mqTypeDefault  = "default"
+	mqTypeNatsmq   = "natsmq"
+	mqTypeRocksmq  = "rocksmq"
+	mqTypePebblemq = "pebblemq"
+	mqTypeKafka    = "kafka"
+	mqTypePulsar   = "pulsar"
 )
 
 type mqEnable struct {
-	Rocksmq bool
-	Natsmq  bool
-	Pulsar  bool
-	Kafka   bool
+	Rocksmq  bool
+	Pebblemq bool
+	Natsmq   bool
+	Pulsar   bool
+	Kafka    bool
 }
 
 // DefaultFactory is a factory that produces instances of storage.ChunkManager and message queue.
@@ -38,8 +40,9 @@ type DefaultFactory struct {
 // Only for test
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
-		standAlone:       standAlone,
-		msgStreamFactory: smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		standAlone: standAlone,
+		// for test, replace to pebblemq directly
+		msgStreamFactory: smsgstream.NewPebblemqFactory("/tmp/pebblemq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
 	}
@@ -49,7 +52,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:          standAlone,
-		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		msgStreamFactory:    smsgstream.NewPebblemqFactory("/tmp/pebblemq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
 	}
 }
@@ -63,7 +66,7 @@ func NewFactory(standAlone bool) *DefaultFactory {
 // Init create a msg factory(TODO only support one mq at the same time.)
 // In order to guarantee backward compatibility of config file, we still support multiple mq configs.
 // The initialization of MQ follows the following rules, if the mq.type is default.
-// 1. standalone(local) mode: rocksmq(default) > natsmq > Pulsar > Kafka
+// 1. standalone(local) mode: rocksmq/pebblemq(default) > natsmq > Pulsar > Kafka
 // 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
 func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 	// skip if using default factory
@@ -80,7 +83,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 }
 
 func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
-	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.NatsmqEnable(), params.PulsarEnable(), params.KafkaEnable()})
+	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.PebblemqEnable(), params.NatsmqEnable(), params.PulsarEnable(), params.KafkaEnable()})
 	log.Info("try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
 
 	switch mqType {
@@ -88,6 +91,8 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 		f.msgStreamFactory = msgstream.NewNatsmqFactory()
 	case mqTypeRocksmq:
 		f.msgStreamFactory = smsgstream.NewRocksmqFactory(params.RocksmqCfg.Path.GetValue(), &params.ServiceParam)
+	case mqTypePebblemq:
+		f.msgStreamFactory = smsgstream.NewPebblemqFactory(params.PebblemqCfg.Path.GetValue(), &params.ServiceParam)
 	case mqTypePulsar:
 		f.msgStreamFactory = msgstream.NewPmsFactory(&params.ServiceParam)
 	case mqTypeKafka:
@@ -112,6 +117,9 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 		if enable.Rocksmq {
 			return mqTypeRocksmq
 		}
+		if enable.Pebblemq {
+			return mqTypePebblemq
+		}
 	}
 	if enable.Pulsar {
 		return mqTypePulsar
@@ -125,10 +133,10 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 
 // Validate mq type.
 func validateMQType(standalone bool, mqType string) error {
-	if mqType != mqTypeNatsmq && mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar {
+	if mqType != mqTypeNatsmq && mqType != mqTypeRocksmq && mqType != mqTypePebblemq && mqType != mqTypeKafka && mqType != mqTypePulsar {
 		return errors.Newf("mq type %s is invalid", mqType)
 	}
-	if !standalone && (mqType == mqTypeRocksmq || mqType == mqTypeNatsmq) {
+	if !standalone && (mqType == mqTypeRocksmq || mqType == mqTypePebblemq || mqType == mqTypeNatsmq) {
 		return errors.Newf("mq %s is only valid in standalone mode")
 	}
 	return nil

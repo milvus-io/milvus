@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	pebblemqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
@@ -62,6 +63,10 @@ func init() {
 
 func stopRocksmq() {
 	rocksmqimpl.CloseRocksMQ()
+}
+
+func stopPebblemq() {
+	pebblemqimpl.ClosePebbleMQ()
 }
 
 type component interface {

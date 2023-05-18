@@ -345,6 +345,10 @@ func TestProxy(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 
+	path = "/tmp/pebblemq" + funcutil.GenRandomStr()
+	t.Setenv("PEBBLEMQ_PATH", path)
+	defer os.RemoveAll(path)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")
 	localMsg := true

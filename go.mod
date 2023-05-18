@@ -17,6 +17,7 @@ require (
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/cockroachdb/errors v1.9.1
+	github.com/cockroachdb/pebble v0.0.0-20230608205838-2a23c6721072
 	github.com/gin-gonic/gin v1.9.1
 	github.com/gofrs/flock v0.8.1
 	github.com/gogo/protobuf v1.3.2

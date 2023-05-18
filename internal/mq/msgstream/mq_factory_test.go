@@ -41,3 +41,22 @@ func TestRmsFactory(t *testing.T) {
 	_, err = rmsFactory.NewTtMsgStream(ctx)
 	assert.NoError(t, err)
 }
+
+func TestPmsFactory(t *testing.T) {
+	defer os.Unsetenv("PebbleMQ_PATH")
+	paramtable.Init()
+
+	dir := t.TempDir()
+
+	pmsFactory := NewPebblemqFactory(dir, &paramtable.Get().ServiceParam)
+
+	ctx := context.Background()
+	_, err := pmsFactory.NewMsgStream(ctx)
+	assert.NoError(t, err)
+
+	_, err = pmsFactory.NewTtMsgStream(ctx)
+	assert.NoError(t, err)
+
+	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	assert.NoError(t, err)
+}

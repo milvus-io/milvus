@@ -51,6 +51,7 @@ type ServiceParam struct {
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
 	NatsmqCfg       NatsmqConfig
+	PebblemqCfg     PebblemqConfig
 	MinioCfg        MinioConfig
 }
 
@@ -63,12 +64,17 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.PulsarCfg.Init(bt)
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
+	p.PebblemqCfg.Init(bt)
 	p.NatsmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
-	return p.RocksmqCfg.Path.GetValue() != ""
+	return p.RocksmqCfg.Enable.GetAsBool()
+}
+
+func (p *ServiceParam) PebblemqEnable() bool {
+	return p.PebblemqCfg.Enable.GetAsBool()
 }
 
 // NatsmqEnable checks if NATS messaging queue is enabled.
@@ -704,8 +710,87 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 }
 
 // /////////////////////////////////////////////////////////////////////////////
+// --- pebblemq ---
+type PebblemqConfig struct {
+	Enable   ParamItem `refreshable:"false"`
+	Path     ParamItem `refreshable:"false"`
+	PageSize ParamItem `refreshable:"false"`
+	// RetentionTimeInMinutes is the time of retention
+	RetentionTimeInMinutes ParamItem `refreshable:"false"`
+	// RetentionSizeInMB is the size of retention
+	RetentionSizeInMB ParamItem `refreshable:"false"`
+	// CompactionInterval is the Interval we trigger compaction,
+	CompactionInterval ParamItem `refreshable:"false"`
+	// TickerTimeInSeconds is the time of expired check, default 10 minutes
+	TickerTimeInSeconds ParamItem `refreshable:"false"`
+}
+
+func (r *PebblemqConfig) Init(base *BaseTable) {
+	r.Enable = ParamItem{
+		Key:     "pebblemq.enable",
+		Version: "2.2.14",
+		Doc:     `Enable or not`,
+		Export:  true,
+	}
+	r.Enable.Init(base.mgr)
+
+	r.Path = ParamItem{
+		Key:     "pebblemq.path",
+		Version: "2.2.14",
+		Doc: `The path where the message is stored in pebblemq
+please adjust in embedded Milvus: /tmp/milvus/pdb_data`,
+		Export: true,
+	}
+	r.Path.Init(base.mgr)
+
+	r.PageSize = ParamItem{
+		Key:          "pebblemq.pebblemqPageSize",
+		DefaultValue: strconv.FormatInt(64<<20, 10),
+		Version:      "2.2.14",
+		Doc:          "64 MB, 64 * 1024 * 1024 bytes, The size of each page of messages in pebblemq",
+		Export:       true,
+	}
+	r.PageSize.Init(base.mgr)
+
+	r.RetentionTimeInMinutes = ParamItem{
+		Key:          "pebblemq.retentionTimeInMinutes",
+		DefaultValue: "4320",
+		Version:      "2.2.14",
+		Doc:          "3 days, 3 * 24 * 60 minutes, The retention time of the message in pebblemq.",
+		Export:       true,
+	}
+	r.RetentionTimeInMinutes.Init(base.mgr)
+
+	r.RetentionSizeInMB = ParamItem{
+		Key:          "pebblemq.retentionSizeInMB",
+		DefaultValue: "7200",
+		Version:      "2.2.14",
+		Doc:          "8 GB, 8 * 1024 MB, The retention size of the message in pebblemq.",
+		Export:       true,
+	}
+	r.RetentionSizeInMB.Init(base.mgr)
+
+	r.CompactionInterval = ParamItem{
+		Key:          "pebblemq.compactionInterval",
+		DefaultValue: "86400",
+		Version:      "2.2.14",
+		Doc:          "1 day, trigger rocksdb compaction every day to remove deleted data",
+		Export:       true,
+	}
+	r.CompactionInterval.Init(base.mgr)
+
+	r.TickerTimeInSeconds = ParamItem{
+		Key:          "pebblemq.timtickerInterval",
+		DefaultValue: "600",
+		Version:      "2.2.14",
+	}
+	r.TickerTimeInSeconds.Init(base.mgr)
+}
+
+// /////////////////////////////////////////////////////////////////////////////
 // --- rocksmq ---
 type RocksmqConfig struct {
+	Enable        ParamItem `refreshable:"false"`
 	Path          ParamItem `refreshable:"false"`
 	LRUCacheRatio ParamItem `refreshable:"false"`
 	PageSize      ParamItem `refreshable:"false"`
@@ -725,6 +810,14 @@ type RocksmqConfig struct {
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
+	r.Enable = ParamItem{
+		Key:     "rocksmq.enable",
+		Version: "2.2.14",
+		Doc:     `Enable or not`,
+		Export:  true,
+	}
+	r.Enable.Init(base.mgr)
+
 	r.Path = ParamItem{
 		Key:     "rocksmq.path",
 		Version: "2.0.0",

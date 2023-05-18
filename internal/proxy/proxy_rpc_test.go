@@ -29,6 +29,10 @@ func TestProxyRpcLimit(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 
+	path = "/tmp/pebblemq" + funcutil.GenRandomStr()
+	t.Setenv("PEBBLEMQ_PATH", path)
+	defer os.RemoveAll(path)
+
 	ctx := GetContext(context.Background(), "root:123456")
 	localMsg := true
 	factory := dependency.NewDefaultFactory(localMsg)

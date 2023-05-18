@@ -58,6 +58,7 @@ func generateMsgPack() msgstream.MsgPack {
 
 func TestNodeCtx_Start(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
+	t.Setenv("PEBBLEMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
 	factory := dependency.NewDefaultFactory(true)
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())

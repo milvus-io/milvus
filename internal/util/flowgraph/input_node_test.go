@@ -28,6 +28,7 @@ import (
 
 func TestInputNode(t *testing.T) {
 	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
+	t.Setenv("PEBBLEMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
 	factory := dependency.NewDefaultFactory(true)
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())

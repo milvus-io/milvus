@@ -157,6 +157,17 @@ func TestServiceParam(t *testing.T) {
 
 		assert.NotEqual(t, Params.Path.GetValue(), "")
 		t.Logf("rocksmq path = %s", Params.Path.GetValue())
+		assert.NotNil(t, Params.Enable.GetAsBool())
+		t.Logf("rocksmq enable = %t", Params.Enable.GetAsBool())
+	})
+
+	t.Run("test pebblemqConfig", func(t *testing.T) {
+		Params := &SParams.PebblemqCfg
+
+		assert.NotEqual(t, Params.Path.GetValue(), "")
+		t.Logf("pebblemq path = %s", Params.Path.GetValue())
+		assert.NotNil(t, Params.Enable.GetAsBool())
+		t.Logf("pebblemq enable = %t", Params.Enable.GetAsBool())
 	})
 
 	t.Run("test kafkaConfig", func(t *testing.T) {

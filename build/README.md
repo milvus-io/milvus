@@ -137,7 +137,7 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 cd deployments/docker/dev
 docker-compose up -d
 cd ../../../
-build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' && ./scripts/start_standalone.sh && cat"
+build/builder.sh /bin/bash -c "export ROCKSMQ_PATH='/tmp/milvus/rdb_data' PEBBLEMQ_PATH='/tmp/milvus/pdb_data' && ./scripts/start_standalone.sh && cat"
 ```
 
 or

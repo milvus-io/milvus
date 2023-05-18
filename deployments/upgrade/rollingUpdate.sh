@@ -79,6 +79,9 @@ function set_rollingupdate_mode() {
     if [[ $mq == "rocksmq" ]];then
         echo "standalone Milvus with mq:rocksmq don't support rolling update now" && exit 1
     fi
+    if [[ $mq == "pebblemq" ]];then
+        echo "standalone Milvus with mq:pebblemq don't support rolling update now" && exit 1
+    fi
     local add_user_yaml='rootCoord:\\n  enableActiveStandby: true\\nqueryCoord:\\n  enableActiveStandby: true\\ndataCoord:\\n  enableActiveStandby: true\\nindexCoord:\\n  enableActiveStandby: true'
     local check_standby=$(kubectl -n $NAMESPACE get configmaps $configmaps_name -o json|grep '^\ *"user\.yaml":'|grep "$add_user_yaml")
     # echo $check_standby

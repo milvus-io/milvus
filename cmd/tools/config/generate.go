@@ -219,10 +219,10 @@ func WriteYaml() {
 		{
 			name: "pulsar",
 			header: `
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
+# Milvus supports three MQ: rocksmq(based on RockDB)/pebblemq, Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
+# 1. standalone(local) mode: rocksmq(default)/pebblemq > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq/pebblemq is unsupported)
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.`,
 		},

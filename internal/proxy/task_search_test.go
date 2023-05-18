@@ -500,7 +500,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	// }
 	//
 	// // simple mock for query node
-	// // TODO(dragondriver): should we replace this mock using RocksMq or MemMsgStream?
+	// // TODO(dragondriver): should we replace this mock using PebbleMQ or MemMsgStream?
 	//
 	//
 	// var wg sync.WaitGroup
@@ -743,7 +743,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	// }
 	//
 	// // simple mock for query node
-	// // TODO(dragondriver): should we replace this mock using RocksMq or MemMsgStream?
+	// // TODO(dragondriver): should we replace this mock using PebbleMQ or MemMsgStream?
 	//
 	// var wg sync.WaitGroup
 	// wg.Add(1)
@@ -980,7 +980,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	// }
 	//
 	// // simple mock for query node
-	// // TODO(dragondriver): should we replace this mock using RocksMq or MemMsgStream?
+	// // TODO(dragondriver): should we replace this mock using PebbleMQ or MemMsgStream?
 	//
 	// var wg sync.WaitGroup
 	// wg.Add(1)
