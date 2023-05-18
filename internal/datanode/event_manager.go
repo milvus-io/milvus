@@ -40,6 +40,7 @@ type event struct {
 
 type channelEventManager struct {
 	sync.Once
+	wg                sync.WaitGroup
 	eventChan         chan event
 	closeChan         chan struct{}
 	handlePutEvent    func(watchInfo *datapb.ChannelWatchInfo, version int64) error // node.handlePutEvent
@@ -64,7 +65,9 @@ func newChannelEventManager(handlePut func(*datapb.ChannelWatchInfo, int64) erro
 }
 
 func (e *channelEventManager) Run() {
+	e.wg.Add(1)
 	go func() {
+		defer e.wg.Done()
 		for {
 			select {
 			case event := <-e.eventChan:
@@ -88,6 +91,7 @@ func (e *channelEventManager) handleEvent(event event) {
 func (e *channelEventManager) Close() {
 	e.Do(func() {
 		close(e.closeChan)
+		e.wg.Wait()
 	})
 }
 
