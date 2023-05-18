@@ -432,6 +432,26 @@ func TestTranslateOutputFields(t *testing.T) {
 	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	t.Run("enable dynamic schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "TestTranslateOutputFields",
+			Description:        "TestTranslateOutputFields",
+			AutoID:             false,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{Name: idFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: tsFieldName, DataType: schemapb.DataType_Int64},
+				{Name: floatVectorFieldName, DataType: schemapb.DataType_FloatVector},
+				{Name: binaryVectorFieldName, DataType: schemapb.DataType_BinaryVector},
+				{Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		outputFields, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
+		assert.Equal(t, nil, err)
+		assert.ElementsMatch(t, []string{common.MetaFieldName, idFieldName}, outputFields)
+	})
 }
 
 func TestCreateCollectionTask(t *testing.T) {

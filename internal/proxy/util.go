@@ -800,7 +800,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 //	output_fields=["*",C]    ==> [A,B,C,D]
 func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
 	var primaryFieldName string
-	allFielNameMap := make(map[string]bool)
+	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 
@@ -808,17 +808,26 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
 		}
-		allFielNameMap[field.Name] = true
+		allFieldNameMap[field.Name] = true
 	}
 
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
 		if outputFieldName == "*" {
-			for fieldName := range allFielNameMap {
+			for fieldName := range allFieldNameMap {
 				resultFieldNameMap[fieldName] = true
 			}
 		} else {
-			resultFieldNameMap[outputFieldName] = true
+			if _, ok := allFieldNameMap[outputFieldName]; ok {
+				resultFieldNameMap[outputFieldName] = true
+			} else {
+				if schema.EnableDynamicField {
+					resultFieldNameMap[common.MetaFieldName] = true
+				} else {
+					return nil, fmt.Errorf("field %s not exist", outputFieldName)
+				}
+			}
+
 		}
 	}
 
