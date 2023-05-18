@@ -174,4 +174,33 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
+
+	t.Run("test update collection props", func(t *testing.T) {
+		coll := &model.Collection{
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.CollectionTTLConfigKey,
+					Value: "1",
+				},
+			},
+		}
+
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "1",
+		})
+
+		updateProps2 := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "2",
+			},
+		}
+		updateCollectionProperties(coll, updateProps2)
+
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "2",
+		})
+	})
 }
