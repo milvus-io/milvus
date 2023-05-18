@@ -55,6 +55,8 @@ const (
 
 	PrivilegeWord = "Privilege"
 	AnyWord       = "*"
+
+	IdentifierKey = "identifier"
 )
 
 const (

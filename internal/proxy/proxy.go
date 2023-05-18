@@ -435,6 +435,8 @@ func (node *Proxy) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
+	GetConnectionManager().stop()
+
 	return nil
 }
 
