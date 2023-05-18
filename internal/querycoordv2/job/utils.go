@@ -18,16 +18,17 @@ package job
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -60,30 +61,39 @@ func waitCollectionReleased(dist *meta.DistributionManager, collection int64, pa
 func loadPartitions(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
-	schema *schemapb.CollectionSchema,
-	ignoreErr bool,
+	broker meta.Broker,
 	collection int64,
 	partitions ...int64) error {
+	schema, err := broker.GetCollectionSchema(ctx, collection)
+	if err != nil {
+		return err
+	}
+	indexes, err := broker.DescribeIndex(ctx, collection)
+	if err != nil {
+		return err
+	}
+
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	loadReq := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
 		},
-		CollectionID: collection,
-		PartitionIDs: partitions,
-		Schema:       schema,
+		CollectionID:  collection,
+		PartitionIDs:  partitions,
+		Schema:        schema,
+		IndexInfoList: indexes,
 	}
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {
 			status, err := cluster.LoadPartitions(ctx, node, loadReq)
-			if ignoreErr {
-				continue
-			}
+			// There is no need to rollback LoadPartitions as the load job will fail
+			// and the Delegator will not be created,
+			// resulting in search and query requests failing due to the absence of Delegator.
 			if err != nil {
 				return err
 			}
-			if status.GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("QueryNode failed to loadPartition, nodeID=%d, err=%s", node, status.GetReason())
+			if !merr.Ok(status) {
+				return merr.Error(status)
 			}
 		}
 	}
@@ -93,9 +103,9 @@ func loadPartitions(ctx context.Context,
 func releasePartitions(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
-	ignoreErr bool,
 	collection int64,
-	partitions ...int64) error {
+	partitions ...int64) {
+	log := log.Ctx(ctx).With(zap.Int64("collection", collection), zap.Int64s("partitions", partitions))
 	replicas := meta.ReplicaManager.GetByCollection(collection)
 	releaseReq := &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -107,16 +117,15 @@ func releasePartitions(ctx context.Context,
 	for _, replica := range replicas {
 		for _, node := range replica.GetNodes() {
 			status, err := cluster.ReleasePartitions(ctx, node, releaseReq)
-			if ignoreErr {
+			// Ignore error as the Delegator will be removed from the query node,
+			// causing search and query requests to fail due to the absence of Delegator.
+			if err != nil {
+				log.Warn("failed to ReleasePartitions", zap.Int64("node", node), zap.Error(err))
 				continue
 			}
-			if err != nil {
-				return err
-			}
-			if status.GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("QueryNode failed to releasePartitions, nodeID=%d, err=%s", node, status.GetReason())
+			if !merr.Ok(status) {
+				log.Warn("failed to ReleasePartitions", zap.Int64("node", node), zap.Error(merr.Error(status)))
 			}
 		}
 	}
-	return nil
 }

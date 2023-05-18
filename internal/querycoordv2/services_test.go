@@ -317,6 +317,7 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	// Test load all collections
 	for _, collection := range suite.collections {
 		suite.expectGetRecoverInfo(collection)
+		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -777,6 +778,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
+		suite.expectLoadPartitions()
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -824,8 +826,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	}
 
 	// Test load with more partitions
-	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
 			continue
@@ -873,6 +873,9 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
+
+	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.Status(nil), nil)
 
 	// Test release all collections
 	for _, collection := range suite.collections {
@@ -1563,6 +1566,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 func (suite *ServiceSuite) loadAll() {
 	ctx := context.Background()
 	for _, collection := range suite.collections {
+		suite.expectLoadPartitions()
 		suite.expectGetRecoverInfo(collection)
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
@@ -1574,10 +1578,10 @@ func (suite *ServiceSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.broker,
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
-				suite.broker,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)
@@ -1598,10 +1602,10 @@ func (suite *ServiceSuite) loadAll() {
 				req,
 				suite.dist,
 				suite.meta,
+				suite.broker,
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
-				suite.broker,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)
@@ -1695,6 +1699,15 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 	suite.broker.EXPECT().
 		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
 		Return(vChannels, segmentBinlogs, nil)
+}
+
+func (suite *ServiceSuite) expectLoadPartitions() {
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).
+		Return(nil, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
+		Return(nil, nil)
+	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
+		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -186,13 +185,6 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		Return(&schemapb.CollectionSchema{
 			Name: "TestSubscribeChannelTask",
 		}, nil)
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			TypeParams:   []*commonpb.KeyValuePair{},
-			IndexParams:  []*commonpb.KeyValuePair{},
-		},
-	}, nil)
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{

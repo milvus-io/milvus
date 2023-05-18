@@ -234,10 +234,10 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		req,
 		s.dist,
 		s.meta,
+		s.broker,
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
-		s.broker,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
@@ -272,6 +272,8 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		req,
 		s.dist,
 		s.meta,
+		s.broker,
+		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
 	)
@@ -331,10 +333,10 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		req,
 		s.dist,
 		s.meta,
+		s.broker,
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
-		s.broker,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
@@ -394,6 +396,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		req,
 		s.dist,
 		s.meta,
+		s.broker,
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
@@ -536,7 +539,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster)
+	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster, s.broker)
 	s.jobScheduler.Add(syncJob)
 	err := syncJob.Wait()
 	if err != nil && !errors.Is(err, job.ErrPartitionNotInTarget) {

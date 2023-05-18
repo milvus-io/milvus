@@ -36,6 +36,8 @@ type ReleaseCollectionJob struct {
 	req            *querypb.ReleaseCollectionRequest
 	dist           *meta.DistributionManager
 	meta           *meta.Meta
+	broker         meta.Broker
+	cluster        session.Cluster
 	targetMgr      *meta.TargetManager
 	targetObserver *observers.TargetObserver
 }
@@ -44,6 +46,8 @@ func NewReleaseCollectionJob(ctx context.Context,
 	req *querypb.ReleaseCollectionRequest,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
+	broker meta.Broker,
+	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
 ) *ReleaseCollectionJob {
@@ -52,6 +56,8 @@ func NewReleaseCollectionJob(ctx context.Context,
 		req:            req,
 		dist:           dist,
 		meta:           meta,
+		broker:         broker,
+		cluster:        cluster,
 		targetMgr:      targetMgr,
 		targetObserver: targetObserver,
 	}
@@ -66,7 +72,11 @@ func (job *ReleaseCollectionJob) Execute() error {
 		return nil
 	}
 
-	lenPartitions := len(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()))
+	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID())
+	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
+		return partition.GetPartitionID()
+	})
+	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
 	err := job.meta.CollectionManager.RemoveCollection(req.GetCollectionID())
 	if err != nil {
@@ -85,7 +95,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(lenPartitions))
+	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
@@ -98,6 +108,7 @@ type ReleasePartitionJob struct {
 	req            *querypb.ReleasePartitionsRequest
 	dist           *meta.DistributionManager
 	meta           *meta.Meta
+	broker         meta.Broker
 	cluster        session.Cluster
 	targetMgr      *meta.TargetManager
 	targetObserver *observers.TargetObserver
@@ -107,6 +118,7 @@ func NewReleasePartitionJob(ctx context.Context,
 	req *querypb.ReleasePartitionsRequest,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
+	broker meta.Broker,
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
@@ -116,6 +128,7 @@ func NewReleasePartitionJob(ctx context.Context,
 		req:            req,
 		dist:           dist,
 		meta:           meta,
+		broker:         broker,
 		cluster:        cluster,
 		targetMgr:      targetMgr,
 		targetObserver: targetObserver,
@@ -143,6 +156,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		log.Warn("releasing partition(s) not loaded")
 		return nil
 	}
+	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
 	// If all partitions are released and LoadType is LoadPartition, clear all
 	if len(toRelease) == len(loadedPartitions) &&
@@ -163,14 +177,8 @@ func (job *ReleasePartitionJob) Execute() error {
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		waitCollectionReleased(job.dist, req.GetCollectionID())
 	} else {
-		err := releasePartitions(job.ctx, job.meta, job.cluster, false, req.GetCollectionID(), toRelease...)
+		err := job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
-			loadPartitions(job.ctx, job.meta, job.cluster, nil, true, req.GetCollectionID(), toRelease...)
-			return err
-		}
-		err = job.meta.CollectionManager.RemovePartition(toRelease...)
-		if err != nil {
-			loadPartitions(job.ctx, job.meta, job.cluster, nil, true, req.GetCollectionID(), toRelease...)
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
 			return utils.WrapError(msg, err)
