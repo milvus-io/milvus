@@ -988,6 +988,67 @@ func TestMetaTable_reload(t *testing.T) {
 	})
 }
 
+func TestMetaTable_ListAllAvailCollections(t *testing.T) {
+	meta := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: {
+				ID: util.DefaultDBID,
+			},
+			"db2": {
+				ID: 11,
+			},
+			"db3": {
+				ID: 2,
+			},
+			"db4": {
+				ID: 1111,
+			},
+		},
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			111: {
+				CollectionID: 111,
+				DBID:         1111,
+				State:        pb.CollectionState_CollectionDropped,
+			},
+			2: {
+				CollectionID: 2,
+				DBID:         11,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			3: {
+				CollectionID: 3,
+				DBID:         11,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			4: {
+				CollectionID: 4,
+				DBID:         2,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			5: {
+				CollectionID: 5,
+				DBID:         util.NonDBID,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+		},
+	}
+
+	ret := meta.ListAllAvailCollections(context.TODO())
+	assert.Equal(t, 4, len(ret))
+	db0, ok := ret[util.DefaultDBID]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(db0))
+	db1, ok := ret[11]
+	assert.True(t, ok)
+	assert.Equal(t, 2, len(db1))
+	db2, ok2 := ret[2]
+	assert.True(t, ok2)
+	assert.Equal(t, 1, len(db2))
+	db3, ok := ret[1111]
+	assert.True(t, ok)
+	assert.Equal(t, 0, len(db3))
+}
+
 func TestMetaTable_ChangeCollectionState(t *testing.T) {
 	t.Run("not exist", func(t *testing.T) {
 		meta := &MetaTable{}

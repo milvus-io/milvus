@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -94,12 +96,76 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("normal case", func(t *testing.T) {
+	t.Run("total collection num exceeds limit", func(t *testing.T) {
+		cfgCollectionLimit := Params.QuotaConfig.MaxCollectionNum
+		restoreCfg := func() {
+			Params.QuotaConfig.MaxCollectionNum = cfgCollectionLimit
+		}
+		defer restoreCfg()
+
+		Params.QuotaConfig.MaxCollectionNum = 1
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAllAvailCollections",
+			mock.Anything,
+		).Return(map[int64][]int64{
+			1: {1, 2},
+		}, nil)
+		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			},
 		}
+		err := task.validate()
+		assert.Error(t, err)
+	})
+
+	t.Run("collection num per db exceeds limit", func(t *testing.T) {
+		cfgCollectionLimit := Params.QuotaConfig.MaxCollectionNumPerDB
+		restoreCfg := func() {
+			Params.QuotaConfig.MaxCollectionNumPerDB = cfgCollectionLimit
+		}
+		defer restoreCfg()
+
+		Params.QuotaConfig.MaxCollectionNumPerDB = 1
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAllAvailCollections",
+			mock.Anything,
+		).Return(map[int64][]int64{
+			1: {1, 2},
+		}, nil)
+		core := newTestCore(withMeta(meta))
+		task := createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+		}
+		err := task.validate()
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAllAvailCollections",
+			mock.Anything,
+		).Return(map[int64][]int64{
+			1: {1, 2},
+		}, nil)
+
+		core := newTestCore(withMeta(meta))
+		task := createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			dbID: 1,
+		}
+
+		Params.QuotaConfig.MaxCollectionNum = math.MaxInt64
+		Params.QuotaConfig.MaxCollectionNumPerDB = math.MaxInt64
+
 		err := task.validate()
 		assert.NoError(t, err)
 	})
@@ -220,9 +286,24 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.On("GetDatabaseByName",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(model.NewDefaultDatabase(), nil)
+	meta.On("ListAllAvailCollections",
+		mock.Anything,
+	).Return(map[int64][]int64{
+		util.DefaultDBID: {1, 2},
+	}, nil)
+	Params.QuotaConfig.MaxCollectionNum = math.MaxInt64
+	Params.QuotaConfig.MaxCollectionNumPerDB = math.MaxInt64
+
 	t.Run("invalid msg type", func(t *testing.T) {
+		core := newTestCore(withMeta(meta))
 		task := &createCollectionTask{
-			baseTask: newBaseTask(context.TODO(), nil),
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 			},
@@ -230,13 +311,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
-
-	meta := mockrootcoord.NewIMetaTable(t)
-	meta.On("GetDatabaseByName",
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
 
 	t.Run("invalid schema", func(t *testing.T) {
 		core := newTestCore(withMeta(meta))
@@ -248,6 +322,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				CollectionName: collectionName,
 				Schema:         []byte("invalid schema"),
 			},
+			dbID: 1,
 		}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
@@ -276,6 +351,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				CollectionName: collectionName,
 				Schema:         marshaledSchema,
 			},
+			dbID: 1,
 		}
 		err = task.Prepare(context.Background())
 		assert.Error(t, err)
@@ -309,6 +385,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				CollectionName: collectionName,
 				Schema:         marshaledSchema,
 			},
+			dbID: 1,
 		}
 		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum + 1) // no enough channels.
 		err = task.Prepare(context.Background())
@@ -490,33 +567,6 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			schema:   schema,
 		}
 
-		meta.On("ListCollections",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil, errors.New("mock error")).Once()
-
-		err = task.Execute(context.Background())
-		assert.Error(t, err)
-
-		// testing for number of collection equal the limits
-		meta.On("ListCollections",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(make([]*model.Collection, Params.QuotaConfig.MaxCollectionNum), nil).Once()
-		err = task.Execute(context.Background())
-		assert.Error(t, err)
-
-		// testing for number of collection less than the limits
-		meta.On("ListCollections",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return([]*model.Collection{}, nil).Once()
 		err = task.Execute(context.Background())
 		assert.NoError(t, err)
 	})
@@ -548,12 +598,6 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("error mock ChangeCollectionState"))
-		meta.On("ListCollections",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return([]*model.Collection{}, nil)
 
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
@@ -649,6 +693,13 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(model.NewDefaultDatabase(), nil)
+	meta.On("ListAllAvailCollections",
+		mock.Anything,
+	).Return(map[int64][]int64{
+		util.DefaultDBID: {1, 2},
+	}, nil)
+	Params.QuotaConfig.MaxCollectionNum = math.MaxInt64
+	Params.QuotaConfig.MaxCollectionNumPerDB = math.MaxInt64
 	core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
 	partitionKeyField := &schemapb.FieldSchema{

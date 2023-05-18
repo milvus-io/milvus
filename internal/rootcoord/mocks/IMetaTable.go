@@ -447,6 +447,22 @@ func (_m *IMetaTable) ListAliasesByID(collID int64) []string {
 	return r0
 }
 
+// ListAllAvailCollections provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {
+	ret := _m.Called(ctx)
+
+	var r0 map[int64][]int64
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64][]int64); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64][]int64)
+		}
+	}
+
+	return r0
+}
+
 // ListCollectionPhysicalChannels provides a mock function with given fields:
 func (_m *IMetaTable) ListCollectionPhysicalChannels() map[int64][]string {
 	ret := _m.Called()
@@ -620,7 +636,7 @@ func (_m *IMetaTable) RemoveCollection(ctx context.Context, collectionID int64, 
 	return r0
 }
 
-// RemovePartition provides a mock function with given fields: ctx, dbName, collectionID, partitionID, ts
+// RemovePartition provides a mock function with given fields: ctx, dbID, collectionID, partitionID, ts
 func (_m *IMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
 	ret := _m.Called(ctx, dbID, collectionID, partitionID, ts)
 
