@@ -344,6 +344,15 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateDynamicField(coll *schemapb.CollectionSchema) error {
+	for _, field := range coll.Fields {
+		if field.IsDynamic {
+			return fmt.Errorf("cannot explicitly set a field as a dynamic field")
+		}
+	}
+	return nil
+}
+
 // RepeatedKeyValToMap transfer the kv pairs to map.
 func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
 	resMap := make(map[string]string)
@@ -547,6 +556,23 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	}
 
 	return &fieldData, nil
+}
+
+func autoGenDynamicFieldData(data [][]byte) (*schemapb.FieldData, error) {
+	fieldData := &schemapb.FieldData{
+		FieldName: common.MetaFieldName,
+		Type:      schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: data,
+					},
+				},
+			},
+		},
+	}
+	return fieldData, nil
 }
 
 // fillFieldIDBySchema set fieldID to fieldData according FieldSchemas

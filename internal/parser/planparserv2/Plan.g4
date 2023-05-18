@@ -82,7 +82,7 @@ FloatingConstant:
 	DecimalFloatingConstant
 	| HexadecimalFloatingConstant;
 
-Identifier: Nondigit (Nondigit | Digit)*;
+Identifier: Nondigit (Nondigit | Digit)* | '$meta';
 
 StringLiteral: EncodingPrefix? '"' SCharSequence? '"';
 JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;

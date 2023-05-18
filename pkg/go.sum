@@ -467,6 +467,8 @@ github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/le
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
 github.com/milvus-io/milvus-proto/go-api v0.0.0-20230416064425-aec3e83865b2 h1:G5uN68X/7eoCfHUkNvkbNueFhHuohCZG94te+ApLAOY=
 github.com/milvus-io/milvus-proto/go-api v0.0.0-20230416064425-aec3e83865b2/go.mod h1:148qnlmZ0Fdm1Fq+Mj/OW2uDoEP25g3mjh0vMGtkgmk=
+github.com/milvus-io/milvus-proto/go-api v0.0.0-20230515081521-d963c95b041f h1:uZzVaSbUtxMdEix9By6z+M/H/XNkXRQJdZQ9HP/wHtc=
+github.com/milvus-io/milvus-proto/go-api v0.0.0-20230515081521-d963c95b041f/go.mod h1:148qnlmZ0Fdm1Fq+Mj/OW2uDoEP25g3mjh0vMGtkgmk=
 github.com/milvus-io/pulsar-client-go v0.6.10 h1:eqpJjU+/QX0iIhEo3nhOqMNXL+TyInAs1IAHZCrCM/A=
 github.com/milvus-io/pulsar-client-go v0.6.10/go.mod h1:lQqCkgwDF8YFYjKA+zOheTk1tev2B+bKj5j7+nm8M1w=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=

@@ -466,10 +466,11 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 	resp := &milvuspb.DescribeCollectionResponse{
 		Status: coll.Status,
 		Schema: &schemapb.CollectionSchema{
-			Name:        coll.Schema.Name,
-			Description: coll.Schema.Description,
-			AutoID:      coll.Schema.AutoID,
-			Fields:      make([]*schemapb.FieldSchema, 0),
+			Name:               coll.Schema.Name,
+			Description:        coll.Schema.Description,
+			AutoID:             coll.Schema.AutoID,
+			Fields:             make([]*schemapb.FieldSchema, 0),
+			EnableDynamicField: coll.Schema.EnableDynamicField,
 		},
 		CollectionID:         coll.CollectionID,
 		VirtualChannelNames:  coll.VirtualChannelNames,

@@ -40,4 +40,7 @@ const (
 
 	// TimeStampFieldName name of the timestamp field
 	TimeStampFieldName = common.TimeStampFieldName
+
+	// MetaFieldName name of the dynamic schema field
+	MetaFieldName = common.MetaFieldName
 )

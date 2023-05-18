@@ -192,6 +192,11 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate dynamic field
+	if err := validateDynamicField(cct.schema); err != nil {
+		return err
+	}
+
 	// validate auto id definition
 	if err := ValidateFieldAutoID(cct.schema); err != nil {
 		return err
@@ -473,6 +478,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.Schema.Name = result.Schema.Name
 		dct.result.Schema.Description = result.Schema.Description
 		dct.result.Schema.AutoID = result.Schema.AutoID
+		dct.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
 		dct.result.CollectionID = result.CollectionID
 		dct.result.VirtualChannelNames = result.VirtualChannelNames
 		dct.result.PhysicalChannelNames = result.PhysicalChannelNames

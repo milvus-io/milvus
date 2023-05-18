@@ -320,9 +320,11 @@ class FieldSchema final :
     kDefaultValueFieldNumber = 11,
     kFieldIDFieldNumber = 1,
     kDataTypeFieldNumber = 5,
+    kStateFieldNumber = 9,
     kIsPrimaryKeyFieldNumber = 3,
     kAutoIDFieldNumber = 8,
-    kStateFieldNumber = 9,
+    kIsDynamicFieldNumber = 12,
+    kIsPartitionKeyFieldNumber = 13,
     kElementTypeFieldNumber = 10,
   };
   // repeated .milvus.proto.common.KeyValuePair type_params = 6;
@@ -425,6 +427,15 @@ class FieldSchema final :
   void _internal_set_data_type(::milvus::proto::schema::DataType value);
   public:
 
+  // .milvus.proto.schema.FieldState state = 9;
+  void clear_state();
+  ::milvus::proto::schema::FieldState state() const;
+  void set_state(::milvus::proto::schema::FieldState value);
+  private:
+  ::milvus::proto::schema::FieldState _internal_state() const;
+  void _internal_set_state(::milvus::proto::schema::FieldState value);
+  public:
+
   // bool is_primary_key = 3;
   void clear_is_primary_key();
   bool is_primary_key() const;
@@ -443,13 +454,22 @@ class FieldSchema final :
   void _internal_set_autoid(bool value);
   public:
 
-  // .milvus.proto.schema.FieldState state = 9;
-  void clear_state();
-  ::milvus::proto::schema::FieldState state() const;
-  void set_state(::milvus::proto::schema::FieldState value);
+  // bool is_dynamic = 12;
+  void clear_is_dynamic();
+  bool is_dynamic() const;
+  void set_is_dynamic(bool value);
   private:
-  ::milvus::proto::schema::FieldState _internal_state() const;
-  void _internal_set_state(::milvus::proto::schema::FieldState value);
+  bool _internal_is_dynamic() const;
+  void _internal_set_is_dynamic(bool value);
+  public:
+
+  // bool is_partition_key = 13;
+  void clear_is_partition_key();
+  bool is_partition_key() const;
+  void set_is_partition_key(bool value);
+  private:
+  bool _internal_is_partition_key() const;
+  void _internal_set_is_partition_key(bool value);
   public:
 
   // .milvus.proto.schema.DataType element_type = 10;
@@ -476,9 +496,11 @@ class FieldSchema final :
     ::milvus::proto::schema::ValueField* default_value_;
     int64_t fieldid_;
     int data_type_;
+    int state_;
     bool is_primary_key_;
     bool autoid_;
-    int state_;
+    bool is_dynamic_;
+    bool is_partition_key_;
     int element_type_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -612,6 +634,7 @@ class CollectionSchema final :
     kNameFieldNumber = 1,
     kDescriptionFieldNumber = 2,
     kAutoIDFieldNumber = 3,
+    kEnableDynamicFieldFieldNumber = 5,
   };
   // repeated .milvus.proto.schema.FieldSchema fields = 4;
   int fields_size() const;
@@ -668,6 +691,15 @@ class CollectionSchema final :
   void _internal_set_autoid(bool value);
   public:
 
+  // bool enable_dynamic_field = 5;
+  void clear_enable_dynamic_field();
+  bool enable_dynamic_field() const;
+  void set_enable_dynamic_field(bool value);
+  private:
+  bool _internal_enable_dynamic_field() const;
+  void _internal_set_enable_dynamic_field(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.CollectionSchema)
  private:
   class _Internal;
@@ -680,6 +712,7 @@ class CollectionSchema final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
     bool autoid_;
+    bool enable_dynamic_field_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -4060,6 +4093,46 @@ inline void FieldSchema::set_allocated_default_value(::milvus::proto::schema::Va
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.default_value)
 }
 
+// bool is_dynamic = 12;
+inline void FieldSchema::clear_is_dynamic() {
+  _impl_.is_dynamic_ = false;
+}
+inline bool FieldSchema::_internal_is_dynamic() const {
+  return _impl_.is_dynamic_;
+}
+inline bool FieldSchema::is_dynamic() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.is_dynamic)
+  return _internal_is_dynamic();
+}
+inline void FieldSchema::_internal_set_is_dynamic(bool value) {
+  
+  _impl_.is_dynamic_ = value;
+}
+inline void FieldSchema::set_is_dynamic(bool value) {
+  _internal_set_is_dynamic(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.is_dynamic)
+}
+
+// bool is_partition_key = 13;
+inline void FieldSchema::clear_is_partition_key() {
+  _impl_.is_partition_key_ = false;
+}
+inline bool FieldSchema::_internal_is_partition_key() const {
+  return _impl_.is_partition_key_;
+}
+inline bool FieldSchema::is_partition_key() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.is_partition_key)
+  return _internal_is_partition_key();
+}
+inline void FieldSchema::_internal_set_is_partition_key(bool value) {
+  
+  _impl_.is_partition_key_ = value;
+}
+inline void FieldSchema::set_is_partition_key(bool value) {
+  _internal_set_is_partition_key(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.is_partition_key)
+}
+
 // -------------------------------------------------------------------
 
 // CollectionSchema
@@ -4222,6 +4295,26 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema:
 CollectionSchema::fields() const {
   // @@protoc_insertion_point(field_list:milvus.proto.schema.CollectionSchema.fields)
   return _impl_.fields_;
+}
+
+// bool enable_dynamic_field = 5;
+inline void CollectionSchema::clear_enable_dynamic_field() {
+  _impl_.enable_dynamic_field_ = false;
+}
+inline bool CollectionSchema::_internal_enable_dynamic_field() const {
+  return _impl_.enable_dynamic_field_;
+}
+inline bool CollectionSchema::enable_dynamic_field() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.CollectionSchema.enable_dynamic_field)
+  return _internal_enable_dynamic_field();
+}
+inline void CollectionSchema::_internal_set_enable_dynamic_field(bool value) {
+  
+  _impl_.enable_dynamic_field_ = value;
+}
+inline void CollectionSchema::set_enable_dynamic_field(bool value) {
+  _internal_set_enable_dynamic_field(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.CollectionSchema.enable_dynamic_field)
 }
 
 // -------------------------------------------------------------------

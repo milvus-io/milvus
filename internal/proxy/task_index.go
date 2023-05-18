@@ -114,6 +114,9 @@ func (cit *createIndexTask) parseIndexParams() error {
 			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
 		}
 	}
+	if cit.fieldSchema.DataType == schemapb.DataType_JSON {
+		return fmt.Errorf("create index on json field is not supported")
+	}
 
 	for _, kv := range cit.req.GetExtraParams() {
 		if kv.Key == common.IndexParamsKey {
