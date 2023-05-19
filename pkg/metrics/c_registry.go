@@ -22,13 +22,15 @@ package metrics
 */
 import "C"
 import (
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/expfmt"
 	"sort"
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
+	"go.uber.org/zap"
 
 	dto "github.com/prometheus/client_model/go"
 )
@@ -123,7 +125,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	out, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 	if err != nil {
-		log.Error("fail to parse prometheus metrics")
+		log.Error("fail to parse prometheus metrics", zap.Error(err))
 		return
 	}
 	res = NormalizeMetricFamilies(out)
