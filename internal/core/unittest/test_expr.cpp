@@ -352,6 +352,10 @@ TEST(Expr, TestBinaryRangeJSON) {
         {true, true, 20, 30, {"int"}},
         {false, true, 30, 40, {"int"}},
         {false, false, 40, 50, {"int"}},
+        {true, false, 10, 20, {"double"}},
+        {true, true, 20, 30, {"double"}},
+        {false, true, 30, 40, {"double"}},
+        {false, false, 40, 50, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -395,11 +399,23 @@ TEST(Expr, TestBinaryRangeJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
-            auto val =
-                milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(testcase.nested_path).value();
-            auto ref = check(val);
-            ASSERT_EQ(ans, ref) << val << testcase.lower_inclusive << testcase.lower << testcase.upper_inclusive
-                                << testcase.upper;
+            if (testcase.nested_path[0] == "int") {
+                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+                               .template at<int64_t>(testcase.nested_path)
+                               .value();
+                auto ref = check(val);
+                ASSERT_EQ(ans, ref)
+                    << val << testcase.lower_inclusive << testcase.lower
+                    << testcase.upper_inclusive << testcase.upper;
+            } else {
+                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+                               .template at<double>(testcase.nested_path)
+                               .value();
+                auto ref = check(val);
+                ASSERT_EQ(ans, ref)
+                    << val << testcase.lower_inclusive << testcase.lower
+                    << testcase.upper_inclusive << testcase.upper;
+            }
         }
     }
 }
@@ -467,6 +483,10 @@ TEST(Expr, TestUnaryRangeJson) {
         {20, {"int"}},
         {30, {"int"}},
         {40, {"int"}},
+        {10, {"double"}},
+        {20, {"double"}},
+        {30, {"double"}},
+        {40, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -535,11 +555,21 @@ TEST(Expr, TestUnaryRangeJson) {
 
             for (int i = 0; i < N * num_iters; ++i) {
                 auto ans = final[i];
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>(testcase.nested_path)
-                               .value();
-                auto ref = f(val);
-                ASSERT_EQ(ans, ref);
+                if (testcase.nested_path[0] == "int") {
+                    auto val =
+                        milvus::Json(simdjson::padded_string(json_col[i]))
+                            .template at<int64_t>(testcase.nested_path)
+                            .value();
+                    auto ref = f(val);
+                    ASSERT_EQ(ans, ref);
+                } else {
+                    auto val =
+                        milvus::Json(simdjson::padded_string(json_col[i]))
+                            .template at<double>(testcase.nested_path)
+                            .value();
+                    auto ref = f(val);
+                    ASSERT_EQ(ans, ref);
+                }
             }
         }
     }
@@ -1570,6 +1600,10 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
         {20, 30, OpType::Equal, {"int"}},
         {30, 40, OpType::NotEqual, {"int"}},
         {40, 50, OpType::NotEqual, {"int"}},
+        {10, 20, OpType::Equal, {"double"}},
+        {20, 30, OpType::Equal, {"double"}},
+        {30, 40, OpType::NotEqual, {"double"}},
+        {40, 50, OpType::NotEqual, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -1609,10 +1643,19 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
-            auto val =
-                milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(testcase.nested_path).value();
-            auto ref = check(val);
-            ASSERT_EQ(ans, ref) << testcase.value << " " << val;
+            if (testcase.nested_path[0] == "int") {
+                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+                               .template at<int64_t>(testcase.nested_path)
+                               .value();
+                auto ref = check(val);
+                ASSERT_EQ(ans, ref) << testcase.value << " " << val;
+            } else {
+                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+                               .template at<double>(testcase.nested_path)
+                               .value();
+                auto ref = check(val);
+                ASSERT_EQ(ans, ref) << testcase.value << " " << val;
+            }
         }
     }
 }
@@ -1632,6 +1675,10 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
         {20, 30, OpType::Equal, {"double"}},
         {30, 40, OpType::NotEqual, {"double"}},
         {40, 50, OpType::NotEqual, {"double"}},
+        {10, 20, OpType::Equal, {"int"}},
+        {20, 30, OpType::Equal, {"int"}},
+        {30, 40, OpType::NotEqual, {"int"}},
+        {40, 50, OpType::NotEqual, {"int"}},
     };
 
     auto schema = std::make_shared<Schema>();
