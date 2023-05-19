@@ -54,8 +54,8 @@ type uploader interface {
 	//
 	// errUploadToBlobStorage is returned if ctx is canceled from outside while a uploading is inprogress.
 	// Beware of the ctx here, if no timeout or cancel is applied to this ctx, this uploading may retry forever.
-	upload(ctx context.Context, segID, partID UniqueID, iData []*InsertData, dData *DeleteData, meta *etcdpb.CollectionMeta) (*segPaths, error)
-	uploadInsertLog(ctx context.Context, segID, partID UniqueID, iData *InsertData, meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error)
+	uploadInsertLog(ctx context.Context, segID, partID UniqueID, iData *InsertData, meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, error)
+	uploadStatsLog(ctx context.Context, segID, partID UniqueID, iData *InsertData, stats *storage.PrimaryKeyStats, totRows int64, meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error)
 	uploadDeltaLog(ctx context.Context, segID, partID UniqueID, dData *DeleteData, meta *etcdpb.CollectionMeta) ([]*datapb.FieldBinlog, error)
 }
 
@@ -131,108 +131,6 @@ func (b *binlogIO) uploadSegmentFiles(
 	return nil
 }
 
-type segPaths struct {
-	inPaths    []*datapb.FieldBinlog
-	statsPaths []*datapb.FieldBinlog
-	deltaInfo  []*datapb.FieldBinlog
-}
-
-func (b *binlogIO) upload(
-	ctx context.Context,
-	segID, partID UniqueID,
-	iDatas []*InsertData,
-	dData *DeleteData,
-	meta *etcdpb.CollectionMeta) (*segPaths, error) {
-
-	var (
-		p   = &segPaths{}             // The returns
-		kvs = make(map[string][]byte) // Key values to store in minIO
-
-		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its FieldBinlog
-		statsField2Path  = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its statsBinlog
-	)
-
-	for _, iData := range iDatas {
-		tf, ok := iData.Data[common.TimeStampField]
-		if !ok || tf.RowNum() == 0 {
-			log.Warn("binlog io uploading empty insert data",
-				zap.Int64("segmentID", segID),
-				zap.Int64("collectionID", meta.GetID()),
-			)
-			continue
-		}
-
-		blobs, inpaths, statspaths, err := b.genInsertBlobs(iData, partID, segID, meta)
-		if err != nil {
-			log.Warn("generate insert blobs wrong",
-				zap.Int64("collectionID", meta.GetID()),
-				zap.Int64("segmentID", segID),
-				zap.Error(err))
-			return nil, err
-		}
-
-		for k, v := range blobs {
-			kvs[k] = v
-		}
-
-		for fID, path := range inpaths {
-			tmpBinlog, ok := insertField2Path[fID]
-			if !ok {
-				tmpBinlog = path
-			} else {
-				tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
-			}
-			insertField2Path[fID] = tmpBinlog
-		}
-
-		for fID, path := range statspaths {
-			tmpBinlog, ok := statsField2Path[fID]
-			if !ok {
-				tmpBinlog = path
-			} else {
-				tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
-			}
-			statsField2Path[fID] = tmpBinlog
-		}
-	}
-
-	for _, path := range insertField2Path {
-		p.inPaths = append(p.inPaths, path)
-	}
-
-	for _, path := range statsField2Path {
-		p.statsPaths = append(p.statsPaths, path)
-	}
-
-	// If there are delta binlogs
-	if dData.RowCount > 0 {
-		k, v, err := b.genDeltaBlobs(dData, meta.GetID(), partID, segID)
-		if err != nil {
-			log.Warn("generate delta blobs wrong",
-				zap.Int64("collectionID", meta.GetID()),
-				zap.Int64("segmentID", segID),
-				zap.Error(err))
-			return nil, err
-		}
-
-		kvs[k] = v
-		p.deltaInfo = append(p.deltaInfo, &datapb.FieldBinlog{
-			FieldID: 0, // TODO: Not useful on deltalogs, FieldID shall be ID of primary key field
-			Binlogs: []*datapb.Binlog{{
-				EntriesNum: dData.RowCount,
-				LogPath:    k,
-				LogSize:    int64(len(v)),
-			}},
-		})
-	}
-
-	err := b.uploadSegmentFiles(ctx, meta.GetID(), segID, kvs)
-	if err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
 // genDeltaBlobs returns key, value
 func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueID) (string, []byte, error) {
 	dCodec := storage.NewDeleteCodec()
@@ -253,32 +151,26 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 	return key, blob.GetValue(), nil
 }
 
-// genInsertBlobs returns kvs, insert-paths, stats-paths
-func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string][]byte, map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
-	inCodec := storage.NewInsertCodecWithSchema(meta)
-	inlogs, statslogs, err := inCodec.Serialize(partID, segID, data)
+// genInsertBlobs returns insert-paths and save blob to kvs
+func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte) (map[UniqueID]*datapb.FieldBinlog, error) {
+	inlogs, err := iCodec.Serialize(partID, segID, data)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	var (
-		kvs        = make(map[string][]byte, len(inlogs)+len(statslogs))
-		inpaths    = make(map[UniqueID]*datapb.FieldBinlog)
-		statspaths = make(map[UniqueID]*datapb.FieldBinlog)
-	)
-
+	inpaths := make(map[UniqueID]*datapb.FieldBinlog)
 	notifyGenIdx := make(chan struct{})
 	defer close(notifyGenIdx)
 
-	generator, err := b.GetGenerator(len(inlogs)+len(statslogs), notifyGenIdx)
+	generator, err := b.GetGenerator(len(inlogs), notifyGenIdx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	for _, blob := range inlogs {
 		// Blob Key is generated by Serialize from int64 fieldID in collection schema, which won't raise error in ParseInt
 		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
-		k := metautil.JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
+		k := metautil.JoinIDPath(iCodec.Schema.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(b.ChunkManager.RootPath(), common.SegmentInsertLogPath, k)
 
 		value := blob.GetValue()
@@ -291,24 +183,76 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		}
 	}
 
-	for _, blob := range statslogs {
-		// Blob Key is generated by Serialize from int64 fieldID in collection schema, which won't raise error in ParseInt
-		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
+	return inpaths, nil
+}
 
-		k := metautil.JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
-		key := path.Join(b.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
+// genStatBlobs return stats log paths and save blob to kvs
+func (b *binlogIO) genStatBlobs(stats *storage.PrimaryKeyStats, partID, segID UniqueID, iCodec *storage.InsertCodec, kvs map[string][]byte, totRows int64) (map[UniqueID]*datapb.FieldBinlog, error) {
+	statBlob, err := iCodec.SerializePkStats(stats, totRows)
+	if err != nil {
+		return nil, err
+	}
+	statPaths := make(map[UniqueID]*datapb.FieldBinlog)
 
-		value := blob.GetValue()
-		fileLen := len(value)
+	idx, err := b.AllocOne()
+	if err != nil {
+		return nil, err
+	}
 
-		kvs[key] = value
-		statspaths[fID] = &datapb.FieldBinlog{
-			FieldID: fID,
-			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum}},
+	fID, _ := strconv.ParseInt(statBlob.GetKey(), 10, 64)
+	k := metautil.JoinIDPath(iCodec.Schema.GetID(), partID, segID, fID, idx)
+	key := path.Join(b.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
+
+	value := statBlob.GetValue()
+	fileLen := len(value)
+
+	kvs[key] = value
+
+	statPaths[fID] = &datapb.FieldBinlog{
+		FieldID: fID,
+		Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: totRows}},
+	}
+	return statPaths, nil
+}
+
+// update stats log
+// also update with insert data if not nil
+func (b *binlogIO) uploadStatsLog(
+	ctx context.Context,
+	segID UniqueID,
+	partID UniqueID,
+	iData *InsertData,
+	stats *storage.PrimaryKeyStats,
+	totRows int64,
+	meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	var inPaths map[int64]*datapb.FieldBinlog
+	var err error
+
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+	kvs := make(map[string][]byte)
+
+	if !iData.IsEmpty() {
+		inPaths, err = b.genInsertBlobs(iData, partID, segID, iCodec, kvs)
+		if err != nil {
+			log.Warn("generate insert blobs wrong",
+				zap.Int64("collectionID", iCodec.Schema.GetID()),
+				zap.Int64("segmentID", segID),
+				zap.Error(err))
+			return nil, nil, err
 		}
 	}
 
-	return kvs, inpaths, statspaths, nil
+	statPaths, err := b.genStatBlobs(stats, partID, segID, iCodec, kvs, totRows)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = b.uploadSegmentFiles(ctx, meta.GetID(), segID, kvs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return inPaths, statPaths, nil
 }
 
 func (b *binlogIO) uploadInsertLog(
@@ -316,55 +260,30 @@ func (b *binlogIO) uploadInsertLog(
 	segID UniqueID,
 	partID UniqueID,
 	iData *InsertData,
-	meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
-	var (
-		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog)
-		statsField2Path  = make(map[UniqueID]*datapb.FieldBinlog)
-	)
+	meta *etcdpb.CollectionMeta) (map[UniqueID]*datapb.FieldBinlog, error) {
 
-	tf, ok := iData.Data[common.TimeStampField]
-	if !ok || tf.RowNum() == 0 {
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+	kvs := make(map[string][]byte)
+
+	if iData.IsEmpty() {
 		log.Warn("binlog io uploading empty insert data",
 			zap.Int64("segmentID", segID),
-			zap.Int64("collectionID", meta.GetID()),
+			zap.Int64("collectionID", iCodec.Schema.GetID()),
 		)
-		return nil, nil, nil
+		return nil, nil
 	}
 
-	kvs, inpaths, statspaths, err := b.genInsertBlobs(iData, partID, segID, meta)
+	inpaths, err := b.genInsertBlobs(iData, partID, segID, iCodec, kvs)
 	if err != nil {
-		log.Warn("generate insert blobs wrong",
-			zap.Int64("collectionID", meta.GetID()),
-			zap.Int64("segmentID", segID),
-			zap.Error(err))
-		return nil, nil, err
-	}
-
-	for fID, path := range inpaths {
-		tmpBinlog, ok := insertField2Path[fID]
-		if !ok {
-			tmpBinlog = path
-		} else {
-			tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
-		}
-		insertField2Path[fID] = tmpBinlog
-	}
-
-	for fID, path := range statspaths {
-		tmpBinlog, ok := statsField2Path[fID]
-		if !ok {
-			tmpBinlog = path
-		} else {
-			tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
-		}
-		statsField2Path[fID] = tmpBinlog
+		return nil, err
 	}
 
 	err = b.uploadSegmentFiles(ctx, meta.GetID(), segID, kvs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return insertField2Path, statsField2Path, nil
+
+	return inpaths, nil
 }
 
 func (b *binlogIO) uploadDeltaLog(

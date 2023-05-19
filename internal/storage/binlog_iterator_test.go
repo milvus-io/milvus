@@ -72,7 +72,7 @@ func generateTestData(t *testing.T, num int) []*Blob {
 		},
 	}}
 
-	blobs, _, err := insertCodec.Serialize(1, 1, data)
+	blobs, err := insertCodec.Serialize(1, 1, data)
 	assert.Nil(t, err)
 	return blobs
 }

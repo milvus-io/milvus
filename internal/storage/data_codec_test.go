@@ -105,7 +105,7 @@ func TestInsertCodec(t *testing.T) {
 				{
 					FieldID:      Int64Field,
 					Name:         "field_int64",
-					IsPrimaryKey: false,
+					IsPrimaryKey: true,
 					Description:  "int64",
 					DataType:     schemapb.DataType_Int64,
 				},
@@ -307,18 +307,21 @@ func TestInsertCodec(t *testing.T) {
 			JSONField:         &JSONFieldData{[][]byte{}},
 		},
 	}
-	b, s, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
+	b, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
 	assert.Error(t, err)
 	assert.Empty(t, b)
+
+	s, err := insertCodec.SerializePkStatsByData(insertDataEmpty)
+	assert.Error(t, err)
 	assert.Empty(t, s)
 
-	Blobs1, statsBlob1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
+	Blobs1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
 	assert.Nil(t, err)
 	for _, blob := range Blobs1 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
-	Blobs2, statsBlob2, err := insertCodec.Serialize(PartitionID, SegmentID, insertData2)
+	Blobs2, err := insertCodec.Serialize(PartitionID, SegmentID, insertData2)
 	assert.Nil(t, err)
 	for _, blob := range Blobs2 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
@@ -368,10 +371,14 @@ func TestInsertCodec(t *testing.T) {
 	_, _, _, _, err = insertCodec.DeserializeAll(blobs)
 	assert.NotNil(t, err)
 
-	_, err = DeserializeStats(statsBlob1)
+	statsBlob1, err := insertCodec.SerializePkStatsByData(insertData1)
+	assert.Nil(t, err)
+	_, err = DeserializeStats([]*Blob{statsBlob1})
 	assert.Nil(t, err)
 
-	_, err = DeserializeStats(statsBlob2)
+	statsBlob2, err := insertCodec.SerializePkStatsByData(insertData2)
+	assert.Nil(t, err)
+	_, err = DeserializeStats([]*Blob{statsBlob2})
 	assert.Nil(t, err)
 }
 
@@ -495,7 +502,7 @@ func TestDDCodec(t *testing.T) {
 func TestTsError(t *testing.T) {
 	insertData := &InsertData{}
 	insertCodec := NewInsertCodecWithSchema(nil)
-	blobs, _, err := insertCodec.Serialize(1, 1, insertData)
+	blobs, err := insertCodec.Serialize(1, 1, insertData)
 	assert.Nil(t, blobs)
 	assert.NotNil(t, err)
 }

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -136,6 +137,20 @@ func (t *compactionTask) getChannelName() string {
 	return t.plan.GetChannel()
 }
 
+// return num rows of all segment compaction from
+func (t *compactionTask) getNumRows() (int64, error) {
+	numRows := int64(0)
+	for _, binlog := range t.plan.SegmentBinlogs {
+		seg := t.Channel.getSegment(binlog.GetSegmentID())
+		if seg == nil {
+			return 0, merr.WrapErrSegmentNotFound(binlog.GetSegmentID(), "get compaction segments num rows failed")
+		}
+		numRows += seg.numRows
+	}
+
+	return numRows, nil
+}
+
 func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (
 	map[interface{}]Timestamp, *DelDataBuf, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()))
@@ -196,13 +211,51 @@ func nano2Milli(nano time.Duration) float64 {
 	return float64(nano) / float64(time.Millisecond)
 }
 
+func (t *compactionTask) uploadRemainLog(
+	ctxTimeout context.Context,
+	targetSegID UniqueID,
+	partID UniqueID,
+	meta *etcdpb.CollectionMeta,
+	stats *storage.PrimaryKeyStats,
+	totRows int64,
+	fID2Content map[UniqueID][]interface{},
+	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	var iData *InsertData
+
+	// remain insert data
+	if len(fID2Content) != 0 {
+		iData = &InsertData{Data: make(map[storage.FieldID]storage.FieldData)}
+		for fID, content := range fID2Content {
+			tp, ok := fID2Type[fID]
+			if !ok {
+				log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
+				return nil, nil, errors.New("Unexpected error")
+			}
+
+			fData, err := interface2FieldData(tp, content, int64(len(content)))
+			if err != nil {
+				log.Warn("transfer interface to FieldData wrong", zap.Error(err))
+				return nil, nil, err
+			}
+			iData.Data[fID] = fData
+		}
+	}
+
+	inPaths, statPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, iData, stats, totRows, meta)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return inPaths, statPaths, nil
+}
+
 func (t *compactionTask) uploadSingleInsertLog(
 	ctxTimeout context.Context,
 	targetSegID UniqueID,
 	partID UniqueID,
 	meta *etcdpb.CollectionMeta,
 	fID2Content map[UniqueID][]interface{},
-	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, error) {
 	iData := &InsertData{
 		Data: make(map[storage.FieldID]storage.FieldData)}
 
@@ -210,23 +263,23 @@ func (t *compactionTask) uploadSingleInsertLog(
 		tp, ok := fID2Type[fID]
 		if !ok {
 			log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
-			return nil, nil, errors.New("Unexpected error")
+			return nil, errors.New("Unexpected error")
 		}
 
 		fData, err := interface2FieldData(tp, content, int64(len(content)))
 		if err != nil {
 			log.Warn("transfer interface to FieldData wrong", zap.Error(err))
-			return nil, nil, err
+			return nil, err
 		}
 		iData.Data[fID] = fData
 	}
 
-	inPaths, statPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, iData, meta)
+	inPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, iData, meta)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return inPaths, statPaths, nil
+	return inPaths, nil
 }
 
 func (t *compactionTask) merge(
@@ -244,10 +297,6 @@ func (t *compactionTask) merge(
 		numBinlogs       int   // binlog number
 		numRows          int64 // the number of rows uploaded
 		expired          int64 // the number of expired entity
-
-		// statslog generation
-		pkID   UniqueID
-		pkType schemapb.DataType
 
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
 		fID2Content = make(map[UniqueID][]interface{})
@@ -295,13 +344,21 @@ func (t *compactionTask) merge(
 	}
 
 	// get pkID, pkType, dim
+	var pkField *schemapb.FieldSchema
 	for _, fs := range meta.GetSchema().GetFields() {
 		fID2Type[fs.GetFieldID()] = fs.GetDataType()
 		if fs.GetIsPrimaryKey() && fs.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(fs.GetDataType()) {
-			pkID = fs.GetFieldID()
-			pkType = fs.GetDataType()
+			pkField = fs
 		}
 	}
+
+	if pkField == nil {
+		log.Warn("failed to get pk filed from schema")
+		return nil, nil, 0, fmt.Errorf("no pk field in schema")
+	}
+
+	pkID := pkField.GetFieldID()
+	pkType := pkField.GetDataType()
 
 	// estimate Rows per binlog
 	// TODO should not convert size to row because we already know the size, this is especially important on varchar types.
@@ -323,6 +380,13 @@ func (t *compactionTask) merge(
 	currentRows := 0
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
+
+	oldRowNums, err := t.getNumRows()
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	stats := storage.NewPrimaryKeyStats(pkID, int64(pkType), oldRowNums)
 
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
@@ -369,18 +433,19 @@ func (t *compactionTask) merge(
 				}
 				fID2Content[fID] = append(fID2Content[fID], vInter)
 			}
+			//update pk to new stats log
+			stats.Update(v.PK)
 
 			currentRows++
 			if currentRows >= maxRowsPerBinlog {
 				uploadInsertStart := time.Now()
-				inPaths, statsPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
+				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
 				if err != nil {
 					log.Warn("failed to upload single insert log", zap.Error(err))
 					return nil, nil, 0, err
 				}
 				uploadInsertTimeCost += time.Since(uploadInsertStart)
 				addInsertFieldPath(inPaths)
-				addStatFieldPath(statsPaths)
 
 				fID2Content = make(map[int64][]interface{})
 				currentRows = 0
@@ -389,20 +454,21 @@ func (t *compactionTask) merge(
 			}
 		}
 	}
-	if currentRows != 0 {
-		uploadInsertStart := time.Now()
-		inPaths, statsPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
+
+	// upload stats log and remain insert rows
+	if numRows != 0 || currentRows != 0 {
+		uploadStart := time.Now()
+		inPaths, statsPaths, err := t.uploadRemainLog(ctxTimeout, targetSegID, partID, meta,
+			stats, numRows+int64(currentRows), fID2Content, fID2Type)
 		if err != nil {
-			log.Warn("failed to upload single insert log", zap.Error(err))
 			return nil, nil, 0, err
 		}
-		uploadInsertTimeCost += time.Since(uploadInsertStart)
 
+		uploadInsertTimeCost += time.Since(uploadStart)
 		addInsertFieldPath(inPaths)
 		addStatFieldPath(statsPaths)
-
 		numRows += int64(currentRows)
-		numBinlogs++
+		numBinlogs += len(inPaths)
 	}
 
 	for _, path := range insertField2Path {

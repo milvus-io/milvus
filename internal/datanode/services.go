@@ -840,7 +840,9 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		ID:     colID,
 		Schema: schema,
 	}
-	binLogs, statsBinLogs, err := storage.NewInsertCodecWithSchema(meta).Serialize(partID, segmentID, data.buffer)
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+
+	binLogs, err := iCodec.Serialize(partID, segmentID, data.buffer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -878,27 +880,30 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 
 	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
-	for _, blob := range statsBinLogs {
-		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
-			return nil, nil, err
-		}
+	statsBinLog, err := iCodec.SerializePkStatsByData(data.buffer)
+	if err != nil {
+		return nil, nil, err
+	}
 
-		logidx := field2Logidx[fieldID]
+	fieldID, err := strconv.ParseInt(statsBinLog.GetKey(), 10, 64)
+	if err != nil {
+		log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+		return nil, nil, err
+	}
 
-		// no error raise if alloc=false
-		k := metautil.JoinIDPath(colID, partID, segmentID, fieldID, logidx)
+	logidx := field2Logidx[fieldID]
 
-		key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
-		kvs[key] = blob.Value
-		field2Stats[fieldID] = &datapb.Binlog{
-			EntriesNum:    data.size,
-			TimestampFrom: ts,
-			TimestampTo:   ts,
-			LogPath:       key,
-			LogSize:       int64(len(blob.Value)),
-		}
+	// no error raise if alloc=false
+	k := metautil.JoinIDPath(colID, partID, segmentID, fieldID, logidx)
+
+	key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
+	kvs[key] = statsBinLog.Value
+	field2Stats[fieldID] = &datapb.Binlog{
+		EntriesNum:    data.size,
+		TimestampFrom: ts,
+		TimestampTo:   ts,
+		LogPath:       key,
+		LogSize:       int64(len(statsBinLog.Value)),
 	}
 
 	err = node.chunkManager.MultiWrite(ctx, kvs)

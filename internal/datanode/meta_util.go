@@ -17,9 +17,9 @@
 package datanode
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
@@ -66,13 +66,11 @@ func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {
 	vChannel.DroppedSegmentIds = removeDuplicateSegmentIDFn(vChannel.GetDroppedSegmentIds())
 }
 
-// getPKID returns the primary key field id from collection meta.
-func getPKID(meta *etcdpb.CollectionMeta) UniqueID {
-	for _, field := range meta.GetSchema().GetFields() {
+func getPKField(meta *etcdpb.CollectionMeta) *schemapb.FieldSchema {
+	for _, field := range meta.Schema.Fields {
 		if field.GetIsPrimaryKey() {
-			return field.GetFieldID()
+			return field
 		}
 	}
-
-	return common.InvalidFieldID
+	return nil
 }

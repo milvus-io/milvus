@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -91,6 +92,30 @@ func (s *Segment) updatePKRange(ids storage.FieldData) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (s *Segment) getHistoricalStats(pkField *schemapb.FieldSchema) ([]*storage.PrimaryKeyStats, int64) {
+	statsList := []*storage.PrimaryKeyStats{}
+	for _, stats := range s.historyStats {
+		statsList = append(statsList, &storage.PrimaryKeyStats{
+			FieldID: pkField.FieldID,
+			PkType:  int64(pkField.DataType),
+			BF:      stats.PkFilter,
+			MaxPk:   stats.MaxPK,
+			MinPk:   stats.MinPK,
+		})
+	}
+
+	if s.currentStat != nil {
+		statsList = append(statsList, &storage.PrimaryKeyStats{
+			FieldID: pkField.FieldID,
+			PkType:  int64(pkField.DataType),
+			BF:      s.currentStat.PkFilter,
+			MaxPk:   s.currentStat.MaxPK,
+			MinPk:   s.currentStat.MinPK,
+		})
+	}
+	return statsList, s.numRows
 }
 
 func (s *Segment) InitCurrentStat() {

@@ -108,7 +108,7 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 		},
 	}
 
-	blobs, _, err := insertCodec.Serialize(1, 1, insertData)
+	blobs, err := insertCodec.Serialize(1, 1, insertData)
 	if err != nil {
 		return nil
 	}

@@ -13,11 +13,26 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
 	"golang.org/x/exp/mmap"
 )
+
+type StatsLogType int64
+
+const (
+	DefaultStatsType StatsLogType = iota + 0
+
+	// CompundStatsType log save multiple stats
+	// and bloom filters to one file
+	CompoundStatsType
+)
+
+func (s StatsLogType) LogIdx() string {
+	return fmt.Sprintf("0%d", s)
+}
 
 type FileReader interface {
 	io.Reader

@@ -470,20 +470,16 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			zap.String("channel", ibNode.channelName),
 		)
 		// use the flushed pk stats to take current stat
-		var pkStats []*storage.PrimaryKeyStats
+		var pkStats *storage.PrimaryKeyStats
 		// TODO, this has to be async flush, no need to block here.
 		err := retry.Do(ibNode.ctx, func() error {
-			statBlobs, err := ibNode.flushManager.flushBufferData(task.buffer,
+			var err error
+			pkStats, err = ibNode.flushManager.flushBufferData(task.buffer,
 				task.segmentID,
 				task.flushed,
 				task.dropped,
 				endPosition)
 			if err != nil {
-				return err
-			}
-			pkStats, err = storage.DeserializeStats(statBlobs)
-			if err != nil {
-				log.Warn("failed to deserialize bloom filter files", zap.Error(err))
 				return err
 			}
 			return nil
