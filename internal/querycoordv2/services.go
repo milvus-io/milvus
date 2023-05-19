@@ -809,13 +809,23 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 	}
 
 	for _, replica := range replicas {
-		info, err := s.fillReplicaInfo(replica, req.GetWithShardNodes())
-		if err != nil {
-			msg := "failed to get replica info"
+		msg := "failed to get replica info"
+		if len(replica.GetNodes()) == 0 {
+			err := merr.WrapErrNoAvailableNodeInReplica(replica.ID)
 			log.Warn(msg,
 				zap.Int64("replica", replica.GetID()),
 				zap.Error(err))
 			resp.Status = utils.WrapStatus(commonpb.ErrorCode_MetaFailed, msg, err)
+			break
+		}
+
+		info, err := s.fillReplicaInfo(replica, req.GetWithShardNodes())
+		if err != nil {
+			log.Warn(msg,
+				zap.Int64("replica", replica.GetID()),
+				zap.Error(err))
+			resp.Status = utils.WrapStatus(commonpb.ErrorCode_MetaFailed, msg, err)
+			break
 		}
 		resp.Replicas = append(resp.Replicas, info)
 	}
