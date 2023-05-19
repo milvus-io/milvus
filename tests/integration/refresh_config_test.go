@@ -29,62 +29,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
-func TestRefreshPasswordLength(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
+type RefreshConfigSuite struct {
+	MiniClusterSuite
+}
+
+func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
 
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
-
-	s, err := c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	resp, err := c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 		Username: "test",
 		Password: "1234",
 	})
-	log.Debug("first create result", zap.Any("state", s))
-	assert.Equal(t, commonpb.ErrorCode_IllegalArgument, s.GetErrorCode())
+	log.Debug("first create result", zap.Any("state", resp))
+	s.Require().NoError(err)
+	s.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetErrorCode())
 
 	params := paramtable.Get()
-	c.etcdCli.KV.Put(ctx, fmt.Sprintf("%s/config/proxy/minpasswordlength", params.EtcdCfg.RootPath.GetValue()), "3")
+	key := fmt.Sprintf("%s/config/proxy/minpasswordlength", params.EtcdCfg.RootPath.GetValue())
+	c.etcdCli.KV.Put(ctx, key, "3")
 
-	assert.Eventually(t, func() bool {
-		s, err = c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	s.Eventually(func() bool {
+		resp, err = c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 			Username: "test",
 			Password: "1234",
 		})
-		log.Debug("second create result", zap.Any("state", s))
-		return commonpb.ErrorCode_Success == s.GetErrorCode()
+		log.Debug("second create result", zap.Any("state", resp))
+		return commonpb.ErrorCode_Success == resp.GetErrorCode()
 	}, time.Second*20, time.Millisecond*500)
+
 }
 
-func TestRefreshDefaultIndexName(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
+func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
-
 	params := paramtable.Get()
 	c.etcdCli.KV.Put(ctx, fmt.Sprintf("%s/config/common/defaultIndexName", params.EtcdCfg.RootPath.GetValue()), "a_index")
 
-	assert.Eventually(t, func() bool {
+	s.Eventually(func() bool {
 		return params.CommonCfg.DefaultIndexName.GetValue() == "a_index"
 	}, time.Second*10, time.Millisecond*500)
 
@@ -95,6 +83,7 @@ func TestRefreshDefaultIndexName(t *testing.T) {
 
 	schema := constructSchema("test", 128, true)
 	marshaledSchema, err := proto.Marshal(schema)
+	s.Require().NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "default",
@@ -102,11 +91,11 @@ func TestRefreshDefaultIndexName(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      1,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := generateHashKeys(rowNum)
@@ -117,19 +106,25 @@ func TestRefreshDefaultIndexName(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	_, err = c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      floatVecField,
 		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
 	})
+	s.NoError(err)
 
-	s, err := c.proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+	resp, err := c.proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.Equal(t, commonpb.ErrorCode_Success, s.Status.GetErrorCode())
-	assert.Equal(t, 1, len(s.IndexDescriptions))
-	assert.Equal(t, "a_index_101", s.IndexDescriptions[0].GetIndexName())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+	s.Equal(1, len(resp.IndexDescriptions))
+	s.Equal("a_index_101", resp.IndexDescriptions[0].GetIndexName())
+}
+
+func TestRefreshConfig(t *testing.T) {
+	suite.Run(t, new(RefreshConfigSuite))
 }

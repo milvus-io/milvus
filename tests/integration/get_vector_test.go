@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
@@ -36,11 +35,7 @@ import (
 )
 
 type TestGetVectorSuite struct {
-	suite.Suite
-
-	ctx     context.Context
-	cancel  context.CancelFunc
-	cluster *MiniCluster
+	MiniClusterSuite
 
 	// test params
 	nq         int
@@ -51,25 +46,12 @@ type TestGetVectorSuite struct {
 	vecType    schemapb.DataType
 }
 
-func (suite *TestGetVectorSuite) SetupTest() {
-	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), time.Second*180)
+func (s *TestGetVectorSuite) run() {
+	ctx, cancel := context.WithCancel(s.Cluster.ctx)
+	defer cancel()
 
-	var err error
-	suite.cluster, err = StartMiniCluster(suite.ctx)
-	suite.Require().NoError(err)
-	err = suite.cluster.Start()
-	suite.Require().NoError(err)
-}
-
-func (suite *TestGetVectorSuite) TearDownTest() {
-	err := suite.cluster.Stop()
-	suite.Require().NoError(err)
-	suite.cancel()
-}
-
-func (suite *TestGetVectorSuite) run() {
 	collection := fmt.Sprintf("TestGetVector_%d_%d_%s_%s_%s",
-		suite.nq, suite.topK, suite.indexType, suite.metricType, funcutil.GenRandomStr())
+		s.nq, s.topK, s.indexType, s.metricType, funcutil.GenRandomStr())
 
 	const (
 		NB  = 10000
@@ -83,7 +65,7 @@ func (suite *TestGetVectorSuite) run() {
 		Name:         pkFieldName,
 		IsPrimaryKey: true,
 		Description:  "",
-		DataType:     suite.pkType,
+		DataType:     s.pkType,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MaxLengthKey,
@@ -98,7 +80,7 @@ func (suite *TestGetVectorSuite) run() {
 		Name:         vecFieldName,
 		IsPrimaryKey: false,
 		Description:  "",
-		DataType:     suite.vecType,
+		DataType:     s.vecType,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.DimKey,
@@ -109,96 +91,96 @@ func (suite *TestGetVectorSuite) run() {
 	}
 	schema := constructSchema(collection, dim, false, pk, fVec)
 	marshaledSchema, err := proto.Marshal(schema)
-	suite.Require().NoError(err)
+	s.Require().NoError(err)
 
-	createCollectionStatus, err := suite.cluster.proxy.CreateCollection(suite.ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collection,
 		Schema:         marshaledSchema,
 		ShardsNum:      2,
 	})
-	suite.Require().NoError(err)
-	suite.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	fieldsData := make([]*schemapb.FieldData, 0)
-	if suite.pkType == schemapb.DataType_Int64 {
+	if s.pkType == schemapb.DataType_Int64 {
 		fieldsData = append(fieldsData, newInt64FieldData(pkFieldName, NB))
 	} else {
 		fieldsData = append(fieldsData, newStringFieldData(pkFieldName, NB))
 	}
 	var vecFieldData *schemapb.FieldData
-	if suite.vecType == schemapb.DataType_FloatVector {
+	if s.vecType == schemapb.DataType_FloatVector {
 		vecFieldData = newFloatVectorFieldData(vecFieldName, NB, dim)
 	} else {
 		vecFieldData = newBinaryVectorFieldData(vecFieldName, NB, dim)
 	}
 	fieldsData = append(fieldsData, vecFieldData)
 	hashKeys := generateHashKeys(NB)
-	_, err = suite.cluster.proxy.Insert(suite.ctx, &milvuspb.InsertRequest{
+	_, err = s.Cluster.proxy.Insert(ctx, &milvuspb.InsertRequest{
 		CollectionName: collection,
 		FieldsData:     fieldsData,
 		HashKeys:       hashKeys,
 		NumRows:        uint32(NB),
 	})
-	suite.Require().NoError(err)
-	suite.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := suite.cluster.proxy.Flush(suite.ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		CollectionNames: []string{collection},
 	})
-	suite.Require().NoError(err)
+	s.Require().NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collection]
 	ids := segmentIDs.GetData()
-	suite.Require().NotEmpty(segmentIDs)
-	suite.Require().True(has)
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
 
-	segments, err := suite.cluster.metaWatcher.ShowSegments()
-	suite.Require().NoError(err)
-	suite.Require().NotEmpty(segments)
+	segments, err := s.Cluster.metaWatcher.ShowSegments()
+	s.Require().NoError(err)
+	s.Require().NotEmpty(segments)
 
-	waitingForFlush(suite.ctx, suite.cluster, ids)
+	waitingForFlush(ctx, s.Cluster, ids)
 
 	// create index
-	_, err = suite.cluster.proxy.CreateIndex(suite.ctx, &milvuspb.CreateIndexRequest{
+	_, err = s.Cluster.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collection,
 		FieldName:      vecFieldName,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, suite.indexType, suite.metricType),
+		ExtraParams:    constructIndexParam(dim, s.indexType, s.metricType),
 	})
-	suite.Require().NoError(err)
-	suite.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	waitingForIndexBuilt(suite.ctx, suite.cluster, suite.T(), collection, vecFieldName)
+	waitingForIndexBuilt(ctx, s.Cluster, s.T(), collection, vecFieldName)
 
 	// load
-	_, err = suite.cluster.proxy.LoadCollection(suite.ctx, &milvuspb.LoadCollectionRequest{
+	_, err = s.Cluster.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collection,
 	})
-	suite.Require().NoError(err)
-	suite.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-	waitingForLoad(suite.ctx, suite.cluster, collection)
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	waitingForLoad(ctx, s.Cluster, collection)
 
 	// search
-	nq := suite.nq
-	topk := suite.topK
+	nq := s.nq
+	topk := s.topK
 
 	outputFields := []string{vecFieldName}
-	params := getSearchParams(suite.indexType, suite.metricType)
+	params := getSearchParams(s.indexType, s.metricType)
 	searchReq := constructSearchRequest("", collection, "",
-		vecFieldName, suite.vecType, outputFields, suite.metricType, params, nq, dim, topk, -1)
+		vecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
-	searchResp, err := suite.cluster.proxy.Search(suite.ctx, searchReq)
-	suite.Require().NoError(err)
-	suite.Require().Equal(searchResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	searchResp, err := s.Cluster.proxy.Search(ctx, searchReq)
+	s.Require().NoError(err)
+	s.Require().Equal(searchResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	result := searchResp.GetResults()
-	if suite.pkType == schemapb.DataType_Int64 {
-		suite.Require().Len(result.GetIds().GetIntId().GetData(), nq*topk)
+	if s.pkType == schemapb.DataType_Int64 {
+		s.Require().Len(result.GetIds().GetIntId().GetData(), nq*topk)
 	} else {
-		suite.Require().Len(result.GetIds().GetStrId().GetData(), nq*topk)
+		s.Require().Len(result.GetIds().GetStrId().GetData(), nq*topk)
 	}
-	suite.Require().Len(result.GetScores(), nq*topk)
-	suite.Require().GreaterOrEqual(len(result.GetFieldsData()), 1)
+	s.Require().Len(result.GetScores(), nq*topk)
+	s.Require().GreaterOrEqual(len(result.GetFieldsData()), 1)
 	var vecFieldIndex = -1
 	for i, fieldData := range result.GetFieldsData() {
 		if typeutil.IsVectorType(fieldData.GetType()) {
@@ -206,162 +188,162 @@ func (suite *TestGetVectorSuite) run() {
 			break
 		}
 	}
-	suite.Require().EqualValues(nq, result.GetNumQueries())
-	suite.Require().EqualValues(topk, result.GetTopK())
+	s.Require().EqualValues(nq, result.GetNumQueries())
+	s.Require().EqualValues(topk, result.GetTopK())
 
 	// check output vectors
-	if suite.vecType == schemapb.DataType_FloatVector {
-		suite.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloatVector().GetData(), nq*topk*dim)
+	if s.vecType == schemapb.DataType_FloatVector {
+		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloatVector().GetData(), nq*topk*dim)
 		rawData := vecFieldData.GetVectors().GetFloatVector().GetData()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloatVector().GetData()
-		if suite.pkType == schemapb.DataType_Int64 {
+		if s.pkType == schemapb.DataType_Int64 {
 			for i, id := range result.GetIds().GetIntId().GetData() {
 				expect := rawData[int(id)*dim : (int(id)+1)*dim]
 				actual := resData[i*dim : (i+1)*dim]
-				suite.Require().ElementsMatch(expect, actual)
+				s.Require().ElementsMatch(expect, actual)
 			}
 		} else {
 			for i, idStr := range result.GetIds().GetStrId().GetData() {
 				id, err := strconv.Atoi(idStr)
-				suite.Require().NoError(err)
+				s.Require().NoError(err)
 				expect := rawData[id*dim : (id+1)*dim]
 				actual := resData[i*dim : (i+1)*dim]
-				suite.Require().ElementsMatch(expect, actual)
+				s.Require().ElementsMatch(expect, actual)
 			}
 		}
 	} else {
-		suite.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
+		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector()
-		if suite.pkType == schemapb.DataType_Int64 {
+		if s.pkType == schemapb.DataType_Int64 {
 			for i, id := range result.GetIds().GetIntId().GetData() {
 				dataBytes := dim / 8
 				for j := 0; j < dataBytes; j++ {
 					expect := rawData[int(id)*dataBytes+j]
 					actual := resData[i*dataBytes+j]
-					suite.Require().Equal(expect, actual)
+					s.Require().Equal(expect, actual)
 				}
 			}
 		} else {
 			for i, idStr := range result.GetIds().GetStrId().GetData() {
 				dataBytes := dim / 8
 				id, err := strconv.Atoi(idStr)
-				suite.Require().NoError(err)
+				s.Require().NoError(err)
 				for j := 0; j < dataBytes; j++ {
 					expect := rawData[id*dataBytes+j]
 					actual := resData[i*dataBytes+j]
-					suite.Require().Equal(expect, actual)
+					s.Require().Equal(expect, actual)
 				}
 			}
 		}
 	}
 
-	status, err := suite.cluster.proxy.DropCollection(suite.ctx, &milvuspb.DropCollectionRequest{
+	status, err := s.Cluster.proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collection,
 	})
-	suite.Require().NoError(err)
-	suite.Require().Equal(status.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Require().NoError(err)
+	s.Require().Equal(status.GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_FLAT() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexFaissIDMap
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_FLAT() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexFaissIDMap
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexFaissIvfFlat
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexFaissIvfFlat
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_IVF_PQ() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexFaissIvfPQ
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_IVF_PQ() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexFaissIvfPQ
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexFaissIvfSQ8
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexFaissIvfSQ8
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_HNSW() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexHNSW
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_HNSW() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexHNSW
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_IP() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexHNSW
-	suite.metricType = distance.IP
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_IP() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexHNSW
+	s.metricType = distance.IP
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_StringPK() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexHNSW
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_VarChar
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_StringPK() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexHNSW
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_VarChar
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_BinaryVector() {
-	suite.nq = 10
-	suite.topK = 10
-	suite.indexType = IndexFaissBinIvfFlat
-	suite.metricType = distance.JACCARD
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_BinaryVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_BinaryVector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = IndexFaissBinIvfFlat
+	s.metricType = distance.JACCARD
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_BinaryVector
+	s.run()
 }
 
-func (suite *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
-	suite.T().Skip("skip big NQ Top due to timeout")
-	suite.nq = 10000
-	suite.topK = 200
-	suite.indexType = IndexHNSW
-	suite.metricType = distance.L2
-	suite.pkType = schemapb.DataType_Int64
-	suite.vecType = schemapb.DataType_FloatVector
-	suite.run()
+func (s *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
+	s.T().Skip("skip big NQ Top due to timeout")
+	s.nq = 10000
+	s.topK = 200
+	s.indexType = IndexHNSW
+	s.metricType = distance.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
 }
 
-//func (suite *TestGetVectorSuite) TestGetVector_DISKANN() {
-//	suite.nq = 10
-//	suite.topK = 10
-//	suite.indexType = IndexDISKANN
-//	suite.metricType = distance.L2
-//	suite.pkType = schemapb.DataType_Int64
-//	suite.vecType = schemapb.DataType_FloatVector
-//	suite.run()
+//func (s *TestGetVectorSuite) TestGetVector_DISKANN() {
+//	s.nq = 10
+//	s.topK = 10
+//	s.indexType = IndexDISKANN
+//	s.metricType = distance.L2
+//	s.pkType = schemapb.DataType_Int64
+//	s.vecType = schemapb.DataType_FloatVector
+//	s.run()
 //}
 
 func TestGetVector(t *testing.T) {

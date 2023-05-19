@@ -27,6 +27,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -44,6 +45,10 @@ const (
 	Dim           = 128
 )
 
+type BulkInsertSuite struct {
+	MiniClusterSuite
+}
+
 // test bulk insert E2E
 // 1, create collection with a vector column and a varchar column
 // 2, generate numpy files
@@ -51,17 +56,10 @@ const (
 // 4, create index
 // 5, load
 // 6, search
-func TestBulkInsert(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
+func (s *BulkInsertSuite) TestBulkInsert() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestBulkInsert"
 	dbName := ""
@@ -75,7 +73,7 @@ func TestBulkInsert(t *testing.T) {
 		&schemapb.FieldSchema{Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 	)
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -83,17 +81,17 @@ func TestBulkInsert(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
-		t.FailNow()
+		s.FailNow("failed to create collection")
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
@@ -102,14 +100,14 @@ func TestBulkInsert(t *testing.T) {
 			Value: strconv.Itoa(Dim),
 		},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 		{
 			Key:   common.MaxLengthKey,
 			Value: strconv.Itoa(65535),
 		},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	bulkInsertFiles := []string{
 		c.chunkManager.RootPath() + "/" + "embeddings.npy",
@@ -117,13 +115,13 @@ func TestBulkInsert(t *testing.T) {
 	}
 
 	health1, err := c.dataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	assert.NoError(t, err)
+	s.NoError(err)
 	log.Info("dataCoord health", zap.Any("health1", health1))
 	importResp, err := c.proxy.Import(ctx, &milvuspb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          bulkInsertFiles,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	log.Info("Import result", zap.Any("importResp", importResp), zap.Int64s("tasks", importResp.GetTasks()))
 
 	tasks := importResp.GetTasks()
@@ -133,7 +131,7 @@ func TestBulkInsert(t *testing.T) {
 			importTaskState, err := c.proxy.GetImportState(ctx, &milvuspb.GetImportStateRequest{
 				Task: task,
 			})
-			assert.NoError(t, err)
+			s.NoError(err)
 			switch importTaskState.GetState() {
 			case commonpb.ImportState_ImportCompleted:
 				break loop
@@ -150,12 +148,12 @@ func TestBulkInsert(t *testing.T) {
 	}
 
 	health2, err := c.dataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	assert.NoError(t, err)
+	s.NoError(err)
 	log.Info("dataCoord health", zap.Any("health2", health2))
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -170,21 +168,21 @@ func TestBulkInsert(t *testing.T) {
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, t, collectionName, "embeddings")
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, "embeddings")
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	waitingForLoad(ctx, c, collectionName)
 
 	// search
@@ -202,14 +200,18 @@ func TestBulkInsert(t *testing.T) {
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
 	log.Info("======================")
 	log.Info("======================")
 	log.Info("TestBulkInsert succeed")
 	log.Info("======================")
 	log.Info("======================")
+}
+
+func TestBulkInsert(t *testing.T) {
+	suite.Run(t, new(BulkInsertSuite))
 }
 
 func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {

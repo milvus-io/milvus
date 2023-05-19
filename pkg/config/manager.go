@@ -162,6 +162,8 @@ func (m *Manager) FileConfigs() map[string]string {
 }
 
 func (m *Manager) Close() {
+	m.Lock()
+	defer m.Unlock()
 	for _, s := range m.sources {
 		s.Close()
 	}

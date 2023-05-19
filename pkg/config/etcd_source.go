@@ -19,6 +19,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -104,7 +105,7 @@ func (es *EtcdSource) GetSourceName() string {
 }
 
 func (es *EtcdSource) Close() {
-	es.etcdCli.Close()
+	// cannot close client here, since client is shared with components
 	es.configRefresher.stop()
 }
 
@@ -128,7 +129,7 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 
 func (es *EtcdSource) refreshConfigurations() error {
 	es.RLock()
-	prefix := es.keyPrefix + "/config"
+	prefix := path.Join(es.keyPrefix, "config")
 	es.RUnlock()
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)

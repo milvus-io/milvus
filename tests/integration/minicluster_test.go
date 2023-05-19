@@ -20,183 +20,170 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/datanode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/querynodev2"
 )
 
-func TestMiniClusterStartAndStop(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	err = c.Stop()
-	assert.NoError(t, err)
+type MiniClusterMethodsSuite struct {
+	MiniClusterSuite
 }
 
-func TestAddRemoveDataNode(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MiniClusterMethodsSuite) TestStartAndStop() {
+	//Do nothing
+}
+
+func (s *MiniClusterMethodsSuite) TestRemoveDataNode() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	datanode := datanode.NewDataNode(ctx, c.factory)
 	datanode.SetEtcdClient(c.etcdCli)
 	//datanode := c.CreateDefaultDataNode()
 
-	err = c.AddDataNode(datanode)
-	assert.NoError(t, err)
+	err := c.AddDataNode(datanode)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 2, len(c.dataNodes))
+	s.Equal(2, c.clusterConfig.DataNodeNum)
+	s.Equal(2, len(c.dataNodes))
 
 	err = c.RemoveDataNode(datanode)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 1, len(c.dataNodes))
+	s.Equal(1, c.clusterConfig.DataNodeNum)
+	s.Equal(1, len(c.dataNodes))
 
 	// add default node and remove randomly
 	err = c.AddDataNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 2, len(c.dataNodes))
+	s.Equal(2, c.clusterConfig.DataNodeNum)
+	s.Equal(2, len(c.dataNodes))
 
 	err = c.RemoveDataNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 1, len(c.dataNodes))
+	s.Equal(1, c.clusterConfig.DataNodeNum)
+	s.Equal(1, len(c.dataNodes))
 }
 
-func TestAddRemoveQueryNode(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MiniClusterMethodsSuite) TestRemoveQueryNode() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	queryNode := querynodev2.NewQueryNode(ctx, c.factory)
 	queryNode.SetEtcdClient(c.etcdCli)
 	//queryNode := c.CreateDefaultQueryNode()
 
-	err = c.AddQueryNode(queryNode)
-	assert.NoError(t, err)
+	err := c.AddQueryNode(queryNode)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 2, len(c.queryNodes))
+	s.Equal(2, c.clusterConfig.QueryNodeNum)
+	s.Equal(2, len(c.queryNodes))
 
 	err = c.RemoveQueryNode(queryNode)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 1, len(c.queryNodes))
+	s.Equal(1, c.clusterConfig.QueryNodeNum)
+	s.Equal(1, len(c.queryNodes))
 
 	// add default node and remove randomly
 	err = c.AddQueryNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 2, len(c.queryNodes))
+	s.Equal(2, c.clusterConfig.QueryNodeNum)
+	s.Equal(2, len(c.queryNodes))
 
 	err = c.RemoveQueryNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 1, len(c.queryNodes))
+	s.Equal(1, c.clusterConfig.QueryNodeNum)
+	s.Equal(1, len(c.queryNodes))
+
 }
 
-func TestAddRemoveIndexNode(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MiniClusterMethodsSuite) TestRemoveIndexNode() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	indexNode := indexnode.NewIndexNode(ctx, c.factory)
 	indexNode.SetEtcdClient(c.etcdCli)
 	//indexNode := c.CreateDefaultIndexNode()
 
-	err = c.AddIndexNode(indexNode)
-	assert.NoError(t, err)
+	err := c.AddIndexNode(indexNode)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.IndexNodeNum)
-	assert.Equal(t, 2, len(c.indexNodes))
+	s.Equal(2, c.clusterConfig.IndexNodeNum)
+	s.Equal(2, len(c.indexNodes))
 
 	err = c.RemoveIndexNode(indexNode)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.IndexNodeNum)
-	assert.Equal(t, 1, len(c.indexNodes))
+	s.Equal(1, c.clusterConfig.IndexNodeNum)
+	s.Equal(1, len(c.indexNodes))
 
 	// add default node and remove randomly
 	err = c.AddIndexNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.IndexNodeNum)
-	assert.Equal(t, 2, len(c.indexNodes))
+	s.Equal(2, c.clusterConfig.IndexNodeNum)
+	s.Equal(2, len(c.indexNodes))
 
 	err = c.RemoveIndexNode(nil)
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 1, c.clusterConfig.IndexNodeNum)
-	assert.Equal(t, 1, len(c.indexNodes))
+	s.Equal(1, c.clusterConfig.IndexNodeNum)
+	s.Equal(1, len(c.indexNodes))
+
 }
 
-func TestUpdateClusterSize(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MiniClusterMethodsSuite) TestUpdateClusterSize() {
 
-	err = c.UpdateClusterSize(ClusterConfig{
+	c := s.Cluster
+
+	err := c.UpdateClusterSize(ClusterConfig{
 		QueryNodeNum: -1,
 		DataNodeNum:  -1,
 		IndexNodeNum: -1,
 	})
-	assert.Error(t, err)
+	s.Error(err)
 
 	err = c.UpdateClusterSize(ClusterConfig{
 		QueryNodeNum: 2,
 		DataNodeNum:  2,
 		IndexNodeNum: 2,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 2, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 2, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 2, c.clusterConfig.IndexNodeNum)
+	s.Equal(2, c.clusterConfig.DataNodeNum)
+	s.Equal(2, c.clusterConfig.QueryNodeNum)
+	s.Equal(2, c.clusterConfig.IndexNodeNum)
 
-	assert.Equal(t, 2, len(c.dataNodes))
-	assert.Equal(t, 2, len(c.queryNodes))
-	assert.Equal(t, 2, len(c.indexNodes))
+	s.Equal(2, len(c.dataNodes))
+	s.Equal(2, len(c.queryNodes))
+	s.Equal(2, len(c.indexNodes))
 
 	err = c.UpdateClusterSize(ClusterConfig{
 		DataNodeNum:  3,
 		QueryNodeNum: 2,
 		IndexNodeNum: 1,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
-	assert.Equal(t, 3, c.clusterConfig.DataNodeNum)
-	assert.Equal(t, 2, c.clusterConfig.QueryNodeNum)
-	assert.Equal(t, 1, c.clusterConfig.IndexNodeNum)
+	s.Equal(3, c.clusterConfig.DataNodeNum)
+	s.Equal(2, c.clusterConfig.QueryNodeNum)
+	s.Equal(1, c.clusterConfig.IndexNodeNum)
 
-	assert.Equal(t, 3, len(c.dataNodes))
-	assert.Equal(t, 2, len(c.queryNodes))
-	assert.Equal(t, 1, len(c.indexNodes))
+	s.Equal(3, len(c.dataNodes))
+	s.Equal(2, len(c.queryNodes))
+	s.Equal(1, len(c.indexNodes))
+}
+
+func TestMiniCluster(t *testing.T) {
+	suite.Run(t, new(MiniClusterMethodsSuite))
 }

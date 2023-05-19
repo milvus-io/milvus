@@ -20,10 +20,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -35,17 +34,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func TestRangeSearchIP(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
+type RangeSearchSuite struct {
+	MiniClusterSuite
+}
+
+func (s *RangeSearchSuite) TestRangeSearchIP() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestRangeSearchIP"
 	dbName := ""
@@ -55,7 +51,7 @@ func TestRangeSearchIP(t *testing.T) {
 
 	schema := constructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -63,7 +59,7 @@ func TestRangeSearchIP(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
@@ -72,8 +68,8 @@ func TestRangeSearchIP(t *testing.T) {
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(showCollectionsResp.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -85,23 +81,23 @@ func TestRangeSearchIP(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(insertResult.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-	assert.True(t, has)
+	s.True(has)
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
+	s.NotEmpty(segmentIDs)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -114,19 +110,19 @@ func TestRangeSearchIP(t *testing.T) {
 		IndexName:      "_default",
 		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.IP),
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
@@ -153,7 +149,7 @@ func TestRangeSearchIP(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
@@ -166,7 +162,7 @@ func TestRangeSearchIP(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	// pass in illegal radius and range_filter when range search
 	params["radius"] = filter
@@ -180,26 +176,20 @@ func TestRangeSearchIP(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.Error(t, err)
+	s.Error(err)
 
 	log.Info("=========================")
 	log.Info("=========================")
 	log.Info("TestRangeSearchIP succeed")
 	log.Info("=========================")
 	log.Info("=========================")
+
 }
 
-func TestRangeSearchL2(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
+func (s *RangeSearchSuite) TestRangeSearchL2() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestRangeSearchL2"
 	dbName := ""
@@ -209,7 +199,7 @@ func TestRangeSearchL2(t *testing.T) {
 
 	schema := constructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -217,7 +207,7 @@ func TestRangeSearchL2(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
@@ -226,8 +216,8 @@ func TestRangeSearchL2(t *testing.T) {
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(showCollectionsResp.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -239,23 +229,23 @@ func TestRangeSearchL2(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(insertResult.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-	assert.True(t, has)
+	s.True(has)
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
+	s.NotEmpty(segmentIDs)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -268,19 +258,19 @@ func TestRangeSearchL2(t *testing.T) {
 		IndexName:      "_default",
 		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
@@ -306,7 +296,7 @@ func TestRangeSearchL2(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
@@ -319,7 +309,7 @@ func TestRangeSearchL2(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	// pass in illegal radius and range_filter when range search
 	params["radius"] = filter
@@ -333,11 +323,16 @@ func TestRangeSearchL2(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.Error(t, err)
+	s.Error(err)
 
 	log.Info("=========================")
 	log.Info("=========================")
 	log.Info("TestRangeSearchL2 succeed")
 	log.Info("=========================")
 	log.Info("=========================")
+
+}
+
+func TestRangeSearch(t *testing.T) {
+	suite.Run(t, new(RangeSearchSuite))
 }

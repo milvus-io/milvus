@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/distance"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -34,18 +35,98 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
-func TestJson_EnableDynamicSchema(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+type JSONExprSuite struct {
+	MiniClusterSuite
+}
+
+func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
+	prefix := "TestHelloMilvus"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	dim := 128
+	rowNum := 100
+
+	constructCollectionSchema := func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         int64Field,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_Int64,
+			TypeParams:   nil,
+			IndexParams:  nil,
+			AutoID:       true,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         floatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		return &schemapb.CollectionSchema{
+			Name:               collectionName,
+			Description:        "",
+			AutoID:             false,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+			},
+		}
+	}
+	schema := constructCollectionSchema()
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      2,
+	})
+	s.NoError(err)
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+
+	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	s.NoError(err)
+	s.True(describeCollectionResp.Schema.EnableDynamicField)
+	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
+
+	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+	jsonData := newJSONData(common.MetaFieldName, rowNum)
+	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData})
+
+	s.checkSearch(c, collectionName, common.MetaFieldName, dim)
+}
+
+func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestHelloMilvus"
 	dbName := ""
@@ -92,7 +173,7 @@ func TestJson_EnableDynamicSchema(t *testing.T) {
 	}
 	schema := constructCollectionSchema()
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -100,330 +181,490 @@ func TestJson_EnableDynamicSchema(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      2,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
-	assert.NoError(t, err)
-	assert.True(t, describeCollectionResp.Schema.EnableDynamicField)
-	assert.Equal(t, 3, len(describeCollectionResp.GetSchema().GetFields()))
+	s.NoError(err)
+	s.True(describeCollectionResp.Schema.EnableDynamicField)
+	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	jsonData := newJSONData(common.MetaFieldName, rowNum)
-	insertFlushIndexLoad(ctx, t, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData})
+	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn})
 
-	checkSearch(t, c, collectionName, common.MetaFieldName, dim)
-}
-
-func checkSearch(t *testing.T, c *MiniCluster, collectionName, fieldName string, dim int) {
 	expr := ""
 	// search
 	expr = `$meta["A"] > 90`
 	checkFunc := func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(0, len(result.Results.FieldsData))
 	}
-	doSearch(c, collectionName, []string{"A"}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
+	log.Info("GT expression run successfully")
+}
+
+func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
+
+	prefix := "TestHelloMilvus"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	dim := 128
+	rowNum := 100
+
+	constructCollectionSchema := func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         int64Field,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_Int64,
+			TypeParams:   nil,
+			IndexParams:  nil,
+			AutoID:       true,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         floatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		j := &schemapb.FieldSchema{
+			Name:        jsonField,
+			Description: "json field",
+			DataType:    schemapb.DataType_JSON,
+		}
+		return &schemapb.CollectionSchema{
+			Name:               collectionName,
+			Description:        "",
+			AutoID:             false,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+				j,
+			},
+		}
+	}
+	schema := constructCollectionSchema()
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      2,
+	})
+	s.NoError(err)
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+
+	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	s.NoError(err)
+	s.True(describeCollectionResp.Schema.EnableDynamicField)
+	s.Equal(4, len(describeCollectionResp.GetSchema().GetFields()))
+
+	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+	jsonData := newJSONData(jsonField, rowNum)
+	dynamicData := newJSONData(common.MetaFieldName, rowNum)
+	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData, dynamicData})
+
+	s.checkSearch(c, collectionName, common.MetaFieldName, dim)
+
+	expr := ""
+	// search
+	expr = `jsonField["A"] < 10`
+	checkFunc := func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("LT expression run successfully")
+
+	expr = `jsonField["A"] <= 5`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("LE expression run successfully")
+
+	expr = `jsonField["A"] == 5`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("EQ expression run successfully")
+
+	expr = `jsonField["C"][0] in [90, 91, 95, 97]`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("IN expression run successfully")
+
+	expr = `jsonField["C"][0] not in [90, 91, 95, 97]`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("NIN expression run successfully")
+
+	expr = `jsonField["E"]["G"] > 100`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(jsonField, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{jsonField}, expr, dim, checkFunc)
+	log.Info("nested path expression run successfully")
+
+	expr = `jsonField == ""`
+	s.doSearchWithInvalidExpr(c, collectionName, []string{jsonField}, expr, dim)
+}
+
+func (s *JSONExprSuite) checkSearch(c *MiniCluster, collectionName, fieldName string, dim int) {
+	expr := ""
+	// search
+	expr = `$meta["A"] > 90`
+	checkFunc := func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(c, collectionName, []string{"A"}, expr, dim, checkFunc)
 	log.Info("GT expression run successfully")
 
 	expr = `$meta["A"] < 10`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{"B"}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{"B"}, expr, dim, checkFunc)
 	log.Info("LT expression run successfully")
 
 	expr = `$meta["A"] <= 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{"C"}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{"C"}, expr, dim, checkFunc)
 	log.Info("LE expression run successfully")
 
 	expr = `A >= 95`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("GE expression run successfully")
 
 	expr = `$meta["A"] == 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("EQ expression run successfully")
 
 	expr = `A != 95`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NE expression run successfully")
 
 	expr = `not (A != 95)`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NOT NE expression run successfully")
 
 	expr = `A > 90 && B < 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NE expression run successfully")
 
 	expr = `A > 95 || 5 > B`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NE expression run successfully")
 
 	expr = `not (A == 95)`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NOT expression run successfully")
 
 	expr = `A in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("IN expression run successfully")
 
 	expr = `A not in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NIN expression run successfully")
 
 	expr = `C[0] in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("IN expression run successfully")
 
 	expr = `C[0] not in [90, 91, 95, 97]`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NIN expression run successfully")
 
 	expr = `0 <= A < 5`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(2, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("BinaryRange expression run successfully")
 
 	expr = `100 > A >= 90`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("BinaryRange expression run successfully")
 
 	expr = `1+5 <= A < 5+10`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("BinaryRange expression run successfully")
 
 	expr = `A + 5 == 10`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("Arithmetic expression run successfully")
 
 	expr = `exists A`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("EXISTS expression run successfully")
 
 	expr = `exists AAA`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 0, len(result.Results.FieldsData))
+		s.Equal(0, len(result.Results.FieldsData))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("EXISTS expression run successfully")
 
 	expr = `not exists A`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("NOT EXISTS expression run successfully")
 
 	expr = `E["G"] > 100`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("nested path expression run successfully")
 
 	expr = `D like "name-%"`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
 	expr = `D like "name-11"`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
 	expr = `A like "10"`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 0, len(result.Results.FieldsData))
+		s.Equal(0, len(result.Results.FieldsData))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 0, len(result.Results.FieldsData))
+		s.Equal(0, len(result.Results.FieldsData))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("term empty expression run successfully")
 
 	expr = `A not in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, fieldName, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	s.doSearch(c, collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("term empty expression run successfully")
 
 	// invalid expr
 	expr = `E[F] > 100`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `A >> 10`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `not A > 5`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `not A == 5`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `A > B`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `A > Int64Field`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `A like abc`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `D like "%name-%"`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `D like "na%me"`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `1+5 <= A+1 < 5+10`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 
 	expr = `$meta == ""`
-	doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim, t)
+	s.doSearchWithInvalidExpr(c, collectionName, []string{fieldName}, expr, dim)
 }
 
-func insertFlushIndexLoad(ctx context.Context, t *testing.T, c *MiniCluster, dbName, collectionName string, rowNum int, dim int, fieldData []*schemapb.FieldData) {
+func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, c *MiniCluster, dbName, collectionName string, rowNum int, dim int, fieldData []*schemapb.FieldData) {
 	hashKeys := generateHashKeys(rowNum)
 	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
@@ -432,22 +673,22 @@ func insertFlushIndexLoad(ctx context.Context, t *testing.T, c *MiniCluster, dbN
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
+	s.NotEmpty(segmentIDs)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -501,20 +742,20 @@ func insertFlushIndexLoad(ctx context.Context, t *testing.T, c *MiniCluster, dbN
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
 		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
@@ -529,7 +770,7 @@ func insertFlushIndexLoad(ctx context.Context, t *testing.T, c *MiniCluster, dbN
 	}
 }
 
-func doSearch(cluster *MiniCluster, collectionName string, outputField []string, expr string, dim int, t *testing.T, checkFunc func(results *milvuspb.SearchResults)) {
+func (s *JSONExprSuite) doSearch(cluster *MiniCluster, collectionName string, outputField []string, expr string, dim int, checkFunc func(results *milvuspb.SearchResults)) {
 	nq := 1
 	topk := 10
 	roundDecimal := -1
@@ -543,8 +784,8 @@ func doSearch(cluster *MiniCluster, collectionName string, outputField []string,
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
 	log.Info("TestHelloMilvus succeed", zap.Any("result", searchResult.Results),
 		zap.Any("result num", len(searchResult.Results.FieldsData)))
@@ -602,7 +843,7 @@ func newJSONData(fieldName string, rowNum int) *schemapb.FieldData {
 	}
 }
 
-func doSearchWithInvalidExpr(cluster *MiniCluster, collectionName string, outputField []string, expr string, dim int, t *testing.T) {
+func (s *JSONExprSuite) doSearchWithInvalidExpr(cluster *MiniCluster, collectionName string, outputField []string, expr string, dim int) {
 	nq := 1
 	topk := 10
 	roundDecimal := -1
@@ -616,256 +857,10 @@ func doSearchWithInvalidExpr(cluster *MiniCluster, collectionName string, output
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 }
 
-func TestJSON_InsertWithoutDynamicData(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
-
-	prefix := "TestHelloMilvus"
-	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
-	dim := 128
-	rowNum := 100
-
-	constructCollectionSchema := func() *schemapb.CollectionSchema {
-		pk := &schemapb.FieldSchema{
-			FieldID:      0,
-			Name:         int64Field,
-			IsPrimaryKey: true,
-			Description:  "",
-			DataType:     schemapb.DataType_Int64,
-			TypeParams:   nil,
-			IndexParams:  nil,
-			AutoID:       true,
-		}
-		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
-			Name:         floatVecField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: strconv.Itoa(dim),
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		return &schemapb.CollectionSchema{
-			Name:               collectionName,
-			Description:        "",
-			AutoID:             false,
-			EnableDynamicField: true,
-			Fields: []*schemapb.FieldSchema{
-				pk,
-				fVec,
-			},
-		}
-	}
-	schema := constructCollectionSchema()
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
-
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Schema:         marshaledSchema,
-		ShardsNum:      2,
-	})
-	assert.NoError(t, err)
-	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
-	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
-
-	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
-	assert.NoError(t, err)
-	assert.True(t, describeCollectionResp.Schema.EnableDynamicField)
-	assert.Equal(t, 3, len(describeCollectionResp.GetSchema().GetFields()))
-
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	insertFlushIndexLoad(ctx, t, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn})
-
-	expr := ""
-	// search
-	expr = `$meta["A"] > 90`
-	checkFunc := func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 0, len(result.Results.FieldsData))
-	}
-	doSearch(c, collectionName, []string{common.MetaFieldName}, expr, dim, t, checkFunc)
-	log.Info("GT expression run successfully")
-}
-
-func TestJSON_DynamicSchemaWithJSON(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
-
-	prefix := "TestHelloMilvus"
-	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
-	dim := 128
-	rowNum := 100
-
-	constructCollectionSchema := func() *schemapb.CollectionSchema {
-		pk := &schemapb.FieldSchema{
-			FieldID:      0,
-			Name:         int64Field,
-			IsPrimaryKey: true,
-			Description:  "",
-			DataType:     schemapb.DataType_Int64,
-			TypeParams:   nil,
-			IndexParams:  nil,
-			AutoID:       true,
-		}
-		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
-			Name:         floatVecField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: strconv.Itoa(dim),
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		j := &schemapb.FieldSchema{
-			Name:        jsonField,
-			Description: "json field",
-			DataType:    schemapb.DataType_JSON,
-		}
-		return &schemapb.CollectionSchema{
-			Name:               collectionName,
-			Description:        "",
-			AutoID:             false,
-			EnableDynamicField: true,
-			Fields: []*schemapb.FieldSchema{
-				pk,
-				fVec,
-				j,
-			},
-		}
-	}
-	schema := constructCollectionSchema()
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
-
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Schema:         marshaledSchema,
-		ShardsNum:      2,
-	})
-	assert.NoError(t, err)
-	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
-	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
-
-	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
-	assert.NoError(t, err)
-	assert.True(t, describeCollectionResp.Schema.EnableDynamicField)
-	assert.Equal(t, 4, len(describeCollectionResp.GetSchema().GetFields()))
-
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	jsonData := newJSONData(jsonField, rowNum)
-	dynamicData := newJSONData(common.MetaFieldName, rowNum)
-	insertFlushIndexLoad(ctx, t, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData, dynamicData})
-
-	checkSearch(t, c, collectionName, common.MetaFieldName, dim)
-
-	expr := ""
-	// search
-	expr = `jsonField["A"] < 10`
-	checkFunc := func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("LT expression run successfully")
-
-	expr = `jsonField["A"] <= 5`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("LE expression run successfully")
-
-	expr = `jsonField["A"] == 5`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 1, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("EQ expression run successfully")
-
-	expr = `jsonField["C"][0] in [90, 91, 95, 97]`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 4, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("IN expression run successfully")
-
-	expr = `jsonField["C"][0] not in [90, 91, 95, 97]`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("NIN expression run successfully")
-
-	expr = `jsonField["E"]["G"] > 100`
-	checkFunc = func(result *milvuspb.SearchResults) {
-		assert.Equal(t, 1, len(result.Results.FieldsData))
-		assert.Equal(t, jsonField, result.Results.FieldsData[0].GetFieldName())
-		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
-		assert.Equal(t, 9, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
-	}
-	doSearch(c, collectionName, []string{jsonField}, expr, dim, t, checkFunc)
-	log.Info("nested path expression run successfully")
-
-	expr = `jsonField == ""`
-	doSearchWithInvalidExpr(c, collectionName, []string{jsonField}, expr, dim, t)
+func TestJsonExpr(t *testing.T) {
+	suite.Run(t, new(JSONExprSuite))
 }
