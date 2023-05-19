@@ -44,7 +44,7 @@ func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 		return &rmqID{messageID: id}, err
 	}
 
-	elapsed := start.Elapse("send msg to stream done")
+	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 	return &rmqID{messageID: id}, nil
