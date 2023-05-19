@@ -220,6 +220,53 @@ func (_c *Proxy_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthResponse, _a1 
 	return _c
 }
 
+// Connect provides a mock function with given fields: ctx, req
+func (_m *Proxy) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ConnectResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ConnectRequest) *milvuspb.ConnectResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ConnectResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ConnectRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_Connect_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Connect'
+type Proxy_Connect_Call struct {
+	*mock.Call
+}
+
+// Connect is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.ConnectRequest
+func (_e *Proxy_Expecter) Connect(ctx interface{}, req interface{}) *Proxy_Connect_Call {
+	return &Proxy_Connect_Call{Call: _e.mock.On("Connect", ctx, req)}
+}
+
+func (_c *Proxy_Connect_Call) Run(run func(ctx context.Context, req *milvuspb.ConnectRequest)) *Proxy_Connect_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ConnectRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_Connect_Call) Return(_a0 *milvuspb.ConnectResponse, _a1 error) *Proxy_Connect_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // CreateAlias provides a mock function with given fields: ctx, request
 func (_m *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, request)
@@ -2540,6 +2587,53 @@ func (_c *Proxy_InvalidateCredentialCache_Call) Run(run func(ctx context.Context
 }
 
 func (_c *Proxy_InvalidateCredentialCache_Call) Return(_a0 *commonpb.Status, _a1 error) *Proxy_InvalidateCredentialCache_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// ListClientInfos provides a mock function with given fields: ctx, req
+func (_m *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *proxypb.ListClientInfosResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.ListClientInfosRequest) *proxypb.ListClientInfosResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*proxypb.ListClientInfosResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.ListClientInfosRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_ListClientInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClientInfos'
+type Proxy_ListClientInfos_Call struct {
+	*mock.Call
+}
+
+// ListClientInfos is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *proxypb.ListClientInfosRequest
+func (_e *Proxy_Expecter) ListClientInfos(ctx interface{}, req interface{}) *Proxy_ListClientInfos_Call {
+	return &Proxy_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos", ctx, req)}
+}
+
+func (_c *Proxy_ListClientInfos_Call) Run(run func(ctx context.Context, req *proxypb.ListClientInfosRequest)) *Proxy_ListClientInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*proxypb.ListClientInfosRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_ListClientInfos_Call) Return(_a0 *proxypb.ListClientInfosResponse, _a1 error) *Proxy_ListClientInfos_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

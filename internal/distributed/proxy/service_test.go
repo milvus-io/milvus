@@ -514,6 +514,10 @@ func (m *MockProxy) Register() error {
 	return m.regErr
 }
 
+func (m *MockProxy) ListClientInfos(ctx context.Context, request *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -849,6 +853,10 @@ func (m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListRe
 }
 
 func (m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
 	return nil, nil
 }
 

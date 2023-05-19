@@ -236,3 +236,21 @@ func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*c
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.ListClientInfos(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*proxypb.ListClientInfosResponse), nil
+}
