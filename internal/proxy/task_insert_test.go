@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -475,4 +476,131 @@ func TestAssignPartitionsByKey(t *testing.T) {
 			assert.Contains(t, rowOffset, offset)
 		}
 	}
+}
+
+func TestInsertTask_checkDynamicFieldData(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
+		assert.NoError(t, err)
+		it := insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					CollectionName: "collectionName",
+					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				},
+			},
+			schema: newTestSchema(),
+		}
+		err = it.checkDynamicFieldData()
+		assert.NoError(t, err)
+	})
+	t.Run("key has $meta", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+			"$meta": "error key",
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
+		assert.NoError(t, err)
+		it := insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					CollectionName: "collectionName",
+					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				},
+			},
+			schema: newTestSchema(),
+		}
+		err = it.checkDynamicFieldData()
+		assert.Error(t, err)
+	})
+	t.Run("disable dynamic schema", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"bool":   true,
+			"int":    100,
+			"float":  1.2,
+			"string": "abc",
+			"json": map[string]interface{}{
+				"int":   20,
+				"array": []int{1, 2, 3},
+			},
+		}
+		jsonBytes, err := json.MarshalIndent(data, "", "  ")
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
+		assert.NoError(t, err)
+		it := insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					CollectionName: "collectionName",
+					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				},
+			},
+			schema: newTestSchema(),
+		}
+		it.schema.EnableDynamicField = false
+		err = it.checkDynamicFieldData()
+		assert.Error(t, err)
+	})
+
+	t.Run("json data is string", func(t *testing.T) {
+		data := "abcdefg"
+		jsonFieldData, err := autoGenDynamicFieldData([][]byte{[]byte(data)})
+		assert.NoError(t, err)
+		it := insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					CollectionName: "collectionName",
+					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				},
+			},
+			schema: newTestSchema(),
+		}
+		err = it.checkDynamicFieldData()
+		assert.Error(t, err)
+	})
+	t.Run("no json data", func(t *testing.T) {
+		it := insertTask{
+			ctx: context.Background(),
+			BaseInsertTask: msgstream.InsertMsg{
+				InsertRequest: internalpb.InsertRequest{
+					CollectionName: "collectionName",
+					FieldsData:     []*schemapb.FieldData{},
+				},
+			},
+			schema: newTestSchema(),
+		}
+		err := it.checkDynamicFieldData()
+		assert.NoError(t, err)
+	})
 }

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -373,6 +375,15 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateDynamicField(coll *schemapb.CollectionSchema) error {
+	for _, field := range coll.Fields {
+		if field.IsDynamic {
+			return fmt.Errorf("cannot explicitly set a field as a dynamic field")
+		}
+	}
+	return nil
+}
+
 // RepeatedKeyValToMap transfer the kv pairs to map.
 func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
 	resMap := make(map[string]string)
@@ -591,6 +602,23 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	}
 
 	return &fieldData, nil
+}
+
+func autoGenDynamicFieldData(data [][]byte) (*schemapb.FieldData, error) {
+	fieldData := &schemapb.FieldData{
+		FieldName: common.MetaFieldName,
+		Type:      schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: data,
+					},
+				},
+			},
+		},
+	}
+	return fieldData, nil
 }
 
 // fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
@@ -832,7 +860,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 //	output_fields=["*",C]    ==> [A,B,C,D]
 func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
 	var primaryFieldName string
-	allFielNameMap := make(map[string]bool)
+	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
 
@@ -840,17 +868,26 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
 		}
-		allFielNameMap[field.Name] = true
+		allFieldNameMap[field.Name] = true
 	}
 
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
 		if outputFieldName == "*" {
-			for fieldName := range allFielNameMap {
+			for fieldName := range allFieldNameMap {
 				resultFieldNameMap[fieldName] = true
 			}
 		} else {
-			resultFieldNameMap[outputFieldName] = true
+			if _, ok := allFieldNameMap[outputFieldName]; ok {
+				resultFieldNameMap[outputFieldName] = true
+			} else {
+				if schema.EnableDynamicField {
+					resultFieldNameMap[common.MetaFieldName] = true
+				} else {
+					return nil, fmt.Errorf("field %s not exist", outputFieldName)
+				}
+			}
+
 		}
 	}
 

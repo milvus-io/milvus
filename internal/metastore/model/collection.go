@@ -27,6 +27,7 @@ type Collection struct {
 	Aliases              []string // TODO: deprecate this.
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
+	EnableDynamicField   bool
 }
 
 func (c Collection) Available() bool {
@@ -52,6 +53,7 @@ func (c Collection) Clone() *Collection {
 		Aliases:              common.CloneStringList(c.Aliases),
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
+		EnableDynamicField:   c.EnableDynamicField,
 	}
 }
 
@@ -71,7 +73,8 @@ func (c Collection) Equal(other Collection) bool {
 		c.AutoID == other.AutoID &&
 		CheckFieldsEqual(c.Fields, other.Fields) &&
 		c.ShardsNum == other.ShardsNum &&
-		c.ConsistencyLevel == other.ConsistencyLevel
+		c.ConsistencyLevel == other.ConsistencyLevel &&
+		c.EnableDynamicField == other.EnableDynamicField
 }
 
 func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
@@ -105,6 +108,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		StartPositions:       coll.StartPositions,
 		State:                coll.State,
 		Properties:           coll.Properties,
+		EnableDynamicField:   coll.Schema.EnableDynamicField,
 	}
 }
 
@@ -143,9 +147,10 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 	}
 
 	collSchema := &schemapb.CollectionSchema{
-		Name:        coll.Name,
-		Description: coll.Description,
-		AutoID:      coll.AutoID,
+		Name:               coll.Name,
+		Description:        coll.Description,
+		AutoID:             coll.AutoID,
+		EnableDynamicField: coll.EnableDynamicField,
 	}
 
 	if c.withFields {
