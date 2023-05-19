@@ -134,7 +134,7 @@ func checkSearch(t *testing.T, c *MiniCluster, collectionName, fieldName string,
 		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
 		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	doSearch(c, collectionName, []string{"A"}, expr, dim, t, checkFunc)
 	log.Info("GT expression run successfully")
 
 	expr = `$meta["A"] < 10`
@@ -144,7 +144,7 @@ func checkSearch(t *testing.T, c *MiniCluster, collectionName, fieldName string,
 		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
 		assert.Equal(t, 5, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	doSearch(c, collectionName, []string{"B"}, expr, dim, t, checkFunc)
 	log.Info("LT expression run successfully")
 
 	expr = `$meta["A"] <= 5`
@@ -154,7 +154,7 @@ func checkSearch(t *testing.T, c *MiniCluster, collectionName, fieldName string,
 		assert.Equal(t, schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
 		assert.Equal(t, 3, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
 	}
-	doSearch(c, collectionName, []string{fieldName}, expr, dim, t, checkFunc)
+	doSearch(c, collectionName, []string{"C"}, expr, dim, t, checkFunc)
 	log.Info("LE expression run successfully")
 
 	expr = `A >= 95`
