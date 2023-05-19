@@ -396,6 +396,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.msgID),
+		zap.String("segmentType", s.typ.String()),
 	)
 
 	span := trace.SpanFromContext(ctx)
@@ -421,13 +423,9 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
 		return nil, nil
 	}).Await()
-
-	log.Debug("do retrieve on segment",
-		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.typ.String()),
-	)
 
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
@@ -438,7 +436,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, err
 	}
 
-	log.Debug("retrieve result",
+	log.Debug("retrieve segment done",
 		zap.Int("resultNum", len(result.Offset)),
 	)
 
