@@ -71,6 +71,17 @@ func (l *FailedLoadCache) Get(collectionID UniqueID) *commonpb.Status {
 	return status
 }
 
+func (l *FailedLoadCache) Exist(collectionID UniqueID, errorCode commonpb.ErrorCode) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	info, ok := l.records[collectionID]
+	if !ok {
+		return false
+	}
+	_, ok = info[errorCode]
+	return ok
+}
+
 func (l *FailedLoadCache) Put(collectionID UniqueID, errCode commonpb.ErrorCode, err error) {
 	if errCode == commonpb.ErrorCode_Success {
 		return

@@ -36,14 +36,17 @@ func TestFailedLoadCache(t *testing.T) {
 	GlobalFailedLoadCache.Put(colID, commonpb.ErrorCode_Success, nil)
 	res := GlobalFailedLoadCache.Get(colID)
 	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.False(t, GlobalFailedLoadCache.Exist(colID, commonpb.ErrorCode_InsufficientMemoryToLoad))
 
 	GlobalFailedLoadCache.Put(colID, errCode, mockErr)
 	res = GlobalFailedLoadCache.Get(colID)
 	assert.Equal(t, errCode, res.GetErrorCode())
+	assert.True(t, GlobalFailedLoadCache.Exist(colID, commonpb.ErrorCode_InsufficientMemoryToLoad))
 
 	GlobalFailedLoadCache.Remove(colID)
 	res = GlobalFailedLoadCache.Get(colID)
 	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.False(t, GlobalFailedLoadCache.Exist(colID, commonpb.ErrorCode_InsufficientMemoryToLoad))
 
 	GlobalFailedLoadCache.Put(colID, errCode, mockErr)
 	GlobalFailedLoadCache.mu.Lock()
@@ -52,4 +55,5 @@ func TestFailedLoadCache(t *testing.T) {
 	GlobalFailedLoadCache.TryExpire()
 	res = GlobalFailedLoadCache.Get(colID)
 	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.False(t, GlobalFailedLoadCache.Exist(colID, commonpb.ErrorCode_InsufficientMemoryToLoad))
 }
