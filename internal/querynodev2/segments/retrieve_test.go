@@ -145,6 +145,33 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	suite.Len(res[0].Offset, 3)
 }
 
+func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{999},
+		nil)
+	suite.NoError(err)
+	suite.Len(res, 0)
+}
+
+func (suite *RetrieveSuite) TestRetrieveNilSegment() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	DeleteSegment(suite.sealed)
+	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()},
+		nil)
+	suite.ErrorIs(err, ErrSegmentReleased)
+	suite.Len(res, 0)
+}
+
 func TestRetrieve(t *testing.T) {
 	suite.Run(t, new(RetrieveSuite))
 }

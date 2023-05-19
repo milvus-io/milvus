@@ -18,31 +18,71 @@ package segments
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
 func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentType, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
-	var retrieveResults []*segcorepb.RetrieveResults
+	var (
+		resultCh = make(chan *segcorepb.RetrieveResults, len(segIDs))
+		errs     = make([]error, len(segIDs))
+		wg       sync.WaitGroup
+	)
 
-	for _, segID := range segIDs {
-		segment, _ := manager.Segment.Get(segID).(*LocalSegment)
-		if segment == nil {
-			continue
-		}
-		result, err := segment.Retrieve(ctx, plan)
+	label := metrics.SealedSegmentLabel
+	if segType == commonpb.SegmentState_Growing {
+		label = metrics.GrowingSegmentLabel
+	}
+
+	for i, segID := range segIDs {
+		wg.Add(1)
+		go func(segID int64, i int) {
+			defer wg.Done()
+			segment, _ := manager.Segment.Get(segID).(*LocalSegment)
+			if segment == nil {
+				errs[i] = nil
+				return
+			}
+			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+			result, err := segment.Retrieve(ctx, plan)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			if err = segment.FillIndexedFieldsData(ctx, vcm, result); err != nil {
+				errs[i] = err
+				return
+			}
+			errs[i] = nil
+			resultCh <- result
+			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		}(segID, i)
+	}
+	wg.Wait()
+	close(resultCh)
+
+	for _, err := range errs {
 		if err != nil {
 			return nil, err
 		}
-		if err := segment.FillIndexedFieldsData(ctx, vcm, result); err != nil {
-			return nil, err
-		}
+	}
+
+	var retrieveResults []*segcorepb.RetrieveResults
+	for result := range resultCh {
 		retrieveResults = append(retrieveResults, result)
 	}
+
 	return retrieveResults, nil
 }
 
