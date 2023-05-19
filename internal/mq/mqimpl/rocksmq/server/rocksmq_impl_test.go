@@ -1214,15 +1214,22 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 		consumer := &Consumer{
 			Topic:     topicName,
 			GroupName: groupName + strconv.Itoa(i),
+			MsgMutex:  make(chan struct{}),
 		}
 		//make sure consumer not in rmq.consumersID
-		_ = rmq.DestroyConsumerGroup(topicName, groupName)
+		rmq.DestroyConsumerGroup(topicName, groupName+strconv.Itoa(i))
 		//add consumer to rmq.consumers
 		rmq.RegisterConsumer(consumer)
 	}
 
 	// update acked for all page in rmq but some consumer not in rmq.consumers
 	assert.Error(t, rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]))
+
+	for i := 0; i < 2; i++ {
+		rmq.DestroyConsumerGroup(topicName, groupName+strconv.Itoa(i))
+	}
+	// update acked for topic without any consumer
+	assert.Panics(t, func() { rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]) })
 }
 
 func TestRocksmq_Info(t *testing.T) {

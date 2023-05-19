@@ -74,6 +74,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	if reflect.ValueOf(c.server).IsNil() {
 		return nil, newError(0, "Rmq server is nil")
 	}
+
 	exist, con, err := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName)
 	if err != nil {
 		return nil, err
@@ -103,12 +104,6 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	if options.SubscriptionInitialPosition == mqwrapper.SubscriptionPositionLatest {
-		err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)
-		if err != nil {
-			return nil, err
-		}
-	}
 	// Register self in rocksmq server
 	cons := &server.Consumer{
 		Topic:     consumer.topic,
@@ -116,6 +111,13 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		MsgMutex:  consumer.msgMutex,
 	}
 	c.server.RegisterConsumer(cons)
+
+	if options.SubscriptionInitialPosition == mqwrapper.SubscriptionPositionLatest {
+		err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Take messages from RocksDB and put it into consumer.Chan(),
 	// trigger by consumer.MsgMutex which trigger by producer

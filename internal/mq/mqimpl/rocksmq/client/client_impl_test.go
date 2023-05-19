@@ -12,12 +12,15 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -133,6 +136,29 @@ func TestClient_Subscribe(t *testing.T) {
 	})
 	assert.NotNil(t, producer1)
 	assert.NoError(t, err)
+}
+
+func TestClient_SubscribeError(t *testing.T) {
+	mockMQ := server.NewMockRocksMQ(t)
+	client, err := NewClient(Options{
+		Server: mockMQ,
+	})
+	testTopic := newTopicName()
+	testGroupName := newConsumerName()
+
+	assert.NoError(t, err)
+	mockMQ.EXPECT().ExistConsumerGroup(testTopic, testGroupName).Return(false, nil, nil)
+	mockMQ.EXPECT().CreateConsumerGroup(testTopic, testGroupName).Return(nil)
+	mockMQ.EXPECT().RegisterConsumer(mock.Anything).Return(nil)
+	mockMQ.EXPECT().SeekToLatest(testTopic, testGroupName).Return(fmt.Errorf("test error"))
+
+	consumer, err := client.Subscribe(ConsumerOptions{
+		Topic:                       testTopic,
+		SubscriptionName:            testGroupName,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, consumer)
 }
 
 func TestClient_SeekLatest(t *testing.T) {
