@@ -176,7 +176,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 		}
 	}
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.BuildID),
-		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
+		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	return nil
 }
 
@@ -230,10 +230,10 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	err = it.decodeBlobs(ctx, blobs)
 	if err != nil {
 		log.Ctx(ctx).Info("failed to decode blobs", zap.Int64("buildID", it.BuildID),
-			zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID), zap.Error(err))
+			zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID), zap.Error(err))
 	} else {
 		log.Ctx(ctx).Info("Successfully load data", zap.Int64("buildID", it.BuildID),
-			zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
+			zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	}
 	blobs = nil
 	debug.FreeOSMemory()
@@ -512,7 +512,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
 	it.tr.Elapse("index building all done")
-	log.Ctx(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
+	log.Ctx(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collection", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
 	return nil
 }
