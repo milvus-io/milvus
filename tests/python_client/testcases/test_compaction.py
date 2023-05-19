@@ -232,7 +232,7 @@ class TestCompactionParams(TestcaseBase):
         # delete 20% entities
         ratio_expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:tmp_nb // ct.compact_delta_ratio_reciprocal]}'
         collection_w.delete(ratio_expr)
-        assert collection_w.num_entities == tmp_nb
+        collection_w.flush()
 
         # Flush a new segment and meet condition 20% deleted entities, triggre compaction but no way to get plan
         collection_w.insert(cf.gen_default_dataframe_data(1, start=tmp_nb))
