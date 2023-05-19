@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -30,22 +29,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
-func TestUpsert(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
-	assert.NoError(t, err)
+type UpsertSuite struct {
+	MiniClusterSuite
+}
+
+func (s *UpsertSuite) TestUpsert() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestUpsert"
 	dbName := ""
@@ -55,7 +50,7 @@ func TestUpsert(t *testing.T) {
 
 	schema := constructSchema(collectionName, dim, false)
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -63,7 +58,7 @@ func TestUpsert(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
@@ -72,8 +67,8 @@ func TestUpsert(t *testing.T) {
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(showCollectionsResp.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	pkFieldData := newInt64FieldData(int64Field, rowNum)
@@ -86,23 +81,23 @@ func TestUpsert(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(upsertResult.GetStatus()))
+	s.NoError(err)
+	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-	assert.True(t, has)
+	s.True(has)
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
+	s.NotEmpty(segmentIDs)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -115,20 +110,20 @@ func TestUpsert(t *testing.T) {
 		IndexName:      "_default",
 		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.IP),
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
 
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
@@ -150,11 +145,16 @@ func TestUpsert(t *testing.T) {
 	if err != nil {
 		log.Warn("searchResult fail reason", zap.Error(err))
 	}
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	log.Info("==================")
 	log.Info("==================")
 	log.Info("TestUpsert succeed")
 	log.Info("==================")
 	log.Info("==================")
+
+}
+
+func TestUpsert(t *testing.T) {
+	suite.Run(t, new(UpsertSuite))
 }

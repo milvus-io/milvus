@@ -24,7 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -36,32 +36,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
-func TestShowSessions(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+type MetaWatcherSuite struct {
+	MiniClusterSuite
+}
 
-	sessions, err := c.metaWatcher.ShowSessions()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, sessions)
+func (s *MetaWatcherSuite) TestShowSessions() {
+	sessions, err := s.Cluster.metaWatcher.ShowSessions()
+	s.NoError(err)
+	s.NotEmpty(sessions)
 	for _, session := range sessions {
 		log.Info("ShowSessions result", zap.String("session", session.String()))
 	}
-
 }
 
-func TestShowSegments(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MetaWatcherSuite) TestShowSegments() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestShowSegments"
 	dbName := ""
@@ -109,7 +100,7 @@ func TestShowSegments(t *testing.T) {
 	}
 	schema := constructCollectionSchema()
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -117,13 +108,13 @@ func TestShowSegments(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -135,25 +126,21 @@ func TestShowSegments(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
 }
 
-func TestShowReplicas(t *testing.T) {
-	ctx := context.Background()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer c.Stop()
-	assert.NoError(t, err)
+func (s *MetaWatcherSuite) TestShowReplicas() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
 
 	prefix := "TestShowReplicas"
 	dbName := ""
@@ -201,7 +188,7 @@ func TestShowReplicas(t *testing.T) {
 	}
 	schema := constructCollectionSchema()
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -209,16 +196,16 @@ func TestShowReplicas(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -230,22 +217,22 @@ func TestShowReplicas(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
+	s.NotEmpty(segmentIDs)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -296,24 +283,24 @@ func TestShowReplicas(t *testing.T) {
 			},
 		},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
 		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
@@ -328,11 +315,15 @@ func TestShowReplicas(t *testing.T) {
 	}
 
 	replicas, err := c.metaWatcher.ShowReplicas()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, replicas)
+	s.NoError(err)
+	s.NotEmpty(replicas)
 	for _, replica := range replicas {
 		log.Info("ShowReplicas result", zap.String("replica", PrettyReplica(replica)))
 	}
 
 	log.Info("TestShowReplicas succeed")
+}
+
+func TestMetaWatcher(t *testing.T) {
+	suite.Run(t, new(MetaWatcherSuite))
 }

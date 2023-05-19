@@ -17,7 +17,7 @@
 # limitations under the License.
 
 # run integration test
-echo "Running integration test uner ./tests/integration"
+echo "Running integration test under ./tests/integration"
 
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh

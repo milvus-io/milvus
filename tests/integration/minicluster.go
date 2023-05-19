@@ -310,6 +310,10 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	return cluster, nil
 }
 
+func (cluster *MiniCluster) GetContext() context.Context {
+	return cluster.ctx
+}
+
 func (cluster *MiniCluster) Start() error {
 	log.Info("mini cluster start")
 	err := cluster.rootCoord.Init()

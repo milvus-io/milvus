@@ -20,10 +20,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -35,18 +34,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
-func TestHelloMilvus(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*180)
+type HelloMilvusSuite struct {
+	MiniClusterSuite
+}
+
+func (s *HelloMilvusSuite) TestHelloMilvus() {
+	ctx, cancel := context.WithCancel(s.Cluster.ctx)
 	defer cancel()
-	c, err := StartMiniCluster(ctx)
-	assert.NoError(t, err)
-	err = c.Start()
-	assert.NoError(t, err)
-	defer func() {
-		err = c.Stop()
-		assert.NoError(t, err)
-		cancel()
-	}()
+	c := s.Cluster
 
 	const (
 		dim    = 128
@@ -58,7 +53,7 @@ func TestHelloMilvus(t *testing.T) {
 
 	schema := constructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	s.NoError(err)
 
 	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -66,16 +61,16 @@ func TestHelloMilvus(t *testing.T) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
-	assert.Equal(t, createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	assert.NoError(t, err)
-	assert.Equal(t, showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -87,23 +82,23 @@ func TestHelloMilvus(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	assert.NoError(t, err)
-	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	s.NoError(err)
+	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
 	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	assert.NotEmpty(t, segmentIDs)
-	assert.True(t, has)
+	s.NotEmpty(segmentIDs)
+	s.True(has)
 
 	segments, err := c.metaWatcher.ShowSegments()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, segments)
+	s.NoError(err)
+	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
@@ -119,21 +114,21 @@ func TestHelloMilvus(t *testing.T) {
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
 	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	assert.NoError(t, err)
+	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
-	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	waitingForLoad(ctx, c, collectionName)
 
 	// search
@@ -151,8 +146,13 @@ func TestHelloMilvus(t *testing.T) {
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
 	}
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
 	log.Info("TestHelloMilvus succeed")
+
+}
+
+func TestHelloMilvus(t *testing.T) {
+	suite.Run(t, new(HelloMilvusSuite))
 }

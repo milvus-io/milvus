@@ -175,7 +175,7 @@ func buildKvGroup(keys, values []string) (map[string]string, error) {
 // StartTestEmbedEtcdServer returns a newly created embed etcd server.
 // ### USED FOR UNIT TEST ONLY ###
 func StartTestEmbedEtcdServer() (*embed.Etcd, string, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_datanode_ut")
+	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
 	if err != nil {
 		return nil, "", err
 	}
