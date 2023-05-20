@@ -70,7 +70,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 		return nil, m.TopicPartition.Error
 	}
 
-	elapsed := start.Elapse("send msg to stream done")
+	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 
