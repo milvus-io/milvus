@@ -25,6 +25,7 @@
 
 #include "arrow/api.h"
 #include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "exceptions/EasyAssert.h"
@@ -206,5 +207,4 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
         return field_data_[offset].size();
     }
 };
-
 }  // namespace milvus::storage

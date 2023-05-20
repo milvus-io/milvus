@@ -16,6 +16,7 @@
 
 #include <mutex>
 
+#include "common/Types.h"
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
@@ -219,6 +220,7 @@ NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size, CPayloadRead
         case milvus::DataType::DOUBLE:
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
+        case milvus::DataType::JSON:
         case milvus::DataType::VECTOR_BINARY:
         case milvus::DataType::VECTOR_FLOAT: {
             break;
