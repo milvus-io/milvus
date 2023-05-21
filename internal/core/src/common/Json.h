@@ -109,25 +109,24 @@ class Json {
     }
 
     bool
-    exist(std::vector<std::string> nested_path) const {
+    exist(std::string_view pointer) const {
+        return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
+    }
+
+    static std::string
+    pointer(std::vector<std::string> nested_path) {
         std::for_each(
             nested_path.begin(), nested_path.end(), [](std::string& key) {
                 boost::replace_all(key, "~", "~0");
                 boost::replace_all(key, "/", "~1");
             });
         auto pointer = "/" + boost::algorithm::join(nested_path, "/");
-        return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
+        return pointer;
     }
 
     template <typename T>
     value_result<T>
-    at(std::vector<std::string> nested_path) const {
-        std::for_each(
-            nested_path.begin(), nested_path.end(), [](std::string& key) {
-                boost::replace_all(key, "~", "~0");
-                boost::replace_all(key, "/", "~1");
-            });
-        auto pointer = "/" + boost::algorithm::join(nested_path, "/");
+    at(std::string_view pointer) const {
         return doc().at_pointer(pointer).get<T>();
     }
 
