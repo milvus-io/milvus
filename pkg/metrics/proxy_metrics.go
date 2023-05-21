@@ -25,6 +25,14 @@ import (
 )
 
 var (
+	ProxyReceivedNQ = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "received_nq",
+			Help:      "counter of nq of received search and query requests",
+		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
 	// ProxySearchVectors record the number of vectors search successfully.
 	ProxySearchVectors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -204,7 +212,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "receive_bytes_count",
 			Help:      "count of bytes received  from sdk",
-		}, []string{nodeIDLabelName, msgTypeLabelName})
+		}, []string{nodeIDLabelName, msgTypeLabelName, collectionName})
 
 	// ProxyReadReqSendBytes record the bytes sent back to client by Proxy
 	ProxyReadReqSendBytes = prometheus.NewCounterVec(
@@ -243,6 +251,7 @@ var (
 
 // RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(ProxyReceivedNQ)
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
 
@@ -286,4 +295,18 @@ func CleanupCollectionMetrics(nodeID int64, collection string) {
 		msgTypeLabelName: InsertLabel, collectionName: collection})
 	ProxyCollectionMutationLatency.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName: DeleteLabel, collectionName: collection})
+	ProxyReceivedNQ.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel, collectionName: collection})
+	ProxyReceivedNQ.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: QueryLabel, collectionName: collection})
+	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: SearchLabel, collectionName: collection})
+	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: QueryLabel, collectionName: collection})
+	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: InsertLabel, collectionName: collection})
+	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: DeleteLabel, collectionName: collection})
+	ProxyReceiveBytes.Delete(prometheus.Labels{nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		msgTypeLabelName: UpsertLabel, collectionName: collection})
 }
