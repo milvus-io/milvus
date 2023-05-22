@@ -348,14 +348,9 @@ TEST(Expr, TestBinaryRangeJSON) {
         std::vector<std::string> nested_path;
     };
     std::vector<Testcase> testcases{
-        {true, false, 10, 20, {"int"}},
-        {true, true, 20, 30, {"int"}},
-        {false, true, 30, 40, {"int"}},
-        {false, false, 40, 50, {"int"}},
-        {true, false, 10, 20, {"double"}},
-        {true, true, 20, 30, {"double"}},
-        {false, true, 30, 40, {"double"}},
-        {false, false, 40, 50, {"double"}},
+        {true, false, 10, 20, {"int"}},    {true, true, 20, 30, {"int"}},      {false, true, 30, 40, {"int"}},
+        {false, false, 40, 50, {"int"}},   {true, false, 10, 20, {"double"}},  {true, true, 20, 30, {"double"}},
+        {false, true, 30, 40, {"double"}}, {false, false, 40, 50, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -389,6 +384,7 @@ TEST(Expr, TestBinaryRangeJSON) {
             }
             return lower <= value && value <= upper;
         };
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
         RetrievePlanNode plan;
         plan.predicate_ = std::make_unique<BinaryRangeExprImpl<int64_t>>(
             ColumnInfo(json_fid, DataType::JSON, testcase.nested_path), proto::plan::GenericValue::ValCase::kInt64Val,
@@ -400,21 +396,15 @@ TEST(Expr, TestBinaryRangeJSON) {
             auto ans = final[i];
 
             if (testcase.nested_path[0] == "int") {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>(testcase.nested_path)
-                               .value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(pointer).value();
                 auto ref = check(val);
-                ASSERT_EQ(ans, ref)
-                    << val << testcase.lower_inclusive << testcase.lower
-                    << testcase.upper_inclusive << testcase.upper;
+                ASSERT_EQ(ans, ref) << val << testcase.lower_inclusive << testcase.lower << testcase.upper_inclusive
+                                    << testcase.upper;
             } else {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>(testcase.nested_path)
-                               .value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>(pointer).value();
                 auto ref = check(val);
-                ASSERT_EQ(ans, ref)
-                    << val << testcase.lower_inclusive << testcase.lower
-                    << testcase.upper_inclusive << testcase.upper;
+                ASSERT_EQ(ans, ref) << val << testcase.lower_inclusive << testcase.lower << testcase.upper_inclusive
+                                    << testcase.upper;
             }
         }
     }
@@ -457,13 +447,14 @@ TEST(Expr, TestExistsJson) {
     for (auto testcase : testcases) {
         auto check = [&](bool value) { return value; };
         RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ = std::make_unique<ExistsExprImpl>(ColumnInfo(json_fid, DataType::JSON, testcase.nested_path));
         auto final = visitor.call_child(*plan.predicate_);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist(testcase.nested_path);
+            auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist(pointer);
             auto ref = check(val);
             ASSERT_EQ(ans, ref);
         }
@@ -479,14 +470,8 @@ TEST(Expr, TestUnaryRangeJson) {
         std::vector<std::string> nested_path;
     };
     std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
+        {10, {"int"}},    {20, {"int"}},    {30, {"int"}},    {40, {"int"}},
+        {10, {"double"}}, {20, {"double"}}, {30, {"double"}}, {40, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -547,6 +532,7 @@ TEST(Expr, TestUnaryRangeJson) {
             }
 
             RetrievePlanNode plan;
+            auto pointer = milvus::Json::pointer(testcase.nested_path);
             plan.predicate_ = std::make_unique<UnaryRangeExprImpl<int64_t>>(
                 ColumnInfo(json_fid, DataType::JSON, testcase.nested_path), op, testcase.val,
                 proto::plan::GenericValue::ValCase::kInt64Val);
@@ -556,17 +542,11 @@ TEST(Expr, TestUnaryRangeJson) {
             for (int i = 0; i < N * num_iters; ++i) {
                 auto ans = final[i];
                 if (testcase.nested_path[0] == "int") {
-                    auto val =
-                        milvus::Json(simdjson::padded_string(json_col[i]))
-                            .template at<int64_t>(testcase.nested_path)
-                            .value();
+                    auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(pointer).value();
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
                 } else {
-                    auto val =
-                        milvus::Json(simdjson::padded_string(json_col[i]))
-                            .template at<double>(testcase.nested_path)
-                            .value();
+                    auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>(pointer).value();
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
                 }
@@ -616,6 +596,7 @@ TEST(Expr, TestTermJson) {
             return term_set.find(value) != term_set.end();
         };
         RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ =
             std::make_unique<TermExprImpl<int64_t>>(ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
                                                     testcase.term, proto::plan::GenericValue::ValCase::kInt64Val);
@@ -624,8 +605,7 @@ TEST(Expr, TestTermJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto val =
-                milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(testcase.nested_path).value();
+            auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(pointer).value();
             auto ref = check(val);
             ASSERT_EQ(ans, ref);
         }
@@ -1596,14 +1576,10 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
         std::vector<std::string> nested_path;
     };
     std::vector<Testcase> testcases{
-        {10, 20, OpType::Equal, {"int"}},
-        {20, 30, OpType::Equal, {"int"}},
-        {30, 40, OpType::NotEqual, {"int"}},
-        {40, 50, OpType::NotEqual, {"int"}},
-        {10, 20, OpType::Equal, {"double"}},
-        {20, 30, OpType::Equal, {"double"}},
-        {30, 40, OpType::NotEqual, {"double"}},
-        {40, 50, OpType::NotEqual, {"double"}},
+        {10, 20, OpType::Equal, {"int"}},       {20, 30, OpType::Equal, {"int"}},
+        {30, 40, OpType::NotEqual, {"int"}},    {40, 50, OpType::NotEqual, {"int"}},
+        {10, 20, OpType::Equal, {"double"}},    {20, 30, OpType::Equal, {"double"}},
+        {30, 40, OpType::NotEqual, {"double"}}, {40, 50, OpType::NotEqual, {"double"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -1634,6 +1610,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
             return value + testcase.right_operand != testcase.value;
         };
         RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ = std::make_unique<BinaryArithOpEvalRangeExprImpl<int64_t>>(
             ColumnInfo(json_fid, DataType::JSON, testcase.nested_path), proto::plan::GenericValue::ValCase::kInt64Val,
             ArithOpType::Add, testcase.right_operand, testcase.op, testcase.value);
@@ -1644,15 +1621,11 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
             auto ans = final[i];
 
             if (testcase.nested_path[0] == "int") {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>(testcase.nested_path)
-                               .value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>(pointer).value();
                 auto ref = check(val);
                 ASSERT_EQ(ans, ref) << testcase.value << " " << val;
             } else {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>(testcase.nested_path)
-                               .value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>(pointer).value();
                 auto ref = check(val);
                 ASSERT_EQ(ans, ref) << testcase.value << " " << val;
             }
@@ -1671,14 +1644,10 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
         std::vector<std::string> nested_path;
     };
     std::vector<Testcase> testcases{
-        {10, 20, OpType::Equal, {"double"}},
-        {20, 30, OpType::Equal, {"double"}},
-        {30, 40, OpType::NotEqual, {"double"}},
-        {40, 50, OpType::NotEqual, {"double"}},
-        {10, 20, OpType::Equal, {"int"}},
-        {20, 30, OpType::Equal, {"int"}},
-        {30, 40, OpType::NotEqual, {"int"}},
-        {40, 50, OpType::NotEqual, {"int"}},
+        {10, 20, OpType::Equal, {"double"}},    {20, 30, OpType::Equal, {"double"}},
+        {30, 40, OpType::NotEqual, {"double"}}, {40, 50, OpType::NotEqual, {"double"}},
+        {10, 20, OpType::Equal, {"int"}},       {20, 30, OpType::Equal, {"int"}},
+        {30, 40, OpType::NotEqual, {"int"}},    {40, 50, OpType::NotEqual, {"int"}},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -1709,6 +1678,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
             return value + testcase.right_operand != testcase.value;
         };
         RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
         plan.predicate_ = std::make_unique<BinaryArithOpEvalRangeExprImpl<double>>(
             ColumnInfo(json_fid, DataType::JSON, testcase.nested_path), proto::plan::GenericValue::ValCase::kFloatVal,
             ArithOpType::Add, testcase.right_operand, testcase.op, testcase.value);
@@ -1718,8 +1688,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
-            auto val =
-                milvus::Json(simdjson::padded_string(json_col[i])).template at<double>(testcase.nested_path).value();
+            auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>(pointer).value();
             auto ref = check(val);
             ASSERT_EQ(ans, ref) << testcase.value << " " << val;
         }
@@ -2289,21 +2258,20 @@ TEST(Expr, TestUnaryRangeWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<bool>({"bool"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<bool>("/bool").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>({"int"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>("/int").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>({"double"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>("/double").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<std::string_view>({"string"})
-                               .value();
+                auto val =
+                    milvus::Json(simdjson::padded_string(json_col[i])).template at<std::string_view>("/string").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
@@ -2438,21 +2406,20 @@ TEST(Expr, TestTermWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<bool>({"bool"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<bool>("/bool").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>({"int"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<int64_t>("/int").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>({"double"}).value();
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).template at<double>("/double").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<std::string_view>({"string"})
-                               .value();
+                auto val =
+                    milvus::Json(simdjson::padded_string(json_col[i])).template at<std::string_view>("/string").value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
@@ -2564,23 +2531,23 @@ TEST(Expr, TestExistsWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist({"bool"});
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist("/bool");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist({"int"});
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist("/int");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist({"double"});
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist("/double");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist({"string"});
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist("/string");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::VARCHAR) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist({"varchar"});
+                auto val = milvus::Json(simdjson::padded_string(json_col[i])).exist("/varchar");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
