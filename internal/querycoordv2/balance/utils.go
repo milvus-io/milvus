@@ -56,6 +56,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 		if err != nil {
 			log.Warn("create segment task from plan failed",
 				zap.Int64("collection", p.Segment.GetCollectionID()),
+				zap.Int64("segmentID", p.Segment.GetID()),
 				zap.Int64("replica", p.ReplicaID),
 				zap.String("channel", p.Segment.GetInsertChannel()),
 				zap.Int64("from", p.From),
@@ -67,6 +68,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 
 		log.Info("create segment task",
 			zap.Int64("collection", p.Segment.GetCollectionID()),
+			zap.Int64("segmentID", p.Segment.GetID()),
 			zap.Int64("replica", p.ReplicaID),
 			zap.String("channel", p.Segment.GetInsertChannel()),
 			zap.Int64("from", p.From),
