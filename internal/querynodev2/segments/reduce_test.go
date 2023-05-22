@@ -104,7 +104,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	nq := int64(10)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := generateFloatVectors(1, defaultDim)
+	vec := generateFloatVectors(1, defaultDim, false)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)

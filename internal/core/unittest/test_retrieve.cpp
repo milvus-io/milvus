@@ -78,10 +78,10 @@ TEST(Retrieve, AutoID) {
     plan->field_ids_ = target_fields_id;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
-    Assert(retrieve_results->fields_data_size() == target_fields_id.size());
-    auto field0 = retrieve_results->fields_data(0);
-    Assert(field0.has_scalars());
-    auto field0_data = field0.scalars().long_data();
+    Assert(retrieve_results->field_data_.size() == target_fields_id.size());
+    const auto* field0 = retrieve_results->field_data_[0].get();
+    Assert(field0->has_scalars());
+    auto field0_data = field0->scalars().long_data();
 
     for (int i = 0; i < req_size; ++i) {
         auto index = choose(i);
@@ -94,9 +94,9 @@ TEST(Retrieve, AutoID) {
         ASSERT_EQ(data, i64_col[index]);
     }
 
-    auto field1 = retrieve_results->fields_data(1);
-    Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
+    const auto* field1 = retrieve_results->field_data_[1].get();
+    Assert(field1->has_vectors());
+    auto field1_data = field1->vectors().float_vector();
     ASSERT_EQ(field1_data.data_size(), DIM * req_size);
 }
 
@@ -133,10 +133,10 @@ TEST(Retrieve, AutoID2) {
     plan->field_ids_ = target_offsets;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    auto field0 = retrieve_results->fields_data(0);
-    Assert(field0.has_scalars());
-    auto field0_data = field0.scalars().long_data();
+    Assert(retrieve_results->field_data_.size() == target_offsets.size());
+    const auto* field0 = retrieve_results->field_data_[0].get();
+    Assert(field0->has_scalars());
+    auto field0_data = field0->scalars().long_data();
 
     for (int i = 0; i < req_size; ++i) {
         auto index = choose(i);
@@ -144,9 +144,9 @@ TEST(Retrieve, AutoID2) {
         ASSERT_EQ(data, i64_col[index]);
     }
 
-    auto field1 = retrieve_results->fields_data(1);
-    Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
+    const auto* field1 = retrieve_results->field_data_[1].get();
+    Assert(field1->has_vectors());
+    auto field1_data = field1->vectors().float_vector();
     ASSERT_EQ(field1_data.data_size(), DIM * req_size);
 }
 
@@ -186,10 +186,10 @@ TEST(Retrieve, NotExist) {
     plan->field_ids_ = target_offsets;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    auto field0 = retrieve_results->fields_data(0);
-    Assert(field0.has_scalars());
-    auto field0_data = field0.scalars().long_data();
+    Assert(retrieve_results->field_data_.size() == target_offsets.size());
+    const auto* field0 = retrieve_results->field_data_[0].get();
+    Assert(field0->has_scalars());
+    auto field0_data = field0->scalars().long_data();
 
     for (int i = 0; i < req_size; ++i) {
         auto index = choose(i);
@@ -197,9 +197,9 @@ TEST(Retrieve, NotExist) {
         ASSERT_EQ(data, i64_col[index]);
     }
 
-    auto field1 = retrieve_results->fields_data(1);
-    Assert(field1.has_vectors());
-    auto field1_data = field1.vectors().float_vector();
+    const auto* field1 = retrieve_results->field_data_[1].get();
+    Assert(field1->has_vectors());
+    auto field1_data = field1->vectors().float_vector();
     ASSERT_EQ(field1_data.data_size(), DIM * req_size);
 }
 
@@ -234,13 +234,13 @@ TEST(Retrieve, Empty) {
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
 
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    auto field0 = retrieve_results->fields_data(0);
-    auto field1 = retrieve_results->fields_data(1);
-    Assert(field0.has_scalars());
-    auto field0_data = field0.scalars().long_data();
+    Assert(retrieve_results->field_data_.size() == target_offsets.size());
+    const auto* field0 = retrieve_results->field_data_[0].get();
+    const auto* field1 = retrieve_results->field_data_[1].get();
+    Assert(field0->has_scalars());
+    auto field0_data = field0->scalars().long_data();
     Assert(field0_data.data_size() == 0);
-    Assert(field1.vectors().float_vector().data_size() == 0);
+    Assert(field1->vectors().float_vector().data_size() == 0);
 }
 
 TEST(Retrieve, LargeTimestamp) {
@@ -281,20 +281,21 @@ TEST(Retrieve, LargeTimestamp) {
     for (const auto& f_ts : filter_timestamps) {
         auto retrieve_results =
             segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
-        Assert(retrieve_results->fields_data_size() == 2);
+        Assert(retrieve_results->field_data_.size() == 2);
 
         int target_num = (f_ts + choose_sep) / choose_sep;
         if (target_num > req_size) {
             target_num = req_size;
         }
 
-        for (auto field_data : retrieve_results->fields_data()) {
-            if (DataType(field_data.type()) == DataType::INT64) {
-                Assert(field_data.scalars().long_data().data_size() ==
+        for (auto i = 0; i < retrieve_results->field_data_.size(); ++i) {
+            const auto* field_data = retrieve_results->field_data_[i].get();
+            if (DataType(field_data->type()) == DataType::INT64) {
+                Assert(field_data->scalars().long_data().data_size() ==
                        target_num);
             }
-            if (DataType(field_data.type()) == DataType::VECTOR_FLOAT) {
-                Assert(field_data.vectors().float_vector().data_size() ==
+            if (DataType(field_data->type()) == DataType::VECTOR_FLOAT) {
+                Assert(field_data->vectors().float_vector().data_size() ==
                        target_num * DIM);
             }
         }
@@ -342,10 +343,10 @@ TEST(Retrieve, Delete) {
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
-        ASSERT_EQ(retrieve_results->fields_data_size(), target_offsets.size());
-        auto field0 = retrieve_results->fields_data(0);
-        Assert(field0.has_scalars());
-        auto field0_data = field0.scalars().long_data();
+        ASSERT_EQ(retrieve_results->field_data_.size(), target_offsets.size());
+        const auto* field0 = retrieve_results->field_data_[0].get();
+        Assert(field0->has_scalars());
+        auto field0_data = field0->scalars().long_data();
 
         for (int i = 0; i < req_size; ++i) {
             auto index = choose(i);
@@ -353,9 +354,9 @@ TEST(Retrieve, Delete) {
             ASSERT_EQ(data, ts_col[index]);
         }
 
-        auto field1 = retrieve_results->fields_data(1);
-        Assert(field1.has_scalars());
-        auto field1_data = field1.scalars().long_data();
+        const auto* field1 = retrieve_results->field_data_[1].get();
+        Assert(field1->has_scalars());
+        auto field1_data = field1->scalars().long_data();
 
         for (int i = 0; i < req_size; ++i) {
             auto index = choose(i);
@@ -363,9 +364,9 @@ TEST(Retrieve, Delete) {
             ASSERT_EQ(data, i64_col[index]);
         }
 
-        auto field2 = retrieve_results->fields_data(2);
-        Assert(field2.has_vectors());
-        auto field2_data = field2.vectors().float_vector();
+        const auto* field2 = retrieve_results->field_data_[2].get();
+        Assert(field2->has_vectors());
+        auto field2_data = field2->vectors().float_vector();
         ASSERT_EQ(field2_data.data_size(), DIM * req_size);
     }
 
@@ -398,10 +399,10 @@ TEST(Retrieve, Delete) {
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
-        Assert(retrieve_results->fields_data_size() == target_offsets.size());
-        auto field1 = retrieve_results->fields_data(1);
-        Assert(field1.has_scalars());
-        auto field1_data = field1.scalars().long_data();
+        Assert(retrieve_results->field_data_.size() == target_offsets.size());
+        const auto* field1 = retrieve_results->field_data_[1].get();
+        Assert(field1->has_scalars());
+        auto field1_data = field1->scalars().long_data();
         auto size = req_size - new_count;
         for (int i = 0; i < size; ++i) {
             auto index = choose(i);
@@ -409,9 +410,9 @@ TEST(Retrieve, Delete) {
             ASSERT_EQ(data, i64_col[index + new_count]);
         }
 
-        auto field2 = retrieve_results->fields_data(2);
-        Assert(field2.has_vectors());
-        auto field2_data = field2.vectors().float_vector();
+        const auto* field2 = retrieve_results->field_data_[2].get();
+        Assert(field2->has_vectors());
+        auto field2_data = field2->vectors().float_vector();
         ASSERT_EQ(field2_data.data_size(), DIM * size);
     }
 }

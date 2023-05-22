@@ -21,6 +21,7 @@ package segments
 
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/reduce_c.h"
 */
 import "C"
@@ -401,6 +402,374 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	return &searchResult, nil
 }
 
+type CType C.CDataType
+
+func BuildIDs(cResult C.CRetrieveResult) (*schemapb.IDs, error) {
+	ids := &schemapb.IDs{}
+	if !bool(C.RetrieveResultHasIds(cResult)) {
+		return ids, nil
+	}
+
+	pkType := CType(C.GetRetrieveResultPkType(cResult))
+	cCount := C.GetRetrieveResultRowCount(cResult)
+	count := int(cCount)
+	switch pkType {
+	case CType(C.Int64):
+		int64Pks := make([]int64, count)
+		status := C.GetRetrieveResultPkDataForInt(cResult, (*C.int64_t)(unsafe.Pointer(&int64Pks[0])), cCount)
+		if err := HandleCStatus(&status, "get int pk data failed"); err != nil {
+			return nil, err
+		}
+		ids.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: int64Pks,
+			},
+		}
+	case CType(C.VarChar):
+		varCharPksCPtr := make([]*C.char, count)
+		status := C.GetRetrieveResultPkDataForString(cResult, (**C.char)(unsafe.Pointer(&varCharPksCPtr[0])), cCount)
+		if err := HandleCStatus(&status, "get string pk data failed"); err != nil {
+			return nil, err
+		}
+		varCharPks := make([]string, count)
+		for i := 0; i < count; i++ {
+			varCharPks[i] = C.GoString(varCharPksCPtr[i])
+			defer C.free(unsafe.Pointer(varCharPksCPtr[i]))
+		}
+
+		ids.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: varCharPks,
+			},
+		}
+	default:
+		return nil, fmt.Errorf("invalid data type of primary keys")
+	}
+	return ids, nil
+}
+
+func ConvertCDataTypetoSchemaType(cType CType) schemapb.DataType {
+	switch cType {
+	case CType(C.Bool):
+		return schemapb.DataType_Bool
+	case CType(C.Int8):
+		return schemapb.DataType_Int8
+	case CType(C.Int16):
+		return schemapb.DataType_Int16
+	case CType(C.Int32):
+		return schemapb.DataType_Int32
+	case CType(C.Int64):
+		return schemapb.DataType_Int64
+	case CType(C.Float):
+		return schemapb.DataType_Float
+	case CType(C.Double):
+		return schemapb.DataType_Double
+	case CType(C.String):
+		return schemapb.DataType_String
+	case CType(C.VarChar):
+		return schemapb.DataType_VarChar
+	case CType(C.Array):
+		return schemapb.DataType_Array
+	case CType(C.JSON):
+		return schemapb.DataType_JSON
+	case CType(C.FloatVector):
+		return schemapb.DataType_FloatVector
+	case CType(C.BinaryVector):
+		return schemapb.DataType_BinaryVector
+	default:
+		return schemapb.DataType_None
+	}
+}
+
+func FillEmptyRetrieveResult(cResult C.CRetrieveResult) (*segcorepb.RetrieveResults, error) {
+	fieldSize := int(C.GetRetrieveResultFieldSize(cResult))
+	fieldDatas := make([]*schemapb.FieldData, 0)
+	ids := &schemapb.IDs{}
+	pkType := CType(C.GetRetrieveResultPkType(cResult))
+	switch pkType {
+	case CType(C.Int64):
+		ids.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{},
+			},
+		}
+	case CType(C.VarChar):
+		ids.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: []string{},
+			},
+		}
+	default:
+		return nil, fmt.Errorf("invalid data type of primary keys")
+	}
+
+	for index := 0; index < fieldSize; index++ {
+		var fieldMeta C.CFieldMeta
+		var cIndex = C.int64_t(index)
+
+		status := C.GetRetrieveResultFieldMeta(cResult, cIndex, &fieldMeta)
+		if err := HandleCStatus(&status, "get field meta failed"); err != nil {
+			return nil, err
+		}
+		fieldData := &schemapb.FieldData{
+			Type:      ConvertCDataTypetoSchemaType(CType(fieldMeta.field_type)),
+			FieldName: C.GoString(&fieldMeta.field_name[0]),
+			FieldId:   int64(fieldMeta.field_id),
+		}
+		fieldDatas = append(fieldDatas, fieldData)
+	}
+
+	return &segcorepb.RetrieveResults{
+		Ids:        ids,
+		Offset:     []int64{},
+		FieldsData: fieldDatas,
+	}, nil
+}
+
+func FillCountRetrieveResult(cResult C.CRetrieveResult) (*segcorepb.RetrieveResults, error) {
+	dataArray := make([]int64, 1)
+	status := C.GetRetrieveResultFieldDataForLong(cResult, C.int64_t(0), (*C.int64_t)(unsafe.Pointer(&dataArray[0])), C.int64_t(1))
+	if err := HandleCStatus(&status, "get field long data failed"); err != nil {
+		return nil, err
+	}
+	fieldData := &schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: dataArray,
+					},
+				},
+			},
+		},
+	}
+	return &segcorepb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{fieldData},
+	}, nil
+}
+
+func HandleRetrieveResult(cResult C.CRetrieveResult) (*segcorepb.RetrieveResults, error) {
+	var status C.CStatus
+	cCount := C.GetRetrieveResultRowCount(cResult)
+	var count = int64(cCount)
+
+	if bool(C.RetrieveResultIsCount(cResult)) {
+		return FillCountRetrieveResult(cResult)
+	}
+
+	if count == 0 {
+		return FillEmptyRetrieveResult(cResult)
+	}
+
+	offsets := make([]int64, count)
+	status = C.GetRetrieveResultOffsets(cResult, (*C.int64_t)(unsafe.Pointer(&offsets[0])), cCount)
+	if err := HandleCStatus(&status, "get retrieve result offset failed"); err != nil {
+		return nil, err
+	}
+
+	fieldSize := int(C.GetRetrieveResultFieldSize(cResult))
+	fieldDatas := make([]*schemapb.FieldData, 0)
+	for index := 0; index < fieldSize; index++ {
+		var fieldMeta C.CFieldMeta
+		var cIndex = C.int64_t(index)
+
+		status = C.GetRetrieveResultFieldMeta(cResult, cIndex, &fieldMeta)
+		if err := HandleCStatus(&status, "get field meta failed"); err != nil {
+			return nil, err
+		}
+		fieldData := &schemapb.FieldData{
+			Type:      ConvertCDataTypetoSchemaType(CType(fieldMeta.field_type)),
+			FieldName: C.GoString(&fieldMeta.field_name[0]),
+			Field:     nil,
+			FieldId:   int64(fieldMeta.field_id),
+		}
+
+		switch fieldData.Type {
+		case schemapb.DataType_Bool:
+			{
+				dataArray := make([]bool, count)
+				status = C.GetRetrieveResultFieldDataForBool(cResult, cIndex, (*C.bool)(unsafe.Pointer(&dataArray[0])), cCount)
+				if err := HandleCStatus(&status, "get field bool data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			{
+				dataArray := make([]int32, count)
+				status = C.GetRetrieveResultFieldDataForInt(cResult, cIndex, (*C.int32_t)(unsafe.Pointer(&dataArray[0])), cCount)
+				if err := HandleCStatus(&status, "get field int data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_Int64:
+			{
+				dataArray := make([]int64, count)
+				status = C.GetRetrieveResultFieldDataForLong(cResult, cIndex, (*C.int64_t)(unsafe.Pointer(&dataArray[0])), cCount)
+				if err := HandleCStatus(&status, "get field long data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_Float:
+			{
+				dataArray := make([]float32, count)
+				status = C.GetRetrieveResultFieldDataForFloat(cResult, cIndex, (*C.float)(unsafe.Pointer(&dataArray[0])), cCount)
+				if err := HandleCStatus(&status, "get field float data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_Double:
+			{
+				dataArray := make([]float64, count)
+				status = C.GetRetrieveResultFieldDataForDouble(cResult, cIndex, (*C.double)(unsafe.Pointer(&dataArray[0])), cCount)
+				if err := HandleCStatus(&status, "get field double data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_VarChar, schemapb.DataType_String:
+			{
+				cStrings := make([]*C.char, count)
+				status = C.GetRetrieveResultFieldDataForVarChar(cResult, cIndex, (**C.char)(unsafe.Pointer(&cStrings[0])), cCount)
+				if err := HandleCStatus(&status, "get field string data failed"); err != nil {
+					return nil, err
+				}
+				dataArray := make([]string, count)
+				for i := 0; i < int(count); i++ {
+					dataArray[i] = C.GoString(cStrings[i])
+					defer C.free(unsafe.Pointer(cStrings[i]))
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_JSON:
+			{
+				cStrings := make([]*C.char, count)
+				status = C.GetRetrieveResultFieldDataForJson(cResult, cIndex, (**C.char)(unsafe.Pointer(&cStrings[0])), cCount)
+				if err := HandleCStatus(&status, "get field json data failed"); err != nil {
+					return nil, err
+				}
+				dataArray := make([][]byte, count)
+				for i := 0; i < int(count); i++ {
+					dataArray[i] = []byte(C.GoString(cStrings[i]))
+					defer C.free(unsafe.Pointer(cStrings[i]))
+				}
+				fieldData.Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+
+			}
+		case schemapb.DataType_FloatVector:
+			{
+				dim := int64(fieldMeta.dim)
+				dataArray := make([]float32, count*dim)
+				status = C.GetRetrieveResultFieldDataForFloatVector(cResult, cIndex, (*C.float)(unsafe.Pointer(&dataArray[0])), fieldMeta.dim, cCount)
+				if err := HandleCStatus(&status, "get field float vector data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: dataArray,
+							},
+						},
+					},
+				}
+			}
+		case schemapb.DataType_BinaryVector:
+			{
+				dim := int64(fieldMeta.dim)
+				dataArray := make([]byte, dim*count/8)
+				status = C.GetRetrieveResultFieldDataForBinaryVector(cResult, cIndex, (*C.char)(unsafe.Pointer(&dataArray[0])), fieldMeta.dim, cCount)
+				if err := HandleCStatus(&status, "get field float vector data failed"); err != nil {
+					return nil, err
+				}
+				fieldData.Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: dataArray,
+						},
+					},
+				}
+			}
+		}
+		fieldDatas = append(fieldDatas, fieldData)
+	}
+
+	ids, err := BuildIDs(cResult)
+	if err != nil {
+		return nil, err
+	}
+
+	C.DeleteRetrieveResult(cResult)
+
+	return &segcorepb.RetrieveResults{
+		Ids:        ids,
+		Offset:     offsets,
+		FieldsData: fieldDatas,
+	}, nil
+
+}
+
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
@@ -448,17 +817,16 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, err
 	}
 
-	result := new(segcorepb.RetrieveResults)
-	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+	goResult, err := HandleRetrieveResult(retrieveResult.cRetrieveResult)
+	if err != nil {
 		return nil, err
 	}
 
 	log.Debug("retrieve segment done",
-		zap.Int("resultNum", len(result.Offset)),
+		zap.Int("resultNum", len(goResult.Offset)),
 	)
-
-	sort.Sort(&byPK{result})
-	return result, nil
+	sort.Sort(&byPK{goResult})
+	return goResult, nil
 }
 
 func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {

@@ -52,7 +52,7 @@ class SegmentInterface {
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp) const = 0;
 
-    virtual std::unique_ptr<proto::segcore::RetrieveResults>
+    virtual std::unique_ptr<RetrieveResult>
     Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
 
     // TODO: memory use is not correct when load string or load string index
@@ -127,7 +127,7 @@ class SegmentInternalInterface : public SegmentInterface {
     FillTargetEntry(const query::Plan* plan,
                     SearchResult& results) const override;
 
-    std::unique_ptr<proto::segcore::RetrieveResults>
+    std::unique_ptr<RetrieveResult>
     Retrieve(const query::RetrievePlan* plan,
              Timestamp timestamp) const override;
 

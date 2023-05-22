@@ -130,11 +130,12 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 std::unique_ptr<RetrieveResult>
 wrap_num_entities(int64_t cnt) {
     auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
+    auto arr = std::make_unique<DataArray>();
+    arr->set_type(milvus::proto::schema::Int64);
+    auto scalar = arr->mutable_scalars();
     scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
+    retrieve_result->field_data_.push_back(std::move(arr));
+    retrieve_result->is_count_ = true;
     return retrieve_result;
 }
 
@@ -154,8 +155,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     if (active_count == 0 && node.is_count) {
-        retrieve_result = *(wrap_num_entities(0));
-        retrieve_result_opt_ = std::move(retrieve_result);
+        retrieve_result_opt_ = std::move(*(wrap_num_entities(0)));
         return;
     }
 
@@ -182,8 +182,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     if (node.is_count) {
         auto cnt = bitset_holder.size() - bitset_holder.count();
-        retrieve_result = *(wrap_num_entities(cnt));
-        retrieve_result_opt_ = std::move(retrieve_result);
+        retrieve_result_opt_ = std::move(*(wrap_num_entities(cnt)));
         return;
     }
 

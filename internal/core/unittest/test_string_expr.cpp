@@ -675,8 +675,8 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         num_queries,           //
         topk,                  //
         round_decimal,
-        dim,       //
-        query_ptr  //
+        dim,                   //
+        query_ptr              //
     };
     auto sub_result = BruteForceSearch(
         search_dataset, vec_col.data(), N, knowhere::Json(), nullptr);
@@ -732,9 +732,10 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     Timestamp time = MAX_TIMESTAMP;
 
     auto retrieved = segment->Retrieve(plan.get(), time);
-    ASSERT_EQ(retrieved->ids().str_id().data().size(), N);
-    ASSERT_EQ(retrieved->offset().size(), N);
-    ASSERT_EQ(retrieved->fields_data().size(), 1);
-    ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
-              N);
+    ASSERT_EQ(retrieved->ids_->str_id().data().size(), N);
+    ASSERT_EQ(retrieved->result_offsets_.size(), N);
+    ASSERT_EQ(retrieved->field_data_.size(), 1);
+    ASSERT_EQ(
+        retrieved->field_data_[0].get()->scalars().string_data().data().size(),
+        N);
 }

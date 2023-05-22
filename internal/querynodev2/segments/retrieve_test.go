@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -166,6 +167,191 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 		[]int64{suite.sealed.ID()})
 	suite.ErrorIs(err, ErrSegmentReleased)
 	suite.Len(res, 0)
+}
+
+func (suite *RetrieveSuite) TestRetrieveResultByType() {
+	plan, err := genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Bool)
+	suite.NoError(err)
+	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	boolData := res[0].FieldsData[0].GetScalars().GetBoolData().Data
+	suite.Len(boolData, 3)
+	fmt.Println("bool type")
+	suite.Equal(boolData[0], false)
+	suite.Equal(boolData[1], true)
+	suite.Equal(boolData[2], false)
+	fmt.Println(boolData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Int8)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	intData := res[0].FieldsData[0].GetScalars().GetIntData().Data
+	suite.Len(intData, 3)
+	fmt.Println("int8 type")
+	suite.Equal(intData[0], int32(1))
+	suite.Equal(intData[1], int32(2))
+	suite.Equal(intData[2], int32(3))
+	fmt.Println(intData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Int16)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	intData = res[0].FieldsData[0].GetScalars().GetIntData().Data
+	suite.Len(intData, 3)
+	fmt.Println("int16 type")
+	suite.Equal(intData[0], int32(1))
+	suite.Equal(intData[1], int32(2))
+	suite.Equal(intData[2], int32(3))
+	fmt.Println(intData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Int32)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	intData = res[0].FieldsData[0].GetScalars().GetIntData().Data
+	suite.Len(intData, 3)
+	fmt.Println("int32 type")
+	suite.Equal(intData[0], int32(1))
+	suite.Equal(intData[1], int32(2))
+	suite.Equal(intData[2], int32(3))
+	fmt.Println(intData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Int64)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	longData := res[0].FieldsData[0].GetScalars().GetLongData().Data
+	suite.Len(longData, 3)
+	fmt.Println("int64 type")
+	suite.Equal(longData[0], int64(1))
+	suite.Equal(longData[1], int64(2))
+	suite.Equal(longData[2], int64(3))
+	fmt.Println(longData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Float)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	floatData := res[0].FieldsData[0].GetScalars().GetFloatData().Data
+	suite.Len(floatData, 3)
+	fmt.Println("float type")
+	suite.Equal(floatData[0], float32(2.0/101))
+	suite.Equal(floatData[1], float32(3.0/102))
+	suite.Equal(floatData[2], float32(4.0/103))
+	fmt.Println(floatData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Double)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.Len(res[0].Offset, 3)
+	suite.NoError(err)
+	doubleData := res[0].FieldsData[0].GetScalars().GetDoubleData().Data
+	suite.Len(doubleData, 3)
+	fmt.Println("double type")
+	suite.Equal(doubleData[0], float64(2.0/101))
+	suite.Equal(doubleData[1], float64(3.0/102))
+	suite.Equal(doubleData[2], float64(4.0/103))
+	fmt.Println(doubleData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_VarChar)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.Len(res[0].Offset, 3)
+	suite.NoError(err)
+	fmt.Println("string/varchar type")
+	strData := res[0].FieldsData[0].GetScalars().GetStringData().Data
+	suite.Equal(strData[0], "string1")
+	suite.Equal(strData[1], "string2")
+	suite.Equal(strData[2], "string3")
+	fmt.Println(strData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_FloatVector)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.Len(res[0].Offset, 3)
+	suite.NoError(err)
+	floatVecData := res[0].FieldsData[0].GetVectors().GetFloatVector().Data
+	suite.Len(floatVecData, 128*3)
+	fmt.Println("float vec type")
+	suite.Equal(floatVecData[0], float32(128))
+	suite.Equal(floatVecData[383], float32(511))
+	fmt.Println(floatVecData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_BinaryVector)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.Len(res[0].Offset, 3)
+	suite.NoError(err)
+	strVecData := res[0].FieldsData[0].GetVectors().GetBinaryVector()
+	fmt.Println("binary vector type")
+	suite.Equal(len(strVecData), 3*16)
+	fmt.Println(strVecData)
+
+	plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_JSON)
+	suite.NoError(err)
+	res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+		suite.collectionID,
+		[]int64{suite.partitionID},
+		[]int64{suite.sealed.ID()})
+	suite.Len(res[0].Offset, 3)
+	suite.NoError(err)
+	jsonData := res[0].FieldsData[0].GetScalars().GetJsonData().Data
+	suite.Equal(len(jsonData), 3)
+	fmt.Println("Json type")
+	suite.Equal(string(jsonData[0]), fmt.Sprintf(`{"key":%d}`, 2))
+	suite.Equal(string(jsonData[1]), fmt.Sprintf(`{"key":%d}`, 3))
+	suite.Equal(string(jsonData[2]), fmt.Sprintf(`{"key":%d}`, 4))
+	fmt.Println(string(jsonData[0]))
+	fmt.Println(string(jsonData[1]))
+	fmt.Println(string(jsonData[2]))
+
+	// plan, err = genSimpleRetrievePlanByOutputFieldType(suite.collection, schemapb.DataType_Array)
+	// suite.NoError(err)
+	// res, _, _, err = RetrieveHistorical(context.TODO(), suite.manager, plan,
+	// 	suite.collectionID,
+	// 	[]int64{suite.partitionID},
+	// 	[]int64{suite.sealed.ID()},
+	// 	nil)
+	// suite.Len(res[0].Offset, 3)
+	// suite.NoError(err)
 }
 
 func TestRetrieve(t *testing.T) {

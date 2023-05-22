@@ -178,6 +178,12 @@ var simpleVarCharField = constFieldParam{
 	fieldName: "varCharField",
 }
 
+var simpleStringField = constFieldParam{
+	id:        112,
+	dataType:  schemapb.DataType_VarChar,
+	fieldName: "stringField",
+}
+
 var rowIDField = constFieldParam{
 	id:        rowIDFieldID,
 	dataType:  schemapb.DataType_Int64,
@@ -197,6 +203,11 @@ func genConstantFieldSchema(param constFieldParam) *schemapb.FieldSchema {
 		IsPrimaryKey: false,
 		DataType:     param.dataType,
 		ElementType:  schemapb.DataType_Int32,
+	}
+	if param.dataType == schemapb.DataType_VarChar {
+		field.TypeParams = []*commonpb.KeyValuePair{
+			{Key: "max_length", Value: "12"},
+		}
 	}
 	return field
 }
@@ -246,6 +257,7 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 	fieldInt32 := genConstantFieldSchema(simpleInt32Field)
 	fieldFloat := genConstantFieldSchema(simpleFloatField)
 	fieldDouble := genConstantFieldSchema(simpleDoubleField)
+	fieldString := genConstantFieldSchema(simpleStringField)
 	// fieldArray := genConstantFieldSchema(simpleArrayField)
 	fieldJSON := genConstantFieldSchema(simpleJSONField)
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
@@ -269,6 +281,7 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType) *s
 			fieldInt32,
 			fieldFloat,
 			fieldDouble,
+			fieldString,
 			// fieldArray,
 			fieldJSON,
 			floatVecFieldSchema,
@@ -335,93 +348,178 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 
 // ---------- unittest util functions ----------
 // gen field data
-func generateBoolArray(numRows int) []bool {
+func generateBoolArray(numRows int, isOrder bool) []bool {
 	ret := make([]bool, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, i%2 == 0)
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, rand.Int()%2 == 0)
 	}
 	return ret
 }
 
-func generateInt8Array(numRows int) []int8 {
+func generateInt8Array(numRows int, isOrder bool) []int8 {
 	ret := make([]int8, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, int8(i%127))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, int8(rand.Int()))
 	}
 	return ret
 }
 
-func generateInt16Array(numRows int) []int16 {
+func generateInt16Array(numRows int, isOrder bool) []int16 {
 	ret := make([]int16, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, int16(i%math.MaxInt16))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, int16(rand.Int()))
 	}
 	return ret
 }
 
-func generateInt32Array(numRows int) []int32 {
+func generateInt32Array(numRows int, isOrder bool) []int32 {
 	ret := make([]int32, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, int32(i))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, rand.Int31())
 	}
 	return ret
 }
 
-func generateInt64Array(numRows int) []int64 {
+func generateInt64Array(numRows int, isOrder bool) []int64 {
 	ret := make([]int64, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, int64(i))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
-		ret = append(ret, int64(i))
+		ret = append(ret, rand.Int63())
 	}
 	return ret
 }
 
-func generateFloat32Array(numRows int) []float32 {
+func generateFloat32Array(numRows int, isOrder bool) []float32 {
 	ret := make([]float32, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, (float32(i)+1)/(float32(i)+100))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, rand.Float32())
 	}
 	return ret
 }
 
-func generateStringArray(numRows int) []string {
+func generateStringArray(numRows int, isOrder bool) []string {
 	ret := make([]string, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, "string"+strconv.Itoa(i))
+		}
+		return ret
+
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, strconv.Itoa(rand.Int()))
 	}
 	return ret
 }
-func generateArrayArray(numRows int) []*schemapb.ScalarField {
+func generateArrayArray(numRows int, isOrder bool) []*schemapb.ScalarField {
 	ret := make([]*schemapb.ScalarField, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: generateInt32Array(10, true),
+					},
+				},
+			})
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{
-					Data: generateInt32Array(10),
+					Data: generateInt32Array(10, false),
 				},
 			},
 		})
 	}
 	return ret
 }
-func generateJSONArray(numRows int) [][]byte {
+
+func generateJSONArray(numRows int, isOrder bool) [][]byte {
 	ret := make([][]byte, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, []byte(fmt.Sprintf(`{"key":%d}`, i+1)))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
-		ret = append(ret, []byte(fmt.Sprintf(`{"key":%d}`, i+1)))
+		ret = append(ret, []byte(fmt.Sprintf(`{"key":%d}`, rand.Int()+1)))
 	}
 	return ret
 }
 
-func generateFloat64Array(numRows int) []float64 {
+func generateFloat64Array(numRows int, isOrder bool) []float64 {
 	ret := make([]float64, 0, numRows)
+	if isOrder {
+		for i := 0; i < numRows; i++ {
+			ret = append(ret, (float64(i)+1)/(float64(i)+100))
+		}
+		return ret
+	}
+
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, rand.Float64())
 	}
 	return ret
 }
 
-func generateFloatVectors(numRows, dim int) []float32 {
+func generateFloatVectors(numRows, dim int, isOrder bool) []float32 {
 	total := numRows * dim
 	ret := make([]float32, 0, total)
+	if isOrder {
+		for i := 0; i < total; i++ {
+			ret = append(ret, float32(i))
+		}
+		return ret
+	}
+
 	for i := 0; i < total; i++ {
 		ret = append(ret, rand.Float32())
 	}
@@ -452,7 +550,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
-						Data: generateBoolArray(numRows),
+						Data: generateBoolArray(numRows, true),
 					},
 				},
 			},
@@ -463,7 +561,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
+						Data: generateInt32Array(numRows, true),
 					},
 				},
 			},
@@ -474,7 +572,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
+						Data: generateInt32Array(numRows, true),
 					},
 				},
 			},
@@ -485,7 +583,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
+						Data: generateInt32Array(numRows, true),
 					},
 				},
 			},
@@ -496,7 +594,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(numRows),
+						Data: generateInt64Array(numRows, true),
 					},
 				},
 			},
@@ -507,7 +605,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
-						Data: generateFloat32Array(numRows),
+						Data: generateFloat32Array(numRows, true),
 					},
 				},
 			},
@@ -518,7 +616,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
-						Data: generateFloat64Array(numRows),
+						Data: generateFloat64Array(numRows, true),
 					},
 				},
 			},
@@ -529,7 +627,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
-						Data: generateStringArray(numRows),
+						Data: generateStringArray(numRows, true),
 					},
 				},
 			},
@@ -541,7 +639,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
-						Data: generateArrayArray(numRows),
+						Data: generateArrayArray(numRows, true),
 					},
 				},
 			},
@@ -553,7 +651,7 @@ func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID i
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{
-						Data: generateJSONArray(numRows),
+						Data: generateJSONArray(numRows, true),
 					}},
 			}}
 
@@ -588,7 +686,7 @@ func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID i
 				Dim: int64(dim),
 				Data: &schemapb.VectorField_FloatVector{
 					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(numRows, dim),
+						Data: generateFloatVectors(numRows, dim, true),
 					},
 				},
 			},
@@ -702,7 +800,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 
 	// set data for rowID field
 	insertData.Data[rowIDFieldID] = &storage.Int64FieldData{
-		Data: generateInt64Array(msgLength),
+		Data: generateInt64Array(msgLength, true),
 	}
 	// set data for ts field
 	insertData.Data[timestampFieldID] = &storage.Int64FieldData{
@@ -713,48 +811,48 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 		switch f.DataType {
 		case schemapb.DataType_Bool:
 			insertData.Data[f.FieldID] = &storage.BoolFieldData{
-				Data: generateBoolArray(msgLength),
+				Data: generateBoolArray(msgLength, true),
 			}
 		case schemapb.DataType_Int8:
 			insertData.Data[f.FieldID] = &storage.Int8FieldData{
-				Data: generateInt8Array(msgLength),
+				Data: generateInt8Array(msgLength, true),
 			}
 		case schemapb.DataType_Int16:
 			insertData.Data[f.FieldID] = &storage.Int16FieldData{
-				Data: generateInt16Array(msgLength),
+				Data: generateInt16Array(msgLength, true),
 			}
 		case schemapb.DataType_Int32:
 			insertData.Data[f.FieldID] = &storage.Int32FieldData{
-				Data: generateInt32Array(msgLength),
+				Data: generateInt32Array(msgLength, true),
 			}
 		case schemapb.DataType_Int64:
 			insertData.Data[f.FieldID] = &storage.Int64FieldData{
-				Data: generateInt64Array(msgLength),
+				Data: generateInt64Array(msgLength, true),
 			}
 		case schemapb.DataType_Float:
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
-				Data: generateFloat32Array(msgLength),
+				Data: generateFloat32Array(msgLength, true),
 			}
 		case schemapb.DataType_Double:
 			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
-				Data: generateFloat64Array(msgLength),
+				Data: generateFloat64Array(msgLength, true),
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID] = &storage.StringFieldData{
-				Data: generateStringArray(msgLength),
+				Data: generateStringArray(msgLength, true),
 			}
 		case schemapb.DataType_Array:
 			insertData.Data[f.FieldID] = &storage.ArrayFieldData{
-				Data: generateArrayArray(msgLength),
+				Data: generateArrayArray(msgLength, true),
 			}
 		case schemapb.DataType_JSON:
 			insertData.Data[f.FieldID] = &storage.JSONFieldData{
-				Data: generateJSONArray(msgLength),
+				Data: generateJSONArray(msgLength, true),
 			}
 		case schemapb.DataType_FloatVector:
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
 			insertData.Data[f.FieldID] = &storage.FloatVectorFieldData{
-				Data: generateFloatVectors(msgLength, dim),
+				Data: generateFloatVectors(msgLength, dim, true),
 				Dim:  dim,
 			}
 		case schemapb.DataType_BinaryVector:
@@ -840,7 +938,7 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 	}
 	defer index.Delete()
 
-	err = index.Build(indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim)))
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim, false)))
 	if err != nil {
 		return nil, err
 	}
@@ -1246,6 +1344,72 @@ func genSimpleRowIDField(numRows int) []int64 {
 func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 	timestamp := storage.Timestamp(1000)
 	planBytes, err := genSimpleRetrievePlanExpr(collection.schema)
+	if err != nil {
+		return nil, err
+	}
+
+	plan, err2 := NewRetrievePlan(collection, planBytes, timestamp, 100)
+	return plan, err2
+}
+
+func getFieldSchemaByType(schema *schemapb.CollectionSchema, dataType schemapb.DataType) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.DataType == dataType {
+			return fieldSchema, nil
+		}
+	}
+
+	return nil, errors.New("releated field is not found")
+}
+
+func genRetrievePlanExprByOutFieldType(schema *schemapb.CollectionSchema, dataType schemapb.DataType) ([]byte, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	field, err := getFieldSchemaByType(schema, dataType)
+	if err != nil {
+		return nil, err
+	}
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{
+			Predicates: &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: &planpb.ColumnInfo{
+							FieldId:  pkField.FieldID,
+							DataType: pkField.DataType,
+						},
+						Values: []*planpb.GenericValue{
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 1,
+								},
+							},
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 2,
+								},
+							},
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 3,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		OutputFieldIds: []int64{field.FieldID},
+	}
+	planExpr, err := proto.Marshal(planNode)
+	return planExpr, err
+}
+
+func genSimpleRetrievePlanByOutputFieldType(collection *Collection, dataType schemapb.DataType) (*RetrievePlan, error) {
+	timestamp := storage.Timestamp(1000)
+	planBytes, err := genRetrievePlanExprByOutFieldType(collection.schema, dataType)
 	if err != nil {
 		return nil, err
 	}

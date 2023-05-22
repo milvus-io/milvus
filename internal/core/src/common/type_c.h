@@ -54,10 +54,20 @@ enum CDataType {
     String = 20,
     VarChar = 21,
 
+    Array = 22,
+    JSON = 23,
+
     BinaryVector = 100,
     FloatVector = 101,
 };
 typedef enum CDataType CDataType;
+
+typedef struct CFieldMeta {
+    int field_id;
+    int64_t dim;
+    CDataType field_type;
+    char field_name[1024];
+} CFieldMeta;
 
 typedef struct CStatus {
     int error_code;

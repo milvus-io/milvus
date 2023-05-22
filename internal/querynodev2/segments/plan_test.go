@@ -97,7 +97,7 @@ func (suite *PlanSuite) TestPlanPlaceholderGroup() {
 
 	var searchRawData1 []byte
 	var searchRawData2 []byte
-	var vec = generateFloatVectors(1, defaultDim)
+	var vec = generateFloatVectors(1, defaultDim, false)
 	for i, ele := range vec {
 		buf := make([]byte, 4)
 		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))

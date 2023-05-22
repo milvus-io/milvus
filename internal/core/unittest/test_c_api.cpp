@@ -31,6 +31,8 @@
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "common/QueryResult.h"
+#include "segcore/segment_c.h"
 
 namespace chrono = std::chrono;
 
@@ -424,12 +426,9 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
+    DeleteRetrieveResult(retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
@@ -442,11 +441,10 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
-    DeleteRetrieveResult(&retrieve_result);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 1);
+
+    DeleteRetrieveResult(retrieve_result);
 
     // delete pks = {2}
     delete_pks = {2};
@@ -467,13 +465,11 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -561,12 +557,9 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
+    DeleteRetrieveResult(retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
@@ -579,11 +572,9 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
-    DeleteRetrieveResult(&retrieve_result);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 1);
+    DeleteRetrieveResult(retrieve_result);
 
     // delete pks = {2}
     delete_pks = {2};
@@ -604,13 +595,11 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -667,12 +656,9 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
-    DeleteRetrieveResult(&retrieve_result);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 6);
+    DeleteRetrieveResult(retrieve_result);
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -695,15 +681,11 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-
-    query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -772,12 +754,9 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
-    DeleteRetrieveResult(&retrieve_result);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 6);
+    DeleteRetrieveResult(retrieve_result);
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -801,15 +780,11 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-
-    query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -873,12 +848,9 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
-    DeleteRetrieveResult(&retrieve_result);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 0);
+    DeleteRetrieveResult(retrieve_result);
 
     // second insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
@@ -898,15 +870,11 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-
-    query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                       retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
+    result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 3);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -994,14 +962,11 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     res = Retrieve(
         segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 4);
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->ids_->int_id().data().size(), 4);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -1186,7 +1151,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     ASSERT_EQ(res.error_code, Success);
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -4105,13 +4070,10 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     res = Retrieve(
         segment, plan.get(), {}, raw_data.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
-                                            retrieve_result.proto_size);
-    ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->fields_data().size(), 6);
-    auto fields_data = query_result->fields_data();
-    for (auto iter = fields_data.begin(); iter < fields_data.end(); ++iter) {
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    ASSERT_EQ(result->field_data_.size(), 6);
+    for (int i = 0; i < result->field_data_.size(); ++i) {
+        const auto* iter = result->field_data_[i].get();
         switch (iter->type()) {
             case proto::schema::DataType::Int8: {
                 ASSERT_EQ(iter->scalars().int_data().data(0), age8_col[0]);
@@ -4146,7 +4108,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     }
 
     DeleteRetrievePlan(plan.release());
-    DeleteRetrieveResult(&retrieve_result);
+    DeleteRetrieveResult(retrieve_result);
 
     DeleteSegment(segment);
 }
@@ -4457,4 +4419,188 @@ TEST(CApiTest, AssembeChunkTest) {
     for (size_t i = 0; i < 105; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
+}
+
+TEST(TestCRetrieveResultConvert, GetDataFromCRetrieveResult) {
+    milvus::RetrieveResult result;
+    auto data_array = std::make_unique<DataArray>();
+    auto bool_array = data_array->mutable_scalars()->mutable_bool_data();
+    bool_array->add_data(true);
+    bool_array->add_data(false);
+    bool_array->add_data(true);
+    bool_array->add_data(false);
+    result.field_data_.push_back(std::move(data_array));
+
+    bool res1[4];
+    auto status = GetRetrieveResultFieldDataForBool(&result, 0, &res1[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(res1[0], true);
+    ASSERT_EQ(res1[1], false);
+    ASSERT_EQ(res1[2], true);
+    ASSERT_EQ(res1[3], false);
+
+    data_array = std::make_unique<DataArray>();
+    auto int_array = data_array->mutable_scalars()->mutable_int_data();
+    int_array->add_data(100);
+    int_array->add_data(200);
+    int_array->add_data(300);
+    int_array->add_data(400);
+    data_array->set_type(::milvus::proto::schema::DataType::Int16);
+    data_array->set_field_id(1000);
+    int32_t res2[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForInt(&result, 1, &res2[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(res2[0], 100);
+    ASSERT_EQ(res2[1], 200);
+    ASSERT_EQ(res2[2], 300);
+    ASSERT_EQ(res2[3], 400);
+
+    data_array = std::make_unique<DataArray>();
+    auto long_array = data_array->mutable_scalars()->mutable_long_data();
+    long_array->add_data(1000);
+    long_array->add_data(2000);
+    long_array->add_data(3000);
+    long_array->add_data(4000);
+    int64_t res3[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForLong(&result, 2, &res3[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(res3[0], 1000);
+    ASSERT_EQ(res3[1], 2000);
+    ASSERT_EQ(res3[2], 3000);
+    ASSERT_EQ(res3[3], 4000);
+
+    data_array = std::make_unique<DataArray>();
+    auto float_array = data_array->mutable_scalars()->mutable_float_data();
+    float_array->add_data(1.234);
+    float_array->add_data(2.345);
+    float_array->add_data(3.456);
+    float_array->add_data(5.678);
+    float res4[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForFloat(&result, 3, &res4[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_FLOAT_EQ(res4[0], 1.234);
+    ASSERT_FLOAT_EQ(res4[1], 2.345);
+    ASSERT_FLOAT_EQ(res4[2], 3.456);
+    ASSERT_FLOAT_EQ(res4[3], 5.678);
+
+    data_array = std::make_unique<DataArray>();
+    auto double_array = data_array->mutable_scalars()->mutable_double_data();
+    double_array->add_data(1.234);
+    double_array->add_data(2.345);
+    double_array->add_data(3.456);
+    double_array->add_data(5.678);
+    double res5[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForDouble(&result, 4, &res5[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_DOUBLE_EQ(res5[0], 1.234);
+    ASSERT_DOUBLE_EQ(res5[1], 2.345);
+    ASSERT_DOUBLE_EQ(res5[2], 3.456);
+    ASSERT_DOUBLE_EQ(res5[3], 5.678);
+
+    data_array = std::make_unique<DataArray>();
+    auto str_array = data_array->mutable_scalars()->mutable_string_data();
+    str_array->add_data("string1");
+    str_array->add_data("string2");
+    str_array->add_data("string3");
+    str_array->add_data("string4");
+    char* res6[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForVarChar(&result, 5, &res6[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_STREQ(res6[0], "string1");
+    ASSERT_STREQ(res6[1], "string2");
+    ASSERT_STREQ(res6[2], "string3");
+    ASSERT_STREQ(res6[3], "string4");
+    for (int i = 0; i < 4; ++i) {
+        free(res6[i]);
+    }
+
+    data_array = std::make_unique<DataArray>();
+    auto json_array = data_array->mutable_scalars()->mutable_json_data();
+    json_array->add_data("string1");
+    json_array->add_data("string2");
+    json_array->add_data("string3");
+    json_array->add_data("string4");
+    char* res7[4];
+    result.field_data_.push_back(std::move(data_array));
+    status = GetRetrieveResultFieldDataForJson(&result, 6, &res7[0], 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_STREQ(res7[0], "string1");
+    ASSERT_STREQ(res7[1], "string2");
+    ASSERT_STREQ(res7[2], "string3");
+    ASSERT_STREQ(res7[3], "string4");
+    for (int i = 0; i < 4; ++i) {
+        free(res7[i]);
+    }
+
+    data_array = std::make_unique<DataArray>();
+    auto vec_array = data_array->mutable_vectors();
+    vec_array->set_dim(2);
+    auto float_vec_array = vec_array->mutable_float_vector();
+    float_vec_array->add_data(1.234);
+    float_vec_array->add_data(2.234);
+    float_vec_array->add_data(3.234);
+    float_vec_array->add_data(4.234);
+    result.field_data_.push_back(std::move(data_array));
+    float res8[4];
+    status =
+        GetRetrieveResultFieldDataForFloatVector(&result, 7, &res8[0], 2, 2);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_FLOAT_EQ(res8[0], 1.234);
+    ASSERT_FLOAT_EQ(res8[1], 2.234);
+    ASSERT_FLOAT_EQ(res8[2], 3.234);
+    ASSERT_FLOAT_EQ(res8[3], 4.234);
+
+    data_array = std::make_unique<DataArray>();
+    vec_array = data_array->mutable_vectors();
+    vec_array->set_dim(8);
+    auto binary_vec_array = vec_array->mutable_binary_vector();
+    binary_vec_array->push_back(125);
+    binary_vec_array->push_back(23);
+    result.field_data_.push_back(std::move(data_array));
+    char res9[2];
+    status = GetRetrieveResultFieldDataForBinaryVector(&result, 8, res9, 8, 2);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(res9[0], 125);
+    ASSERT_EQ(res9[1], 23);
+
+    int64_t field_size = GetRetrieveResultFieldSize(&result);
+    ASSERT_EQ(field_size, 9);
+
+    CFieldMeta meta;
+    status = GetRetrieveResultFieldMeta(&result, 1, &meta);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(meta.field_type, CDataType::Int16);
+    ASSERT_EQ(meta.field_id, 1000);
+
+    result.result_offsets_ = {1, 2, 3, 4};
+    auto row_count = GetRetrieveResultRowCount(&result);
+    ASSERT_EQ(row_count, 4);
+
+    int64_t offset[4];
+    status = GetRetrieveResultOffsets(&result, offset, 4);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_EQ(offset[2], 3);
+
+    bool has_ids = RetrieveResultHasIds(&result);
+    ASSERT_FALSE(has_ids);
+
+    auto ids = std::make_unique<IdArray>();
+    auto id_arr = ids->mutable_int_id();
+    id_arr->add_data(1);
+    id_arr->add_data(2);
+    id_arr->add_data(3);
+    id_arr->add_data(4);
+    result.pk_type_ = milvus::DataType::INT64;
+    result.ids_ = std::move(ids);
+    auto pk_type = GetRetrieveResultPkType(&result);
+    ASSERT_TRUE(status.error_code == 0);
+    ASSERT_TRUE(pk_type == CDataType::Int64);
+    int64_t pks[4];
+    status = GetRetrieveResultPkDataForInt(&result, pks, 4);
+    ASSERT_EQ(pks[3], 4);
 }

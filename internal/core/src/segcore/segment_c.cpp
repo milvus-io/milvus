@@ -96,11 +96,6 @@ Search(CSegmentInterface c_segment,
     }
 }
 
-void
-DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
-    std::free(const_cast<void*>(retrieve_result->proto_blob));
-}
-
 CStatus
 Retrieve(CSegmentInterface c_segment,
          CRetrievePlan c_plan,
@@ -118,12 +113,7 @@ Retrieve(CSegmentInterface c_segment,
 
         auto retrieve_result = segment->Retrieve(plan, timestamp);
 
-        auto size = retrieve_result->ByteSizeLong();
-        void* buffer = malloc(size);
-        retrieve_result->SerializePartialToArray(buffer, size);
-
-        result->proto_blob = buffer;
-        result->proto_size = size;
+        *result = retrieve_result.release();
 
         span->End();
         return milvus::SuccessCStatus();
@@ -320,6 +310,365 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         segment->DropIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+//////////////////////////////    interfaces for RetrieveResult    //////////////////////////////
+void
+DeleteRetrieveResult(CRetrieveResult retrieve_result) {
+    auto res = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    delete res;
+}
+
+bool
+RetrieveResultIsCount(CRetrieveResult retrieve_result) {
+    auto res = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    return res->is_count_;
+}
+
+int64_t
+GetRetrieveResultRowCount(CRetrieveResult retrieve_result) {
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    return result->result_offsets_.size();
+}
+
+CStatus
+GetRetrieveResultOffsets(CRetrieveResult retrieve_result,
+                         int64_t* dest,
+                         int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        int64_t* offset_ptr = result->result_offsets_.data();
+        AssertInfo(size == result->result_offsets_.size(),
+                   "offset size not match");
+        std::copy(offset_ptr, offset_ptr + size, dest);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+int64_t
+GetRetrieveResultFieldSize(CRetrieveResult retrieve_result) {
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    return result->field_data_.size();
+}
+
+bool
+RetrieveResultHasIds(CRetrieveResult retrieve_result) {
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    return result->ids_ != nullptr;
+}
+
+CDataType
+GetRetrieveResultPkType(CRetrieveResult retrieve_result) {
+    auto result = reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+    auto type = result->pk_type_;
+    // Only Int64 or Varchar for PK
+    if (type == milvus::DataType::INT64) {
+        return CDataType::Int64;
+    } else {
+        return CDataType::VarChar;
+    }
+}
+
+CStatus
+GetRetrieveResultPkDataForInt(CRetrieveResult retrieve_result,
+                              int64_t* data,
+                              int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        const auto* ids = result->ids_.get();
+        AssertInfo(ids != nullptr && ids->has_int_id(), "ids has no int data");
+        auto long_array = ids->int_id();
+        AssertInfo(long_array.data_size() == size, "ids size not match");
+        const int64_t* src_data_ptr = long_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultPkDataForString(CRetrieveResult retrieve_result,
+                                 char** data,
+                                 int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        const auto* ids = result->ids_.get();
+        AssertInfo(ids != nullptr && ids->has_str_id(),
+                   "ids has no string data");
+        auto str_array = ids->str_id();
+        AssertInfo(str_array.data_size() == size, "ids size not match");
+        for (size_t i = 0; i < size; ++i) {
+            data[i] = strdup(str_array.data(i).c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CDataType
+ConvertSchemaPbTypeToCType(::milvus::proto::schema::DataType type) {
+    switch (type) {
+        case milvus::proto::schema::DataType::Bool:
+            return CDataType::Bool;
+        case milvus::proto::schema::DataType::Int8:
+            return CDataType::Int8;
+        case milvus::proto::schema::DataType::Int16:
+            return CDataType::Int16;
+        case milvus::proto::schema::DataType::Int32:
+            return CDataType::Int32;
+        case milvus::proto::schema::DataType::Int64:
+            return CDataType::Int64;
+        case milvus::proto::schema::DataType::Float:
+            return CDataType::Float;
+        case milvus::proto::schema::DataType::Double:
+            return CDataType::Double;
+        case milvus::proto::schema::DataType::String:
+            return CDataType::String;
+        case milvus::proto::schema::DataType::VarChar:
+            return CDataType::VarChar;
+        case milvus::proto::schema::DataType::Array:
+            return CDataType::Array;
+        case milvus::proto::schema::DataType::JSON:
+            return CDataType::JSON;
+        case milvus::proto::schema::DataType::BinaryVector:
+            return CDataType::BinaryVector;
+        case milvus::proto::schema::DataType::FloatVector:
+            return CDataType::FloatVector;
+        default:
+            return CDataType::None;
+    }
+}
+
+CStatus
+GetRetrieveResultFieldMeta(CRetrieveResult retrieve_result,
+                           int64_t index,
+                           CFieldMeta* meta) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        meta->field_id = field->field_id();
+        if (!field->field_name().empty()) {
+            strcpy(meta->field_name, field->field_name().c_str());
+        }
+        meta->field_type = ConvertSchemaPbTypeToCType(field->type());
+        if (meta->field_type == CDataType::FloatVector ||
+            meta->field_type == CDataType::BinaryVector) {
+            meta->dim = field->vectors().dim();
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForBool(CRetrieveResult retrieve_result,
+                                  int64_t index,
+                                  bool* data,
+                                  int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto bool_array = field->scalars().bool_data();
+        AssertInfo(bool_array.data_size() == size,
+                   "bool field data size not match");
+        const bool* src_data_ptr = bool_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForInt(CRetrieveResult retrieve_result,
+                                 int64_t index,
+                                 int32_t* data,
+                                 int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto int_array = field->scalars().int_data();
+        AssertInfo(int_array.data_size() == size,
+                   "int field data size not match");
+        const int32_t* src_data_ptr = int_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForLong(CRetrieveResult retrieve_result,
+                                  int64_t index,
+                                  int64_t* data,
+                                  int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto long_array = field->scalars().long_data();
+        AssertInfo(long_array.data_size() == size,
+                   "long field data size not match");
+        const int64_t* src_data_ptr = long_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForFloat(CRetrieveResult retrieve_result,
+                                   int64_t index,
+                                   float* data,
+                                   int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto float_array = field->scalars().float_data();
+        AssertInfo(float_array.data_size() == size,
+                   "float field data size not match");
+        const float* src_data_ptr = float_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForDouble(CRetrieveResult retrieve_result,
+                                    int64_t index,
+                                    double* data,
+                                    int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto double_array = field->scalars().double_data();
+        AssertInfo(double_array.data_size() == size,
+                   "double field data size not match");
+        const double* src_data_ptr = double_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForVarChar(CRetrieveResult retrieve_result,
+                                     int64_t index,
+                                     char** data,
+                                     int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto string_array = field->scalars().string_data();
+        AssertInfo(string_array.data_size() == size,
+                   "string field data size not match");
+        for (size_t i = 0; i < size; ++i) {
+            data[i] = strdup(string_array.data(i).c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForJson(CRetrieveResult retrieve_result,
+                                  int64_t index,
+                                  char** data,
+                                  int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto json_array = field->scalars().json_data();
+        AssertInfo(json_array.data_size() == size,
+                   "json field data size not match");
+        for (size_t i = 0; i < size; ++i) {
+            data[i] = strdup(json_array.data(i).c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForFloatVector(CRetrieveResult retrieve_result,
+                                         int64_t index,
+                                         float* data,
+                                         int64_t dim,
+                                         int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto float_array = field->vectors().float_vector();
+        AssertInfo(float_array.data_size() == size * dim,
+                   "float vector field size not match");
+        const float* src_data_ptr = float_array.data().data();
+        std::copy(src_data_ptr, src_data_ptr + size * dim, data);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
+GetRetrieveResultFieldDataForBinaryVector(CRetrieveResult retrieve_result,
+                                          int64_t index,
+                                          char* data,
+                                          int64_t dim,
+                                          int64_t size) {
+    try {
+        auto result =
+            reinterpret_cast<milvus::RetrieveResult*>(retrieve_result);
+        AssertInfo(index <= result->field_data_.size(),
+                   "retrieve result field index out of range");
+        const auto* field = result->field_data_[index].get();
+        auto byte_array = field->vectors().binary_vector();
+        AssertInfo(byte_array.length() == size * dim / 8, "");
+        std::copy(byte_array.data(), byte_array.data() + size * dim / 8, data);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

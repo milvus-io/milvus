@@ -76,8 +76,11 @@ struct RetrieveResult {
 
  public:
     void* segment_;
+    bool is_count_ = false;
     std::vector<int64_t> result_offsets_;
-    std::vector<DataArray> field_data_;
+    milvus::DataType pk_type_;
+    std::unique_ptr<IdArray> ids_ = nullptr;
+    std::vector<std::unique_ptr<DataArray>> field_data_;
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
