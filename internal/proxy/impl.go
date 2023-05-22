@@ -2693,7 +2693,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	tr := timerecord.NewTimeRecorder(method)
 	receiveSize := proto.Size(request)
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(receiveSize))
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.InsertLabel).Add(float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.InsertLabel, request.GetCollectionName()).Add(float64(receiveSize))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 	it := &insertTask{
@@ -2810,7 +2812,9 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	receiveSize := proto.Size(request)
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.DeleteLabel, request.GetCollectionName()).Add(float64(receiveSize))
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -2899,7 +2903,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 // Search search the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SearchLabel).Add(float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.SearchLabel, request.GetCollectionName()).Add(float64(receiveSize))
+
+	metrics.ProxyReceivedNQ.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.SearchLabel, request.GetCollectionName()).Add(float64(request.GetNq()))
 
 	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
 
@@ -3167,7 +3177,13 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.QueryLabel).Add(float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.QueryLabel, request.GetCollectionName()).Add(float64(receiveSize))
+
+	metrics.ProxyReceivedNQ.WithLabelValues(
+		strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.SearchLabel, request.GetCollectionName()).Add(float64(1))
 
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1)
 
