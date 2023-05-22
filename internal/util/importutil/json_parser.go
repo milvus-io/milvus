@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 )
 
 const (
@@ -44,17 +45,17 @@ type IOReader struct {
 }
 
 type JSONParser struct {
-	ctx                context.Context  // for canceling parse process
-	bufRowCount        int              // max rows in a buffer
-	fields             map[string]int64 // fields need to be parsed
+	ctx                context.Context // for canceling parse process
+	bufRowCount        int             // max rows in a buffer
 	name2FieldID       map[string]storage.FieldID
 	updateProgressFunc func(percent int64) // update working progress percent value
+	dynamicFieldID     storage.FieldID     // dynamic field id, set to -1 if no dynamic field
 }
 
 // NewJSONParser helper function to create a JSONParser
 func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema, updateProgressFunc func(percent int64)) *JSONParser {
-	fields := make(map[string]int64)
 	name2FieldID := make(map[string]storage.FieldID)
+	dynamicFieldID := int64(-1)
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 		// RowIDField and TimeStampField is internal field, no need to parse
@@ -66,16 +67,18 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 			continue
 		}
 
-		fields[schema.GetName()] = 0
 		name2FieldID[schema.GetName()] = schema.GetFieldID()
+		if schema.GetIsDynamic() && collectionSchema.GetEnableDynamicField() {
+			dynamicFieldID = schema.GetFieldID()
+		}
 	}
 
 	parser := &JSONParser{
 		ctx:                ctx,
 		bufRowCount:        1024,
-		fields:             fields,
 		name2FieldID:       name2FieldID,
 		updateProgressFunc: updateProgressFunc,
+		dynamicFieldID:     dynamicFieldID,
 	}
 	adjustBufSize(parser, collectionSchema)
 
@@ -108,6 +111,50 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 	parser.bufRowCount = bufRowCount
 }
 
+func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row map[storage.FieldID]interface{}) error {
+	if p.dynamicFieldID < 0 {
+		return nil
+	}
+	// combine the dynamic field value
+	// valid input:
+	// case 1: {"id": 1, "vector": [], "x": 8, "$meta": "{\"y\": 8}"}
+	// case 2: {"id": 1, "vector": [], "x": 8, "$meta": {}}
+	// case 3: {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
+	// case 4: {"id": 1, "vector": [], "$meta": {"x": 8}}
+	// case 5: {"id": 1, "vector": [], "$meta": {}}
+	// case 6: {"id": 1, "vector": [], "x": 8}
+	// case 7: {"id": 1, "vector": []}
+	obj, ok := row[p.dynamicFieldID]
+	if ok {
+		if len(dynamicValues) > 0 {
+			if value, is := obj.(string); is {
+				// case 1
+				mp := make(map[string]interface{})
+				json.Unmarshal([]byte(value), &mp)
+				maps.Copy(dynamicValues, mp)
+			} else if mp, is := obj.(map[string]interface{}); is {
+				// case 2
+				maps.Copy(dynamicValues, mp)
+			} else {
+				// invalid input
+				return errors.New("illegal value for dynamic field")
+			}
+			row[p.dynamicFieldID] = dynamicValues
+		}
+		// else case 3/4/5
+	} else {
+		if len(dynamicValues) > 0 {
+			// case 6
+			row[p.dynamicFieldID] = dynamicValues
+		} else {
+			// case 7
+			row[p.dynamicFieldID] = "{}"
+		}
+	}
+
+	return nil
+}
+
 func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}, error) {
 	stringMap, ok := raw.(map[string]interface{})
 	if !ok {
@@ -115,20 +162,29 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 		return nil, errors.New("invalid JSON format, each row should be a key-value map")
 	}
 
+	dynamicValues := make(map[string]interface{})
 	row := make(map[storage.FieldID]interface{})
 	for k, v := range stringMap {
-		// if user provided redundant field, return error
 		fieldID, ok := p.name2FieldID[k]
-		if !ok {
+		if ok {
+			row[fieldID] = v
+		} else if p.dynamicFieldID >= 0 {
+			// has dynamic field. put redundant pair to dynamicValues
+			dynamicValues[k] = v
+		} else {
+			// no dynamic field. if user provided redundant field, return error
 			log.Error("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
 			return nil, fmt.Errorf("the field '%s' is not defined in collection schema", k)
 		}
-		row[fieldID] = v
 	}
 
 	// some fields not provided?
 	if len(row) != len(p.name2FieldID) {
 		for k, v := range p.name2FieldID {
+			if v == p.dynamicFieldID {
+				// dyanmic field, allow user ignore this field
+				continue
+			}
 			_, ok := row[v]
 			if !ok {
 				log.Error("JSON parser: a field value is missed", zap.String("fieldName", k))
@@ -137,7 +193,9 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 		}
 	}
 
-	return row, nil
+	// combine the redundant pairs into dunamic field(if has)
+	err := p.combineDynamicRow(dynamicValues, row)
+	return row, err
 }
 
 func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {

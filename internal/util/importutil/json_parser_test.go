@@ -385,3 +385,189 @@ func Test_JSONParserParseRows_StrPK(t *testing.T) {
 		}
 	}
 }
+
+func Test_JSONParserCombineDynamicRow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := &schemapb.CollectionSchema{
+		Name:               "schema",
+		Description:        "schema",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      106,
+				Name:         "FieldID",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				Description:  "int64",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      113,
+				Name:         "FieldDynamic",
+				IsPrimaryKey: false,
+				IsDynamic:    true,
+				Description:  "dynamic field",
+				DataType:     schemapb.DataType_JSON,
+			},
+		},
+	}
+	parser := NewJSONParser(ctx, schema, nil)
+	assert.NotNil(t, parser)
+
+	// valid input:
+	// case 1: {"id": 1, "vector": [], "x": 8, "$meta": "{\"y\": 8}"}
+	// case 2: {"id": 1, "vector": [], "x": 8, "$meta": {}}
+	// case 3: {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
+	// case 4: {"id": 1, "vector": [], "$meta": {"x": 8}}
+	// case 5: {"id": 1, "vector": [], "$meta": {}}
+	// case 6: {"id": 1, "vector": [], "x": 8}
+	// case 7: {"id": 1, "vector": []}
+
+	// case 1
+	dynamicValues := map[string]interface{}{
+		"x": 8,
+	}
+	row := map[storage.FieldID]interface{}{
+		106: 1,
+		113: "{\"y\": 8}",
+	}
+	err := parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(113))
+	assert.Contains(t, row[113], "x")
+	assert.Contains(t, row[113], "y")
+
+	// case 2
+	dynamicValues = map[string]interface{}{
+		"x": 8,
+	}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+		113: map[string]interface{}{},
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(113))
+	assert.Contains(t, row[113], "x")
+
+	// case 3/4/5
+	dynamicValues = map[string]interface{}{}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+		113: "{\"x\": 8}",
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(113))
+
+	// case 6
+	dynamicValues = map[string]interface{}{
+		"x": 8,
+	}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(113))
+	assert.Contains(t, row[113], "x")
+
+	// case 7
+	dynamicValues = map[string]interface{}{}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(113))
+	assert.Equal(t, "{}", row[113])
+
+	// invalid input
+	dynamicValues = map[string]interface{}{
+		"x": 8,
+	}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+		113: 5,
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.Error(t, err)
+
+	// no dynamic field
+	parser.dynamicFieldID = -1
+	dynamicValues = map[string]interface{}{
+		"x": 8,
+	}
+	row = map[storage.FieldID]interface{}{
+		106: 1,
+	}
+	err = parser.combineDynamicRow(dynamicValues, row)
+	assert.NoError(t, err)
+	assert.NotContains(t, row, int64(113))
+}
+
+func Test_JSONParserVerifyRow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := &schemapb.CollectionSchema{
+		Name:               "schema",
+		Description:        "schema",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      106,
+				Name:         "FieldID",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				Description:  "int64",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      113,
+				Name:         "FieldDynamic",
+				IsPrimaryKey: false,
+				IsDynamic:    true,
+				Description:  "dynamic field",
+				DataType:     schemapb.DataType_JSON,
+			},
+		},
+	}
+	parser := NewJSONParser(ctx, schema, nil)
+	assert.NotNil(t, parser)
+	assert.Equal(t, int64(113), parser.dynamicFieldID)
+
+	// dynamic field provided
+	raw := map[string]interface{}{
+		"FieldID":      100,
+		"FieldDynamic": "{\"x\": 8}",
+		"y":            true,
+	}
+	row, err := parser.verifyRow(raw)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(106))
+	assert.Contains(t, row, int64(113))
+	assert.Contains(t, row[113], "x")
+	assert.Contains(t, row[113], "y")
+
+	// dynamic field not provided
+	raw = map[string]interface{}{
+		"FieldID": 100,
+	}
+	row, err = parser.verifyRow(raw)
+	assert.NoError(t, err)
+	assert.Contains(t, row, int64(106))
+	assert.Contains(t, row, int64(113))
+	assert.Equal(t, "{}", row[113])
+
+	// invalid input dynamic field
+	raw = map[string]interface{}{
+		"FieldID":      100,
+		"FieldDynamic": true,
+		"y":            true,
+	}
+	_, err = parser.verifyRow(raw)
+	assert.Error(t, err)
+}
