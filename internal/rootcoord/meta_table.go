@@ -327,6 +327,12 @@ func (mt *MetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Ti
 }
 
 func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty")
+		dbName = util.DefaultDBName
+	}
+
 	db, ok := mt.dbName2Meta[dbName]
 	if !ok {
 		return nil, fmt.Errorf("database:%s not found", dbName)
@@ -532,6 +538,12 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, col
 }
 
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("collectionName", collectionName), zap.Uint64("ts", ts))
+		dbName = util.DefaultDBName
+	}
+
 	collectionID, ok := mt.aliases.get(dbName, collectionName)
 	if ok {
 		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
@@ -624,6 +636,12 @@ func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Time
 }
 
 func (mt *MetaTable) listCollectionFromCache(dbName string, onlyAvail bool) ([]*model.Collection, error) {
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty")
+		dbName = util.DefaultDBName
+	}
+
 	collectionIDs, err := mt.names.listCollectionID(dbName)
 	if err != nil {
 		return nil, err
@@ -675,12 +693,17 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	// backward compatibility for rolling  upgrade
 
 	log := log.Ctx(ctx).With(
 		zap.String("db", dbName),
 		zap.String("oldName", oldName),
 		zap.String("newName", newName),
 	)
+	if dbName == "" {
+		log.Warn("db name is empty")
+		dbName = util.DefaultDBName
+	}
 
 	//old collection should not be an alias
 	_, ok := mt.aliases.get(dbName, oldName)
@@ -818,6 +841,11 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
+		dbName = util.DefaultDBName
+	}
 
 	// It's ok that we don't read from catalog when cache missed.
 	// Since cache always keep the latest version, and the ts should always be the latest.
@@ -881,6 +909,11 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 func (mt *MetaTable) DropAlias(ctx context.Context, dbName string, alias string, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("alias", alias), zap.Uint64("ts", ts))
+		dbName = util.DefaultDBName
+	}
 
 	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
 	if err != nil {
@@ -905,6 +938,11 @@ func (mt *MetaTable) DropAlias(ctx context.Context, dbName string, alias string,
 func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
+		dbName = util.DefaultDBName
+	}
 
 	// It's ok that we don't read from catalog when cache missed.
 	// Since cache always keep the latest version, and the ts should always be the latest.
