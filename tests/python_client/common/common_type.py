@@ -63,6 +63,12 @@ max_field_num = 64  # Maximum number of fields in a collection
 max_name_length = 255  # Maximum length of name for a collection or alias
 default_replica_num = 1
 max_shards_num = 16
+default_db = "default"
+max_database_num = 64
+max_collections_per_db = 65536
+max_collection_num = 65536
+
+
 IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
 NAMESPACE_CHAOS_TESTING = "chaos-testing"
 
