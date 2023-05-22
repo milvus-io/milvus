@@ -115,6 +115,7 @@ if (LINUX OR MSYS)
                   "-DELPP_THREAD_SAFE"
                   "-fopenmp"
                   "-Werror"
+                  "-O3"
                   )
 endif ()
 

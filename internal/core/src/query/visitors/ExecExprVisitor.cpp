@@ -13,6 +13,7 @@
 
 #include <boost/variant.hpp>
 #include <boost/utility/binary.hpp>
+#include <ctime>
 #include <deque>
 #include <optional>
 #include <string>
@@ -271,8 +272,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
         const T* data = chunk.data();
         // Can use CPU SIMD optimazation to speed up
         for (int index = 0; index < this_size; ++index) {
-            auto x = data[index];
-            chunk_res[index] = element_func(x);
+            chunk_res[index] = element_func(data[index]);
         }
         results.emplace_back(std::move(chunk_res));
     }
@@ -878,7 +878,7 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
     IndexInnerType val1 = expr.lower_value_;
     IndexInnerType val2 = expr.upper_value_;
 
-    auto index_func = [=](Index* index) {
+    auto index_func = [&](Index* index) {
         return index->Range(val1, lower_inclusive, val2, upper_inclusive);
     };
     if (lower_inclusive && upper_inclusive) {
