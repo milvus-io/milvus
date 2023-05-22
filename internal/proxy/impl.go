@@ -3689,39 +3689,48 @@ func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*
 	}
 	log.Info(rpcReceived("FlushAll"))
 
-	// Flush all collections to accelerate the flushAll progress
-	showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
-	})
-	if err != nil {
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	hasError := func(status *commonpb.Status, err error) bool {
+		if err != nil {
+			resp.Status = &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("FlushAll failed", zap.String("err", err.Error()))
+			return true
 		}
-		log.Warn("FlushAll failed", zap.String("err", err.Error()))
-		return resp, nil
-	}
-	if showColRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("FlushAll failed", zap.String("err", showColRsp.GetStatus().GetReason()))
-		resp.Status = showColRsp.GetStatus()
-		return resp, nil
-	}
-	flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
-		Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
-		CollectionNames: showColRsp.GetCollectionNames(),
-	})
-	if err != nil {
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("FlushAll failed", zap.String("err", status.GetReason()))
+			resp.Status = status
+			return true
 		}
-		log.Warn("FlushAll failed", zap.String("err", err.Error()))
+		return false
+	}
+
+	dbsRsp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
+	})
+	if hasError(dbsRsp.GetStatus(), err) {
 		return resp, nil
 	}
-	if flushRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("FlushAll failed", zap.String("err", flushRsp.GetStatus().GetReason()))
-		resp.Status = flushRsp.GetStatus()
-		return resp, nil
+
+	for _, dbName := range dbsRsp.DbNames {
+		// Flush all collections to accelerate the flushAll progress
+		showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
+			DbName: dbName,
+		})
+		if hasError(showColRsp.GetStatus(), err) {
+			return resp, nil
+		}
+
+		flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
+			Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
+			DbName:          dbName,
+			CollectionNames: showColRsp.GetCollectionNames(),
+		})
+		if hasError(flushRsp.GetStatus(), err) {
+			return resp, nil
+		}
 	}
 
 	// allocate current ts as FlushAllTs
