@@ -59,9 +59,10 @@ type searchTask struct {
 	schema         *schemapb.CollectionSchema
 	requery        bool
 
-	offset          int64
-	resultBuf       chan *internalpb.SearchResults
-	toReduceResults []*internalpb.SearchResults
+	offset           int64
+	resultBuf        chan *internalpb.SearchResults
+	toReduceResults  []*internalpb.SearchResults
+	userOutputFields []string
 
 	searchShardPolicy pickShardPolicy
 	shardMgr          *shardClientMgr
@@ -234,7 +235,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		return err
 	}

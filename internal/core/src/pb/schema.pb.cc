@@ -266,6 +266,7 @@ PROTOBUF_CONSTEXPR SearchResultData::SearchResultData(
   , /*decltype(_impl_.scores_)*/{}
   , /*decltype(_impl_.topks_)*/{}
   , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
+  , /*decltype(_impl_.output_fields_)*/{}
   , /*decltype(_impl_.ids_)*/nullptr
   , /*decltype(_impl_.num_queries_)*/int64_t{0}
   , /*decltype(_impl_.top_k_)*/int64_t{0}
@@ -455,6 +456,7 @@ const uint32_t TableStruct_schema_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(p
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.scores_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.ids_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.topks_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, _impl_.output_fields_),
 };
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, -1, sizeof(::milvus::proto::schema::FieldSchema)},
@@ -551,28 +553,28 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "B\007\n\005field\"w\n\003IDs\0220\n\006int_id\030\001 \001(\0132\036.milvu"
   "s.proto.schema.LongArrayH\000\0222\n\006str_id\030\002 \001"
   "(\0132 .milvus.proto.schema.StringArrayH\000B\n"
-  "\n\010id_field\"\261\001\n\020SearchResultData\022\023\n\013num_q"
+  "\n\010id_field\"\310\001\n\020SearchResultData\022\023\n\013num_q"
   "ueries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\0223\n\013fields_da"
   "ta\030\003 \003(\0132\036.milvus.proto.schema.FieldData"
   "\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus.p"
-  "roto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\261\001\n\010DataT"
-  "ype\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005Int"
-  "16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005Float\020\n\022\n\n"
-  "\006Double\020\013\022\n\n\006String\020\024\022\013\n\007VarChar\020\025\022\t\n\005Ar"
-  "ray\020\026\022\010\n\004JSON\020\027\022\020\n\014BinaryVector\020d\022\017\n\013Flo"
-  "atVector\020e*V\n\nFieldState\022\020\n\014FieldCreated"
-  "\020\000\022\021\n\rFieldCreating\020\001\022\021\n\rFieldDropping\020\002"
-  "\022\020\n\014FieldDropped\020\003Bf\n\016io.milvus.grpcB\013Sc"
-  "hemaProtoP\001Z1github.com/milvus-io/milvus"
-  "-proto/go-api/schemapb\240\001\001\252\002\016IO.Milvus.Gr"
-  "pcb\006proto3"
+  "roto.schema.IDs\022\r\n\005topks\030\006 \003(\003\022\025\n\routput"
+  "_fields\030\007 \003(\t*\261\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004"
+  "Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t"
+  "\n\005Int64\020\005\022\t\n\005Float\020\n\022\n\n\006Double\020\013\022\n\n\006Stri"
+  "ng\020\024\022\013\n\007VarChar\020\025\022\t\n\005Array\020\026\022\010\n\004JSON\020\027\022\020"
+  "\n\014BinaryVector\020d\022\017\n\013FloatVector\020e*V\n\nFie"
+  "ldState\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreati"
+  "ng\020\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDropped\020"
+  "\003Bf\n\016io.milvus.grpcB\013SchemaProtoP\001Z1gith"
+  "ub.com/milvus-io/milvus-proto/go-api/sch"
+  "emapb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_schema_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_schema_2eproto = {
-    false, false, 2730, descriptor_table_protodef_schema_2eproto,
+    false, false, 2753, descriptor_table_protodef_schema_2eproto,
     "schema.proto",
     &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_deps, 1, 17,
     schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
@@ -5482,6 +5484,7 @@ SearchResultData::SearchResultData(const SearchResultData& from)
     , decltype(_impl_.scores_){from._impl_.scores_}
     , decltype(_impl_.topks_){from._impl_.topks_}
     , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
+    , decltype(_impl_.output_fields_){from._impl_.output_fields_}
     , decltype(_impl_.ids_){nullptr}
     , decltype(_impl_.num_queries_){}
     , decltype(_impl_.top_k_){}
@@ -5506,6 +5509,7 @@ inline void SearchResultData::SharedCtor(
     , decltype(_impl_.scores_){arena}
     , decltype(_impl_.topks_){arena}
     , /*decltype(_impl_._topks_cached_byte_size_)*/{0}
+    , decltype(_impl_.output_fields_){arena}
     , decltype(_impl_.ids_){nullptr}
     , decltype(_impl_.num_queries_){int64_t{0}}
     , decltype(_impl_.top_k_){int64_t{0}}
@@ -5527,6 +5531,7 @@ inline void SearchResultData::SharedDtor() {
   _impl_.fields_data_.~RepeatedPtrField();
   _impl_.scores_.~RepeatedField();
   _impl_.topks_.~RepeatedField();
+  _impl_.output_fields_.~RepeatedPtrField();
   if (this != internal_default_instance()) delete _impl_.ids_;
 }
 
@@ -5543,6 +5548,7 @@ void SearchResultData::Clear() {
   _impl_.fields_data_.Clear();
   _impl_.scores_.Clear();
   _impl_.topks_.Clear();
+  _impl_.output_fields_.Clear();
   if (GetArenaForAllocation() == nullptr && _impl_.ids_ != nullptr) {
     delete _impl_.ids_;
   }
@@ -5618,6 +5624,21 @@ const char* SearchResultData::_InternalParse(const char* ptr, ::_pbi::ParseConte
         } else
           goto handle_unusual;
         continue;
+      // repeated string output_fields = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 58)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_output_fields();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            CHK_(::_pbi::VerifyUTF8(str, "milvus.proto.schema.SearchResultData.output_fields"));
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<58>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5688,6 +5709,16 @@ uint8_t* SearchResultData::_InternalSerialize(
     }
   }
 
+  // repeated string output_fields = 7;
+  for (int i = 0, n = this->_internal_output_fields_size(); i < n; i++) {
+    const auto& s = this->_internal_output_fields(i);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      s.data(), static_cast<int>(s.length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.schema.SearchResultData.output_fields");
+    target = stream->WriteString(7, s, target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5736,6 +5767,14 @@ size_t SearchResultData::ByteSizeLong() const {
     total_size += data_size;
   }
 
+  // repeated string output_fields = 7;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.output_fields_.size());
+  for (int i = 0, n = _impl_.output_fields_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.output_fields_.Get(i));
+  }
+
   // .milvus.proto.schema.IDs ids = 5;
   if (this->_internal_has_ids()) {
     total_size += 1 +
@@ -5774,6 +5813,7 @@ void SearchResultData::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const
   _this->_impl_.fields_data_.MergeFrom(from._impl_.fields_data_);
   _this->_impl_.scores_.MergeFrom(from._impl_.scores_);
   _this->_impl_.topks_.MergeFrom(from._impl_.topks_);
+  _this->_impl_.output_fields_.MergeFrom(from._impl_.output_fields_);
   if (from._internal_has_ids()) {
     _this->_internal_mutable_ids()->::milvus::proto::schema::IDs::MergeFrom(
         from._internal_ids());
@@ -5804,6 +5844,7 @@ void SearchResultData::InternalSwap(SearchResultData* other) {
   _impl_.fields_data_.InternalSwap(&other->_impl_.fields_data_);
   _impl_.scores_.InternalSwap(&other->_impl_.scores_);
   _impl_.topks_.InternalSwap(&other->_impl_.topks_);
+  _impl_.output_fields_.InternalSwap(&other->_impl_.output_fields_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(SearchResultData, _impl_.top_k_)
       + sizeof(SearchResultData::_impl_.top_k_)
