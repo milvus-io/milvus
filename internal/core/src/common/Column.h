@@ -117,10 +117,11 @@ class VariableColumn : public ColumnBase {
             end = FIELD_DATA(info.field_data, json).end();
         }
 
+        size_ = 0;
         indices_.reserve(info.row_count);
         while (begin != end) {
             indices_.push_back(size_);
-            size_ += begin->size();
+            size_ += begin->length();
             begin++;
         }
 

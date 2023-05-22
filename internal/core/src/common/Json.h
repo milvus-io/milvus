@@ -28,6 +28,7 @@
 #include "exceptions/EasyAssert.h"
 #include "simdjson.h"
 #include "fmt/core.h"
+#include "simdjson/common_defs.h"
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 
@@ -54,7 +55,8 @@ class Json {
     // WARN: this is used for fast non-copy construction,
     // MUST make sure that the data points to a memory that
     // with size at least len + SIMDJSON_PADDING
-    Json(const char* data, size_t len) : data_(data, len) {
+    Json(const char* data, size_t len)
+        : data_(data, len, len + simdjson::SIMDJSON_PADDING) {
     }
 
     Json(const Json& json) {
@@ -91,20 +93,18 @@ class Json {
         return data_;
     }
 
-    document
+    value_result<document>
     doc() const {
         thread_local simdjson::ondemand::parser parser;
 
         // it's always safe to add the padding,
         // as we have allocated the memory with this padding
-        document doc;
-        auto err =
-            parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING)
-                .get(doc);
-        AssertInfo(err == simdjson::SUCCESS,
+        auto doc =
+            parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING);
+        AssertInfo(doc.error() == simdjson::SUCCESS,
                    fmt::format("failed to parse the json {}: {}",
                                data_,
-                               simdjson::error_message(err)));
+                               simdjson::error_message(doc.error())));
         return doc;
     }
 
