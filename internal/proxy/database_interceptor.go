@@ -218,6 +218,16 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.OperatePrivilegeRequest:
+		if r.Entity != nil && r.Entity.DbName == "" {
+			r.Entity.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.SelectGrantRequest:
+		if r.Entity != nil && r.Entity.DbName == "" {
+			r.Entity.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.GetImportStateRequest:
 		return ctx, r
 	case *milvuspb.DummyRequest:

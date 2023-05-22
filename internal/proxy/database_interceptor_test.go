@@ -86,6 +86,8 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.RenameCollectionRequest{},
 			&milvuspb.TransferReplicaRequest{},
 			&milvuspb.ListImportTasksRequest{},
+			&milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{}},
+			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")
