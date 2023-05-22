@@ -2424,6 +2424,50 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
 
 
 class TestUtilityRBAC(TestcaseBase):
+
+    def teardown_method(self, method):
+        """
+        teardown method: drop role and user
+        """
+        log.info("[utility_teardown_method] Start teardown utility test cases ...")
+
+        self.connection_wrap.connect(host=cf.param_info.param_host, port=cf.param_info.param_port, user=ct.default_user,
+                                     password=ct.default_password, secure=cf.param_info.param_secure)
+
+        # drop users
+        users, _ = self.utility_wrap.list_users(False)
+        for u in users.groups:
+            if u.username != ct.default_user:
+                self.utility_wrap.delete_user(u.username)
+        user_groups, _ = self.utility_wrap.list_users(False)
+        assert len(user_groups.groups) == 1
+
+        role_groups, _ = self.utility_wrap.list_roles(False)
+
+        # drop roles
+        for role_group in role_groups.groups:
+            if role_group.role_name not in ['admin', 'public']:
+                self.utility_wrap.init_role(role_group.role_name)
+                g_list, _ = self.utility_wrap.role_list_grants()
+                for g in g_list.groups:
+                    self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
+                self.utility_wrap.role_drop()
+        role_groups, _ = self.utility_wrap.list_roles(False)
+        assert len(role_groups.groups) == 2
+
+        super().teardown_method(method)
+
+    def init_db_kwargs(self, with_db):
+        """
+        init db name kwargs
+        """
+        db_kwargs = {}
+        if with_db:
+            db_name = cf.gen_unique_str("db")
+            self.database_wrap.create_database(db_name)
+            db_kwargs = {"db_name": db_name}
+        return db_kwargs
+
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_clear_roles(self, host, port):
         """
@@ -2690,8 +2734,53 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.init_role("public")
         self.utility_wrap.role_grant("Collection", c_name, "Insert")
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_revoke_user_after_delete_user(self, host, port):
+        """
+        target: test revoke user with deleted user
+        method: 1. create user -> create a role -> role add user
+                2. delete user
+                3. revoke the deleted user
+        expected: revoke successfully
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # create user
+        username = cf.gen_unique_str("user")
+        u, _ = self.utility_wrap.create_user(user=username, password=ct.default_password)
+
+        # create a role and bind user
+        role_name = cf.gen_unique_str("role")
+        self.utility_wrap.init_role(role_name)
+        self.utility_wrap.create_role()
+        self.utility_wrap.role_add_user(username)
+
+        # delete user
+        self.utility_wrap.delete_user(username)
+
+        # get role users
+        users, _ = self.utility_wrap.role_get_users()
+        log.debug(users)
+
+        # re-create the user with different password
+        self.utility_wrap.create_user(user=username, password=ct.default_password + "aaa")
+        self.connection_wrap.connect(alias="re-user", host=host, port=port, user=username,
+                                     password=ct.default_password + "aaa", check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections(using="re-user")
+
+        # delete user and remove user successfully
+        self.utility_wrap.delete_user(username)
+        self.utility_wrap.role_remove_user(username)
+
+        # get role users and verify user removed
+        role_users, _ = self.utility_wrap.role_get_users()
+        assert username not in role_users
+
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_role_revoke_collection_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [True, False])
+    def test_role_revoke_collection_privilege(self, host, port, with_db):
         """
         target: test revoke role collection privilege,
         method: create role and collection, grant role insert privilege, revoke privilege
@@ -2709,16 +2798,21 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         self.utility_wrap.role_add_user(user)
 
-        self.init_collection_wrap(name=c_name)
+        # self.init_collection_wrap(name=c_name)
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=c_name)
 
         # grant user collection insert privilege
-        self.utility_wrap.role_grant("Collection", c_name, "Insert")
+        self.utility_wrap.role_grant("Collection", c_name, "Insert", **db_kwargs)
+        self.utility_wrap.role_list_grants(**db_kwargs)
 
         # verify user specific collection insert privilege
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
-        collection_w = self.init_collection_wrap(name=c_name)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
+
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
 
@@ -2727,17 +2821,18 @@ class TestUtilityRBAC(TestcaseBase):
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.init_role(r_name)
-        self.utility_wrap.role_revoke("Collection", c_name, "Insert")
+        self.utility_wrap.role_revoke("Collection", c_name, "Insert", **db_kwargs)
 
         # verify revoke is success
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.insert(data=data, check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_role_revoke_global_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_role_revoke_global_privilege(self, host, port, with_db):
         """
         target: test revoke role global privilege,
         method: create role, grant role global createcollection privilege, revoke privilege
@@ -2757,12 +2852,13 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_add_user(user)
 
         # grant user Global CreateCollection privilege
-        self.utility_wrap.role_grant("Global", "*", "CreateCollection")
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "CreateCollection", **db_kwargs)
 
         # verify user specific Global CreateCollection privilege
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w = self.init_collection_wrap(name=c_name)
 
         # revoke privilege
@@ -2770,17 +2866,18 @@ class TestUtilityRBAC(TestcaseBase):
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.init_role(r_name)
-        self.utility_wrap.role_revoke("Global", "*", "CreateCollection")
+        self.utility_wrap.role_revoke("Global", "*", "CreateCollection", **db_kwargs)
 
         # verify revoke is success
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w = self.init_collection_wrap(name=c_name_2,
                                                  check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_role_revoke_user_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_role_revoke_user_privilege(self, host, port, with_db):
         """
         target: test revoke role user privilege,
         method: create role, grant role user updateuser privilege, revoke privilege
@@ -2802,18 +2899,20 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_add_user(user)
 
         # grant user User UpdateUser privilege
-        self.utility_wrap.role_grant("User", "*", "UpdateUser")
-        self.utility_wrap.role_revoke("User", "*", "UpdateUser")
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("User", "*", "UpdateUser", **db_kwargs)
+        self.utility_wrap.role_revoke("User", "*", "UpdateUser", **db_kwargs)
 
         # verify revoke is success
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         self.utility_wrap.reset_password(user=user_test, old_password=password_test, new_password=password,
                                          check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_role_list_grants(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_role_list_grants(self, host, port, with_db):
         """
         target: test grant role privileges and list them
         method: grant role privileges and list them
@@ -2834,13 +2933,15 @@ class TestUtilityRBAC(TestcaseBase):
         self.init_collection_wrap(name=c_name)
 
         # grant user privilege
+        db_kwargs = self.init_db_kwargs(with_db)
         self.utility_wrap.init_role(r_name)
         grant_list = cf.gen_grant_list(c_name)
         for grant_item in grant_list:
-            self.utility_wrap.role_grant(grant_item["object"], grant_item["object_name"], grant_item["privilege"])
+            self.utility_wrap.role_grant(grant_item["object"], grant_item["object_name"], grant_item["privilege"],
+                                         **db_kwargs)
 
         # list grants
-        g_list, _ = self.utility_wrap.role_list_grants()
+        g_list, _ = self.utility_wrap.role_list_grants(**db_kwargs)
         assert len(g_list.groups) == len(grant_list)
 
     @pytest.mark.tags(CaseLabel.RBAC)
@@ -2879,6 +2980,7 @@ class TestUtilityRBAC(TestcaseBase):
         u, _ = self.utility_wrap.create_user(user=user, password=password)
 
         self.utility_wrap.init_role(name)
+        self.utility_wrap.role_add_user(user)
         self.utility_wrap.role_add_user(user)
         users, _ = self.utility_wrap.role_get_users()
         user_info, _ = self.utility_wrap.list_user(user, True)
@@ -2935,7 +3037,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_list_global_grands_by_role_and_object(self, host, port):
+    def test_list_global_grants_by_role_and_object(self, host, port):
         """
         target: list grants by role and object
         method: create a new role,grant role global privilege,list grants by role and object
@@ -2982,13 +3084,15 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
         assert collection_w.num_entities == ct.default_nb
         collection_w.release()
         collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_collection_load_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_collection_load_privilege(self, host, port, with_db):
         """
         target: verify grant collection load privilege
         method: verify grant collection load privilege
@@ -3004,18 +3108,29 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Collection", c_name, "Load")
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+
+        self.utility_wrap.role_grant("Collection", c_name, "Load", **db_kwargs)
+        self.utility_wrap.role_grant("Collection", c_name, "GetLoadingProgress", **db_kwargs)
+        log.debug(self.utility_wrap.role_list_grants(**db_kwargs))
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
+        log.debug(collection_w.name)
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_collection_release_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_collection_release_privilege(self, host, port, with_db):
         """
         target: verify grant collection release privilege
         method: verify grant collection release privilege
@@ -3031,20 +3146,29 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Collection", c_name, "Release")
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+
+        self.utility_wrap.role_grant("Collection", c_name, "Release", **db_kwargs)
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
+        self.utility_wrap.role_list_grants(**db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         collection_w.release()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/19012")
-    def test_verify_grant_collection_compaction_privilege(self, host, port):
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23945 not supported compaction privilege")
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_collection_compaction_privilege(self, host, port, with_db):
         """
         target: verify grant collection compaction privilege
         method: verify grant collection compaction privilege
@@ -3052,24 +3176,35 @@ class TestUtilityRBAC(TestcaseBase):
         """
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
-        user = cf.gen_unique_str(prefix)
+        user = cf.gen_unique_str("user")
         password = cf.gen_unique_str(prefix)
-        c_name = cf.gen_unique_str(prefix)
-        r_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str("coll")
+        r_name = cf.gen_unique_str("role")
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+
+        self.utility_wrap.role_grant("Collection", c_name, "Compaction", **db_kwargs)
+        self.utility_wrap.role_list_grant("Collection", c_name, **db_kwargs)
+        self.utility_wrap.role_get_users()
+
+        # create collection in the db
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.utility_wrap.role_grant("Collection", c_name, "Compaction")
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w.compact()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_collection_insert_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_collection_insert_privilege(self, host, port, with_db):
         """
         target: verify grant collection insert privilege
         method: verify grant collection insert privilege
@@ -3085,17 +3220,25 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.utility_wrap.role_grant("Collection", c_name, "Insert")
+
+        # with db
+        self.utility_wrap.role_grant("Collection", c_name, "Insert", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_collection_delete_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_collection_delete_privilege(self, host, port, with_db):
         """
         target: verify grant collection delete privilege
         method: verify grant collection delete privilege
@@ -3111,18 +3254,26 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.utility_wrap.role_grant("Collection", c_name, "Delete")
+
+        # with db
+        self.utility_wrap.role_grant("Collection", c_name, "Delete", **db_kwargs)
+
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
         collection_w.delete(tmp_expr)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_create_index_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_create_index_privilege(self, host, port, with_db):
         """
         target: verify grant create index privilege
         method: verify grant create index privilege
@@ -3138,17 +3289,24 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.utility_wrap.role_grant("Collection", c_name, "CreateIndex")
-        self.utility_wrap.role_grant("Collection", c_name, "Flush")
+
+        self.utility_wrap.role_grant("Collection", c_name, "CreateIndex", **db_kwargs)
+        self.utility_wrap.role_grant("Collection", c_name, "Flush", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
                                    default_index_params)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_drop_index_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_drop_index_privilege(self, host, port, with_db):
         """
         target: verify grant drop index privilege
         method: verify grant drop index privilege
@@ -3164,17 +3322,24 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
                                    default_index_params)
-        self.utility_wrap.role_grant("Collection", c_name, "DropIndex")
+
+        self.utility_wrap.role_grant("Collection", c_name, "DropIndex", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         self.index_wrap.drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_collection_search_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_collection_search_privilege(self, host, port, with_db):
         """
         target: verify grant collection search privilege
         method: verify grant collection search privilege
@@ -3190,14 +3355,21 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
-        self.utility_wrap.role_grant("Collection", c_name, "Search")
+
+        self.utility_wrap.role_grant("Collection", c_name, "Search", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         collection_w.search(vectors[:ct.default_nq], ct.default_float_vec_field_name,
                             ct.default_search_params, ct.default_limit,
@@ -3206,7 +3378,8 @@ class TestUtilityRBAC(TestcaseBase):
                                          "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_collection_flush_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_collection_flush_privilege(self, host, port, with_db):
         """
         target: verify grant collection flush privilege
         method: verify grant collection flush privilege
@@ -3222,15 +3395,22 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.utility_wrap.role_grant("Collection", c_name, "Flush")
+        self.utility_wrap.role_grant("Collection", c_name, "Flush", **db_kwargs)
+
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w.flush()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_collection_query_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_collection_query_privilege(self, host, port, with_db):
         """
         target: verify grant collection query privilege
         method: verify grant collection query privilege
@@ -3246,20 +3426,28 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
-        self.utility_wrap.role_grant("Collection", c_name, "Query")
+
+        self.utility_wrap.role_grant("Collection", c_name, "Query", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
         res, _ = collection_w.query(default_term_expr)
         assert len(res) == 2
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_all_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_all_privilege(self, host, port, with_db):
         """
         target: verify grant global all privilege
         method: verify grant global all privilege
@@ -3275,10 +3463,14 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "All")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "All", **db_kwargs)
+
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.drop()
@@ -3297,7 +3489,8 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_create_collection_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_create_collection_privilege(self, host, port, with_db):
         """
         target: verify grant global create collection privilege
         method: verify grant global create collection privilege
@@ -3313,15 +3506,19 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "CreateCollection")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "CreateCollection", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         self.init_collection_wrap(name=c_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_drop_collection_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_drop_collection_privilege(self, host, port, with_db):
         """
         target: verify grant global drop collection privilege
         method: verify grant global drop collection privilege
@@ -3337,15 +3534,19 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "DropCollection")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "DropCollection", **db_kwargs)
         collection_w = self.init_collection_wrap(name=c_name)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_create_ownership_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_create_ownership_privilege(self, host, port, with_db):
         """
         target: verify grant global create ownership privilege
         method: verify grant global create ownership privilege
@@ -3361,10 +3562,13 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "CreateOwnership")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "CreateOwnership", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         user_test = cf.gen_unique_str(prefix)
         password_test = cf.gen_unique_str(prefix)
         self.utility_wrap.create_user(user=user_test, password=password_test)
@@ -3373,7 +3577,8 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_drop_ownership_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_drop_ownership_privilege(self, host, port, with_db):
         """
         target: verify grant global drop ownership privilege
         method: verify grant global drop ownership privilege
@@ -3388,7 +3593,10 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "DropOwnership")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "DropOwnership", **db_kwargs)
 
         user_test = cf.gen_unique_str(prefix)
         password_test = cf.gen_unique_str(prefix)
@@ -3399,13 +3607,14 @@ class TestUtilityRBAC(TestcaseBase):
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         self.utility_wrap.role_drop()
         self.utility_wrap.delete_user(user=user_test)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_select_ownership_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_select_ownership_privilege(self, host, port, with_db):
         """
         target: verify grant global select ownership privilege
         method: verify grant global select ownership privilege
@@ -3420,18 +3629,22 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "SelectOwnership")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "SelectOwnership", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         self.utility_wrap.list_usernames()
         self.utility_wrap.role_list_grants()
         self.utility_wrap.list_roles(False)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_global_manage_ownership_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_global_manage_ownership_privilege(self, host, port, with_db):
         """
         target: verify grant global manage ownership privilege
         method: verify grant global manage ownership privilege
@@ -3455,11 +3668,14 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Global", "*", "ManageOwnership")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("Global", "*", "ManageOwnership", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         self.utility_wrap.role_add_user(user_test)
         self.utility_wrap.role_remove_user(user_test)
@@ -3467,7 +3683,8 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_revoke("Collection", c_name, "Search")
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_user_update_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_user_update_privilege(self, host, port, with_db):
         """
         target: verify grant user update privilege
         method: verify grant user update privilege
@@ -3489,16 +3706,20 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("User", "*", "UpdateUser")
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("User", "*", "UpdateUser", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         self.utility_wrap.reset_password(user=user_test, old_password=password_test, new_password=password)
         self.utility_wrap.update_password(user=user_test, old_password=password, new_password=password_test)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_select_user_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_select_user_privilege(self, host, port, with_db):
         """
         target: verify grant select user privilege
         method: verify grant select user privilege
@@ -3520,17 +3741,52 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("User", "*", "SelectUser")
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        self.utility_wrap.role_grant("User", "*", "SelectUser", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         self.utility_wrap.list_user(username=user_test, include_role_info=False)
         self.utility_wrap.list_users(include_role_info=False)
 
+    def test_admin_user_after_db_deleted(self, host, port):
+        """
+        target: test admin role can opearte after db deleted
+        method: 1.root connect -> create collection in
+                2.create co
+        expected:
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        collection_w_default = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # create db and create collection
+        self.database_wrap.create_database("db")
+        self.database_wrap.create_database("db2")
+        # self.database_wrap.using_database("db")
+        # collection_w_db = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # create a user and bind to admin role
+        self.utility_wrap.create_user("u1", "Milvus")
+        self.utility_wrap.init_role("admin")
+        self.utility_wrap.role_add_user("u1")
+
+        # drop db
+        self.database_wrap.drop_database("db")
+        self.database_wrap.list_database()
+        self.utility_wrap.list_collections()
+        self.database_wrap.using_database("db2")
+        self.database_wrap.list_database()
+        self.utility_wrap.list_collections()
+
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_privilege_with_wildcard_object_name(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_privilege_with_wildcard_object_name(self, host, port, with_db):
         """
         target: verify grant privilege with wildcard instead of object name
         method: verify grant privilege with wildcard instead of object name
@@ -3543,23 +3799,34 @@ class TestUtilityRBAC(TestcaseBase):
         r_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w2 = self.init_collection_wrap(name=c_name_2)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w2.create_index(ct.default_float_vec_field_name, default_index_params)
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Collection", "*", "Load")
+
+        self.utility_wrap.role_grant("Collection", "*", "Load", **db_kwargs)
+        self.utility_wrap.role_grant("Collection", "*", "GetLoadingProgress", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
         collection_w.load()
         collection_w2.load()
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_verify_grant_privilege_with_wildcard_privilege(self, host, port):
+    @pytest.mark.parametrize("with_db", [False, True])
+    def test_verify_grant_privilege_with_wildcard_privilege(self, host, port, with_db):
         """
         target: verify grant privilege with wildcard instead of privilege
         method: verify grant privilege with wildcard instead of privilege
@@ -3571,17 +3838,24 @@ class TestUtilityRBAC(TestcaseBase):
         password = cf.gen_unique_str(prefix)
         r_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        self.utility_wrap.role_grant("Collection", "*", "*")
+
+        self.utility_wrap.role_grant("Collection", "*", "*", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password=password, check_task=ct.CheckTasks.ccr)
+                                     password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
 
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
         collection_w.release()
         collection_w.compact()
@@ -3589,9 +3863,6 @@ class TestUtilityRBAC(TestcaseBase):
         mutation_res, _ = collection_w.insert(data=data)
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
         collection_w.delete(tmp_expr)
-        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
-                                   default_index_params)
-        self.index_wrap.drop(ct.default_int64_field_name)
         vectors = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         collection_w.load()
         collection_w.search(vectors[:ct.default_nq], ct.default_float_vec_field_name,
@@ -3600,6 +3871,8 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.flush()
         default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
         collection_w.query(default_term_expr)
+        collection_w.release()
+        collection_w.drop_index()
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_new_user_default_owns_public_role_permission(self, host, port):
@@ -3725,8 +3998,298 @@ class TestUtilityRBAC(TestcaseBase):
         assert "root" not in users
         self.utility_wrap.role_drop()
 
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_db_collections(self, host, port):
+        """
+        target: test grant collection privilege with db
+        method: 1.root user create db and collection
+                2.create a role and grant collection privilege with db
+                3.bind role to a user
+                4.user connect and verify privilege with different db
+        expected: privilege valid only with the granted db
+        """
+        tmp_nb = 100
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+
+        # grant role collection flush privilege
+        user, pwd, role = self.init_user_with_privilege("Collection", collection_w.name, "Flush", db_name)
+        self.utility_wrap.role_grant("Collection", collection_w.name, "GetStatistics", db_name)
+
+        # re-connect with new user and default db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd,
+                                     db_name=ct.default_db, secure=cf.param_info.param_secure,
+                                     check_task=ct.CheckTasks.ccr)
+
+        # verify user flush collection with different db
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
+        # set using db to db_name and flush
+        self.database_wrap.using_database(db_name)
+        assert collection_w.num_entities == tmp_nb
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_db_global(self, host, port):
+        """
+        target: test grant global privilege with db
+        method: 1.root user create db
+                2.create a role and grant all global privilege with db
+                3.bind role to a user
+                4.user connect and verify privilege with different db
+        expected: privilege valid only with the granted db
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+
+        # grant role collection flush privilege
+        user, pwd, role = self.init_user_with_privilege("Global", "*", "*", db_name)
+
+        # re-connect with new user and default db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd,
+                                     db_name=ct.default_db, secure=cf.param_info.param_secure,
+                                     check_task=ct.CheckTasks.ccr)
+
+        # verify user list grants with different db
+        self.utility_wrap.role_list_grants(check_task=CheckTasks.check_permission_deny)
+
+        # set using db to db_name and verify grants
+        self.database_wrap.using_database(db_name)
+        self.utility_wrap.role_list_grants()
+        self.utility_wrap.describe_resource_group(ct.default_resource_group_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_db_users(self, host, port):
+        """
+        target: test grant user privilege with db
+        method: 1.root user create db
+                2.create a role and grant user privilege with db
+                3.bind role to a user
+                4.user connect and verify privilege with different db
+        expected: privilege valid only with the granted db
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+
+        # grant role collection flush privilege
+        user, pwd, role = self.init_user_with_privilege("User", "*", "SelectUser", db_name)
+
+        # re-connect with new user and default db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, db_name=ct.default_db,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # verify user list grants with different db
+        self.utility_wrap.list_users(False, check_task=CheckTasks.check_permission_deny)
+
+        # set using db to db_name and verify grants
+        self.database_wrap.using_database(db_name)
+        self.utility_wrap.list_users(False)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_revoke_db_collection(self, host, port):
+        """
+        target: test revoke db collection
+        method: test revoke privilege with normal db or not existed db
+        expected: verify privilege
+        """
+        tmp_nb = 100
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+
+        # grant role collection flush privilege
+        user, pwd, role = self.init_user_with_privilege("Collection", collection_w.name, "Flush", db_name)
+
+        # revoke privilege with default db
+        self.utility_wrap.role_revoke("Collection", collection_w.name, "Flush", ct.default_db)
+        self.utility_wrap.role_revoke("Collection", collection_w.name, "Flush", db_name)
+
+        # re-connect with new user and db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd,
+                                     db_name=ct.default_db, secure=cf.param_info.param_secure,
+                                     check_task=ct.CheckTasks.ccr)
+
+        # verify user flush collection with db
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
+        # set using db to default db and verify privilege
+        self.database_wrap.using_database(db_name)
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_list_grant_db(self, host, port):
+        """
+        target: test list grant with db
+        method: 1.list grant with granted db and default db
+        expected: verify role grants with different db
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+
+        # grant role collection * All privilege
+        _, _, role_name = self.init_user_with_privilege("Global", "*", "All", db_name)
+        log.debug(f"role name: {role_name}")
+
+        # list grant with db and verify
+        grants, _ = self.utility_wrap.role_list_grants(db_name=db_name)
+        for g in grants.groups:
+            assert g.object == "Global"
+            assert g.object_name == "*"
+            assert g.privilege == "All"
+            assert g.db_name == db_name
+
+        log.info(self.utility_wrap.role.name)
+        grant_db, _ = self.utility_wrap.role_list_grant(object="Global", object_name="*", db_name=db_name)
+        for g in grant_db.groups:
+            assert g.object == "Global"
+            assert g.object_name == "*"
+            assert g.privilege == "All"
+            assert g.db_name == db_name
+
+        grant_default, _ = self.utility_wrap.role_list_grant("Global", "*", db_name=ct.default_db)
+        assert len(grant_default.groups) == 0
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_list_grants_db(self, host, port):
+        """
+        target: test list grants with db
+        method: 1.list grants with granted db and default db
+        expected: verify role grants with different db
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db
+        db_name = cf.gen_unique_str(prefix)
+        self.database_wrap.create_database(db_name)
+
+        # grant role collection flush privilege
+        self.init_user_with_privilege("Global", "*", "All", db_name)
+        self.utility_wrap.role_grant("User", "*", "UpdateUser", db_name)
+
+        # list grants with db and verify
+        grants, _ = self.utility_wrap.role_list_grants(db_name=db_name)
+        assert len(grants.groups) == 2
+
+        for g in grants.groups:
+            if g.object == "Global":
+                assert g.object_name == "*"
+                assert g.privilege == "All"
+            elif g.object == "User":
+                assert g.object_name == "*"
+                assert g.privilege == "UpdateUser"
+            else:
+                raise Exception(f"{db_name} should't have the privilege {g.object_name}, Please check ")
+
+        # verify the role no grant in default db
+        grants_default, _ = self.utility_wrap.role_list_grants(db_name=ct.default_db)
+        assert len(grants_default.groups) == 0
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_connect(self, host, port):
+        """
+        target: test grant user with db and connect with db
+        method: 1. grand role privilege in the default db
+                2. user connect with default db
+                3. verify db privilege
+        expected: succ
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure)
+
+        # grant global privilege to default db
+        tmp_user, tmp_pwd, tmp_role = self.init_user_with_privilege("User", "*", "SelectUser", ct.default_db)
+
+        # re-connect
+        self.connection_wrap.disconnect(ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=tmp_user, password=tmp_pwd,
+                                     secure=cf.param_info.param_secure)
+
+        # list collections
+        self.utility_wrap.list_users(False)
+        self.utility_wrap.list_collections()
+        self.utility_wrap.describe_resource_group(name=ct.default_resource_group_name,
+                                                  check_task=CheckTasks.check_permission_deny)
+
 
 class TestUtilityNegativeRbac(TestcaseBase):
+
+    def teardown_method(self, method):
+        """
+        teardown method: drop role and user
+        """
+        log.info("[utility_teardown_method] Start teardown utility test cases ...")
+
+        self.connection_wrap.connect(host=cf.param_info.param_host, port=cf.param_info.param_port, user=ct.default_user,
+                                     password=ct.default_password, secure=cf.param_info.param_secure)
+
+        # drop users
+        users, _ = self.utility_wrap.list_users(False)
+        for u in users.groups:
+            if u.username != ct.default_user:
+                self.utility_wrap.delete_user(u.username)
+        user_groups, _ = self.utility_wrap.list_users(False)
+        assert len(user_groups.groups) == 1
+
+        role_groups, _ = self.utility_wrap.list_roles(False)
+
+        # drop roles
+        for role_group in role_groups.groups:
+            if role_group.role_name not in ['admin', 'public']:
+                self.utility_wrap.init_role(role_group.role_name)
+                g_list, _ = self.utility_wrap.role_list_grants()
+                for g in g_list.groups:
+                    self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
+                self.utility_wrap.role_drop()
+        role_groups, _ = self.utility_wrap.list_roles(False)
+        assert len(role_groups.groups) == 2
+
+        super().teardown_method(method)
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_non_string(self, request):
+        """
+        get invalid string without None
+        """
+        if isinstance(request.param, str):
+            pytest.skip("skip string")
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
                                       "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
@@ -3888,6 +4451,9 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
         assert self.utility_wrap.role_is_exist()[0]
+        self.utility_wrap.role_grant("Global", "*", "All")
+        self.utility_wrap.role_add_user(user)
+        self.utility_wrap.role_list_grants()
 
         error = {"err_code": 37,
                  "err_msg": "fail to operate user to role"}
@@ -3987,8 +4553,9 @@ class TestUtilityNegativeRbac(TestcaseBase):
         o_name = cf.gen_unique_str(prefix)
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
-        error = {"err_code": 41,
-                 "err_msg": "the object type in the object entity[name: %s] is invalid" % o_name}
+        error = {"err_code": 42,
+                 "err_msg": f"not found the object type[name: {o_name}], supported the object types: [Global User "
+                            f"Collection]"}
         self.utility_wrap.role_list_grant(o_name, "*", check_task=CheckTasks.err_res, check_items=error)
         self.utility_wrap.role_drop()
 
@@ -4058,11 +4625,256 @@ class TestUtilityNegativeRbac(TestcaseBase):
         error = {"err_code": 41, "err_msg": "the privilege name[%s] in the privilege entity is invalid" % p_name}
         self.utility_wrap.role_revoke("Global", "*", p_name, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_privilege_with_db_not_exist(self, host, port):
+        """
+        target: test grant with an not existed db
+        method: 1.root user create role -> grant privilege -> bind user
+                2.new user connent with db
+                3.list collection
+        expected: database not exist
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+        db_name = cf.gen_unique_str("db")
+        user, pwd, _ = self.init_user_with_privilege("Global", "*", "All", db_name)
+
+        # using the granted and not existing db
+        self.database_wrap.using_database(db_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 2, ct.err_msg: "database not found"})
+
+        # re-connect with new user and db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, db_name=db_name,
+                                     secure=cf.param_info.param_secure, check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 2, ct.err_msg: "database not found"})
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_privilege_with_collection_not_exist(self, host, port):
+        """
+        target: test grant collection object privilege with not existed collection or other's db collection
+        method: 1.root connect and create db_a and create collection in db_a
+                2.create db_b and create a user and role, grant not existed collection privilege to role
+                3.grant db_a's collection with db_b privilege to role
+        expected: 1.grant with invalid db or collection no error
+                  2.use db and operator collection gets permission deny
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create collection in db_a_xxx
+        db_a = cf.gen_unique_str("db_a")
+        self.database_wrap.create_database(db_a)
+
+        # create collection in db_a
+        self.database_wrap.using_database(db_a)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # create db
+        db_b = cf.gen_unique_str("db_b")
+        self.database_wrap.create_database(db_b)
+
+        # grant role privilege: collection not existed -> no error
+        user, pwd, role = self.init_user_with_privilege("Collection", "rbac", "Flush", db_name=db_b)
+
+        # grant role privilege: db_a collection provilege with database db_b
+        self.utility_wrap.role_grant("Collection", collection_w.name, "Flush", db_name=db_b)
+
+        # list grants and verify collection privilege has a not existed collection
+        grants, _ = self.utility_wrap.role_list_grants(db_name=db_b)
+        for g in grants.groups:
+            assert g.object == "Collection"
+            assert g.object_name in [collection_w.name, "rbac"]
+            assert g.privilege == "Flush"
+
+        # re-connect with new user and db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # collection flush with db_b permission
+        self.database_wrap.using_database(db_b)
+        collection_w.flush(check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
+        self.database_wrap.using_database(db_a)
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_revoke_db_not_existed(self, host, port):
+        """
+        target: test revoke with not existed db
+        method: 1. init a user and role by a root user
+                2. revoke role privilege with a not existed db
+        expected: revoke failed
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # grant role privilege: collection not existed -> no error
+        db_name = cf.gen_unique_str("db")
+        user, pwd, role = self.init_user_with_privilege("Global", "*", "All", ct.default_db)
+        self.utility_wrap.role_revoke("Global", "*", "All", db_name)
+
+        self.database_wrap.using_database(db_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+        self.database_wrap.create_database(db_name)
+        self.utility_wrap.role_grant("Global", "*", "All", db_name)
+        self.database_wrap.using_database(db_name)
+        self.utility_wrap.list_users(True)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_list_grant_db_non_existed(self, host, port):
+        """
+        target: test list grant with not existed db
+        method: list grant with an random db name
+        expected: empty grant
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # grant role privilege: collection not existed -> no error
+        self.init_user_with_privilege("Global", "*", "All", ct.default_db)
+
+        # list grant with a not-existed db
+        grant, _ = self.utility_wrap.role_list_grant("Global", "*", "All", cf.gen_unique_str())
+        assert len(grant.groups) == 0
+
+        # list grants with a not-existed db
+        grants, _ = self.utility_wrap.role_list_grants(cf.gen_unique_str())
+        assert len(grants.groups) == 0
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_admin_public_role_privilege_all_dbs(self, host, port):
+        """
+        target: test admin role have privileges in all dbs
+        method: 1. create a user and bind admin role
+                2. create different dbs and create collection in db
+                3. user connect and list collections using different db
+        expected: verify list succ
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create a user and bind user to admin role
+        username = cf.gen_unique_str("user")
+        pwd = cf.gen_unique_str()
+        self.utility_wrap.create_user(username, pwd)
+        self.utility_wrap.init_role("admin")
+        self.utility_wrap.role_add_user(username)
+
+        # create db_a and create collection in db_a
+        db_a = cf.gen_unique_str("a")
+        self.database_wrap.create_database(db_a)
+        self.database_wrap.using_database(db_a)
+
+        # collection in db_a
+        coll_a = cf.gen_unique_str("a")
+        collection_w_a = self.init_collection_wrap(name=coll_a)
+        collection_w_a.insert(cf.gen_default_dataframe_data(nb=100))
+
+        # create db_b and create collection in db_b
+        db_b = cf.gen_unique_str("b")
+        self.database_wrap.create_database(db_b)
+        self.database_wrap.using_database(db_b)
+
+        # collection in db_b
+        coll_b = cf.gen_unique_str("b")
+        collection_w_b = self.init_collection_wrap(name=coll_b)
+        collection_w_b.insert(cf.gen_default_dataframe_data(nb=200))
+
+        # re-connect with new user and db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=username, password=pwd,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # using db_a
+        self.database_wrap.using_database(db_a)
+        assert collection_w_a.num_entities == 100
+        collections_a, _ = self.utility_wrap.list_collections()
+        assert coll_a in collections_a
+        self.utility_wrap.list_users(True)
+
+        # using db_b
+        self.database_wrap.using_database(db_b)
+        assert collection_w_b.num_entities == 200
+        collections_b, _ = self.utility_wrap.list_collections()
+        assert coll_b in collections_b
+        self.utility_wrap.list_users(True)
+
+        # create a user and bind user to public role
+        p_username = cf.gen_unique_str("public")
+        p_pwd = cf.gen_unique_str()
+        self.utility_wrap.create_user(p_username, p_pwd)
+        self.utility_wrap.init_role("public")
+        self.utility_wrap.role_add_user(p_username)
+
+        # re-connect with new user and db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=p_username, password=p_pwd,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # using default db
+        self.database_wrap.using_database(ct.default_db)
+        self.utility_wrap.list_collections()
+
+        # using db a
+        self.database_wrap.using_database(db_a)
+        collections_a, _ = self.utility_wrap.list_collections()
+        assert coll_a in collections_a
+
+        # using db b
+        self.database_wrap.using_database(db_b)
+        collections_b, _ = self.utility_wrap.list_collections()
+        assert coll_b in collections_b
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_not_existed_collection_privilege(self, host, port):
+        """
+        target: test grant privilege with inconsistent collection and db
+        method: 1. create a collection in the default db
+                2. create a db
+                3. create a user and grant all privileges with the collection and db (collection not in this db)
+        expected: collection not exist
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create a collection in the default db
+        coll_name = cf.gen_unique_str("coll")
+        collection_w = self.init_collection_wrap(name=coll_name)
+
+        # create a db
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+
+        # grant role privilege: collection not existed in the db -> no error
+        user, pwd, role = self.init_user_with_privilege("Collection", coll_name, "Flush", db_name)
+
+        # re-connect with new user and granted db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, secure=cf.param_info.param_secure,
+                                     db_name=db_name, check_task=ct.CheckTasks.ccr)
+
+        # operate collection in the granted db
+        collection_w.flush(check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "CollectionNotExists"})
+
+        # operate collection in the default db
+        self.database_wrap.using_database(ct.default_db)
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestUtilityFlushAll(TestcaseBase):
 
-    def test_flush_all_multi_collections(self):
+    @pytest.mark.parametrize("with_db", [True, False])
+    def test_flush_all_multi_collections(self, with_db):
         """
         target: test flush multi collections
         method: 1.create multi collections
@@ -4076,13 +4888,21 @@ class TestUtilityFlushAll(TestcaseBase):
         collection_num = 5
         collection_names = []
         delete_num = 100
+
+        self._connect()
+
+        if with_db:
+            db_name = cf.gen_unique_str("db")
+            self.database_wrap.create_database(db_name)
+            self.database_wrap.using_database(db_name)
+
         for i in range(collection_num):
             collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
                                                                              is_index=True)
             collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
             collection_names.append(collection_w.name)
 
-        self.utility_wrap.flush_all(timeout=60)
+        self.utility_wrap.flush_all(timeout=300)
         cw = ApiCollectionWrapper()
         for c in collection_names:
             cw.init_collection(name=c)
@@ -4094,6 +4914,87 @@ class TestUtilityFlushAll(TestcaseBase):
 
             res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
             assert len(res) == ct.default_nb - delete_num
+
+    def test_flush_all_db_collections(self):
+        """
+        target: test flush all db's collections
+        method: 1. create collections and insert data in multi dbs
+                2. flush all
+                3. verify num entities
+        expected: the insert and delete data of all db's collections are flushed
+        """
+        tmp_nb = 100
+        db_num = 3
+        collection_num = 2
+        collection_names = {}
+        delete_num = 10
+
+        self._connect()
+        for d in range(db_num):
+            db_name = cf.gen_unique_str("db")
+            self.database_wrap.create_database(db_name)
+            self.database_wrap.using_database(db_name)
+            db_collection_names = []
+            for i in range(collection_num):
+                # create collection
+                collection_w = self.init_collection_wrap()
+                # insert
+                insert_res, _ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+                # create index
+                collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+                # delete
+                collection_w.delete(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}')
+                db_collection_names.append(collection_w.name)
+            collection_names[db_name] = db_collection_names
+            self.utility_wrap.list_collections()
+
+        # flush all db collections
+        self.utility_wrap.flush_all(timeout=600)
+
+        for _db, _db_collection_names in collection_names.items():
+            self.database_wrap.using_database(_db)
+            self.utility_wrap.list_collections()
+            for c in _db_collection_names:
+                cw = ApiCollectionWrapper()
+                cw.init_collection(name=c)
+                assert cw.num_entities_without_flush == tmp_nb
+
+                cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+                cw.load()
+                cw.query(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}',
+                         check_task=CheckTasks.check_query_empty)
+
+                res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_res.primary_keys[:delete_num]}')
+                assert len(res) == tmp_nb - delete_num
+
+    def test_flush_empty_db_collections(self):
+        """
+        target: test flush empty db collections
+        method: 1. create collection and insert in the default db
+                2. create a db and using the db
+                3. flush all
+        expected: verify default db's collection flushed
+        """
+        tmp_nb = 10
+        self._connect()
+
+        # create collection
+        self.database_wrap.using_database(ct.default_db)
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        # insert
+        insert_res, _ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+
+        # create a db and using db
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # flush all in the db and no exception
+        self.utility_wrap.flush_all(timeout=120)
+
+        # verify default db's collection not flushed
+        self.database_wrap.using_database(ct.default_db)
+        assert collection_w.num_entities_without_flush == tmp_nb
 
     def test_flush_all_multi_shards_timeout(self):
         """

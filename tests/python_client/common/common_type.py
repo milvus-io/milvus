@@ -67,6 +67,12 @@ default_replica_num = 1
 default_graceful_time = 5  #
 default_shards_num = 1
 max_shards_num = 16
+default_db = "default"
+max_database_num = 64
+max_collections_per_db = 65536
+max_collection_num = 65536
+
+
 IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
 NAMESPACE_CHAOS_TESTING = "chaos-testing"
 

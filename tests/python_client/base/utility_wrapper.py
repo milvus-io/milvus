@@ -434,25 +434,25 @@ class ApiUtilityWrapper:
     def role_name(self):
         return self.role.name
 
-    def role_grant(self, object: str, object_name: str, privilege: str, db_name="default", check_task=None, check_items=None, **kwargs):
+    def role_grant(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.grant, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_revoke(self, object: str, object_name: str, privilege: str, db_name="default", check_task=None, check_items=None, **kwargs):
+    def role_revoke(self, object: str, object_name: str, privilege: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.revoke, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_list_grant(self, object: str, object_name: str, db_name="default", check_task=None, check_items=None, **kwargs):
+    def role_list_grant(self, object: str, object_name: str, db_name: str = "default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.list_grant, object, object_name, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_list_grants(self, db_name="default", check_task=None, check_items=None, **kwargs):
+    def role_list_grants(self, db_name: str = "default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.list_grants, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
