@@ -67,7 +67,8 @@ var (
 	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
 
 	// Replica related
-	ErrReplicaNotFound = newMilvusError("replica not found", 400, false)
+	ErrReplicaNotFound          = newMilvusError("replica not found", 400, false)
+	ErrNoAvailableNodeInReplica = newMilvusError("no available node in replica", 401, false)
 
 	// Channel related
 	ErrChannelNotFound    = newMilvusError("channel not found", 500, false)

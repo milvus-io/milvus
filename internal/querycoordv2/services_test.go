@@ -1404,6 +1404,24 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
+func (suite *ServiceSuite) TestGetReplicasFailed() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(100001, 100000, []int64{}))
+	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(100002, 100000, []int64{1}))
+
+	req := &milvuspb.GetReplicasRequest{
+		CollectionID:   100000,
+		WithShardNodes: true,
+	}
+	resp, err := server.GetReplicas(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_MetaFailed, resp.GetStatus().GetErrorCode())
+	suite.EqualValues(resp.GetStatus().GetReason(), "failed to get replica info, err=replica=100001: no available node in replica")
+}
+
 func (suite *ServiceSuite) TestCheckHealth() {
 	ctx := context.Background()
 	server := suite.server

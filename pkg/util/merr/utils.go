@@ -220,6 +220,14 @@ func WrapErrReplicaNotFound(id int64, msg ...string) error {
 	return err
 }
 
+func WrapErrNoAvailableNodeInReplica(id int64, msg ...string) error {
+	err := wrapWithField(ErrNoAvailableNodeInReplica, "replica", id)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Channel related
 func WrapErrChannelNotFound(name string, msg ...string) error {
 	err := wrapWithField(ErrChannelNotFound, "channel", name)
