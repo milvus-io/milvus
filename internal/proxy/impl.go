@@ -5478,3 +5478,49 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.result, nil
 }
+
+func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.ConnectResponse{Status: unhealthyStatus()}, nil
+	}
+
+	ts, err := node.tsoAllocator.AllocOne(ctx)
+	if err != nil {
+		return &milvuspb.ConnectResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	serverInfo := &commonpb.ServerInfo{
+		BuildTags:  os.Getenv(metricsinfo.GitBuildTagsEnvKey),
+		BuildTime:  os.Getenv(metricsinfo.MilvusBuildTimeEnvKey),
+		GitCommit:  os.Getenv(metricsinfo.GitCommitEnvKey),
+		GoVersion:  os.Getenv(metricsinfo.MilvusUsedGoVersion),
+		DeployMode: os.Getenv(metricsinfo.DeployModeEnvKey),
+		Reserved:   make(map[string]string),
+	}
+
+	GetConnectionManager().register(ctx, int64(ts), request.GetClientInfo())
+
+	return &milvuspb.ConnectResponse{
+		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ServerInfo: serverInfo,
+		Identifier: int64(ts),
+	}, nil
+}
+
+func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	if !node.checkHealthy() {
+		return &proxypb.ListClientInfosResponse{Status: unhealthyStatus()}, nil
+	}
+
+	clients := GetConnectionManager().list()
+
+	return &proxypb.ListClientInfosResponse{
+		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ClientInfos: clients,
+	}, nil
+}

@@ -58,6 +58,8 @@ const (
 	AnyWord       = "*"
 
 	HeaderDatabase = "dbname"
+
+	IdentifierKey = "identifier"
 )
 
 const (

@@ -183,6 +183,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
+			proxy.KeepActiveInterceptor,
 		)),
 	}
 
@@ -942,4 +943,12 @@ func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabas
 
 func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 	return s.proxy.ListDatabases(ctx, request)
+}
+
+func (s *Server) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+	return s.proxy.Connect(ctx, req)
+}
+
+func (s *Server) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
+	return s.proxy.ListClientInfos(ctx, req)
 }

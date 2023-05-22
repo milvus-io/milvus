@@ -31,6 +31,9 @@
 #include <google/protobuf/message.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
+#include <google/protobuf/map.h>  // IWYU pragma: export
+#include <google/protobuf/map_entry.h>
+#include <google/protobuf/map_field_inl.h>
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include <google/protobuf/descriptor.pb.h>
@@ -49,7 +52,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[11]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[15]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -65,6 +68,12 @@ extern AddressDefaultTypeInternal _Address_default_instance_;
 class Blob;
 class BlobDefaultTypeInternal;
 extern BlobDefaultTypeInternal _Blob_default_instance_;
+class ClientInfo;
+class ClientInfoDefaultTypeInternal;
+extern ClientInfoDefaultTypeInternal _ClientInfo_default_instance_;
+class ClientInfo_ReservedEntry_DoNotUse;
+class ClientInfo_ReservedEntry_DoNotUseDefaultTypeInternal;
+extern ClientInfo_ReservedEntry_DoNotUseDefaultTypeInternal _ClientInfo_ReservedEntry_DoNotUse_default_instance_;
 class DMLMsgHeader;
 class DMLMsgHeaderDefaultTypeInternal;
 extern DMLMsgHeaderDefaultTypeInternal _DMLMsgHeader_default_instance_;
@@ -89,6 +98,12 @@ extern PlaceholderValueDefaultTypeInternal _PlaceholderValue_default_instance_;
 class PrivilegeExt;
 class PrivilegeExtDefaultTypeInternal;
 extern PrivilegeExtDefaultTypeInternal _PrivilegeExt_default_instance_;
+class ServerInfo;
+class ServerInfoDefaultTypeInternal;
+extern ServerInfoDefaultTypeInternal _ServerInfo_default_instance_;
+class ServerInfo_ReservedEntry_DoNotUse;
+class ServerInfo_ReservedEntry_DoNotUseDefaultTypeInternal;
+extern ServerInfo_ReservedEntry_DoNotUseDefaultTypeInternal _ServerInfo_ReservedEntry_DoNotUse_default_instance_;
 class Status;
 class StatusDefaultTypeInternal;
 extern StatusDefaultTypeInternal _Status_default_instance_;
@@ -98,6 +113,8 @@ extern StatusDefaultTypeInternal _Status_default_instance_;
 PROTOBUF_NAMESPACE_OPEN
 template<> ::milvus::proto::common::Address* Arena::CreateMaybeMessage<::milvus::proto::common::Address>(Arena*);
 template<> ::milvus::proto::common::Blob* Arena::CreateMaybeMessage<::milvus::proto::common::Blob>(Arena*);
+template<> ::milvus::proto::common::ClientInfo* Arena::CreateMaybeMessage<::milvus::proto::common::ClientInfo>(Arena*);
+template<> ::milvus::proto::common::ClientInfo_ReservedEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::common::ClientInfo_ReservedEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::common::DMLMsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::DMLMsgHeader>(Arena*);
 template<> ::milvus::proto::common::KeyDataPair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyDataPair>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
@@ -106,6 +123,8 @@ template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvu
 template<> ::milvus::proto::common::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderGroup>(Arena*);
 template<> ::milvus::proto::common::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderValue>(Arena*);
 template<> ::milvus::proto::common::PrivilegeExt* Arena::CreateMaybeMessage<::milvus::proto::common::PrivilegeExt>(Arena*);
+template<> ::milvus::proto::common::ServerInfo* Arena::CreateMaybeMessage<::milvus::proto::common::ServerInfo>(Arena*);
+template<> ::milvus::proto::common::ServerInfo_ReservedEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::common::ServerInfo_ReservedEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::common::Status* Arena::CreateMaybeMessage<::milvus::proto::common::Status>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -349,6 +368,8 @@ enum MsgType : int {
   SegmentStatistics = 1206,
   SegmentFlushDone = 1207,
   DataNodeTt = 1208,
+  Connect = 1209,
+  ListClientInfos = 1210,
   CreateCredential = 1500,
   GetCredential = 1501,
   DeleteCredential = 1502,
@@ -2261,6 +2282,484 @@ class PrivilegeExt :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_common_2eproto;
 };
+// -------------------------------------------------------------------
+
+class ClientInfo_ReservedEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<ClientInfo_ReservedEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<ClientInfo_ReservedEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > SuperType;
+  ClientInfo_ReservedEntry_DoNotUse();
+  ClientInfo_ReservedEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const ClientInfo_ReservedEntry_DoNotUse& other);
+  static const ClientInfo_ReservedEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const ClientInfo_ReservedEntry_DoNotUse*>(&_ClientInfo_ReservedEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.ClientInfo.ReservedEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.ClientInfo.ReservedEntry.value");
+ }
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& other) final;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[11];
+  }
+
+  public:
+};
+
+// -------------------------------------------------------------------
+
+class ClientInfo :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.ClientInfo) */ {
+ public:
+  ClientInfo();
+  virtual ~ClientInfo();
+
+  ClientInfo(const ClientInfo& from);
+  ClientInfo(ClientInfo&& from) noexcept
+    : ClientInfo() {
+    *this = ::std::move(from);
+  }
+
+  inline ClientInfo& operator=(const ClientInfo& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ClientInfo& operator=(ClientInfo&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ClientInfo& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ClientInfo* internal_default_instance() {
+    return reinterpret_cast<const ClientInfo*>(
+               &_ClientInfo_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    12;
+
+  friend void swap(ClientInfo& a, ClientInfo& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ClientInfo* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ClientInfo* New() const final {
+    return CreateMaybeMessage<ClientInfo>(nullptr);
+  }
+
+  ClientInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ClientInfo>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ClientInfo& from);
+  void MergeFrom(const ClientInfo& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ClientInfo* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.ClientInfo";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kReservedFieldNumber = 6,
+    kSdkTypeFieldNumber = 1,
+    kSdkVersionFieldNumber = 2,
+    kLocalTimeFieldNumber = 3,
+    kUserFieldNumber = 4,
+    kHostFieldNumber = 5,
+  };
+  // map<string, string> reserved = 6;
+  int reserved_size() const;
+  void clear_reserved();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      reserved() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_reserved();
+
+  // string sdk_type = 1;
+  void clear_sdk_type();
+  const std::string& sdk_type() const;
+  void set_sdk_type(const std::string& value);
+  void set_sdk_type(std::string&& value);
+  void set_sdk_type(const char* value);
+  void set_sdk_type(const char* value, size_t size);
+  std::string* mutable_sdk_type();
+  std::string* release_sdk_type();
+  void set_allocated_sdk_type(std::string* sdk_type);
+
+  // string sdk_version = 2;
+  void clear_sdk_version();
+  const std::string& sdk_version() const;
+  void set_sdk_version(const std::string& value);
+  void set_sdk_version(std::string&& value);
+  void set_sdk_version(const char* value);
+  void set_sdk_version(const char* value, size_t size);
+  std::string* mutable_sdk_version();
+  std::string* release_sdk_version();
+  void set_allocated_sdk_version(std::string* sdk_version);
+
+  // string local_time = 3;
+  void clear_local_time();
+  const std::string& local_time() const;
+  void set_local_time(const std::string& value);
+  void set_local_time(std::string&& value);
+  void set_local_time(const char* value);
+  void set_local_time(const char* value, size_t size);
+  std::string* mutable_local_time();
+  std::string* release_local_time();
+  void set_allocated_local_time(std::string* local_time);
+
+  // string user = 4;
+  void clear_user();
+  const std::string& user() const;
+  void set_user(const std::string& value);
+  void set_user(std::string&& value);
+  void set_user(const char* value);
+  void set_user(const char* value, size_t size);
+  std::string* mutable_user();
+  std::string* release_user();
+  void set_allocated_user(std::string* user);
+
+  // string host = 5;
+  void clear_host();
+  const std::string& host() const;
+  void set_host(const std::string& value);
+  void set_host(std::string&& value);
+  void set_host(const char* value);
+  void set_host(const char* value, size_t size);
+  std::string* mutable_host();
+  std::string* release_host();
+  void set_allocated_host(std::string* host);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.ClientInfo)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+      ClientInfo_ReservedEntry_DoNotUse,
+      std::string, std::string,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      0 > reserved_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr sdk_type_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr sdk_version_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr local_time_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr user_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr host_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ServerInfo_ReservedEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<ServerInfo_ReservedEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<ServerInfo_ReservedEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > SuperType;
+  ServerInfo_ReservedEntry_DoNotUse();
+  ServerInfo_ReservedEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const ServerInfo_ReservedEntry_DoNotUse& other);
+  static const ServerInfo_ReservedEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const ServerInfo_ReservedEntry_DoNotUse*>(&_ServerInfo_ReservedEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.ServerInfo.ReservedEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.common.ServerInfo.ReservedEntry.value");
+ }
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& other) final;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[13];
+  }
+
+  public:
+};
+
+// -------------------------------------------------------------------
+
+class ServerInfo :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.ServerInfo) */ {
+ public:
+  ServerInfo();
+  virtual ~ServerInfo();
+
+  ServerInfo(const ServerInfo& from);
+  ServerInfo(ServerInfo&& from) noexcept
+    : ServerInfo() {
+    *this = ::std::move(from);
+  }
+
+  inline ServerInfo& operator=(const ServerInfo& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ServerInfo& operator=(ServerInfo&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ServerInfo& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ServerInfo* internal_default_instance() {
+    return reinterpret_cast<const ServerInfo*>(
+               &_ServerInfo_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    14;
+
+  friend void swap(ServerInfo& a, ServerInfo& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ServerInfo* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ServerInfo* New() const final {
+    return CreateMaybeMessage<ServerInfo>(nullptr);
+  }
+
+  ServerInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ServerInfo>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ServerInfo& from);
+  void MergeFrom(const ServerInfo& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ServerInfo* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.ServerInfo";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kReservedFieldNumber = 6,
+    kBuildTagsFieldNumber = 1,
+    kBuildTimeFieldNumber = 2,
+    kGitCommitFieldNumber = 3,
+    kGoVersionFieldNumber = 4,
+    kDeployModeFieldNumber = 5,
+  };
+  // map<string, string> reserved = 6;
+  int reserved_size() const;
+  void clear_reserved();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      reserved() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_reserved();
+
+  // string build_tags = 1;
+  void clear_build_tags();
+  const std::string& build_tags() const;
+  void set_build_tags(const std::string& value);
+  void set_build_tags(std::string&& value);
+  void set_build_tags(const char* value);
+  void set_build_tags(const char* value, size_t size);
+  std::string* mutable_build_tags();
+  std::string* release_build_tags();
+  void set_allocated_build_tags(std::string* build_tags);
+
+  // string build_time = 2;
+  void clear_build_time();
+  const std::string& build_time() const;
+  void set_build_time(const std::string& value);
+  void set_build_time(std::string&& value);
+  void set_build_time(const char* value);
+  void set_build_time(const char* value, size_t size);
+  std::string* mutable_build_time();
+  std::string* release_build_time();
+  void set_allocated_build_time(std::string* build_time);
+
+  // string git_commit = 3;
+  void clear_git_commit();
+  const std::string& git_commit() const;
+  void set_git_commit(const std::string& value);
+  void set_git_commit(std::string&& value);
+  void set_git_commit(const char* value);
+  void set_git_commit(const char* value, size_t size);
+  std::string* mutable_git_commit();
+  std::string* release_git_commit();
+  void set_allocated_git_commit(std::string* git_commit);
+
+  // string go_version = 4;
+  void clear_go_version();
+  const std::string& go_version() const;
+  void set_go_version(const std::string& value);
+  void set_go_version(std::string&& value);
+  void set_go_version(const char* value);
+  void set_go_version(const char* value, size_t size);
+  std::string* mutable_go_version();
+  std::string* release_go_version();
+  void set_allocated_go_version(std::string* go_version);
+
+  // string deploy_mode = 5;
+  void clear_deploy_mode();
+  const std::string& deploy_mode() const;
+  void set_deploy_mode(const std::string& value);
+  void set_deploy_mode(std::string&& value);
+  void set_deploy_mode(const char* value);
+  void set_deploy_mode(const char* value, size_t size);
+  std::string* mutable_deploy_mode();
+  std::string* release_deploy_mode();
+  void set_allocated_deploy_mode(std::string* deploy_mode);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.ServerInfo)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+      ServerInfo_ReservedEntry_DoNotUse,
+      std::string, std::string,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      0 > reserved_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr build_tags_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr build_time_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr git_commit_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr go_version_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr deploy_mode_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
 // ===================================================================
 
 static const int kPrivilegeExtObjFieldNumber = 1001;
@@ -3140,9 +3639,575 @@ inline void PrivilegeExt::set_object_name_indexs(::PROTOBUF_NAMESPACE_ID::int32 
   // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.object_name_indexs)
 }
 
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// ClientInfo
+
+// string sdk_type = 1;
+inline void ClientInfo::clear_sdk_type() {
+  sdk_type_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ClientInfo::sdk_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ClientInfo.sdk_type)
+  return sdk_type_.GetNoArena();
+}
+inline void ClientInfo::set_sdk_type(const std::string& value) {
+  
+  sdk_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ClientInfo.sdk_type)
+}
+inline void ClientInfo::set_sdk_type(std::string&& value) {
+  
+  sdk_type_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ClientInfo.sdk_type)
+}
+inline void ClientInfo::set_sdk_type(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  sdk_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ClientInfo.sdk_type)
+}
+inline void ClientInfo::set_sdk_type(const char* value, size_t size) {
+  
+  sdk_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ClientInfo.sdk_type)
+}
+inline std::string* ClientInfo::mutable_sdk_type() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ClientInfo.sdk_type)
+  return sdk_type_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ClientInfo::release_sdk_type() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ClientInfo.sdk_type)
+  
+  return sdk_type_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ClientInfo::set_allocated_sdk_type(std::string* sdk_type) {
+  if (sdk_type != nullptr) {
+    
+  } else {
+    
+  }
+  sdk_type_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), sdk_type);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ClientInfo.sdk_type)
+}
+
+// string sdk_version = 2;
+inline void ClientInfo::clear_sdk_version() {
+  sdk_version_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ClientInfo::sdk_version() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ClientInfo.sdk_version)
+  return sdk_version_.GetNoArena();
+}
+inline void ClientInfo::set_sdk_version(const std::string& value) {
+  
+  sdk_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ClientInfo.sdk_version)
+}
+inline void ClientInfo::set_sdk_version(std::string&& value) {
+  
+  sdk_version_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ClientInfo.sdk_version)
+}
+inline void ClientInfo::set_sdk_version(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  sdk_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ClientInfo.sdk_version)
+}
+inline void ClientInfo::set_sdk_version(const char* value, size_t size) {
+  
+  sdk_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ClientInfo.sdk_version)
+}
+inline std::string* ClientInfo::mutable_sdk_version() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ClientInfo.sdk_version)
+  return sdk_version_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ClientInfo::release_sdk_version() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ClientInfo.sdk_version)
+  
+  return sdk_version_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ClientInfo::set_allocated_sdk_version(std::string* sdk_version) {
+  if (sdk_version != nullptr) {
+    
+  } else {
+    
+  }
+  sdk_version_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), sdk_version);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ClientInfo.sdk_version)
+}
+
+// string local_time = 3;
+inline void ClientInfo::clear_local_time() {
+  local_time_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ClientInfo::local_time() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ClientInfo.local_time)
+  return local_time_.GetNoArena();
+}
+inline void ClientInfo::set_local_time(const std::string& value) {
+  
+  local_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ClientInfo.local_time)
+}
+inline void ClientInfo::set_local_time(std::string&& value) {
+  
+  local_time_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ClientInfo.local_time)
+}
+inline void ClientInfo::set_local_time(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  local_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ClientInfo.local_time)
+}
+inline void ClientInfo::set_local_time(const char* value, size_t size) {
+  
+  local_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ClientInfo.local_time)
+}
+inline std::string* ClientInfo::mutable_local_time() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ClientInfo.local_time)
+  return local_time_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ClientInfo::release_local_time() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ClientInfo.local_time)
+  
+  return local_time_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ClientInfo::set_allocated_local_time(std::string* local_time) {
+  if (local_time != nullptr) {
+    
+  } else {
+    
+  }
+  local_time_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), local_time);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ClientInfo.local_time)
+}
+
+// string user = 4;
+inline void ClientInfo::clear_user() {
+  user_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ClientInfo::user() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ClientInfo.user)
+  return user_.GetNoArena();
+}
+inline void ClientInfo::set_user(const std::string& value) {
+  
+  user_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ClientInfo.user)
+}
+inline void ClientInfo::set_user(std::string&& value) {
+  
+  user_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ClientInfo.user)
+}
+inline void ClientInfo::set_user(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  user_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ClientInfo.user)
+}
+inline void ClientInfo::set_user(const char* value, size_t size) {
+  
+  user_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ClientInfo.user)
+}
+inline std::string* ClientInfo::mutable_user() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ClientInfo.user)
+  return user_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ClientInfo::release_user() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ClientInfo.user)
+  
+  return user_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ClientInfo::set_allocated_user(std::string* user) {
+  if (user != nullptr) {
+    
+  } else {
+    
+  }
+  user_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), user);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ClientInfo.user)
+}
+
+// string host = 5;
+inline void ClientInfo::clear_host() {
+  host_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ClientInfo::host() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ClientInfo.host)
+  return host_.GetNoArena();
+}
+inline void ClientInfo::set_host(const std::string& value) {
+  
+  host_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ClientInfo.host)
+}
+inline void ClientInfo::set_host(std::string&& value) {
+  
+  host_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ClientInfo.host)
+}
+inline void ClientInfo::set_host(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  host_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ClientInfo.host)
+}
+inline void ClientInfo::set_host(const char* value, size_t size) {
+  
+  host_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ClientInfo.host)
+}
+inline std::string* ClientInfo::mutable_host() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ClientInfo.host)
+  return host_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ClientInfo::release_host() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ClientInfo.host)
+  
+  return host_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ClientInfo::set_allocated_host(std::string* host) {
+  if (host != nullptr) {
+    
+  } else {
+    
+  }
+  host_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), host);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ClientInfo.host)
+}
+
+// map<string, string> reserved = 6;
+inline int ClientInfo::reserved_size() const {
+  return reserved_.size();
+}
+inline void ClientInfo::clear_reserved() {
+  reserved_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+ClientInfo::reserved() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.common.ClientInfo.reserved)
+  return reserved_.GetMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+ClientInfo::mutable_reserved() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.common.ClientInfo.reserved)
+  return reserved_.MutableMap();
+}
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// ServerInfo
+
+// string build_tags = 1;
+inline void ServerInfo::clear_build_tags() {
+  build_tags_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ServerInfo::build_tags() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ServerInfo.build_tags)
+  return build_tags_.GetNoArena();
+}
+inline void ServerInfo::set_build_tags(const std::string& value) {
+  
+  build_tags_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ServerInfo.build_tags)
+}
+inline void ServerInfo::set_build_tags(std::string&& value) {
+  
+  build_tags_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ServerInfo.build_tags)
+}
+inline void ServerInfo::set_build_tags(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  build_tags_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ServerInfo.build_tags)
+}
+inline void ServerInfo::set_build_tags(const char* value, size_t size) {
+  
+  build_tags_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ServerInfo.build_tags)
+}
+inline std::string* ServerInfo::mutable_build_tags() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ServerInfo.build_tags)
+  return build_tags_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ServerInfo::release_build_tags() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ServerInfo.build_tags)
+  
+  return build_tags_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ServerInfo::set_allocated_build_tags(std::string* build_tags) {
+  if (build_tags != nullptr) {
+    
+  } else {
+    
+  }
+  build_tags_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), build_tags);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ServerInfo.build_tags)
+}
+
+// string build_time = 2;
+inline void ServerInfo::clear_build_time() {
+  build_time_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ServerInfo::build_time() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ServerInfo.build_time)
+  return build_time_.GetNoArena();
+}
+inline void ServerInfo::set_build_time(const std::string& value) {
+  
+  build_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ServerInfo.build_time)
+}
+inline void ServerInfo::set_build_time(std::string&& value) {
+  
+  build_time_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ServerInfo.build_time)
+}
+inline void ServerInfo::set_build_time(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  build_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ServerInfo.build_time)
+}
+inline void ServerInfo::set_build_time(const char* value, size_t size) {
+  
+  build_time_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ServerInfo.build_time)
+}
+inline std::string* ServerInfo::mutable_build_time() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ServerInfo.build_time)
+  return build_time_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ServerInfo::release_build_time() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ServerInfo.build_time)
+  
+  return build_time_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ServerInfo::set_allocated_build_time(std::string* build_time) {
+  if (build_time != nullptr) {
+    
+  } else {
+    
+  }
+  build_time_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), build_time);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ServerInfo.build_time)
+}
+
+// string git_commit = 3;
+inline void ServerInfo::clear_git_commit() {
+  git_commit_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ServerInfo::git_commit() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ServerInfo.git_commit)
+  return git_commit_.GetNoArena();
+}
+inline void ServerInfo::set_git_commit(const std::string& value) {
+  
+  git_commit_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ServerInfo.git_commit)
+}
+inline void ServerInfo::set_git_commit(std::string&& value) {
+  
+  git_commit_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ServerInfo.git_commit)
+}
+inline void ServerInfo::set_git_commit(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  git_commit_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ServerInfo.git_commit)
+}
+inline void ServerInfo::set_git_commit(const char* value, size_t size) {
+  
+  git_commit_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ServerInfo.git_commit)
+}
+inline std::string* ServerInfo::mutable_git_commit() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ServerInfo.git_commit)
+  return git_commit_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ServerInfo::release_git_commit() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ServerInfo.git_commit)
+  
+  return git_commit_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ServerInfo::set_allocated_git_commit(std::string* git_commit) {
+  if (git_commit != nullptr) {
+    
+  } else {
+    
+  }
+  git_commit_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), git_commit);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ServerInfo.git_commit)
+}
+
+// string go_version = 4;
+inline void ServerInfo::clear_go_version() {
+  go_version_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ServerInfo::go_version() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ServerInfo.go_version)
+  return go_version_.GetNoArena();
+}
+inline void ServerInfo::set_go_version(const std::string& value) {
+  
+  go_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ServerInfo.go_version)
+}
+inline void ServerInfo::set_go_version(std::string&& value) {
+  
+  go_version_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ServerInfo.go_version)
+}
+inline void ServerInfo::set_go_version(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  go_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ServerInfo.go_version)
+}
+inline void ServerInfo::set_go_version(const char* value, size_t size) {
+  
+  go_version_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ServerInfo.go_version)
+}
+inline std::string* ServerInfo::mutable_go_version() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ServerInfo.go_version)
+  return go_version_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ServerInfo::release_go_version() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ServerInfo.go_version)
+  
+  return go_version_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ServerInfo::set_allocated_go_version(std::string* go_version) {
+  if (go_version != nullptr) {
+    
+  } else {
+    
+  }
+  go_version_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), go_version);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ServerInfo.go_version)
+}
+
+// string deploy_mode = 5;
+inline void ServerInfo::clear_deploy_mode() {
+  deploy_mode_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ServerInfo::deploy_mode() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.ServerInfo.deploy_mode)
+  return deploy_mode_.GetNoArena();
+}
+inline void ServerInfo::set_deploy_mode(const std::string& value) {
+  
+  deploy_mode_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.ServerInfo.deploy_mode)
+}
+inline void ServerInfo::set_deploy_mode(std::string&& value) {
+  
+  deploy_mode_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.ServerInfo.deploy_mode)
+}
+inline void ServerInfo::set_deploy_mode(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  deploy_mode_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.ServerInfo.deploy_mode)
+}
+inline void ServerInfo::set_deploy_mode(const char* value, size_t size) {
+  
+  deploy_mode_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.ServerInfo.deploy_mode)
+}
+inline std::string* ServerInfo::mutable_deploy_mode() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.ServerInfo.deploy_mode)
+  return deploy_mode_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ServerInfo::release_deploy_mode() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.ServerInfo.deploy_mode)
+  
+  return deploy_mode_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ServerInfo::set_allocated_deploy_mode(std::string* deploy_mode) {
+  if (deploy_mode != nullptr) {
+    
+  } else {
+    
+  }
+  deploy_mode_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), deploy_mode);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.ServerInfo.deploy_mode)
+}
+
+// map<string, string> reserved = 6;
+inline int ServerInfo::reserved_size() const {
+  return reserved_.size();
+}
+inline void ServerInfo::clear_reserved() {
+  reserved_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+ServerInfo::reserved() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.common.ServerInfo.reserved)
+  return reserved_.GetMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+ServerInfo::mutable_reserved() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.common.ServerInfo.reserved)
+  return reserved_.MutableMap();
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

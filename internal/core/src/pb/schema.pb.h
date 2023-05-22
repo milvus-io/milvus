@@ -2660,6 +2660,7 @@ class FieldData :
   enum : int {
     kFieldNameFieldNumber = 2,
     kTypeFieldNumber = 1,
+    kIsDynamicFieldNumber = 6,
     kFieldIdFieldNumber = 5,
     kScalarsFieldNumber = 3,
     kVectorsFieldNumber = 4,
@@ -2679,6 +2680,11 @@ class FieldData :
   void clear_type();
   ::milvus::proto::schema::DataType type() const;
   void set_type(::milvus::proto::schema::DataType value);
+
+  // bool is_dynamic = 6;
+  void clear_is_dynamic();
+  bool is_dynamic() const;
+  void set_is_dynamic(bool value);
 
   // int64 field_id = 5;
   void clear_field_id();
@@ -2715,6 +2721,7 @@ class FieldData :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
   int type_;
+  bool is_dynamic_;
   ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   union FieldUnion {
     FieldUnion() {}
@@ -5037,6 +5044,20 @@ inline void FieldData::set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   field_id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.field_id)
+}
+
+// bool is_dynamic = 6;
+inline void FieldData::clear_is_dynamic() {
+  is_dynamic_ = false;
+}
+inline bool FieldData::is_dynamic() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldData.is_dynamic)
+  return is_dynamic_;
+}
+inline void FieldData::set_is_dynamic(bool value) {
+  
+  is_dynamic_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.is_dynamic)
 }
 
 inline bool FieldData::has_field() const {
