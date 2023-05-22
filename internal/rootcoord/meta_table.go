@@ -54,6 +54,7 @@ type IMetaTable interface {
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
+	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
 	GetCollectionVirtualChannels(colID int64) []string
 	AddPartition(ctx context.Context, partition *model.Partition) error
@@ -567,6 +568,30 @@ func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, colle
 	defer mt.ddLock.RUnlock()
 
 	return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
+}
+
+func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	ret := make(map[int64][]int64, len(mt.dbName2Meta))
+	for _, dbMeta := range mt.dbName2Meta {
+		ret[dbMeta.ID] = make([]int64, 0)
+	}
+
+	for collID, collMeta := range mt.collID2Meta {
+		if !collMeta.Available() {
+			continue
+		}
+		dbID := collMeta.DBID
+		if dbID == util.NonDBID {
+			ret[util.DefaultDBID] = append(ret[util.DefaultDBID], collID)
+			continue
+		}
+		ret[dbID] = append(ret[dbID], collID)
+	}
+
+	return ret
 }
 
 func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error) {
