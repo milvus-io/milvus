@@ -102,6 +102,7 @@ append_flags( CMAKE_CXX_FLAGS
               "-DELPP_THREAD_SAFE"
               "-fopenmp"
               "-Werror"
+              "-O3"
               )
 endif ()
 

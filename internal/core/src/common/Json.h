@@ -51,7 +51,7 @@ class Json {
     // WARN: this is used for fast non-copy construction,
     // MUST make sure that the data points to a memory that
     // with size at least len + SIMDJSON_PADDING
-    Json(const char* data, size_t len) : data_(data, len) {
+    Json(const char* data, size_t len) : data_(data, len, len + simdjson::SIMDJSON_PADDING) {
     }
 
     Json(const Json& json) {
@@ -86,7 +86,7 @@ class Json {
         return data_;
     }
 
-    document
+    value_result<document>
     doc() const {
         thread_local simdjson::ondemand::parser parser;
 
