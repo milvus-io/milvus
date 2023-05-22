@@ -635,6 +635,72 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	assert.NotZero(t, newSegment.lastFlushTime)
 }
 
+func TestMeta_PrepareCompleteCompactionMutationEmptyCompactTo(t *testing.T) {
+	prepareSegments := &SegmentsInfo{
+		map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 100,
+				PartitionID:  10,
+				State:        commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+				NumOfRows:    1,
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: 100,
+				PartitionID:  10,
+				State:        commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+				NumOfRows:    1,
+			}},
+		},
+	}
+
+	m := &meta{
+		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments: prepareSegments,
+	}
+
+	inCompactionLogs := []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:           1,
+			FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+		},
+		{
+			SegmentID:           2,
+			FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+		},
+	}
+
+	inCompactionResult := &datapb.CompactionResult{
+		SegmentID:           3,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
+		NumOfRows:           0,
+	}
+	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
+	assert.Nil(t, err)
+	assert.NotNil(t, beforeCompact)
+	assert.NotNil(t, afterCompact)
+	assert.NotNil(t, newSegment)
+	assert.Equal(t, 2, len(metricMutation.stateChange))
+	assert.Equal(t, int64(-2), metricMutation.rowCountChange)
+	assert.Equal(t, int64(0), metricMutation.rowCountAccChange)
+	assert.Equal(t, 0, metricMutation.stateChange[commonpb.SegmentState_Flushing.String()])
+	assert.Equal(t, 2, metricMutation.stateChange[commonpb.SegmentState_Dropped.String()])
+	assert.Equal(t, -2, metricMutation.stateChange[commonpb.SegmentState_Flushed.String()])
+}
+
 func Test_meta_SetSegmentCompacting(t *testing.T) {
 	type fields struct {
 		client   kv.MetaKv

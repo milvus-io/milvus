@@ -1021,11 +1021,20 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 		CompactionFrom:      compactionFrom,
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	metricMutation.addNewSeg(segment.GetState(), segment.GetNumOfRows())
+	if segment.GetNumOfRows() == 0 {
+		segment.State = commonpb.SegmentState_Dropped
+		log.Info("compaction generated segment is empty, set to dropped state by default",
+			zap.Int64("collection ID", segment.GetCollectionID()),
+			zap.Int64("partition ID", segment.GetPartitionID()),
+			zap.Int64("new segment ID", segment.GetID()))
+	} else {
+		metricMutation.addNewSeg(segment.GetState(), segment.GetNumOfRows())
+	}
 	log.Info("meta update: prepare for complete compaction mutation - complete",
 		zap.Int64("collection ID", segment.GetCollectionID()),
 		zap.Int64("partition ID", segment.GetPartitionID()),
 		zap.Int64("new segment ID", segment.GetID()),
+		zap.String("new segment State", segment.GetState().String()),
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
@@ -1062,13 +1071,11 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 	newSegment := segmentCompactTo.SegmentInfo
 
 	modSegIDs := lo.Map(modInfos, func(segment *datapb.SegmentInfo, _ int) int64 { return segment.GetID() })
-	if newSegment.GetNumOfRows() == 0 {
-		newSegment.State = commonpb.SegmentState_Dropped
-	}
 
 	log.Info("meta update: alter meta store for compaction updates",
 		zap.Int64s("compact from segments (segments to be updated as dropped)", modSegIDs),
 		zap.Int64("new segmentId", newSegment.GetID()),
+		zap.String("new segmentState", newSegment.GetState().String()),
 		zap.Int("binlog", len(newSegment.GetBinlogs())),
 		zap.Int("stats log", len(newSegment.GetStatslogs())),
 		zap.Int("delta logs", len(newSegment.GetDeltalogs())),
