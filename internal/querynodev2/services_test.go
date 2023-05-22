@@ -53,6 +53,7 @@ type ServiceSuite struct {
 	msgChan        chan *msgstream.MsgPack
 	collectionID   int64
 	collectionName string
+	schema         *schemapb.CollectionSchema
 	partitionIDs   []int64
 	// Test segments
 	validSegmentIDs   []int64
@@ -124,15 +125,6 @@ func (suite *ServiceSuite) SetupTest() {
 	// start node
 	err = suite.node.Start()
 	suite.NoError(err)
-
-	// init collection
-	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
-	LoadMeta := &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		CollectionID: suite.collectionID,
-		PartitionIDs: suite.partitionIDs,
-	}
-	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
 }
 
 func (suite *ServiceSuite) TearDownTest() {
@@ -250,6 +242,12 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 				DroppedSegmentIds: suite.droppedSegmentIDs,
 			},
 		},
+		Schema: segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64),
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+		},
 	}
 
 	// mocks
@@ -291,6 +289,12 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 				FlushedSegmentIds: suite.flushedSegmentIDs,
 				DroppedSegmentIds: suite.droppedSegmentIDs,
 			},
+		},
+		Schema: segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar),
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
 		},
 	}
 
@@ -334,6 +338,7 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 				DroppedSegmentIds: suite.droppedSegmentIDs,
 			},
 		},
+		Schema: segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64),
 	}
 
 	// init msgstream failed
@@ -470,6 +475,7 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 		CollectionID:   suite.collectionID,
 		DstNodeID:      suite.node.session.ServerID,
 		Infos:          suite.genSegmentLoadInfos(schema),
+		Schema:         schema,
 		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 		NeedTransfer:   true,
 	}
@@ -500,6 +506,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		CollectionID:   suite.collectionID,
 		DstNodeID:      suite.node.session.ServerID,
 		Infos:          suite.genSegmentLoadInfos(schema),
+		Schema:         schema,
 		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 		NeedTransfer:   true,
 	}
@@ -523,6 +530,7 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
 		Infos:        suite.genSegmentLoadInfos(schema),
+		Schema:       schema,
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
 	}
@@ -546,6 +554,7 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
 		Infos:        suite.genSegmentLoadInfos(schema),
+		Schema:       schema,
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
 	}
@@ -568,6 +577,7 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 		CollectionID: suite.collectionID,
 		DstNodeID:    suite.node.session.ServerID,
 		Infos:        suite.genSegmentLoadInfos(schema),
+		Schema:       schema,
 		NeedTransfer: true,
 	}
 
@@ -609,6 +619,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
 			Infos:        suite.genSegmentLoadInfos(schema),
+			Schema:       schema,
 			NeedTransfer: true,
 		}
 
@@ -629,6 +640,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
 			Infos:        suite.genSegmentLoadInfos(schema),
+			Schema:       schema,
 			NeedTransfer: true,
 		}
 
@@ -654,6 +666,7 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			CollectionID: suite.collectionID,
 			DstNodeID:    suite.node.session.ServerID,
 			Infos:        suite.genSegmentLoadInfos(schema),
+			Schema:       schema,
 			NeedTransfer: true,
 		}
 
