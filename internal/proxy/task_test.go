@@ -389,19 +389,39 @@ func TestTranslateOutputFields(t *testing.T) {
 
 	outputFields, err = translateOutputFields([]string{"*"}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
 
 	outputFields, err = translateOutputFields([]string{" * "}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%"}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{" % "}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", "%"}, schema, false)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
 
 	outputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
 
 	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, false)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", floatVectorFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
 
 	//=========================================================================
 	outputFields, err = translateOutputFields([]string{}, schema, true)
@@ -422,15 +442,23 @@ func TestTranslateOutputFields(t *testing.T) {
 
 	outputFields, err = translateOutputFields([]string{"*"}, schema, true)
 	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%"}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", "%"}, schema, true)
+	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
 
 	outputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
 
 	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
 
 	t.Run("enable dynamic schema", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -451,6 +479,14 @@ func TestTranslateOutputFields(t *testing.T) {
 		assert.Equal(t, nil, err)
 		assert.ElementsMatch(t, []string{common.MetaFieldName, idFieldName}, outputFields)
 	})
+
+	outputFields, err = translateOutputFields([]string{"%", floatVectorFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
 }
 
 func TestCreateCollectionTask(t *testing.T) {
