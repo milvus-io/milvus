@@ -70,6 +70,7 @@ func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 				result.FieldsData[i].FieldName = field.Name
 				result.FieldsData[i].FieldId = field.FieldID
 				result.FieldsData[i].Type = field.DataType
+				result.FieldsData[i].IsDynamic = field.IsDynamic
 			}
 		}
 	}

@@ -612,6 +612,7 @@ func (t *searchTask) fillInFieldInfo() {
 					t.result.Results.FieldsData[i].FieldName = field.Name
 					t.result.Results.FieldsData[i].FieldId = field.FieldID
 					t.result.Results.FieldsData[i].Type = field.DataType
+					t.result.Results.FieldsData[i].IsDynamic = field.IsDynamic
 				}
 			}
 		}

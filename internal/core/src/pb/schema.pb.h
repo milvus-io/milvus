@@ -3150,8 +3150,9 @@ class FieldData final :
 
   enum : int {
     kFieldNameFieldNumber = 2,
-    kFieldIdFieldNumber = 5,
     kTypeFieldNumber = 1,
+    kIsDynamicFieldNumber = 6,
+    kFieldIdFieldNumber = 5,
     kScalarsFieldNumber = 3,
     kVectorsFieldNumber = 4,
   };
@@ -3169,15 +3170,6 @@ class FieldData final :
   std::string* _internal_mutable_field_name();
   public:
 
-  // int64 field_id = 5;
-  void clear_field_id();
-  int64_t field_id() const;
-  void set_field_id(int64_t value);
-  private:
-  int64_t _internal_field_id() const;
-  void _internal_set_field_id(int64_t value);
-  public:
-
   // .milvus.proto.schema.DataType type = 1;
   void clear_type();
   ::milvus::proto::schema::DataType type() const;
@@ -3185,6 +3177,24 @@ class FieldData final :
   private:
   ::milvus::proto::schema::DataType _internal_type() const;
   void _internal_set_type(::milvus::proto::schema::DataType value);
+  public:
+
+  // bool is_dynamic = 6;
+  void clear_is_dynamic();
+  bool is_dynamic() const;
+  void set_is_dynamic(bool value);
+  private:
+  bool _internal_is_dynamic() const;
+  void _internal_set_is_dynamic(bool value);
+  public:
+
+  // int64 field_id = 5;
+  void clear_field_id();
+  int64_t field_id() const;
+  void set_field_id(int64_t value);
+  private:
+  int64_t _internal_field_id() const;
+  void _internal_set_field_id(int64_t value);
   public:
 
   // .milvus.proto.schema.ScalarField scalars = 3;
@@ -3239,8 +3249,9 @@ class FieldData final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
-    int64_t field_id_;
     int type_;
+    bool is_dynamic_;
+    int64_t field_id_;
     union FieldUnion {
       constexpr FieldUnion() : _constinit_{} {}
         ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized _constinit_;
@@ -6333,6 +6344,26 @@ inline void FieldData::_internal_set_field_id(int64_t value) {
 inline void FieldData::set_field_id(int64_t value) {
   _internal_set_field_id(value);
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.field_id)
+}
+
+// bool is_dynamic = 6;
+inline void FieldData::clear_is_dynamic() {
+  _impl_.is_dynamic_ = false;
+}
+inline bool FieldData::_internal_is_dynamic() const {
+  return _impl_.is_dynamic_;
+}
+inline bool FieldData::is_dynamic() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldData.is_dynamic)
+  return _internal_is_dynamic();
+}
+inline void FieldData::_internal_set_is_dynamic(bool value) {
+  
+  _impl_.is_dynamic_ = value;
+}
+inline void FieldData::set_is_dynamic(bool value) {
+  _internal_set_is_dynamic(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.is_dynamic)
 }
 
 inline bool FieldData::has_field() const {

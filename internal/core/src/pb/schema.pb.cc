@@ -231,8 +231,9 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 PROTOBUF_CONSTEXPR FieldData::FieldData(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.field_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.field_id_)*/int64_t{0}
   , /*decltype(_impl_.type_)*/0
+  , /*decltype(_impl_.is_dynamic_)*/false
+  , /*decltype(_impl_.field_id_)*/int64_t{0}
   , /*decltype(_impl_.field_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_._oneof_case_)*/{}} {}
@@ -431,6 +432,7 @@ const uint32_t TableStruct_schema_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(p
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, _impl_.field_id_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, _impl_.is_dynamic_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, _impl_.field_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::IDs, _internal_metadata_),
@@ -470,8 +472,8 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 108, -1, -1, sizeof(::milvus::proto::schema::ScalarField)},
   { 124, -1, -1, sizeof(::milvus::proto::schema::VectorField)},
   { 134, -1, -1, sizeof(::milvus::proto::schema::FieldData)},
-  { 146, -1, -1, sizeof(::milvus::proto::schema::IDs)},
-  { 155, -1, -1, sizeof(::milvus::proto::schema::SearchResultData)},
+  { 147, -1, -1, sizeof(::milvus::proto::schema::IDs)},
+  { 156, -1, -1, sizeof(::milvus::proto::schema::SearchResultData)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -540,36 +542,37 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "JSONArrayH\000B\006\n\004data\"t\n\013VectorField\022\013\n\003di"
   "m\030\001 \001(\003\0227\n\014float_vector\030\002 \001(\0132\037.milvus.p"
   "roto.schema.FloatArrayH\000\022\027\n\rbinary_vecto"
-  "r\030\003 \001(\014H\000B\006\n\004data\"\321\001\n\tFieldData\022+\n\004type\030"
+  "r\030\003 \001(\014H\000B\006\n\004data\"\345\001\n\tFieldData\022+\n\004type\030"
   "\001 \001(\0162\035.milvus.proto.schema.DataType\022\022\n\n"
   "field_name\030\002 \001(\t\0223\n\007scalars\030\003 \001(\0132 .milv"
   "us.proto.schema.ScalarFieldH\000\0223\n\007vectors"
   "\030\004 \001(\0132 .milvus.proto.schema.VectorField"
-  "H\000\022\020\n\010field_id\030\005 \001(\003B\007\n\005field\"w\n\003IDs\0220\n\006"
-  "int_id\030\001 \001(\0132\036.milvus.proto.schema.LongA"
-  "rrayH\000\0222\n\006str_id\030\002 \001(\0132 .milvus.proto.sc"
-  "hema.StringArrayH\000B\n\n\010id_field\"\261\001\n\020Searc"
-  "hResultData\022\023\n\013num_queries\030\001 \001(\003\022\r\n\005top_"
-  "k\030\002 \001(\003\0223\n\013fields_data\030\003 \003(\0132\036.milvus.pr"
-  "oto.schema.FieldData\022\016\n\006scores\030\004 \003(\002\022%\n\003"
-  "ids\030\005 \001(\0132\030.milvus.proto.schema.IDs\022\r\n\005t"
-  "opks\030\006 \003(\003*\261\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004Boo"
-  "l\020\001\022\010\n\004Int8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t\n\005I"
-  "nt64\020\005\022\t\n\005Float\020\n\022\n\n\006Double\020\013\022\n\n\006String\020"
-  "\024\022\013\n\007VarChar\020\025\022\t\n\005Array\020\026\022\010\n\004JSON\020\027\022\020\n\014B"
-  "inaryVector\020d\022\017\n\013FloatVector\020e*V\n\nFieldS"
-  "tate\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreating\020"
-  "\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDropped\020\003Bf"
-  "\n\016io.milvus.grpcB\013SchemaProtoP\001Z1github."
-  "com/milvus-io/milvus-proto/go-api/schema"
-  "pb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "H\000\022\020\n\010field_id\030\005 \001(\003\022\022\n\nis_dynamic\030\006 \001(\010"
+  "B\007\n\005field\"w\n\003IDs\0220\n\006int_id\030\001 \001(\0132\036.milvu"
+  "s.proto.schema.LongArrayH\000\0222\n\006str_id\030\002 \001"
+  "(\0132 .milvus.proto.schema.StringArrayH\000B\n"
+  "\n\010id_field\"\261\001\n\020SearchResultData\022\023\n\013num_q"
+  "ueries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\0223\n\013fields_da"
+  "ta\030\003 \003(\0132\036.milvus.proto.schema.FieldData"
+  "\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus.p"
+  "roto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\261\001\n\010DataT"
+  "ype\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005Int"
+  "16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005Float\020\n\022\n\n"
+  "\006Double\020\013\022\n\n\006String\020\024\022\013\n\007VarChar\020\025\022\t\n\005Ar"
+  "ray\020\026\022\010\n\004JSON\020\027\022\020\n\014BinaryVector\020d\022\017\n\013Flo"
+  "atVector\020e*V\n\nFieldState\022\020\n\014FieldCreated"
+  "\020\000\022\021\n\rFieldCreating\020\001\022\021\n\rFieldDropping\020\002"
+  "\022\020\n\014FieldDropped\020\003Bf\n\016io.milvus.grpcB\013Sc"
+  "hemaProtoP\001Z1github.com/milvus-io/milvus"
+  "-proto/go-api/schemapb\240\001\001\252\002\016IO.Milvus.Gr"
+  "pcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_schema_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_schema_2eproto = {
-    false, false, 2710, descriptor_table_protodef_schema_2eproto,
+    false, false, 2730, descriptor_table_protodef_schema_2eproto,
     "schema.proto",
     &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_deps, 1, 17,
     schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
@@ -4762,8 +4765,9 @@ FieldData::FieldData(const FieldData& from)
   FieldData* const _this = this; (void)_this;
   new (&_impl_) Impl_{
       decltype(_impl_.field_name_){}
-    , decltype(_impl_.field_id_){}
     , decltype(_impl_.type_){}
+    , decltype(_impl_.is_dynamic_){}
+    , decltype(_impl_.field_id_){}
     , decltype(_impl_.field_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , /*decltype(_impl_._oneof_case_)*/{}};
@@ -4777,9 +4781,9 @@ FieldData::FieldData(const FieldData& from)
     _this->_impl_.field_name_.Set(from._internal_field_name(), 
       _this->GetArenaForAllocation());
   }
-  ::memcpy(&_impl_.field_id_, &from._impl_.field_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
-    reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.type_));
+  ::memcpy(&_impl_.type_, &from._impl_.type_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.field_id_) -
+    reinterpret_cast<char*>(&_impl_.type_)) + sizeof(_impl_.field_id_));
   clear_has_field();
   switch (from.field_case()) {
     case kScalars: {
@@ -4805,8 +4809,9 @@ inline void FieldData::SharedCtor(
   (void)is_message_owned;
   new (&_impl_) Impl_{
       decltype(_impl_.field_name_){}
-    , decltype(_impl_.field_id_){int64_t{0}}
     , decltype(_impl_.type_){0}
+    , decltype(_impl_.is_dynamic_){false}
+    , decltype(_impl_.field_id_){int64_t{0}}
     , decltype(_impl_.field_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , /*decltype(_impl_._oneof_case_)*/{}
@@ -4869,9 +4874,9 @@ void FieldData::Clear() {
   (void) cached_has_bits;
 
   _impl_.field_name_.ClearToEmpty();
-  ::memset(&_impl_.field_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.type_) -
-      reinterpret_cast<char*>(&_impl_.field_id_)) + sizeof(_impl_.type_));
+  ::memset(&_impl_.type_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.field_id_) -
+      reinterpret_cast<char*>(&_impl_.type_)) + sizeof(_impl_.field_id_));
   clear_field();
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
@@ -4921,6 +4926,14 @@ const char* FieldData::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
           _impl_.field_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool is_dynamic = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.is_dynamic_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -4991,6 +5004,12 @@ uint8_t* FieldData::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(5, this->_internal_field_id(), target);
   }
 
+  // bool is_dynamic = 6;
+  if (this->_internal_is_dynamic() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(6, this->_internal_is_dynamic(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5014,15 +5033,20 @@ size_t FieldData::ByteSizeLong() const {
         this->_internal_field_name());
   }
 
-  // int64 field_id = 5;
-  if (this->_internal_field_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_field_id());
-  }
-
   // .milvus.proto.schema.DataType type = 1;
   if (this->_internal_type() != 0) {
     total_size += 1 +
       ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
+  }
+
+  // bool is_dynamic = 6;
+  if (this->_internal_is_dynamic() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // int64 field_id = 5;
+  if (this->_internal_field_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_field_id());
   }
 
   switch (field_case()) {
@@ -5065,11 +5089,14 @@ void FieldData::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROT
   if (!from._internal_field_name().empty()) {
     _this->_internal_set_field_name(from._internal_field_name());
   }
-  if (from._internal_field_id() != 0) {
-    _this->_internal_set_field_id(from._internal_field_id());
-  }
   if (from._internal_type() != 0) {
     _this->_internal_set_type(from._internal_type());
+  }
+  if (from._internal_is_dynamic() != 0) {
+    _this->_internal_set_is_dynamic(from._internal_is_dynamic());
+  }
+  if (from._internal_field_id() != 0) {
+    _this->_internal_set_field_id(from._internal_field_id());
   }
   switch (from.field_case()) {
     case kScalars: {
@@ -5110,11 +5137,11 @@ void FieldData::InternalSwap(FieldData* other) {
       &other->_impl_.field_name_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(FieldData, _impl_.type_)
-      + sizeof(FieldData::_impl_.type_)
-      - PROTOBUF_FIELD_OFFSET(FieldData, _impl_.field_id_)>(
-          reinterpret_cast<char*>(&_impl_.field_id_),
-          reinterpret_cast<char*>(&other->_impl_.field_id_));
+      PROTOBUF_FIELD_OFFSET(FieldData, _impl_.field_id_)
+      + sizeof(FieldData::_impl_.field_id_)
+      - PROTOBUF_FIELD_OFFSET(FieldData, _impl_.type_)>(
+          reinterpret_cast<char*>(&_impl_.type_),
+          reinterpret_cast<char*>(&other->_impl_.type_));
   swap(_impl_.field_, other->_impl_.field_);
   swap(_impl_._oneof_case_[0], other->_impl_._oneof_case_[0]);
 }
