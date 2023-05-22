@@ -113,6 +113,8 @@ func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.Collection
 		return nil
 	}
 
+	params.Params.InitOnce()
+
 	// ignore the RowID field and Timestamp field
 	realSchema := &schemapb.CollectionSchema{
 		Name:        collectionSchema.GetName(),

@@ -309,6 +309,8 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			}
 		case schemapb.DataType_JSON:
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				// for JSON data, we accept two kinds input: string and map[string]interface
+				// user can write JSON content as {"FieldJSON": "{\"x\": 8}"} or {"FieldJSON": {"x": 8}}
 				if value, ok := obj.(string); ok {
 					var dummy interface{}
 					err := json.Unmarshal([]byte(value), &dummy)
@@ -316,6 +318,12 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 						return fmt.Errorf("failed to parse value '%v' for JSON field '%s', error: %w", value, schema.GetName(), err)
 					}
 					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, []byte(value))
+				} else if mp, ok := obj.(map[string]interface{}); ok {
+					bs, err := json.Marshal(mp)
+					if err != nil {
+						return fmt.Errorf("failed to parse value for JSON field '%s', error: %w", schema.GetName(), err)
+					}
+					field.(*storage.JSONFieldData).Data = append(field.(*storage.JSONFieldData).Data, bs)
 				} else {
 					return fmt.Errorf("illegal value '%v' for JSON type field '%s'", obj, schema.GetName())
 				}
@@ -372,6 +380,48 @@ func triggerGC() {
 	debug.FreeOSMemory()
 }
 
+// if user didn't provide dynamic data, fill the dynamic field by "{}"
+func fillDynamicData(blockData map[storage.FieldID]storage.FieldData, collectionSchema *schemapb.CollectionSchema) error {
+	if !collectionSchema.GetEnableDynamicField() {
+		return nil
+	}
+
+	dynamicFieldID := int64(-1)
+	for i := 0; i < len(collectionSchema.Fields); i++ {
+		schema := collectionSchema.Fields[i]
+		if schema.GetIsDynamic() {
+			dynamicFieldID = schema.GetFieldID()
+			break
+		}
+	}
+
+	if dynamicFieldID < 0 {
+		return fmt.Errorf("the collection schema is dynamic but dynamic field is not found")
+	}
+
+	rowCount := 0
+	if len(blockData) > 0 {
+		for _, v := range blockData {
+			rowCount = v.RowNum()
+		}
+	}
+
+	_, ok := blockData[dynamicFieldID]
+	if !ok {
+		data := &storage.JSONFieldData{
+			Data: make([][]byte, 0),
+		}
+
+		bs := []byte("{}")
+		for i := 0; i < rowCount; i++ {
+			data.Data = append(data.Data, bs)
+		}
+		blockData[dynamicFieldID] = data
+	}
+
+	return nil
+}
+
 // tryFlushBlocks does the two things:
 // 1. if accumulate data of a block exceed blockSize, call callFlushFunc to generate new binlog file
 // 2. if total accumulate data exceed maxTotalSize, call callFlushFUnc to flush the biggest block
@@ -407,7 +457,12 @@ func tryFlushBlocks(ctx context.Context,
 		// force to flush, called at the end of Read()
 		if force && rowCount > 0 {
 			printFieldsDataInfo(blockData, "import util: prepare to force flush a block", nil)
-			err := callFlushFunc(blockData, i)
+			err := fillDynamicData(blockData, collectionSchema)
+			if err != nil {
+				log.Error("Import util: failed to fill dynamic field", zap.Error(err))
+				return fmt.Errorf("failed to fill dynamic field, error: %w", err)
+			}
+			err = callFlushFunc(blockData, i)
 			if err != nil {
 				log.Error("Import util: failed to force flush block data", zap.Int("shardID", i), zap.Error(err))
 				return fmt.Errorf("failed to force flush block data for shard id %d, error: %w", i, err)
@@ -426,7 +481,12 @@ func tryFlushBlocks(ctx context.Context,
 		// initialize a new FieldData list for next round batch read
 		if size > int(blockSize) && rowCount > 0 {
 			printFieldsDataInfo(blockData, "import util: prepare to flush block larger than blockSize", nil)
-			err := callFlushFunc(blockData, i)
+			err := fillDynamicData(blockData, collectionSchema)
+			if err != nil {
+				log.Error("Import util: failed to fill dynamic field", zap.Error(err))
+				return fmt.Errorf("failed to fill dynamic field, error: %w", err)
+			}
+			err = callFlushFunc(blockData, i)
 			if err != nil {
 				log.Error("Import util: failed to flush block data", zap.Int("shardID", i), zap.Error(err))
 				return fmt.Errorf("failed to flush block data for shard id %d, error: %w", i, err)
@@ -470,7 +530,12 @@ func tryFlushBlocks(ctx context.Context,
 
 		if rowCount > 0 {
 			printFieldsDataInfo(blockData, "import util: prepare to flush biggest block", nil)
-			err := callFlushFunc(blockData, biggestItem)
+			err := fillDynamicData(blockData, collectionSchema)
+			if err != nil {
+				log.Error("Import util: failed to fill dynamic field", zap.Error(err))
+				return fmt.Errorf("failed to fill dynamic field, error: %w", err)
+			}
+			err = callFlushFunc(blockData, biggestItem)
 			if err != nil {
 				log.Error("Import util: failed to flush biggest block data", zap.Int("shardID", biggestItem))
 				return fmt.Errorf("failed to flush biggest block data for shard id %d, error: %w", biggestItem, err)
