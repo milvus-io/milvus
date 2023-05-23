@@ -191,7 +191,7 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "DISKANN", "
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                         {"M": 48, "efConstruction": 500}, {}, {"nlist": 128}, {"nlist": 128},
-                        {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8}]
+                        {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 Handler_type = ["GRPC", "HTTP"]
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]

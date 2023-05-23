@@ -204,8 +204,10 @@ def gen_schema_multi_string_fields(string_fields):
 
 def gen_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-    return vectors.tolist()
+    if dim > 1:
+        vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+        vectors = vectors.tolist()
+    return vectors
 
 
 def gen_string(nb):
