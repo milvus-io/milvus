@@ -97,7 +97,15 @@ func (q QueryNodeClient) Search(ctx context.Context, req *querypb.SearchRequest)
 	return q.grpcClient.Search(ctx, req)
 }
 
+func (q QueryNodeClient) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	return q.grpcClient.Search(ctx, req)
+}
+
 func (q QueryNodeClient) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	return q.grpcClient.Query(ctx, req)
+}
+
+func (q QueryNodeClient) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return q.grpcClient.Query(ctx, req)
 }
 

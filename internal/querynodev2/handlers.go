@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -139,30 +138,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// TODO From Shard Delegator
-	if req.FromShardLeader {
-		tr := timerecord.NewTimeRecorder("queryChannel")
-		results, err := node.querySegments(queryCtx, req)
-		if err != nil {
-			log.Warn("failed to query channel", zap.Error(err))
-			failRet.Status.Reason = err.Error()
-			return failRet, nil
-		}
-
-		tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-			traceID,
-			req.GetFromShardLeader(),
-			channel,
-			req.GetSegmentIDs(),
-		))
-
-		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
-		// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
-		latency := tr.ElapseSpan()
-		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
-		return results, nil
-	}
 	// From Proxy
 	tr := timerecord.NewTimeRecorder("queryDelegator")
 	// get delegator
@@ -342,41 +317,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	)
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	if req.GetFromShardLeader() {
-		tr := timerecord.NewTimeRecorder("searchChannel")
-		log.Debug("search channel...")
-
-		collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-		if collection == nil {
-			log.Warn("failed to search channel", zap.Error(segments.ErrCollectionNotFound))
-			return nil, segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
-		}
-
-		task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
-		if !node.scheduler.Add(task) {
-			err := merr.WrapErrTaskQueueFull()
-			log.Warn("failed to search channel", zap.Error(err))
-			return nil, err
-		}
-
-		err := task.Wait()
-		if err != nil {
-			log.Warn("failed to search channel", zap.Error(err))
-			return nil, err
-		}
-
-		tr.CtxElapse(ctx, fmt.Sprintf("search channel done, channel = %s, segmentIDs = %v",
-			channel,
-			req.GetSegmentIDs(),
-		))
-
-		// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
-		latency := tr.ElapseSpan()
-		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
-		return task.Result(), nil
-	}
 
 	// From Proxy
 	tr := timerecord.NewTimeRecorder("searchDelegator")

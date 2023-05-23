@@ -215,10 +215,22 @@ func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*inter
 	})
 }
 
+func (c *Client) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.SearchResults, error) {
+		return client.SearchSegments(ctx, req)
+	})
+}
+
 // Query performs replica query tasks in QueryNode.
 func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {
 		return client.Query(ctx, req)
+	})
+}
+
+func (c *Client) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {
+		return client.QuerySegments(ctx, req)
 	})
 }
 

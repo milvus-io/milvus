@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,7 +35,7 @@ func TestQueryTask_all(t *testing.T) {
 
 		rc = NewRootCoordMock()
 		qc = types.NewMockQueryCoord(t)
-		qn = &QueryNodeMock{}
+		qn = getQueryNode()
 
 		shardsNum      = common.DefaultShardsNum
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -209,27 +210,29 @@ func TestQueryTask_all(t *testing.T) {
 	result1.FieldsData = append(result1.FieldsData, generateFieldData(schemapb.DataType_Int64, common.TimeStampFieldName, hitNum))
 	task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
 	task.ctx = ctx
-	qn.queryError = fmt.Errorf("mock error")
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 	assert.Error(t, task.Execute(ctx))
 
-	qn.queryError = nil
-	qn.withQueryResult = &internalpb.RetrieveResults{
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
 		},
-	}
+	}, nil)
 	err = task.Execute(ctx)
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
-	qn.withQueryResult = &internalpb.RetrieveResults{
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
-	}
+	}, nil)
 	assert.Error(t, task.Execute(ctx))
 
-	qn.withQueryResult = result1
-
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(result1, nil)
 	assert.NoError(t, task.Execute(ctx))
 
 	task.queryParams = &queryParams{

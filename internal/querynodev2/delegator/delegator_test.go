@@ -248,7 +248,7 @@ func (s *DelegatorSuite) TestSearch() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -261,7 +261,7 @@ func (s *DelegatorSuite) TestSearch() {
 					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
 				}
 			}).Return(&internalpb.SearchResults{}, nil)
-		worker2.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -296,9 +296,9 @@ func (s *DelegatorSuite) TestSearch() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(&internalpb.SearchResults{}, nil)
-		worker2.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(&internalpb.SearchResults{}, nil)
 
 		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
@@ -329,8 +329,8 @@ func (s *DelegatorSuite) TestSearch() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(nil, errors.New("mock error"))
-		worker2.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(nil, errors.New("mock error"))
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -364,13 +364,13 @@ func (s *DelegatorSuite) TestSearch() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(&internalpb.SearchResults{
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(&internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mocked error",
 			},
 		}, nil)
-		worker2.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -500,7 +500,7 @@ func (s *DelegatorSuite) TestQuery() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -513,7 +513,7 @@ func (s *DelegatorSuite) TestQuery() {
 					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
 				}
 			}).Return(&internalpb.RetrieveResults{}, nil)
-		worker2.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -548,9 +548,9 @@ func (s *DelegatorSuite) TestQuery() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(&internalpb.RetrieveResults{}, nil)
-		worker2.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(&internalpb.RetrieveResults{}, nil)
 
 		s.workerManager.EXPECT().GetWorker(mock.AnythingOfType("int64")).Call.Return(func(nodeID int64) cluster.Worker {
@@ -581,8 +581,8 @@ func (s *DelegatorSuite) TestQuery() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).Return(nil, errors.New("mock error"))
-		worker2.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).Return(nil, errors.New("mock error"))
+		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())
@@ -613,13 +613,13 @@ func (s *DelegatorSuite) TestQuery() {
 		workers[1] = worker1
 		workers[2] = worker2
 
-		worker1.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).Return(&internalpb.RetrieveResults{
+		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).Return(&internalpb.RetrieveResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mocked error",
 			},
 		}, nil)
-		worker2.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 				s.True(req.GetFromShardLeader())

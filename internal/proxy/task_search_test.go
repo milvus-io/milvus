@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -235,6 +236,12 @@ func getQueryCoord() *types.MockQueryCoord {
 	qc.EXPECT().Start().Return(nil)
 	qc.EXPECT().Stop().Return(nil)
 	return qc
+}
+
+func getQueryNode() *types.MockQueryNode {
+	qn := &types.MockQueryNode{}
+
+	return qn
 }
 
 func TestSearchTaskV2_Execute(t *testing.T) {
@@ -1516,7 +1523,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 		rc = NewRootCoordMock()
 		qc = getQueryCoord()
-		qn = &QueryNodeMock{}
+		qn = getQueryNode()
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -1643,31 +1650,32 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	task.searchShardPolicy = RoundRobinPolicy
-	qn.searchError = fmt.Errorf("mock error")
+	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 	assert.Error(t, task.Execute(ctx))
 
-	qn.searchError = nil
-	qn.withSearchResult = &internalpb.SearchResults{
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
 		},
-	}
+	}, nil)
 	err = task.Execute(ctx)
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
-	qn.withSearchResult = &internalpb.SearchResults{
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
-	}
+	}, nil)
 	assert.Error(t, task.Execute(ctx))
 
-	result1 := &internalpb.SearchResults{
+	qn.ExpectedCalls = nil
+	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-	}
-	qn.withSearchResult = result1
+	}, nil)
 	assert.NoError(t, task.Execute(ctx))
 }
 

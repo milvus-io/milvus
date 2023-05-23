@@ -303,9 +303,17 @@ func (s *Server) Search(ctx context.Context, req *querypb.SearchRequest) (*inter
 	return s.querynode.Search(ctx, req)
 }
 
+func (s *Server) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	return s.querynode.SearchSegments(ctx, req)
+}
+
 // Query performs query of streaming/historical replica on QueryNode.
 func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return s.querynode.Query(ctx, req)
+}
+
+func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	return s.querynode.QuerySegments(ctx, req)
 }
 
 // SyncReplicaSegments syncs replica segment information to shard leader

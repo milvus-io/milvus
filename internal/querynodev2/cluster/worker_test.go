@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -183,12 +185,12 @@ func (s *RemoteWorkerSuite) TestSearch() {
 		result = &internalpb.SearchResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}
-		s.mockClient.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Search(ctx, &querypb.SearchRequest{})
+		sr, serr := s.worker.SearchSegments(ctx, &querypb.SearchRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
@@ -199,12 +201,12 @@ func (s *RemoteWorkerSuite) TestSearch() {
 
 		var result *internalpb.SearchResults
 		err := errors.New("mocked error")
-		s.mockClient.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Search(ctx, &querypb.SearchRequest{})
+		sr, serr := s.worker.SearchSegments(ctx, &querypb.SearchRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
@@ -219,12 +221,32 @@ func (s *RemoteWorkerSuite) TestSearch() {
 		result = &internalpb.SearchResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 		}
+		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Return(result, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sr, serr := s.worker.SearchSegments(ctx, &querypb.SearchRequest{})
+
+		s.Equal(err, serr)
+		s.Equal(result, sr)
+	})
+
+	s.Run("client_search_compatible", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		var result *internalpb.SearchResults
+		var err error
+
+		grpcErr := status.Error(codes.NotFound, "method not implemented")
+		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Return(result, grpcErr)
 		s.mockClient.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Search(ctx, &querypb.SearchRequest{})
+		sr, serr := s.worker.SearchSegments(ctx, &querypb.SearchRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
@@ -241,12 +263,12 @@ func (s *RemoteWorkerSuite) TestQuery() {
 		result = &internalpb.RetrieveResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}
-		s.mockClient.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Query(ctx, &querypb.QueryRequest{})
+		sr, serr := s.worker.QuerySegments(ctx, &querypb.QueryRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
@@ -258,12 +280,12 @@ func (s *RemoteWorkerSuite) TestQuery() {
 		var result *internalpb.RetrieveResults
 
 		err := errors.New("mocked error")
-		s.mockClient.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Query(ctx, &querypb.QueryRequest{})
+		sr, serr := s.worker.QuerySegments(ctx, &querypb.QueryRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
@@ -278,12 +300,32 @@ func (s *RemoteWorkerSuite) TestQuery() {
 		result = &internalpb.RetrieveResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 		}
+		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+			Return(result, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sr, serr := s.worker.QuerySegments(ctx, &querypb.QueryRequest{})
+
+		s.Equal(err, serr)
+		s.Equal(result, sr)
+	})
+
+	s.Run("client_query_compatible", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		var result *internalpb.RetrieveResults
+		var err error
+
+		grpcErr := status.Error(codes.NotFound, "method not implemented")
+		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
+			Return(result, grpcErr)
 		s.mockClient.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(result, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		sr, serr := s.worker.Query(ctx, &querypb.QueryRequest{})
+		sr, serr := s.worker.QuerySegments(ctx, &querypb.QueryRequest{})
 
 		s.Equal(err, serr)
 		s.Equal(result, sr)
