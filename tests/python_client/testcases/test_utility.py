@@ -2764,9 +2764,9 @@ class TestUtilityRBAC(TestcaseBase):
         log.debug(users)
 
         # re-create the user with different password
-        self.utility_wrap.create_user(user=username, password=ct.default_password+"aaa")
+        self.utility_wrap.create_user(user=username, password=ct.default_password + "aaa")
         self.connection_wrap.connect(alias="re-user", host=host, port=port, user=username,
-                                     password=ct.default_password+"aaa", check_task=ct.CheckTasks.ccr)
+                                     password=ct.default_password + "aaa", check_task=ct.CheckTasks.ccr)
         self.utility_wrap.list_collections(using="re-user")
 
         # delete user and remove user successfully
@@ -2778,8 +2778,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert username not in role_users
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
-    @pytest.mark.parametrize("with_db", [False, True])
+    @pytest.mark.parametrize("with_db", [True, False])
     def test_role_revoke_collection_privilege(self, host, port, with_db):
         """
         target: test revoke role collection privilege,
@@ -2798,12 +2797,15 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         self.utility_wrap.role_add_user(user)
 
-        self.init_collection_wrap(name=c_name)
+        # self.init_collection_wrap(name=c_name)
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
 
         # grant user collection insert privilege
-        db_kwargs = self.init_db_kwargs(with_db)
         self.utility_wrap.role_grant("Collection", c_name, "Insert", **db_kwargs)
+        self.utility_wrap.role_list_grants(**db_kwargs)
 
         # verify user specific collection insert privilege
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -3087,7 +3089,6 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.release()
         collection_w.drop()
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_load_privilege(self, host, port, with_db):
@@ -3108,10 +3109,13 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_add_user(user)
 
         db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
 
         self.utility_wrap.role_grant("Collection", c_name, "Load", **db_kwargs)
         self.utility_wrap.role_grant("Collection", c_name, "GetLoadingProgress", **db_kwargs)
         log.debug(self.utility_wrap.role_list_grants(**db_kwargs))
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
@@ -3123,7 +3127,6 @@ class TestUtilityRBAC(TestcaseBase):
         log.debug(collection_w.name)
         collection_w.load()
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_release_privilege(self, host, port, with_db):
@@ -3144,8 +3147,11 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_add_user(user)
 
         db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
 
         self.utility_wrap.role_grant("Collection", c_name, "Release", **db_kwargs)
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
@@ -3159,7 +3165,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.release()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23945")
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23945 not supported compaction privilege")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_compaction_privilege(self, host, port, with_db):
         """
@@ -3177,20 +3183,25 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        collection_w = self.init_collection_wrap(name=c_name)
 
         # with db
         db_kwargs = self.init_db_kwargs(with_db)
+
         self.utility_wrap.role_grant("Collection", c_name, "Compaction", **db_kwargs)
         self.utility_wrap.role_list_grant("Collection", c_name, **db_kwargs)
         self.utility_wrap.role_get_users()
+
+        # create collection in the db
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=c_name)
+
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
                                      password=password, check_task=ct.CheckTasks.ccr, **db_kwargs)
         collection_w.compact()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_insert_privilege(self, host, port, with_db):
         """
@@ -3208,10 +3219,14 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
 
         # with db
-        db_kwargs = self.init_db_kwargs(with_db)
         self.utility_wrap.role_grant("Collection", c_name, "Insert", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -3221,7 +3236,6 @@ class TestUtilityRBAC(TestcaseBase):
         mutation_res, _ = collection_w.insert(data=data)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_collection_delete_privilege(self, host, port, with_db):
         """
@@ -3239,10 +3253,13 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
 
         # with db
-        db_kwargs = self.init_db_kwargs(with_db)
         self.utility_wrap.role_grant("Collection", c_name, "Delete", **db_kwargs)
 
         data = cf.gen_default_list_data(ct.default_nb)
@@ -3254,7 +3271,6 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.delete(tmp_expr)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_create_index_privilege(self, host, port, with_db):
         """
@@ -3272,10 +3288,12 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        collection_w = self.init_collection_wrap(name=c_name)
 
         # with db
         db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=c_name)
 
         self.utility_wrap.role_grant("Collection", c_name, "CreateIndex", **db_kwargs)
         self.utility_wrap.role_grant("Collection", c_name, "Flush", **db_kwargs)
@@ -3286,7 +3304,6 @@ class TestUtilityRBAC(TestcaseBase):
                                    default_index_params)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_drop_index_privilege(self, host, port, with_db):
         """
@@ -3304,12 +3321,14 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
-                                   default_index_params)
 
         # with db
         db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=c_name)
+        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
+                                   default_index_params)
 
         self.utility_wrap.role_grant("Collection", c_name, "DropIndex", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -3318,7 +3337,6 @@ class TestUtilityRBAC(TestcaseBase):
         self.index_wrap.drop()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_collection_search_privilege(self, host, port, with_db):
         """
@@ -3336,14 +3354,16 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
-
-        # with db
-        db_kwargs = self.init_db_kwargs(with_db)
 
         self.utility_wrap.role_grant("Collection", c_name, "Search", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -3357,7 +3377,6 @@ class TestUtilityRBAC(TestcaseBase):
                                          "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_collection_flush_privilege(self, host, port, with_db):
         """
@@ -3375,10 +3394,12 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        collection_w = self.init_collection_wrap(name=c_name)
 
         # with db
         db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+        collection_w = self.init_collection_wrap(name=c_name)
         self.utility_wrap.role_grant("Collection", c_name, "Flush", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -3387,7 +3408,6 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.flush()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_collection_query_privilege(self, host, port, with_db):
         """
@@ -3405,14 +3425,17 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(100)
         mutation_res, _ = collection_w.insert(data=data)
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
 
-        # with db
-        db_kwargs = self.init_db_kwargs(with_db)
         self.utility_wrap.role_grant("Collection", c_name, "Query", **db_kwargs)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
@@ -3761,7 +3784,6 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.list_collections()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_privilege_with_wildcard_object_name(self, host, port, with_db):
         """
@@ -3776,6 +3798,12 @@ class TestUtilityRBAC(TestcaseBase):
         r_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
+
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w2 = self.init_collection_wrap(name=c_name_2)
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
@@ -3784,8 +3812,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        # with db
-        db_kwargs = self.init_db_kwargs(with_db)
+
         self.utility_wrap.role_grant("Collection", "*", "Load", **db_kwargs)
         self.utility_wrap.role_grant("Collection", "*", "GetLoadingProgress", **db_kwargs)
 
@@ -3797,7 +3824,6 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w2.load()
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23943")
     @pytest.mark.parametrize("with_db", [False, True])
     def test_verify_grant_privilege_with_wildcard_privilege(self, host, port, with_db):
         """
@@ -3811,13 +3837,17 @@ class TestUtilityRBAC(TestcaseBase):
         password = cf.gen_unique_str(prefix)
         r_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
+
+        # with db
+        db_kwargs = self.init_db_kwargs(with_db)
+        db_name = db_kwargs.get("db_name", ct.default_db)
+        self.database_wrap.using_database(db_name)
         collection_w = self.init_collection_wrap(name=c_name)
         self.utility_wrap.init_role(r_name)
         self.utility_wrap.create_role()
         u, _ = self.utility_wrap.create_user(user=user, password=password)
         self.utility_wrap.role_add_user(user)
-        # with db
-        db_kwargs = self.init_db_kwargs(with_db)
+
         self.utility_wrap.role_grant("Collection", "*", "*", **db_kwargs)
 
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -4820,11 +4850,50 @@ class TestUtilityNegativeRbac(TestcaseBase):
         collections_b, _ = self.utility_wrap.list_collections()
         assert coll_b in collections_b
 
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_grant_not_existed_collection_privilege(self, host, port):
+        """
+        target: test grant privilege with inconsistent collection and db
+        method: 1. create a collection in the default db
+                2. create a db
+                3. create a user and grant all privileges with the collection and db (collection not in this db)
+        expected: collection not exist
+        """
+        # root connect
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
+
+        # create a collection in the default db
+        coll_name = cf.gen_unique_str("coll")
+        collection_w = self.init_collection_wrap(name=coll_name)
+
+        # create a db
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+
+        # grant role privilege: collection not existed in the db -> no error
+        user, pwd, role = self.init_user_with_privilege("Collection", coll_name, "Flush", db_name)
+
+        # re-connect with new user and granted db
+        self.connection_wrap.disconnect(alias=ct.default_alias)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, secure=cf.param_info.param_secure,
+                                     db_name=db_name, check_task=ct.CheckTasks.ccr)
+
+        # operate collection in the granted db
+        collection_w.flush(check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "CollectionNotExists"})
+
+        # operate collection in the default db
+        self.database_wrap.using_database(ct.default_db)
+        collection_w.flush(check_task=CheckTasks.check_permission_deny)
+
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestUtilityFlushAll(TestcaseBase):
 
-    def test_flush_all_multi_collections(self):
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24220")
+    @pytest.mark.parametrize("with_db", [True, False])
+    def test_flush_all_multi_collections(self, with_db):
         """
         target: test flush multi collections
         method: 1.create multi collections
@@ -4838,6 +4907,14 @@ class TestUtilityFlushAll(TestcaseBase):
         collection_num = 5
         collection_names = []
         delete_num = 100
+
+        self._connect()
+
+        if with_db:
+            db_name = cf.gen_unique_str("db")
+            self.database_wrap.create_database(db_name)
+            self.database_wrap.using_database(db_name)
+
         for i in range(collection_num):
             collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
                                                                              is_index=True)
@@ -4856,6 +4933,51 @@ class TestUtilityFlushAll(TestcaseBase):
 
             res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
             assert len(res) == ct.default_nb - delete_num
+
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24220")
+    def test_flush_all_db_collections(self):
+        """
+        target: test flush all db's collections
+        method: 1. create collections and insert data in multi dbs
+                2. flush all
+                3. verify num entities
+        expected: the insert and delete data of all db's collections are flushed
+        """
+        db_num = 5
+        collection_num = 2
+        collection_names = {}
+        delete_num = 100
+
+        self._connect()
+        for d in range(db_num):
+            db_name = cf.gen_unique_str("db")
+            self.database_wrap.create_database(db_name)
+            self.database_wrap.using_database(db_name)
+            db_collection_names = []
+            for i in range(collection_num):
+                collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True,
+                                                                                 is_flush=False,
+                                                                                 is_index=True)
+                collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+                db_collection_names.append(collection_w.name)
+            collection_names[db_name] = db_collection_names
+
+        log.info(collection_names)
+        self.utility_wrap.flush_all(timeout=300)
+        cw = ApiCollectionWrapper()
+
+        for _db, _db_collection_names in collection_names.items():
+            self.database_wrap.using_database(_db)
+            for c in _db_collection_names:
+                cw.init_collection(name=c)
+                assert cw.num_entities_without_flush == ct.default_nb
+
+                cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+                cw.load()
+                cw.query(f'{ct.default_int64_field_name} in {insert_ids[:100]}', check_task=CheckTasks.check_query_empty)
+
+                res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
+                assert len(res) == ct.default_nb - delete_num
 
     def test_flush_all_multi_shards_timeout(self):
         """
