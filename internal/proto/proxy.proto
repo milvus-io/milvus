@@ -20,6 +20,8 @@ service Proxy {
   rpc RefreshPolicyInfoCache(RefreshPolicyInfoCacheRequest) returns (common.Status) {}
   rpc GetProxyMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
   rpc SetRates(SetRatesRequest) returns (common.Status) {}
+
+  rpc ListClientInfos(ListClientInfosRequest) returns (ListClientInfosResponse) {}
 }
 
 message InvalidateCollMetaCacheRequest {
@@ -60,4 +62,13 @@ message CollectionRate {
 message SetRatesRequest {
   common.MsgBase base = 1;
   repeated CollectionRate rates = 2;
+}
+
+message ListClientInfosRequest {
+  common.MsgBase base = 1;
+}
+
+message ListClientInfosResponse {
+  common.Status status = 1;
+  repeated common.ClientInfo client_infos = 2;
 }

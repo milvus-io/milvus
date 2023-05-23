@@ -68,3 +68,7 @@ func (m *GrpcProxyClient) GetProxyMetrics(ctx context.Context, in *milvuspb.GetM
 func (m *GrpcProxyClient) SetRates(ctx context.Context, in *proxypb.SetRatesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcProxyClient) ListClientInfos(ctx context.Context, in *proxypb.ListClientInfosRequest, opts ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error) {
+	return &proxypb.ListClientInfosResponse{}, m.Err
+}

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -720,5 +721,77 @@ func TestProxyListDatabase(t *testing.T) {
 		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxy_Connect(t *testing.T) {
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.Connect(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed to allocate ts", func(t *testing.T) {
+		m := newMockTimestampAllocator(t)
+		m.On("AllocTimestamp",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock AllocateTimestamp"))
+		alloc, _ := newTimestampAllocator(m, 199)
+		node := Proxy{
+			tsoAllocator: alloc,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.Connect(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		m := newMockTimestampAllocator(t)
+		m.On("AllocTimestamp",
+			mock.Anything,
+			mock.Anything,
+		).Return(&rootcoordpb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Timestamp: 20230518,
+			Count:     1,
+		}, nil)
+		alloc, _ := newTimestampAllocator(m, 199)
+		node := Proxy{
+			tsoAllocator: alloc,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.Connect(context.TODO(), &milvuspb.ConnectRequest{
+			ClientInfo: &commonpb.ClientInfo{},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxy_ListClientInfos(t *testing.T) {
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.ListClientInfos(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		node := Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ListClientInfos(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
 	})
 }

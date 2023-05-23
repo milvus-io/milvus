@@ -509,6 +509,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_schema_2eproto::offsets[] PROT
   offsetof(::milvus::proto::schema::FieldDataDefaultTypeInternal, scalars_),
   offsetof(::milvus::proto::schema::FieldDataDefaultTypeInternal, vectors_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, field_id_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, is_dynamic_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldData, field_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::IDs, _internal_metadata_),
@@ -546,8 +547,8 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 96, -1, sizeof(::milvus::proto::schema::ScalarField)},
   { 111, -1, sizeof(::milvus::proto::schema::VectorField)},
   { 120, -1, sizeof(::milvus::proto::schema::FieldData)},
-  { 131, -1, sizeof(::milvus::proto::schema::IDs)},
-  { 139, -1, sizeof(::milvus::proto::schema::SearchResultData)},
+  { 132, -1, sizeof(::milvus::proto::schema::IDs)},
+  { 140, -1, sizeof(::milvus::proto::schema::SearchResultData)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -616,29 +617,30 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "JSONArrayH\000B\006\n\004data\"t\n\013VectorField\022\013\n\003di"
   "m\030\001 \001(\003\0227\n\014float_vector\030\002 \001(\0132\037.milvus.p"
   "roto.schema.FloatArrayH\000\022\027\n\rbinary_vecto"
-  "r\030\003 \001(\014H\000B\006\n\004data\"\321\001\n\tFieldData\022+\n\004type\030"
+  "r\030\003 \001(\014H\000B\006\n\004data\"\345\001\n\tFieldData\022+\n\004type\030"
   "\001 \001(\0162\035.milvus.proto.schema.DataType\022\022\n\n"
   "field_name\030\002 \001(\t\0223\n\007scalars\030\003 \001(\0132 .milv"
   "us.proto.schema.ScalarFieldH\000\0223\n\007vectors"
   "\030\004 \001(\0132 .milvus.proto.schema.VectorField"
-  "H\000\022\020\n\010field_id\030\005 \001(\003B\007\n\005field\"w\n\003IDs\0220\n\006"
-  "int_id\030\001 \001(\0132\036.milvus.proto.schema.LongA"
-  "rrayH\000\0222\n\006str_id\030\002 \001(\0132 .milvus.proto.sc"
-  "hema.StringArrayH\000B\n\n\010id_field\"\261\001\n\020Searc"
-  "hResultData\022\023\n\013num_queries\030\001 \001(\003\022\r\n\005top_"
-  "k\030\002 \001(\003\0223\n\013fields_data\030\003 \003(\0132\036.milvus.pr"
-  "oto.schema.FieldData\022\016\n\006scores\030\004 \003(\002\022%\n\003"
-  "ids\030\005 \001(\0132\030.milvus.proto.schema.IDs\022\r\n\005t"
-  "opks\030\006 \003(\003*\261\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004Boo"
-  "l\020\001\022\010\n\004Int8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t\n\005I"
-  "nt64\020\005\022\t\n\005Float\020\n\022\n\n\006Double\020\013\022\n\n\006String\020"
-  "\024\022\013\n\007VarChar\020\025\022\t\n\005Array\020\026\022\010\n\004JSON\020\027\022\020\n\014B"
-  "inaryVector\020d\022\017\n\013FloatVector\020e*V\n\nFieldS"
-  "tate\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreating\020"
-  "\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDropped\020\003Bf"
-  "\n\016io.milvus.grpcB\013SchemaProtoP\001Z1github."
-  "com/milvus-io/milvus-proto/go-api/schema"
-  "pb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "H\000\022\020\n\010field_id\030\005 \001(\003\022\022\n\nis_dynamic\030\006 \001(\010"
+  "B\007\n\005field\"w\n\003IDs\0220\n\006int_id\030\001 \001(\0132\036.milvu"
+  "s.proto.schema.LongArrayH\000\0222\n\006str_id\030\002 \001"
+  "(\0132 .milvus.proto.schema.StringArrayH\000B\n"
+  "\n\010id_field\"\261\001\n\020SearchResultData\022\023\n\013num_q"
+  "ueries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\0223\n\013fields_da"
+  "ta\030\003 \003(\0132\036.milvus.proto.schema.FieldData"
+  "\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus.p"
+  "roto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\261\001\n\010DataT"
+  "ype\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005Int"
+  "16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005Float\020\n\022\n\n"
+  "\006Double\020\013\022\n\n\006String\020\024\022\013\n\007VarChar\020\025\022\t\n\005Ar"
+  "ray\020\026\022\010\n\004JSON\020\027\022\020\n\014BinaryVector\020d\022\017\n\013Flo"
+  "atVector\020e*V\n\nFieldState\022\020\n\014FieldCreated"
+  "\020\000\022\021\n\rFieldCreating\020\001\022\021\n\rFieldDropping\020\002"
+  "\022\020\n\014FieldDropped\020\003Bf\n\016io.milvus.grpcB\013Sc"
+  "hemaProtoP\001Z1github.com/milvus-io/milvus"
+  "-proto/go-api/schemapb\240\001\001\252\002\016IO.Milvus.Gr"
+  "pcb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -664,7 +666,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 2710,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 2730,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 16, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 17, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,
@@ -6562,6 +6564,13 @@ const char* FieldData::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
+      // bool is_dynamic = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48)) {
+          is_dynamic_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       default: {
       handle_unusual:
         if ((tag & 7) == 4 || tag == 0) {
@@ -6656,6 +6665,19 @@ bool FieldData::MergePartialFromCodedStream(
         break;
       }
 
+      // bool is_dynamic = 6;
+      case 6: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (48 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
+                 input, &is_dynamic_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -6716,6 +6738,11 @@ void FieldData::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->field_id(), output);
   }
 
+  // bool is_dynamic = 6;
+  if (this->is_dynamic() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(6, this->is_dynamic(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -6765,6 +6792,11 @@ void FieldData::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->field_id(), target);
   }
 
+  // bool is_dynamic = 6;
+  if (this->is_dynamic() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(6, this->is_dynamic(), target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -6797,6 +6829,11 @@ size_t FieldData::ByteSizeLong() const {
   if (this->type() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->type());
+  }
+
+  // bool is_dynamic = 6;
+  if (this->is_dynamic() != 0) {
+    total_size += 1 + 1;
   }
 
   // int64 field_id = 5;
@@ -6859,6 +6896,9 @@ void FieldData::MergeFrom(const FieldData& from) {
   if (from.type() != 0) {
     set_type(from.type());
   }
+  if (from.is_dynamic() != 0) {
+    set_is_dynamic(from.is_dynamic());
+  }
   if (from.field_id() != 0) {
     set_field_id(from.field_id());
   }
@@ -6901,6 +6941,7 @@ void FieldData::InternalSwap(FieldData* other) {
   field_name_.Swap(&other->field_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(type_, other->type_);
+  swap(is_dynamic_, other->is_dynamic_);
   swap(field_id_, other->field_id_);
   swap(field_, other->field_);
   swap(_oneof_case_[0], other->_oneof_case_[0]);
