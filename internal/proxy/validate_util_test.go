@@ -16,15 +16,25 @@ import (
 func Test_verifyLengthPerRow(t *testing.T) {
 	maxLength := 16
 
-	assert.NoError(t, verifyLengthPerRow(nil, int64(maxLength)))
+	assert.NoError(t, verifyStringsLength(nil, int64(maxLength)))
 
-	assert.NoError(t, verifyLengthPerRow([]string{"111111", "22222"}, int64(maxLength)))
+	assert.NoError(t, verifyStringsLength([]string{"111111", "22222"}, int64(maxLength)))
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111111111111111"}, int64(maxLength)))
+	assert.Error(t, verifyStringsLength([]string{"11111111111111111"}, int64(maxLength)))
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111111111111111", "222"}, int64(maxLength)))
+	assert.Error(t, verifyStringsLength([]string{"11111111111111111", "222"}, int64(maxLength)))
 
-	assert.Error(t, verifyLengthPerRow([]string{"11111", "22222222222222222"}, int64(maxLength)))
+	assert.Error(t, verifyStringsLength([]string{"11111", "22222222222222222"}, int64(maxLength)))
+
+	assert.NoError(t, verifyBytesArrayLength(nil, int64(maxLength)))
+
+	assert.NoError(t, verifyBytesArrayLength([][]byte{[]byte("111111"), []byte("22222")}, int64(maxLength)))
+
+	assert.Error(t, verifyBytesArrayLength([][]byte{[]byte("11111111111111111")}, int64(maxLength)))
+
+	assert.Error(t, verifyBytesArrayLength([][]byte{[]byte("11111111111111111"), []byte("222")}, int64(maxLength)))
+
+	assert.Error(t, verifyBytesArrayLength([][]byte{[]byte("11111"), []byte("22222222222222222")}, int64(maxLength)))
 }
 
 func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
@@ -598,6 +608,8 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 }
 
 func Test_validateUtil_Validate(t *testing.T) {
+	Params.Init()
+
 	t.Run("nil schema", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -818,9 +830,36 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
-
 		err := v.Validate(data, schema, 2)
+		assert.Error(t, err)
 
+		// Validate JSON length
+		longBytes := make([]byte, Params.CommonCfg.JSONMaxLength+1)
+		data = []*schemapb.FieldData{
+			{
+				FieldName: "json",
+				Type:      schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{longBytes, longBytes},
+							},
+						},
+					},
+				},
+			},
+		}
+		schema = &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "json",
+					FieldID:  104,
+					DataType: schemapb.DataType_JSON,
+				},
+			},
+		}
+		err = v.Validate(data, schema, 2)
 		assert.Error(t, err)
 	})
 
@@ -866,7 +905,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
-								Data: generateFloatVectors(10, 8),
+								Data: generateFloatVectors(2, 8),
 							},
 						},
 					},
@@ -878,7 +917,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(10, 8),
+							BinaryVector: generateBinaryVectors(2, 8),
 						},
 					},
 				},
@@ -890,7 +929,20 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(10, 8),
+								Data: generateVarCharArray(2, 8),
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test4",
+				Type:      schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{
+								Data: [][]byte{[]byte("{}"), []byte("{}")},
 							},
 						},
 					},
@@ -903,7 +955,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_IntData{
 							IntData: &schemapb.IntArray{
-								Data: []int32{int32(math.MinInt8) + 1, int32(math.MaxInt8) - 1, 0, 1, 2, 3, 4, 5, 6, 7},
+								Data: []int32{int32(math.MinInt8) + 1, int32(math.MaxInt8) - 1},
 							},
 						},
 					},
@@ -947,6 +999,11 @@ func Test_validateUtil_Validate(t *testing.T) {
 					},
 				},
 				{
+					Name:     "test4",
+					FieldID:  104,
+					DataType: schemapb.DataType_JSON,
+				},
+				{
 					Name:     "test5",
 					FieldID:  105,
 					DataType: schemapb.DataType_Int8,
@@ -956,7 +1013,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 
 		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck())
 
-		err := v.Validate(data, schema, 10)
+		err := v.Validate(data, schema, 2)
 
 		assert.NoError(t, err)
 	})
