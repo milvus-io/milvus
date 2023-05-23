@@ -226,6 +226,7 @@ message WatchDmChannelsRequest {
   // for node down load balance, need to remove offline node in time after every watchDmChannel finish.
   int64 offlineNodeID = 11;
   int64 version = 12;
+  repeated index.IndexInfo index_info_list = 13;
 }
 
 message UnsubDmChannelRequest {
