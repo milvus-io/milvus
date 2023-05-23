@@ -1,8 +1,6 @@
 import logging
 import time
 import pytest
-import random
-import numpy as np
 from pathlib import Path
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -15,9 +13,8 @@ from utils.util_k8s import (
     get_milvus_deploy_tool
 )
 from utils.util_log import test_log as log
-from bulk_insert_data import (
+from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
-    prepare_bulk_insert_numpy_files,
     DataField as df,
     DataErrorType,
 )
