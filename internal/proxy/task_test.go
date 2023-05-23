@@ -108,6 +108,49 @@ func constructCollectionSchema(
 	}
 }
 
+func constructCollectionSchemaEnableDynamicSchema(
+	int64Field, floatVecField string,
+	dim int,
+	collectionName string,
+) *schemapb.CollectionSchema {
+
+	pk := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         int64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         floatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: strconv.Itoa(dim),
+			},
+		},
+		IndexParams: nil,
+		AutoID:      false,
+	}
+	return &schemapb.CollectionSchema{
+		Name:               collectionName,
+		Description:        "",
+		AutoID:             false,
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			pk,
+			fVec,
+		},
+	}
+}
+
 func constructCollectionSchemaByDataType(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, autoID bool) *schemapb.CollectionSchema {
 	fieldsSchema := make([]*schemapb.FieldSchema, 0)
 
@@ -1019,6 +1062,71 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
+}
+
+func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	qc := getQueryCoord()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+	prefix := "TestDescribeCollectionTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	shardsNum := common.DefaultShardsNum
+	int64Field := "int64"
+	floatVecField := "fvec"
+	dim := 128
+
+	schema := constructCollectionSchemaEnableDynamicSchema(int64Field, floatVecField, dim, collectionName)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      shardsNum,
+	}
+
+	rc.CreateCollection(ctx, createColReq)
+	globalMetaCache.GetCollectionID(ctx, collectionName)
+
+	//CreateCollection
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+	}
+	err = task.PreExecute(ctx)
+	assert.Nil(t, err)
+
+	err = task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	assert.Equal(t, shardsNum, task.result.ShardsNum)
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
+	assert.Equal(t, 2, len(task.result.Schema.Fields))
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {

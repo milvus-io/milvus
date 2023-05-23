@@ -322,6 +322,15 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 	for i := range schema.Fields {
 		schema.Fields[i].FieldID = int64(common.StartOfUserFieldID + i)
 	}
+	if schema.EnableDynamicField {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:     int64(common.StartOfUserFieldID + len(schema.Fields)),
+			Name:        common.MetaFieldName,
+			Description: "$meta",
+			DataType:    schemapb.DataType_JSON,
+			IsDynamic:   true,
+		})
+	}
 
 	collID := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	coord.collName2ID[req.CollectionName] = collID

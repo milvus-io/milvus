@@ -560,8 +560,8 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	return &fieldData, nil
 }
 
-func autoGenDynamicFieldData(data [][]byte) (*schemapb.FieldData, error) {
-	fieldData := &schemapb.FieldData{
+func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
+	return &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
 		Field: &schemapb.FieldData_Scalars{
@@ -573,8 +573,8 @@ func autoGenDynamicFieldData(data [][]byte) (*schemapb.FieldData, error) {
 				},
 			},
 		},
+		IsDynamic: true,
 	}
-	return fieldData, nil
 }
 
 // fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
