@@ -95,7 +95,7 @@ const (
 type MiniCluster struct {
 	ctx context.Context
 
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	params        map[string]string
 	clusterConfig ClusterConfig
@@ -1177,6 +1177,8 @@ func (cluster *MiniCluster) UpdateClusterSize(clusterConfig ClusterConfig) error
 }
 
 func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string) (types.Proxy, error) {
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
 	if cluster.Proxy.GetAddress() == addr {
 		return cluster.Proxy, nil
 	}
@@ -1184,6 +1186,8 @@ func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string) (types.Pr
 }
 
 func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string) (types.QueryNode, error) {
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
 	for _, queryNode := range cluster.QueryNodes {
 		if queryNode.GetAddress() == addr {
 			return queryNode, nil
@@ -1193,6 +1197,8 @@ func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string) (type
 }
 
 func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string) (types.DataNode, error) {
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
 	for _, dataNode := range cluster.DataNodes {
 		if dataNode.GetAddress() == addr {
 			return dataNode, nil
@@ -1202,6 +1208,8 @@ func (cluster *MiniCluster) GetDataNode(ctx context.Context, addr string) (types
 }
 
 func (cluster *MiniCluster) GetIndexNode(ctx context.Context, addr string) (types.IndexNode, error) {
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
 	for _, indexNode := range cluster.IndexNodes {
 		if indexNode.GetAddress() == addr {
 			return indexNode, nil
