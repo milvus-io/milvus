@@ -295,7 +295,6 @@ class TestDatabaseOperation(TestcaseBase):
         self.collection_wrap.init_collection(cf.gen_unique_str(prefix), cf.gen_default_collection_schema(),
                                              check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24207")
     def test_create_db_collections_exceeds_max_num(self):
         """
         target: test create collection in different db and each db's colelction within max,
@@ -311,7 +310,7 @@ class TestDatabaseOperation(TestcaseBase):
         self.database_wrap.create_database(db_a)
         self.database_wrap.using_database(db_a)
 
-        # create 10 collections in db_a
+        # create 50 collections in db_a
         collection_num_a = 50
         for i in range(collection_num_a):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
@@ -342,7 +341,7 @@ class TestDatabaseOperation(TestcaseBase):
             self.database_wrap.using_database(db)
             total_coll_num += len(self.utility_wrap.list_collections()[0])
 
-        log.debug(f'total collection num: {exist_coll_num}')
+        log.debug(f'total collection num: {total_coll_num}')
         error = {ct.err_code: 1,
                  ct.err_msg: f"failed to create collection, maxCollectionNum={ct.max_collection_num}, exceeded the limit number of"}
         self.collection_wrap.init_collection(cf.gen_unique_str(prefix), cf.gen_default_collection_schema(),
