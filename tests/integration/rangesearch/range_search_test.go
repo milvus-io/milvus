@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package rangesearch
 
 import (
 	"context"
@@ -32,10 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 type RangeSearchSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 func (s *RangeSearchSuite) TestRangeSearchIP() {
@@ -49,11 +50,11 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	dim := 128
 	rowNum := 3000
 
-	schema := constructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -67,14 +68,14 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -85,7 +86,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -95,30 +96,30 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	ids := segmentIDs.GetData()
 	s.NotEmpty(segmentIDs)
 
-	segments, err := c.metaWatcher.ShowSegments()
+	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	waitingForFlush(ctx, c, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.IP),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -127,23 +128,23 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
 	}
-	waitingForLoad(ctx, c, collectionName)
+	s.WaitForLoad(ctx, collectionName)
 	// search
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 	radius := 10
 	filter := 20
 
-	params := getSearchParams(IndexFaissIvfFlat, distance.IP)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.IP)
 
 	// only pass in radius when range search
 	params["radius"] = radius
-	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.proxy.Search(ctx, searchReq)
+	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -153,10 +154,10 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
-	searchReq = constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ = c.proxy.Search(ctx, searchReq)
+	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -167,10 +168,10 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	// pass in illegal radius and range_filter when range search
 	params["radius"] = filter
 	params["range_filter"] = radius
-	searchReq = constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ = c.proxy.Search(ctx, searchReq)
+	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -197,11 +198,11 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	dim := 128
 	rowNum := 3000
 
-	schema := constructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -215,14 +216,14 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -233,7 +234,7 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -243,30 +244,30 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	ids := segmentIDs.GetData()
 	s.NotEmpty(segmentIDs)
 
-	segments, err := c.metaWatcher.ShowSegments()
+	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	waitingForFlush(ctx, c, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.L2),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -275,22 +276,22 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
 	}
-	waitingForLoad(ctx, c, collectionName)
+	s.WaitForLoad(ctx, collectionName)
 	// search
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 	radius := 20
 	filter := 10
 
-	params := getSearchParams(IndexFaissIvfFlat, distance.L2)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.L2)
 	// only pass in radius when range search
 	params["radius"] = radius
-	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.proxy.Search(ctx, searchReq)
+	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -300,10 +301,10 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
-	searchReq = constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ = c.proxy.Search(ctx, searchReq)
+	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -314,10 +315,10 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	// pass in illegal radius and range_filter when range search
 	params["radius"] = filter
 	params["range_filter"] = radius
-	searchReq = constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ = c.proxy.Search(ctx, searchReq)
+	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {

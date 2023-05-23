@@ -41,33 +41,33 @@ func (s *MiniClusterMethodsSuite) TestRemoveDataNode() {
 	defer cancel()
 
 	datanode := datanode.NewDataNode(ctx, c.factory)
-	datanode.SetEtcdClient(c.etcdCli)
+	datanode.SetEtcdClient(c.EtcdCli)
 	//datanode := c.CreateDefaultDataNode()
 
 	err := c.AddDataNode(datanode)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.DataNodeNum)
-	s.Equal(2, len(c.dataNodes))
+	s.Equal(2, len(c.DataNodes))
 
 	err = c.RemoveDataNode(datanode)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.DataNodeNum)
-	s.Equal(1, len(c.dataNodes))
+	s.Equal(1, len(c.DataNodes))
 
 	// add default node and remove randomly
 	err = c.AddDataNode(nil)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.DataNodeNum)
-	s.Equal(2, len(c.dataNodes))
+	s.Equal(2, len(c.DataNodes))
 
 	err = c.RemoveDataNode(nil)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.DataNodeNum)
-	s.Equal(1, len(c.dataNodes))
+	s.Equal(1, len(c.DataNodes))
 }
 
 func (s *MiniClusterMethodsSuite) TestRemoveQueryNode() {
@@ -76,33 +76,33 @@ func (s *MiniClusterMethodsSuite) TestRemoveQueryNode() {
 	defer cancel()
 
 	queryNode := querynodev2.NewQueryNode(ctx, c.factory)
-	queryNode.SetEtcdClient(c.etcdCli)
+	queryNode.SetEtcdClient(c.EtcdCli)
 	//queryNode := c.CreateDefaultQueryNode()
 
 	err := c.AddQueryNode(queryNode)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.QueryNodeNum)
-	s.Equal(2, len(c.queryNodes))
+	s.Equal(2, len(c.QueryNodes))
 
 	err = c.RemoveQueryNode(queryNode)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.QueryNodeNum)
-	s.Equal(1, len(c.queryNodes))
+	s.Equal(1, len(c.QueryNodes))
 
 	// add default node and remove randomly
 	err = c.AddQueryNode(nil)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.QueryNodeNum)
-	s.Equal(2, len(c.queryNodes))
+	s.Equal(2, len(c.QueryNodes))
 
 	err = c.RemoveQueryNode(nil)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.QueryNodeNum)
-	s.Equal(1, len(c.queryNodes))
+	s.Equal(1, len(c.QueryNodes))
 
 }
 
@@ -112,33 +112,33 @@ func (s *MiniClusterMethodsSuite) TestRemoveIndexNode() {
 	defer cancel()
 
 	indexNode := indexnode.NewIndexNode(ctx, c.factory)
-	indexNode.SetEtcdClient(c.etcdCli)
+	indexNode.SetEtcdClient(c.EtcdCli)
 	//indexNode := c.CreateDefaultIndexNode()
 
 	err := c.AddIndexNode(indexNode)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.IndexNodeNum)
-	s.Equal(2, len(c.indexNodes))
+	s.Equal(2, len(c.IndexNodes))
 
 	err = c.RemoveIndexNode(indexNode)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.IndexNodeNum)
-	s.Equal(1, len(c.indexNodes))
+	s.Equal(1, len(c.IndexNodes))
 
 	// add default node and remove randomly
 	err = c.AddIndexNode(nil)
 	s.NoError(err)
 
 	s.Equal(2, c.clusterConfig.IndexNodeNum)
-	s.Equal(2, len(c.indexNodes))
+	s.Equal(2, len(c.IndexNodes))
 
 	err = c.RemoveIndexNode(nil)
 	s.NoError(err)
 
 	s.Equal(1, c.clusterConfig.IndexNodeNum)
-	s.Equal(1, len(c.indexNodes))
+	s.Equal(1, len(c.IndexNodes))
 
 }
 
@@ -164,9 +164,9 @@ func (s *MiniClusterMethodsSuite) TestUpdateClusterSize() {
 	s.Equal(2, c.clusterConfig.QueryNodeNum)
 	s.Equal(2, c.clusterConfig.IndexNodeNum)
 
-	s.Equal(2, len(c.dataNodes))
-	s.Equal(2, len(c.queryNodes))
-	s.Equal(2, len(c.indexNodes))
+	s.Equal(2, len(c.DataNodes))
+	s.Equal(2, len(c.QueryNodes))
+	s.Equal(2, len(c.IndexNodes))
 
 	err = c.UpdateClusterSize(ClusterConfig{
 		DataNodeNum:  3,
@@ -179,9 +179,9 @@ func (s *MiniClusterMethodsSuite) TestUpdateClusterSize() {
 	s.Equal(2, c.clusterConfig.QueryNodeNum)
 	s.Equal(1, c.clusterConfig.IndexNodeNum)
 
-	s.Equal(3, len(c.dataNodes))
-	s.Equal(2, len(c.queryNodes))
-	s.Equal(1, len(c.indexNodes))
+	s.Equal(3, len(c.DataNodes))
+	s.Equal(2, len(c.QueryNodes))
+	s.Equal(1, len(c.IndexNodes))
 }
 
 func TestMiniCluster(t *testing.T) {

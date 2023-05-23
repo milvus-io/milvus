@@ -44,9 +44,31 @@ const (
 	LimitKey        = "limit"
 )
 
+func (s *MiniClusterSuite) WaitForLoad(ctx context.Context, collection string) {
+	cluster := s.Cluster
+	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
+		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+			CollectionName: collection,
+		})
+		if err != nil {
+			panic("GetLoadingProgress fail")
+		}
+		return loadProgress
+	}
+	for getLoadingProgress().GetProgress() != 100 {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait for load")
+			return
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
 func waitingForLoad(ctx context.Context, cluster *MiniCluster, collection string) {
 	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
-		loadProgress, err := cluster.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collection,
 		})
 		if err != nil {
@@ -64,7 +86,7 @@ func waitingForLoad(ctx context.Context, cluster *MiniCluster, collection string
 	}
 }
 
-func constructSearchRequest(
+func ConstructSearchRequest(
 	dbName, collectionName string,
 	expr string,
 	vecField string,

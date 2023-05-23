@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package bulkinsert
 
 import (
 	"context"
@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 const (
@@ -46,7 +47,7 @@ const (
 )
 
 type BulkInsertSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 // test bulk insert E2E
@@ -67,7 +68,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	//floatVecField := floatVecField
 	dim := 128
 
-	schema := constructSchema(collectionName, dim, true,
+	schema := integration.ConstructSchema(collectionName, dim, true,
 		&schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 		&schemapb.FieldSchema{Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}},
 		&schemapb.FieldSchema{Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
@@ -75,7 +76,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -89,19 +90,19 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
+	err = GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"embeddings.npy", 100, schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,
 			Value: strconv.Itoa(Dim),
 		},
 	})
 	s.NoError(err)
-	err = GenerateNumpyFile(c.chunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+	err = GenerateNumpyFile(c.ChunkManager.RootPath()+"/"+"image_path.npy", 100, schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 		{
 			Key:   common.MaxLengthKey,
 			Value: strconv.Itoa(65535),
@@ -110,14 +111,14 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.NoError(err)
 
 	bulkInsertFiles := []string{
-		c.chunkManager.RootPath() + "/" + "embeddings.npy",
-		c.chunkManager.RootPath() + "/" + "image_path.npy",
+		c.ChunkManager.RootPath() + "/" + "embeddings.npy",
+		c.ChunkManager.RootPath() + "/" + "image_path.npy",
 	}
 
-	health1, err := c.dataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	health1, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	s.NoError(err)
 	log.Info("dataCoord health", zap.Any("health1", health1))
-	importResp, err := c.proxy.Import(ctx, &milvuspb.ImportRequest{
+	importResp, err := c.Proxy.Import(ctx, &milvuspb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          bulkInsertFiles,
 	})
@@ -128,7 +129,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	for _, task := range tasks {
 	loop:
 		for {
-			importTaskState, err := c.proxy.GetImportState(ctx, &milvuspb.GetImportStateRequest{
+			importTaskState, err := c.Proxy.GetImportState(ctx, &milvuspb.GetImportStateRequest{
 				Task: task,
 			})
 			s.NoError(err)
@@ -147,11 +148,11 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		}
 	}
 
-	health2, err := c.dataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	health2, err := c.DataCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	s.NoError(err)
 	log.Info("dataCoord health", zap.Any("health2", health2))
 
-	segments, err := c.metaWatcher.ShowSegments()
+	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -159,11 +160,11 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	}
 
 	// create index
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      "embeddings",
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexHNSW, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, distance.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -171,10 +172,10 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, "embeddings")
+	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
 
 	// load
-	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -183,7 +184,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	waitingForLoad(ctx, c, collectionName)
+	s.WaitForLoad(ctx, collectionName)
 
 	// search
 	expr := "" //fmt.Sprintf("%s > 0", int64Field)
@@ -191,11 +192,11 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	topk := 10
 	roundDecimal := -1
 
-	params := getSearchParams(IndexHNSW, distance.L2)
-	searchReq := constructSearchRequest("", collectionName, expr,
+	params := integration.GetSearchParams(integration.IndexHNSW, distance.L2)
+	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		"embeddings", schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.proxy.Search(ctx, searchReq)
+	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))

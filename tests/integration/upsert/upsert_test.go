@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package upsert
 
 import (
 	"context"
@@ -29,12 +29,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
 type UpsertSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 func (s *UpsertSuite) TestUpsert() {
@@ -48,11 +49,11 @@ func (s *UpsertSuite) TestUpsert() {
 	dim := 128
 	rowNum := 3000
 
-	schema := constructSchema(collectionName, dim, false)
+	schema := integration.ConstructSchema(collectionName, dim, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -66,15 +67,15 @@ func (s *UpsertSuite) TestUpsert() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	pkFieldData := newInt64FieldData(int64Field, rowNum)
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	upsertResult, err := c.proxy.Upsert(ctx, &milvuspb.UpsertRequest{
+	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
@@ -85,7 +86,7 @@ func (s *UpsertSuite) TestUpsert() {
 	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -95,20 +96,20 @@ func (s *UpsertSuite) TestUpsert() {
 	ids := segmentIDs.GetData()
 	s.NotEmpty(segmentIDs)
 
-	segments, err := c.metaWatcher.ShowSegments()
+	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	waitingForFlush(ctx, c, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.IP),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
@@ -116,10 +117,10 @@ func (s *UpsertSuite) TestUpsert() {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
 
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -128,18 +129,18 @@ func (s *UpsertSuite) TestUpsert() {
 	if err != nil {
 		log.Warn("LoadCollection fail reason", zap.Error(err))
 	}
-	waitingForLoad(ctx, c, collectionName)
+	s.WaitForLoad(ctx, collectionName)
 	// search
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 
-	params := getSearchParams(IndexFaissIvfFlat, "")
-	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
+	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.proxy.Search(ctx, searchReq)
+	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {

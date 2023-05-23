@@ -26,9 +26,30 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
+func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64) {
+	flushed := func() bool {
+		resp, err := s.Cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+			SegmentIDs: segIDs,
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetFlushed()
+	}
+	for !flushed() {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait for flush until ctx done")
+			return
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
 func waitingForFlush(ctx context.Context, cluster *MiniCluster, segIDs []int64) {
 	flushed := func() bool {
-		resp, err := cluster.proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+		resp, err := cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
 			SegmentIDs: segIDs,
 		})
 		if err != nil {
@@ -46,7 +67,7 @@ func waitingForFlush(ctx context.Context, cluster *MiniCluster, segIDs []int64) 
 	}
 }
 
-func newInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
+func NewInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
 		FieldName: fieldName,
@@ -54,7 +75,7 @@ func newInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(numRows),
+						Data: GenerateInt64Array(numRows),
 					},
 				},
 			},
@@ -62,7 +83,7 @@ func newInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
 	}
 }
 
-func newStringFieldData(fieldName string, numRows int) *schemapb.FieldData {
+func NewStringFieldData(fieldName string, numRows int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
 		FieldName: fieldName,
@@ -70,7 +91,7 @@ func newStringFieldData(fieldName string, numRows int) *schemapb.FieldData {
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
-						Data: generateStringArray(numRows),
+						Data: GenerateStringArray(numRows),
 					},
 				},
 			},
@@ -78,7 +99,7 @@ func newStringFieldData(fieldName string, numRows int) *schemapb.FieldData {
 	}
 }
 
-func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+func NewFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_FloatVector,
 		FieldName: fieldName,
@@ -87,7 +108,7 @@ func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.Field
 				Dim: int64(dim),
 				Data: &schemapb.VectorField_FloatVector{
 					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(numRows, dim),
+						Data: GenerateFloatVectors(numRows, dim),
 					},
 				},
 			},
@@ -95,7 +116,7 @@ func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.Field
 	}
 }
 
-func newBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_BinaryVector,
 		FieldName: fieldName,
@@ -103,14 +124,14 @@ func newBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 			Vectors: &schemapb.VectorField{
 				Dim: int64(dim),
 				Data: &schemapb.VectorField_BinaryVector{
-					BinaryVector: generateBinaryVectors(numRows, dim),
+					BinaryVector: GenerateBinaryVectors(numRows, dim),
 				},
 			},
 		},
 	}
 }
 
-func generateInt64Array(numRows int) []int64 {
+func GenerateInt64Array(numRows int) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {
 		ret[i] = int64(i)
@@ -118,7 +139,7 @@ func generateInt64Array(numRows int) []int64 {
 	return ret
 }
 
-func generateStringArray(numRows int) []string {
+func GenerateStringArray(numRows int) []string {
 	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
 		ret[i] = fmt.Sprintf("%d", i)
@@ -126,7 +147,7 @@ func generateStringArray(numRows int) []string {
 	return ret
 }
 
-func generateFloatVectors(numRows, dim int) []float32 {
+func GenerateFloatVectors(numRows, dim int) []float32 {
 	total := numRows * dim
 	ret := make([]float32, 0, total)
 	for i := 0; i < total; i++ {
@@ -135,7 +156,7 @@ func generateFloatVectors(numRows, dim int) []float32 {
 	return ret
 }
 
-func generateBinaryVectors(numRows, dim int) []byte {
+func GenerateBinaryVectors(numRows, dim int) []byte {
 	total := (numRows * dim) / 8
 	ret := make([]byte, total)
 	_, err := rand.Read(ret)
@@ -145,7 +166,7 @@ func generateBinaryVectors(numRows, dim int) []byte {
 	return ret
 }
 
-func generateHashKeys(numRows int) []uint32 {
+func GenerateHashKeys(numRows int) []uint32 {
 	ret := make([]uint32, 0, numRows)
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, rand.Uint32())

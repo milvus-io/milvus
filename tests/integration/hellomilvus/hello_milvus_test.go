@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package hellomilvus
 
 import (
 	"context"
@@ -32,14 +32,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 type HelloMilvusSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 func (s *HelloMilvusSuite) TestHelloMilvus() {
-	ctx, cancel := context.WithCancel(s.Cluster.ctx)
+	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
 	defer cancel()
 	c := s.Cluster
 
@@ -51,11 +52,11 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 
 	collectionName := "TestHelloMilvus" + funcutil.GenRandomStr()
 
-	schema := constructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -68,14 +69,14 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -86,7 +87,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -96,20 +97,20 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.NotEmpty(segmentIDs)
 	s.True(has)
 
-	segments, err := c.metaWatcher.ShowSegments()
+	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	waitingForFlush(ctx, c, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -117,10 +118,10 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -129,19 +130,19 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	waitingForLoad(ctx, c, collectionName)
+	s.WaitForLoad(ctx, collectionName)
 
 	// search
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 
-	params := getSearchParams(IndexFaissIvfFlat, distance.L2)
-	searchReq := constructSearchRequest("", collectionName, expr,
-		floatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.L2)
+	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.proxy.Search(ctx, searchReq)
+	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
