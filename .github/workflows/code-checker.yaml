@@ -14,6 +14,7 @@ on:
       - 'pkg/**'
       - 'cmd/**'
       - 'build/**'
+      - 'tests/integration/**'
       - '.github/workflows/code-checker.yaml'
       - '.env'
       - docker-compose.yml
