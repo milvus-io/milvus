@@ -217,9 +217,9 @@ message WatchDmChannelsRequest {
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
   repeated data.VchannelInfo infos = 5;
-  schema.CollectionSchema schema = 6; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
+  schema.CollectionSchema schema = 6;
   repeated data.SegmentInfo exclude_infos = 7;
-  LoadMetaInfo load_meta = 8; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
+  LoadMetaInfo load_meta = 8;
   int64 replicaID = 9;
   map<int64, data.SegmentInfo> segment_infos = 10;
   // Deprecated
@@ -277,10 +277,10 @@ message LoadSegmentsRequest {
   common.MsgBase base = 1;
   int64 dst_nodeID = 2;
   repeated SegmentLoadInfo infos = 3;
-  schema.CollectionSchema schema = 4; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
+  schema.CollectionSchema schema = 4;
   int64 source_nodeID = 5;
   int64 collectionID = 6;
-  LoadMetaInfo load_meta = 7; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
+  LoadMetaInfo load_meta = 7;
   int64 replicaID = 8;
   repeated msg.MsgPosition delta_positions = 9; // keep it for compatibility of rolling upgrade from 2.2.x to 2.3
   int64 version = 10;
