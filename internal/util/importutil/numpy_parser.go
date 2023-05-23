@@ -143,8 +143,12 @@ func (p *NumpyParser) Parse(filePaths []string) error {
 
 // validateFileNames is to check redundant file and missed file
 func (p *NumpyParser) validateFileNames(filePaths []string) error {
+	dynamicFieldName := ""
 	requiredFieldNames := make(map[string]interface{})
 	for _, schema := range p.collectionSchema.Fields {
+		if schema.GetIsDynamic() && p.collectionSchema.GetEnableDynamicField() {
+			dynamicFieldName = schema.GetName()
+		}
 		if schema.GetIsPrimaryKey() {
 			if !schema.GetAutoID() {
 				requiredFieldNames[schema.GetName()] = nil
@@ -168,6 +172,10 @@ func (p *NumpyParser) validateFileNames(filePaths []string) error {
 
 	// check missed file
 	for name := range requiredFieldNames {
+		if name == dynamicFieldName {
+			// dynamic schema field file is not required
+			continue
+		}
 		_, ok := fileNames[name]
 		if !ok {
 			log.Error("Numpy parser: there is no file corresponding to field", zap.String("fieldName", name))

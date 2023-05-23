@@ -393,6 +393,10 @@ func Test_InitValidators(t *testing.T) {
 		validVal = "aa"
 		checkConvertFunc("FieldString", validVal, nil)
 
+		validVal = map[string]interface{}{"x": 5, "y": true, "z": "hello"}
+		checkConvertFunc("FieldJSON", validVal, nil)
+		checkConvertFunc("FieldJSON", "{\"x\": 8}", "{")
+
 		// the binary vector dimension is 16, shoud input two uint8 values, each value should between 0~255
 		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
 		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("1256")}
@@ -538,6 +542,97 @@ func Test_GetFieldDimension(t *testing.T) {
 	dim, err = getFieldDimension(schema)
 	assert.NotNil(t, err)
 	assert.Equal(t, 0, dim)
+}
+
+func Test_FillDynamicData(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name:               "schema",
+		Description:        "schema",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      106,
+				Name:         "FieldID",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				Description:  "int64",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      113,
+				Name:         "FieldDynamic",
+				IsPrimaryKey: false,
+				IsDynamic:    true,
+				Description:  "dynamic field",
+				DataType:     schemapb.DataType_JSON,
+			},
+		},
+	}
+
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		return nil
+	}
+
+	rowCount := 1000
+	idData := &storage.Int64FieldData{
+		Data: make([]int64, 0),
+	}
+	for i := 0; i < rowCount; i++ {
+		idData.Data = append(idData.Data, int64(i)) // this is primary key
+	}
+
+	t.Run("dynamic field is filled", func(t *testing.T) {
+		blockData := map[storage.FieldID]storage.FieldData{
+			106: idData,
+		}
+
+		segmentsData := []map[storage.FieldID]storage.FieldData{
+			blockData,
+		}
+
+		err := fillDynamicData(blockData, schema)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(blockData))
+		assert.Contains(t, blockData, int64(113))
+		assert.Equal(t, rowCount, blockData[113].RowNum())
+		assert.Equal(t, []byte("{}"), blockData[113].GetRow(0).([]byte))
+
+		err = tryFlushBlocks(ctx, segmentsData, schema, flushFunc, 1, 1, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("collection is dynamic by no dynamic field", func(t *testing.T) {
+		blockData := map[storage.FieldID]storage.FieldData{
+			106: idData,
+		}
+		schema.Fields[1].IsDynamic = false
+		err := fillDynamicData(blockData, schema)
+		assert.Error(t, err)
+
+		segmentsData := []map[storage.FieldID]storage.FieldData{
+			blockData,
+		}
+
+		err = tryFlushBlocks(ctx, segmentsData, schema, flushFunc, 1024*1024, 1, true)
+		assert.Error(t, err)
+
+		err = tryFlushBlocks(ctx, segmentsData, schema, flushFunc, 1024, 1, false)
+		assert.Error(t, err)
+
+		err = tryFlushBlocks(ctx, segmentsData, schema, flushFunc, 1024*1024, 1, false)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection is not dynamic", func(t *testing.T) {
+		blockData := map[storage.FieldID]storage.FieldData{
+			106: idData,
+		}
+		schema.EnableDynamicField = false
+		err := fillDynamicData(blockData, schema)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_TryFlushBlocks(t *testing.T) {
