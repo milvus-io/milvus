@@ -473,6 +473,8 @@ github.com/milvus-io/milvus-proto/go-api v0.0.0-20230517025117-8ba62a3f3a63 h1:V
 github.com/milvus-io/milvus-proto/go-api v0.0.0-20230517025117-8ba62a3f3a63/go.mod h1:148qnlmZ0Fdm1Fq+Mj/OW2uDoEP25g3mjh0vMGtkgmk=
 github.com/milvus-io/milvus-proto/go-api v0.0.0-20230518083323-3400e837ef47 h1:Dp5AAbOSTq31QLatGXamBMk/o670MkbRi8NoW17ypew=
 github.com/milvus-io/milvus-proto/go-api v0.0.0-20230518083323-3400e837ef47/go.mod h1:148qnlmZ0Fdm1Fq+Mj/OW2uDoEP25g3mjh0vMGtkgmk=
+github.com/milvus-io/milvus-proto/go-api v0.0.0-20230522080721-ef84459b8f87 h1:LdDHjEjus1NdC9ELbpQa6DfUHJotJUW2kD4S+8nvjw4=
+github.com/milvus-io/milvus-proto/go-api v0.0.0-20230522080721-ef84459b8f87/go.mod h1:148qnlmZ0Fdm1Fq+Mj/OW2uDoEP25g3mjh0vMGtkgmk=
 github.com/milvus-io/pulsar-client-go v0.6.10 h1:eqpJjU+/QX0iIhEo3nhOqMNXL+TyInAs1IAHZCrCM/A=
 github.com/milvus-io/pulsar-client-go v0.6.10/go.mod h1:lQqCkgwDF8YFYjKA+zOheTk1tev2B+bKj5j7+nm8M1w=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=

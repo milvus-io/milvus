@@ -3587,6 +3587,7 @@ class SearchResultData final :
     kFieldsDataFieldNumber = 3,
     kScoresFieldNumber = 4,
     kTopksFieldNumber = 6,
+    kOutputFieldsFieldNumber = 7,
     kIdsFieldNumber = 5,
     kNumQueriesFieldNumber = 1,
     kTopKFieldNumber = 2,
@@ -3653,6 +3654,30 @@ class SearchResultData final :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
       mutable_topks();
 
+  // repeated string output_fields = 7;
+  int output_fields_size() const;
+  private:
+  int _internal_output_fields_size() const;
+  public:
+  void clear_output_fields();
+  const std::string& output_fields(int index) const;
+  std::string* mutable_output_fields(int index);
+  void set_output_fields(int index, const std::string& value);
+  void set_output_fields(int index, std::string&& value);
+  void set_output_fields(int index, const char* value);
+  void set_output_fields(int index, const char* value, size_t size);
+  std::string* add_output_fields();
+  void add_output_fields(const std::string& value);
+  void add_output_fields(std::string&& value);
+  void add_output_fields(const char* value);
+  void add_output_fields(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& output_fields() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_output_fields();
+  private:
+  const std::string& _internal_output_fields(int index) const;
+  std::string* _internal_add_output_fields();
+  public:
+
   // .milvus.proto.schema.IDs ids = 5;
   bool has_ids() const;
   private:
@@ -3701,6 +3726,7 @@ class SearchResultData final :
     ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > scores_;
     ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t > topks_;
     mutable std::atomic<int> _topks_cached_byte_size_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> output_fields_;
     ::milvus::proto::schema::IDs* ids_;
     int64_t num_queries_;
     int64_t top_k_;
@@ -6802,6 +6828,81 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
 SearchResultData::mutable_topks() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.topks)
   return _internal_mutable_topks();
+}
+
+// repeated string output_fields = 7;
+inline int SearchResultData::_internal_output_fields_size() const {
+  return _impl_.output_fields_.size();
+}
+inline int SearchResultData::output_fields_size() const {
+  return _internal_output_fields_size();
+}
+inline void SearchResultData::clear_output_fields() {
+  _impl_.output_fields_.Clear();
+}
+inline std::string* SearchResultData::add_output_fields() {
+  std::string* _s = _internal_add_output_fields();
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.schema.SearchResultData.output_fields)
+  return _s;
+}
+inline const std::string& SearchResultData::_internal_output_fields(int index) const {
+  return _impl_.output_fields_.Get(index);
+}
+inline const std::string& SearchResultData::output_fields(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.SearchResultData.output_fields)
+  return _internal_output_fields(index);
+}
+inline std::string* SearchResultData::mutable_output_fields(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.SearchResultData.output_fields)
+  return _impl_.output_fields_.Mutable(index);
+}
+inline void SearchResultData::set_output_fields(int index, const std::string& value) {
+  _impl_.output_fields_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::set_output_fields(int index, std::string&& value) {
+  _impl_.output_fields_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::set_output_fields(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.output_fields_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::set_output_fields(int index, const char* value, size_t size) {
+  _impl_.output_fields_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline std::string* SearchResultData::_internal_add_output_fields() {
+  return _impl_.output_fields_.Add();
+}
+inline void SearchResultData::add_output_fields(const std::string& value) {
+  _impl_.output_fields_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::add_output_fields(std::string&& value) {
+  _impl_.output_fields_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::add_output_fields(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.output_fields_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline void SearchResultData::add_output_fields(const char* value, size_t size) {
+  _impl_.output_fields_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.schema.SearchResultData.output_fields)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+SearchResultData::output_fields() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.SearchResultData.output_fields)
+  return _impl_.output_fields_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+SearchResultData::mutable_output_fields() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.output_fields)
+  return &_impl_.output_fields_;
 }
 
 #ifdef __GNUC__

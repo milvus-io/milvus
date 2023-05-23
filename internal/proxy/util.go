@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -798,11 +800,13 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, []string, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
+	userOutputFieldsMap := make(map[string]bool)
+	userOutputFields := make([]string, 0)
 
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
@@ -816,15 +820,33 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 		if outputFieldName == "*" {
 			for fieldName := range allFieldNameMap {
 				resultFieldNameMap[fieldName] = true
+				userOutputFieldsMap[fieldName] = true
 			}
 		} else {
 			if _, ok := allFieldNameMap[outputFieldName]; ok {
 				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
+					schemaH, err := typeutil.CreateSchemaHelper(schema)
+					if err != nil {
+						return nil, nil, err
+					}
+					err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
+						if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
+							expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
+							return nil
+						}
+						return fmt.Errorf("not suppot getting subkeys of json field yet")
+					})
+					if err != nil {
+						log.Info("parse output field name failed", zap.String("field name", outputFieldName))
+						return nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+					}
 					resultFieldNameMap[common.MetaFieldName] = true
+					userOutputFieldsMap[outputFieldName] = true
 				} else {
-					return nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 
@@ -833,12 +855,16 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 
 	if addPrimary {
 		resultFieldNameMap[primaryFieldName] = true
+		userOutputFieldsMap[primaryFieldName] = true
 	}
 
 	for fieldName := range resultFieldNameMap {
 		resultFieldNames = append(resultFieldNames, fieldName)
 	}
-	return resultFieldNames, nil
+	for fieldName := range userOutputFieldsMap {
+		userOutputFields = append(userOutputFields, fieldName)
+	}
+	return resultFieldNames, userOutputFields, nil
 }
 
 func validateIndexName(indexName string) error {

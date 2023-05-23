@@ -62,6 +62,24 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 	return predicate.expr, nil
 }
 
+func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc func(*planpb.Expr) error) error {
+	ret := handleExpr(schema, identifier)
+
+	if err := getError(ret); err != nil {
+		return fmt.Errorf("cannot parse identifier: %s, error: %s", identifier, err)
+	}
+
+	predicate := getExpr(ret)
+	if predicate == nil {
+		return fmt.Errorf("cannot parse identifier: %s", identifier)
+	}
+	if predicate.expr.GetColumnExpr() == nil {
+		return fmt.Errorf("cannot parse identifier: %s", identifier)
+	}
+
+	return checkFunc(predicate.expr)
+}
+
 func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
