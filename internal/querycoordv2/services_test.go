@@ -1409,11 +1409,16 @@ func (suite *ServiceSuite) TestGetReplicasFailed() {
 	ctx := context.Background()
 	server := suite.server
 
-	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(100001, 100000, []int64{}))
-	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(100002, 100000, []int64{1}))
+	replicas := suite.meta.ReplicaManager.GetByCollection(suite.collections[0])
+	for _, replica := range replicas {
+		suite.updateSegmentDist(suite.collections[0], replica.GetNodes()[0])
+	}
+	suite.updateChannelDist(suite.collections[0])
+
+	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(100001, suite.collections[0], []int64{}))
 
 	req := &milvuspb.GetReplicasRequest{
-		CollectionID:   100000,
+		CollectionID:   suite.collections[0],
 		WithShardNodes: true,
 	}
 	resp, err := server.GetReplicas(ctx, req)

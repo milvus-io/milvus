@@ -26,17 +26,19 @@ import (
 
 type refresher struct {
 	refreshInterval  time.Duration
-	intervalDone     chan bool
+	intervalDone     chan struct{}
 	intervalInitOnce sync.Once
 	eh               EventHandler
 
 	fetchFunc func() error
+	stopOnce  sync.Once
+	wg        sync.WaitGroup
 }
 
 func newRefresher(interval time.Duration, fetchFunc func() error) *refresher {
 	return &refresher{
 		refreshInterval: interval,
-		intervalDone:    make(chan bool, 1),
+		intervalDone:    make(chan struct{}),
 		fetchFunc:       fetchFunc,
 	}
 }
@@ -44,16 +46,21 @@ func newRefresher(interval time.Duration, fetchFunc func() error) *refresher {
 func (r *refresher) start(name string) {
 	if r.refreshInterval > 0 {
 		r.intervalInitOnce.Do(func() {
+			r.wg.Add(1)
 			go r.refreshPeriodically(name)
 		})
 	}
 }
 
 func (r *refresher) stop() {
-	r.intervalDone <- true
+	r.stopOnce.Do(func() {
+		close(r.intervalDone)
+		r.wg.Wait()
+	})
 }
 
 func (r *refresher) refreshPeriodically(name string) {
+	defer r.wg.Done()
 	ticker := time.NewTicker(r.refreshInterval)
 	defer ticker.Stop()
 	log.Info("start refreshing configurations", zap.String("source", name))
@@ -63,7 +70,7 @@ func (r *refresher) refreshPeriodically(name string) {
 			err := r.fetchFunc()
 			if err != nil {
 				log.Error("can not pull configs", zap.Error(err))
-				r.intervalDone <- true
+				r.stop()
 			}
 		case <-r.intervalDone:
 			log.Info("stop refreshing configurations")
