@@ -279,14 +279,15 @@ func TestInsertTask_checkDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
-		assert.NoError(t, err)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: msgpb.InsertRequest{
 					CollectionName: "collectionName",
 					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 			schema: newTestSchema(),
@@ -310,14 +311,15 @@ func TestInsertTask_checkDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
-		assert.NoError(t, err)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: msgpb.InsertRequest{
 					CollectionName: "collectionName",
 					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 			schema: newTestSchema(),
@@ -340,14 +342,15 @@ func TestInsertTask_checkDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData, err := autoGenDynamicFieldData(jsonData)
-		assert.NoError(t, err)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: msgpb.InsertRequest{
 					CollectionName: "collectionName",
 					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 			schema: newTestSchema(),
@@ -358,19 +361,20 @@ func TestInsertTask_checkDynamicFieldData(t *testing.T) {
 	})
 	t.Run("json data is string", func(t *testing.T) {
 		data := "abcdefg"
-		jsonFieldData, err := autoGenDynamicFieldData([][]byte{[]byte(data)})
-		assert.NoError(t, err)
+		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
 		it := insertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: msgpb.InsertRequest{
 					CollectionName: "collectionName",
 					FieldsData:     []*schemapb.FieldData{jsonFieldData},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 			schema: newTestSchema(),
 		}
-		err = it.checkDynamicFieldData()
+		err := it.checkDynamicFieldData()
 		assert.Error(t, err)
 	})
 	t.Run("no json data", func(t *testing.T) {
@@ -380,6 +384,8 @@ func TestInsertTask_checkDynamicFieldData(t *testing.T) {
 				InsertRequest: msgpb.InsertRequest{
 					CollectionName: "collectionName",
 					FieldsData:     []*schemapb.FieldData{},
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 			schema: newTestSchema(),

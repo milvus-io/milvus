@@ -114,10 +114,11 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
-	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
+	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 	jsonData := newJSONData(common.MetaFieldName, rowNum)
+	jsonData.IsDynamic = true
 	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData})
 
 	s.checkSearch(c, collectionName, common.MetaFieldName, dim)
@@ -196,7 +197,7 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
-	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
+	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn})
@@ -290,11 +291,12 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 	describeCollectionResp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
-	s.Equal(4, len(describeCollectionResp.GetSchema().GetFields()))
+	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
 
 	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 	jsonData := newJSONData(jsonField, rowNum)
 	dynamicData := newJSONData(common.MetaFieldName, rowNum)
+	dynamicData.IsDynamic = true
 	s.insertFlushIndexLoad(ctx, c, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, jsonData, dynamicData})
 
 	s.checkSearch(c, collectionName, common.MetaFieldName, dim)

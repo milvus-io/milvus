@@ -300,22 +300,17 @@ func (it *insertTask) verifyDynamicFieldData() error {
 }
 
 func (it *insertTask) checkDynamicFieldData() error {
-	var dataNameSet = typeutil.NewSet[string]()
-
 	for _, data := range it.insertMsg.FieldsData {
-		dataNameSet.Insert(data.GetFieldName())
-	}
-	if _, ok := dataNameSet[common.MetaFieldName]; ok {
-		return it.verifyDynamicFieldData()
+		if data.IsDynamic {
+			data.FieldName = common.MetaFieldName
+			return it.verifyDynamicFieldData()
+		}
 	}
 	defaultData := make([][]byte, it.insertMsg.NRows())
 	for i := range defaultData {
 		defaultData[i] = []byte("{}")
 	}
-	dynamicData, err := autoGenDynamicFieldData(defaultData)
-	if err != nil {
-		return err
-	}
+	dynamicData := autoGenDynamicFieldData(defaultData)
 	it.insertMsg.FieldsData = append(it.insertMsg.FieldsData, dynamicData)
 	return nil
 }
