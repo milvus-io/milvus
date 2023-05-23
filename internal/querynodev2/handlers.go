@@ -212,9 +212,9 @@ func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequ
 
 	var results []*segcorepb.RetrieveResults
 	if req.GetScope() == querypb.DataScope_Historical {
-		results, _, _, err = segments.RetrieveHistorical(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs(), node.cacheChunkManager)
+		results, _, _, err = segments.RetrieveHistorical(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
 	} else {
-		results, _, _, err = segments.RetrieveStreaming(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs(), node.cacheChunkManager)
+		results, _, _, err = segments.RetrieveStreaming(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
 	}
 	if err != nil {
 		return nil, err

@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -32,7 +31,7 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentType, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentType, plan *RetrievePlan, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, error) {
 	var (
 		resultCh = make(chan *segcorepb.RetrieveResults, len(segIDs))
 		errs     = make([]error, len(segIDs))
@@ -59,7 +58,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 				errs[i] = err
 				return
 			}
-			if err = segment.FillIndexedFieldsData(ctx, vcm, result); err != nil {
+			if err = segment.ValidateIndexedFieldsData(ctx, result); err != nil {
 				errs[i] = err
 				return
 			}
@@ -87,7 +86,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 }
 
 // retrieveHistorical will retrieve all the target segments in historical
-func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
+func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	var err error
 	var retrieveResults []*segcorepb.RetrieveResults
 	var retrieveSegmentIDs []UniqueID
@@ -97,12 +96,12 @@ func RetrieveHistorical(ctx context.Context, manager *Manager, plan *RetrievePla
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeSealed, plan, retrieveSegmentIDs, vcm)
+	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeSealed, plan, retrieveSegmentIDs)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
 }
 
 // retrieveStreaming will retrieve all the target segments in streaming
-func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
+func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	var err error
 	var retrieveResults []*segcorepb.RetrieveResults
 	var retrievePartIDs []UniqueID
@@ -112,6 +111,6 @@ func RetrieveStreaming(ctx context.Context, manager *Manager, plan *RetrievePlan
 	if err != nil {
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
-	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeGrowing, plan, retrieveSegmentIDs, vcm)
+	retrieveResults, err = retrieveOnSegments(ctx, manager, SegmentTypeGrowing, plan, retrieveSegmentIDs)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
 }

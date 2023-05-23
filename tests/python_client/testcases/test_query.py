@@ -1418,9 +1418,10 @@ class TestQueryOperation(TestcaseBase):
         assert collection_w.has_index()[0]
         res = df.loc[:1, [ct.default_int64_field_name, ct.default_float_vec_field_name]].to_dict('records')
         collection_w.load()
+        error = {ct.err_code: 1, ct.err_msg: 'not allowed'}
         collection_w.query(default_term_expr, output_fields=fields,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res, "with_vec": True})
+                           check_task=CheckTasks.err_res,
+                           check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_binary_vec_field_after_index(self):

@@ -126,8 +126,7 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
-		[]int64{suite.sealed.ID()},
-		nil)
+		[]int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
 }
@@ -139,8 +138,7 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	res, _, _, err := RetrieveStreaming(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
-		[]int64{suite.growing.ID()},
-		nil)
+		[]int64{suite.growing.ID()})
 	suite.NoError(err)
 	suite.Len(res[0].Offset, 3)
 }
@@ -152,8 +150,7 @@ func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
-		[]int64{999},
-		nil)
+		[]int64{999})
 	suite.NoError(err)
 	suite.Len(res, 0)
 }
@@ -166,8 +163,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	res, _, _, err := RetrieveHistorical(context.TODO(), suite.manager, plan,
 		suite.collectionID,
 		[]int64{suite.partitionID},
-		[]int64{suite.sealed.ID()},
-		nil)
+		[]int64{suite.sealed.ID()})
 	suite.ErrorIs(err, ErrSegmentReleased)
 	suite.Len(res, 0)
 }

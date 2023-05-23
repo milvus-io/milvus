@@ -28,6 +28,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"sort"
 	"sync"
 	"unsafe"
@@ -46,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -473,10 +474,7 @@ func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (
 	return dataPath, offsetInBinlog
 }
 
-func (s *LocalSegment) FillIndexedFieldsData(ctx context.Context,
-	vcm storage.ChunkManager,
-	result *segcorepb.RetrieveResults,
-) error {
+func (s *LocalSegment) ValidateIndexedFieldsData(ctx context.Context, result *segcorepb.RetrieveResults) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -484,43 +482,21 @@ func (s *LocalSegment) FillIndexedFieldsData(ctx context.Context,
 	)
 
 	for _, fieldData := range result.FieldsData {
-		// If the field is not vector field, no need to download data from remote.
 		if !typeutil.IsVectorType(fieldData.GetType()) {
 			continue
 		}
-		// If the vector field doesn't have indexed, vector data is in memory
-		// for brute force search, no need to download data from remote.
 		if !s.ExistIndex(fieldData.FieldId) {
 			continue
 		}
-		// If the index has raw data, vector data could be obtained from index,
-		// no need to download data from remote.
-		if s.HasRawData(fieldData.FieldId) {
-			continue
-		}
-
-		index := s.GetIndex(fieldData.FieldId)
-		if index == nil {
-			continue
-		}
-
-		// TODO: optimize here. Now we'll read a whole file from storage every time we retrieve raw data by offset.
-		for i, offset := range result.Offset {
-			dataPath, dataOffset := s.GetFieldDataPath(index, offset)
-			endian := common.Endian
-
-			// fill field data that fieldData[i] = dataPath[offsetInBinlog*rowBytes, (offsetInBinlog+1)*rowBytes]
-			if err := fillFieldData(ctx, vcm, dataPath, fieldData, i, dataOffset, endian); err != nil {
-				log.Warn("failed to fill field data",
-					zap.Int64("offset", offset),
-					zap.String("dataPath", dataPath),
-					zap.Int64("dataOffset", dataOffset),
-					zap.Int64("fieldID", fieldData.GetFieldId()),
-					zap.String("fieldType", fieldData.GetType().String()),
-					zap.Error(err),
-				)
+		if !s.HasRawData(fieldData.FieldId) {
+			index := s.GetIndex(fieldData.FieldId)
+			indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, index.IndexInfo.GetIndexParams())
+			if err != nil {
 				return err
 			}
+			err = fmt.Errorf("output fields for %s index is not allowed", indexType)
+			log.Warn("validate fields failed", zap.Error(err))
+			return err
 		}
 	}
 
