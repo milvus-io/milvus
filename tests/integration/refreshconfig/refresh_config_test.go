@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package refreshconfig
 
 import (
 	"context"
@@ -29,12 +29,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
 type RefreshConfigSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
@@ -42,7 +43,7 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	resp, err := c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	resp, err := c.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 		Username: "test",
 		Password: "1234",
 	})
@@ -52,10 +53,10 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 
 	params := paramtable.Get()
 	key := fmt.Sprintf("%s/config/proxy/minpasswordlength", params.EtcdCfg.RootPath.GetValue())
-	c.etcdCli.KV.Put(ctx, key, "3")
+	c.EtcdCli.KV.Put(ctx, key, "3")
 
 	s.Eventually(func() bool {
-		resp, err = c.proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+		resp, err = c.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 			Username: "test",
 			Password: "1234",
 		})
@@ -70,7 +71,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 	params := paramtable.Get()
-	c.etcdCli.KV.Put(ctx, fmt.Sprintf("%s/config/common/defaultIndexName", params.EtcdCfg.RootPath.GetValue()), "a_index")
+	c.EtcdCli.KV.Put(ctx, fmt.Sprintf("%s/config/common/defaultIndexName", params.EtcdCfg.RootPath.GetValue()), "a_index")
 
 	s.Eventually(func() bool {
 		return params.CommonCfg.DefaultIndexName.GetValue() == "a_index"
@@ -81,11 +82,11 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	collectionName := "test"
 	rowNum := 100
 
-	schema := constructSchema("test", 128, true)
+	schema := integration.ConstructSchema("test", 128, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "default",
 		CollectionName: "test",
 		Schema:         marshaledSchema,
@@ -97,9 +98,9 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	_, err = c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	_, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -108,14 +109,27 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	})
 	s.NoError(err)
 
-	_, err = c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	// flush
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	s.True(has)
+	ids := segmentIDs.GetData()
+	s.NotEmpty(segmentIDs)
+
+	s.WaitForFlush(ctx, ids)
+
+	_, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
+		FieldName:      integration.FloatVecField,
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.L2),
 	})
 	s.NoError(err)
 
-	resp, err := c.proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+	resp, err := c.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})

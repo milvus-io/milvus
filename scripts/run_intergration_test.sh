@@ -30,9 +30,10 @@ if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     APPLE_SILICON_FLAG="-tags dynamic"
 fi
 
-pushd tests/integration
-go test -race ${APPLE_SILICON_FLAG} -v
-popd
+for d in $(go list ./tests/integration/...); do
+    echo "$d"
+    go test -race ${APPLE_SILICON_FLAG} -v "$d"
+done
 
 endTime=`date +%s`
 

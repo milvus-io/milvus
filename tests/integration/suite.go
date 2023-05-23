@@ -18,6 +18,7 @@ package integration
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -64,6 +65,7 @@ type MiniClusterSuite struct {
 }
 
 func (s *MiniClusterSuite) SetupSuite() {
+	rand.Seed(time.Now().UnixNano())
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 

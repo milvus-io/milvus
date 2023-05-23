@@ -42,9 +42,41 @@ const (
 	IndexDISKANN         = indexparamcheck.IndexDISKANN
 )
 
+func (s *MiniClusterSuite) WaitForIndexBuilt(ctx context.Context, collection, field string) {
+	getIndexBuilt := func() bool {
+		resp, err := s.Cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			CollectionName: collection,
+			FieldName:      field,
+		})
+		if err != nil {
+			s.FailNow("failed to describe index")
+			return true
+		}
+		for _, desc := range resp.GetIndexDescriptions() {
+			if desc.GetFieldName() == field {
+				switch desc.GetState() {
+				case commonpb.IndexState_Finished:
+					return true
+				case commonpb.IndexState_Failed:
+					return false
+				}
+			}
+		}
+		return false
+	}
+	for !getIndexBuilt() {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait index built until ctx done")
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func waitingForIndexBuilt(ctx context.Context, cluster *MiniCluster, t *testing.T, collection, field string) {
 	getIndexBuilt := func() bool {
-		resp, err := cluster.proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+		resp, err := cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			CollectionName: collection,
 			FieldName:      field,
 		})
@@ -74,7 +106,7 @@ func waitingForIndexBuilt(ctx context.Context, cluster *MiniCluster, t *testing.
 	}
 }
 
-func constructIndexParam(dim int, indexType string, metricType string) []*commonpb.KeyValuePair {
+func ConstructIndexParam(dim int, indexType string, metricType string) []*commonpb.KeyValuePair {
 	params := []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,
@@ -126,7 +158,7 @@ func constructIndexParam(dim int, indexType string, metricType string) []*common
 	return params
 }
 
-func getSearchParams(indexType string, metricType string) map[string]any {
+func GetSearchParams(indexType string, metricType string) map[string]any {
 	params := make(map[string]any)
 	switch indexType {
 	case IndexFaissIDMap, IndexFaissBinIDMap:

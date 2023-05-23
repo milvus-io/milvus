@@ -25,20 +25,20 @@ import (
 )
 
 const (
-	boolField     = "boolField"
-	int8Field     = "int8Field"
-	int16Field    = "int16Field"
-	int32Field    = "int32Field"
-	int64Field    = "int64Field"
-	floatField    = "floatField"
-	doubleField   = "doubleField"
-	varCharField  = "varCharField"
-	jsonField     = "jsonField"
-	floatVecField = "floatVecField"
-	binVecField   = "binVecField"
+	BoolField     = "boolField"
+	Int8Field     = "int8Field"
+	Int16Field    = "int16Field"
+	Int32Field    = "int32Field"
+	Int64Field    = "int64Field"
+	FloatField    = "floatField"
+	DoubleField   = "doubleField"
+	VarCharField  = "varCharField"
+	JSONField     = "jsonField"
+	FloatVecField = "floatVecField"
+	BinVecField   = "binVecField"
 )
 
-func constructSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+func ConstructSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
 	// if fields are specified, construct it
 	if len(fields) > 0 {
 		return &schemapb.CollectionSchema{
@@ -51,7 +51,7 @@ func constructSchema(collection string, dim int, autoID bool, fields ...*schemap
 	// if no field is specified, use default
 	pk := &schemapb.FieldSchema{
 		FieldID:      100,
-		Name:         int64Field,
+		Name:         Int64Field,
 		IsPrimaryKey: true,
 		Description:  "",
 		DataType:     schemapb.DataType_Int64,
@@ -61,7 +61,7 @@ func constructSchema(collection string, dim int, autoID bool, fields ...*schemap
 	}
 	fVec := &schemapb.FieldSchema{
 		FieldID:      101,
-		Name:         floatVecField,
+		Name:         FloatVecField,
 		IsPrimaryKey: false,
 		Description:  "",
 		DataType:     schemapb.DataType_FloatVector,

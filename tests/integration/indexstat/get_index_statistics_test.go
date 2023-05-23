@@ -1,9 +1,11 @@
-package integration
+package indexstat
 
 import (
 	"context"
+	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -12,10 +14,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 type GetIndexStatisticsSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 }
 
 func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
@@ -29,11 +32,11 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	dim := 128
 	rowNum := 3000
 
-	schema := constructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -45,9 +48,9 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-	hashKeys := generateHashKeys(rowNum)
-	insertResult, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -58,7 +61,7 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -67,15 +70,15 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	ids := segmentIDs.GetData()
 	s.NotEmpty(segmentIDs)
 	s.Equal(true, has)
-	waitingForFlush(ctx, c, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
 	indexName := "_default"
-	createIndexStatus, err := c.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      floatVecField,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, IndexFaissIvfFlat, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -83,9 +86,9 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	getIndexStatisticsResponse, err := c.proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
+	getIndexStatisticsResponse, err := c.Proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
 		CollectionName: collectionName,
 		IndexName:      indexName,
 	})
@@ -132,7 +135,7 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 
 			s.NoError(err)
 
-		waitingForIndexBuilt(ctx, c, t, collectionName, floatVecField)
+		waitingForIndexBuilt(ctx,  collectionName, integration.FloatVecField)
 
 		getIndexStatisticsResponse2, err := c.proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
 			CollectionName: collectionName,
@@ -146,4 +149,8 @@ func (s *GetIndexStatisticsSuite) TestGetIndexStatistics() {
 	*/
 
 	log.Info("TestGetIndexStatistics succeed")
+}
+
+func TestGetIndexStat(t *testing.T) {
+	suite.Run(t, new(GetIndexStatisticsSuite))
 }

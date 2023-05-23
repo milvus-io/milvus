@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package getvector
 
 import (
 	"context"
@@ -32,10 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 type TestGetVectorSuite struct {
-	MiniClusterSuite
+	integration.MiniClusterSuite
 
 	// test params
 	nq         int
@@ -47,7 +48,7 @@ type TestGetVectorSuite struct {
 }
 
 func (s *TestGetVectorSuite) run() {
-	ctx, cancel := context.WithCancel(s.Cluster.ctx)
+	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
 	defer cancel()
 
 	collection := fmt.Sprintf("TestGetVector_%d_%d_%s_%s_%s",
@@ -89,11 +90,11 @@ func (s *TestGetVectorSuite) run() {
 		},
 		IndexParams: nil,
 	}
-	schema := constructSchema(collection, dim, false, pk, fVec)
+	schema := integration.ConstructSchema(collection, dim, false, pk, fVec)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := s.Cluster.proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collection,
 		Schema:         marshaledSchema,
 		ShardsNum:      2,
@@ -103,19 +104,19 @@ func (s *TestGetVectorSuite) run() {
 
 	fieldsData := make([]*schemapb.FieldData, 0)
 	if s.pkType == schemapb.DataType_Int64 {
-		fieldsData = append(fieldsData, newInt64FieldData(pkFieldName, NB))
+		fieldsData = append(fieldsData, integration.NewInt64FieldData(pkFieldName, NB))
 	} else {
-		fieldsData = append(fieldsData, newStringFieldData(pkFieldName, NB))
+		fieldsData = append(fieldsData, integration.NewStringFieldData(pkFieldName, NB))
 	}
 	var vecFieldData *schemapb.FieldData
 	if s.vecType == schemapb.DataType_FloatVector {
-		vecFieldData = newFloatVectorFieldData(vecFieldName, NB, dim)
+		vecFieldData = integration.NewFloatVectorFieldData(vecFieldName, NB, dim)
 	} else {
-		vecFieldData = newBinaryVectorFieldData(vecFieldName, NB, dim)
+		vecFieldData = integration.NewBinaryVectorFieldData(vecFieldName, NB, dim)
 	}
 	fieldsData = append(fieldsData, vecFieldData)
-	hashKeys := generateHashKeys(NB)
-	_, err = s.Cluster.proxy.Insert(ctx, &milvuspb.InsertRequest{
+	hashKeys := integration.GenerateHashKeys(NB)
+	_, err = s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		CollectionName: collection,
 		FieldsData:     fieldsData,
 		HashKeys:       hashKeys,
@@ -125,7 +126,7 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := s.Cluster.proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 		CollectionNames: []string{collection},
 	})
 	s.Require().NoError(err)
@@ -134,42 +135,42 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().NotEmpty(segmentIDs)
 	s.Require().True(has)
 
-	segments, err := s.Cluster.metaWatcher.ShowSegments()
+	segments, err := s.Cluster.MetaWatcher.ShowSegments()
 	s.Require().NoError(err)
 	s.Require().NotEmpty(segments)
 
-	waitingForFlush(ctx, s.Cluster, ids)
+	s.WaitForFlush(ctx, ids)
 
 	// create index
-	_, err = s.Cluster.proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	_, err = s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collection,
 		FieldName:      vecFieldName,
 		IndexName:      "_default",
-		ExtraParams:    constructIndexParam(dim, s.indexType, s.metricType),
+		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	s.Require().NoError(err)
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	waitingForIndexBuilt(ctx, s.Cluster, s.T(), collection, vecFieldName)
+	s.WaitForIndexBuilt(ctx, collection, vecFieldName)
 
 	// load
-	_, err = s.Cluster.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	_, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collection,
 	})
 	s.Require().NoError(err)
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-	waitingForLoad(ctx, s.Cluster, collection)
+	s.WaitForLoad(ctx, collection)
 
 	// search
 	nq := s.nq
 	topk := s.topK
 
 	outputFields := []string{vecFieldName}
-	params := getSearchParams(s.indexType, s.metricType)
-	searchReq := constructSearchRequest("", collection, "",
+	params := integration.GetSearchParams(s.indexType, s.metricType)
+	searchReq := integration.ConstructSearchRequest("", collection, "",
 		vecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
-	searchResp, err := s.Cluster.proxy.Search(ctx, searchReq)
+	searchResp, err := s.Cluster.Proxy.Search(ctx, searchReq)
 	s.Require().NoError(err)
 	s.Require().Equal(searchResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
@@ -238,7 +239,7 @@ func (s *TestGetVectorSuite) run() {
 		}
 	}
 
-	status, err := s.Cluster.proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err := s.Cluster.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collection,
 	})
 	s.Require().NoError(err)
@@ -248,7 +249,7 @@ func (s *TestGetVectorSuite) run() {
 func (s *TestGetVectorSuite) TestGetVector_FLAT() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexFaissIDMap
+	s.indexType = integration.IndexFaissIDMap
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -258,7 +259,7 @@ func (s *TestGetVectorSuite) TestGetVector_FLAT() {
 func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexFaissIvfFlat
+	s.indexType = integration.IndexFaissIvfFlat
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -268,7 +269,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
 func (s *TestGetVectorSuite) TestGetVector_IVF_PQ() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexFaissIvfPQ
+	s.indexType = integration.IndexFaissIvfPQ
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -278,7 +279,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_PQ() {
 func (s *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexFaissIvfSQ8
+	s.indexType = integration.IndexFaissIvfSQ8
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -288,7 +289,7 @@ func (s *TestGetVectorSuite) TestGetVector_IVF_SQ8() {
 func (s *TestGetVectorSuite) TestGetVector_HNSW() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexHNSW
+	s.indexType = integration.IndexHNSW
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -298,7 +299,7 @@ func (s *TestGetVectorSuite) TestGetVector_HNSW() {
 func (s *TestGetVectorSuite) TestGetVector_IP() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexHNSW
+	s.indexType = integration.IndexHNSW
 	s.metricType = distance.IP
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -308,7 +309,7 @@ func (s *TestGetVectorSuite) TestGetVector_IP() {
 func (s *TestGetVectorSuite) TestGetVector_StringPK() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexHNSW
+	s.indexType = integration.IndexHNSW
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_VarChar
 	s.vecType = schemapb.DataType_FloatVector
@@ -318,7 +319,7 @@ func (s *TestGetVectorSuite) TestGetVector_StringPK() {
 func (s *TestGetVectorSuite) TestGetVector_BinaryVector() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = IndexFaissBinIvfFlat
+	s.indexType = integration.IndexFaissBinIvfFlat
 	s.metricType = distance.JACCARD
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_BinaryVector
@@ -329,7 +330,7 @@ func (s *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
 	s.T().Skip("skip big NQ Top due to timeout")
 	s.nq = 10000
 	s.topK = 200
-	s.indexType = IndexHNSW
+	s.indexType = integration.IndexHNSW
 	s.metricType = distance.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_FloatVector
@@ -339,7 +340,7 @@ func (s *TestGetVectorSuite) TestGetVector_Big_NQ_TOPK() {
 //func (s *TestGetVectorSuite) TestGetVector_DISKANN() {
 //	s.nq = 10
 //	s.topK = 10
-//	s.indexType = IndexDISKANN
+//	s.indexType = integration.IndexDISKANN
 //	s.metricType = distance.L2
 //	s.pkType = schemapb.DataType_Int64
 //	s.vecType = schemapb.DataType_FloatVector
