@@ -108,19 +108,25 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.readableCollections = []int64{1, 2, 3}
 		quotaCenter.resetAllCurrentRates()
-		quotaCenter.forceDenyReading(commonpb.ErrorCode_ForceDeny)
+		quotaCenter.forceDenyReading(commonpb.ErrorCode_ForceDeny, 1, 2, 3, 4)
 		for _, collection := range quotaCenter.readableCollections {
-			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DQLSearch])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DQLQuery])
 		}
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DQLSearch])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DQLQuery])
 
-		quotaCenter.writableCollections = []int64{1, 2, 3, 4}
+		quotaCenter.writableCollections = []int64{1, 2, 3}
 		quotaCenter.resetAllCurrentRates()
-		quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny)
+		quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, 1, 2, 3, 4)
 		for _, collection := range quotaCenter.writableCollections {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLBulkLoad])
 		}
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLDelete])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLBulkLoad])
 	})
 
 	t.Run("test calculateRates", func(t *testing.T) {
