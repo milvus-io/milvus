@@ -465,6 +465,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 				t.result.FieldsData[i].FieldName = field.Name
 				t.result.FieldsData[i].FieldId = field.FieldID
 				t.result.FieldsData[i].Type = field.DataType
+				t.result.FieldsData[i].IsDynamic = field.IsDynamic
 			}
 		}
 	}
