@@ -1,12 +1,10 @@
 import copy
-import time
 import os
-import pathlib
 import numpy as np
 import random
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
-from minio_comm import copy_files_to_minio
+from common.minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
 
 data_source = "/tmp/bulk_insert_data"
@@ -491,7 +489,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     :type data_fields: list
 
     :param file_nums: file numbers to be generated
-        The file(s) would be  geneated in data_source folder if file_nums = 1
+        The file(s) would be  generated in data_source folder if file_nums = 1
         The file(s) would be generated in different subfolers if file_nums > 1
     :type file_nums: int
 

@@ -15,7 +15,7 @@ from utils.util_k8s import (
     get_milvus_deploy_tool
 )
 from utils.util_log import test_log as log
-from bulk_insert_data import (
+from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_numpy_files,
     DataField as df,
