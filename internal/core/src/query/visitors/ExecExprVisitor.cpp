@@ -32,7 +32,7 @@
 #include "query/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/error.h"
-
+#include "query/PlanProto.h"
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR

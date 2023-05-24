@@ -23,7 +23,6 @@ else ()
 endif ()
 
 if ( MILVUS_GPU_VERSION STREQUAL "ON" )
-    set(USE_CUDA ON CACHE BOOL "" FORCE )
     set(WITH_RAFT ON CACHE BOOL "" FORCE )
 endif ()
 

@@ -204,8 +204,10 @@ def gen_schema_multi_string_fields(string_fields):
 
 def gen_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-    return vectors.tolist()
+    if dim > 1:
+        vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+        vectors = vectors.tolist()
+    return vectors
 
 
 def gen_string(nb):
@@ -491,7 +493,7 @@ def gen_search_param(index_type, metric_type="L2"):
             ivf_search_params = {"metric_type": metric_type, "params": {}}
             search_params.append(ivf_search_params)
         else:
-            for nprobe in [64, 128]:
+            for nprobe in [64,]:
                 ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
     elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:

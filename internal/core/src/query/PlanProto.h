@@ -74,3 +74,31 @@ class ProtoParser {
 };
 
 }  // namespace milvus::query
+   //
+template <>
+struct fmt::formatter<milvus::proto::plan::GenericValue::ValCase>
+    : formatter<string_view> {
+    auto
+    format(milvus::proto::plan::GenericValue::ValCase c,
+           format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::proto::plan::GenericValue::ValCase::kBoolVal:
+                name = "kBoolVal";
+                break;
+            case milvus::proto::plan::GenericValue::ValCase::kInt64Val:
+                name = "kInt64Val";
+                break;
+            case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
+                name = "kFloatVal";
+                break;
+            case milvus::proto::plan::GenericValue::ValCase::kStringVal:
+                name = "kStringVal";
+                break;
+            case milvus::proto::plan::GenericValue::ValCase::VAL_NOT_SET:
+                name = "VAL_NOT_SET";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
