@@ -34,12 +34,12 @@ type (
 	InputNode = flowgraph.InputNode
 )
 
-var flowGraphRetryOpt = retry.Attempts(5)
+var flowGraphRetryOpt = retry.Attempts(20)
 
 var fgRetryOptVal atomic.Value
 
 func init() {
-	setFlowGraphRetryOpt(retry.Attempts(5))
+	setFlowGraphRetryOpt(retry.Attempts(20))
 }
 
 // setFlowGraphRetryOpt set retry option for flowgraph
