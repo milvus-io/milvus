@@ -549,6 +549,9 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.DbName = result.GetDbName()
 		dct.result.NumPartitions = result.NumPartitions
 		for _, field := range result.Schema.Fields {
+			if field.IsDynamic {
+				continue
+			}
 			if field.FieldID >= common.StartOfUserFieldID {
 				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
 					FieldID:        field.FieldID,
