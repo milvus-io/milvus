@@ -4,26 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/panjf2000/ants/v2"
 )
 
-const (
-	MaxProcessTaskNum = 1024 * 10
-)
-
 type Scheduler struct {
-	searchProcessNum   *atomic.Int32
 	searchWaitQueue    chan *SearchTask
 	mergingSearchTasks []*SearchTask
 	mergedSearchTasks  chan *SearchTask
-
-	queryProcessQueue chan *QueryTask
-	queryWaitQueue    chan *QueryTask
 
 	pool *conc.Pool[any]
 }
@@ -32,11 +22,9 @@ func NewScheduler() *Scheduler {
 	maxWaitTaskNum := paramtable.Get().QueryNodeCfg.MaxReceiveChanSize.GetAsInt()
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	return &Scheduler{
-		searchProcessNum:   atomic.NewInt32(0),
 		searchWaitQueue:    make(chan *SearchTask, maxWaitTaskNum),
 		mergingSearchTasks: make([]*SearchTask, 0),
 		mergedSearchTasks:  make(chan *SearchTask),
-		// queryProcessQueue: make(chan),
 
 		pool: conc.NewPool[any](maxReadConcurrency, ants.WithPreAlloc(true)),
 	}
