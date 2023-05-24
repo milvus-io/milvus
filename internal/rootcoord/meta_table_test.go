@@ -518,7 +518,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 		}
-		meta.aliases.insert("", "alias", 100)
+		meta.aliases.insert(util.DefaultDBName, "alias", 100)
 		ctx := context.Background()
 		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101)
 		assert.NoError(t, err)
@@ -542,7 +542,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 		}
-		meta.names.insert("", "name", 100)
+		meta.names.insert(util.DefaultDBName, "name", 100)
 		ctx := context.Background()
 		coll, err := meta.GetCollectionByName(ctx, "", "name", 101)
 		assert.NoError(t, err)
@@ -1196,8 +1196,8 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				},
 			},
 		}
-		meta.names.insert("", "old", 1)
-		meta.names.insert("", "new", 2)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.names.insert(util.DefaultDBName, "new", 2)
 		err := meta.RenameCollection(context.TODO(), "", "old", "new", 1000)
 		assert.Error(t, err)
 	})
@@ -1420,6 +1420,72 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 		assert.True(t, meta.aliases.exist("exist"))
 		assert.True(t, meta.names.empty("exist"))
 		assert.True(t, meta.aliases.empty("exist"))
+	})
+}
+
+func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
+	t.Run("getDatabaseByNameInternal with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: {ID: 1},
+			},
+		}
+
+		ret, err := mt.getDatabaseByNameInternal(context.TODO(), "", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), ret.ID)
+	})
+
+	t.Run("getCollectionByNameInternal with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {CollectionID: 1},
+			},
+		}
+
+		mt.aliases.insert(util.DefaultDBName, "aliases", 1)
+		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), ret.CollectionID)
+	})
+
+	t.Run("listCollectionFromCache with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					State:        pb.CollectionState_CollectionCreated,
+				},
+			},
+		}
+
+		mt.names.insert(util.DefaultDBName, "name", 1)
+		ret, err := mt.listCollectionFromCache("", false)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(ret))
+		assert.Equal(t, int64(1), ret[0].CollectionID)
+	})
+
+	t.Run("CreateAlias with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+		}
+
+		mt.names.insert(util.DefaultDBName, "name", 1)
+		err := mt.CreateAlias(context.TODO(), "", "name", "name", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("DropAlias with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+		}
+
+		mt.names.insert(util.DefaultDBName, "name", 1)
+		err := mt.DropAlias(context.TODO(), "", "name", typeutil.MaxTimestamp)
+		assert.Error(t, err)
 	})
 }
 
