@@ -1209,6 +1209,8 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				commonpbutil.WithMsgID(req.Base.GetMsgID()),
 			),
 			Infos:        infos,
+			Schema:       req.GetSchema(),
+			LoadMeta:     req.GetLoadMeta(),
 			CollectionID: req.GetCollectionID(),
 			ReplicaID:    req.GetReplicaID(),
 			DstNodeID:    nodeID,
