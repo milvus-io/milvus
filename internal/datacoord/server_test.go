@@ -30,13 +30,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -49,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -58,8 +52,12 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -3820,21 +3818,24 @@ func TestGetFlushAllState(t *testing.T) {
 		ChannelCPs               []Timestamp
 		FlushAllTs               Timestamp
 		ServerIsHealthy          bool
+		ListDatabaseFailed       bool
 		ShowCollectionFailed     bool
 		DescribeCollectionFailed bool
 		ExpectedSuccess          bool
 		ExpectedFlushed          bool
 	}{
 		{"test FlushAll flushed", []Timestamp{100, 200}, 99,
-			true, false, false, true, true},
+			true, false, false, false, true, true},
 		{"test FlushAll not flushed", []Timestamp{100, 200}, 150,
-			true, false, false, true, false},
+			true, false, false, false, true, false},
 		{"test Sever is not healthy", nil, 0,
-			false, false, false, false, false},
+			false, false, false, false, false, false},
+		{"test ListDatabase failed", nil, 0,
+			true, true, false, false, false, false},
 		{"test ShowCollections failed", nil, 0,
-			true, true, false, false, false},
+			true, false, true, false, false, false},
 		{"test DescribeCollection failed", nil, 0,
-			true, false, true, false, false},
+			true, false, false, true, false, false},
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
@@ -3848,6 +3849,19 @@ func TestGetFlushAllState(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewRootCoord(t)
+			if test.ListDatabaseFailed {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+					Return(&milvuspb.ListDatabasesResponse{
+						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+					}, nil).Maybe()
+			} else {
+				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+					Return(&milvuspb.ListDatabasesResponse{
+						DbNames: []string{"db1"},
+						Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					}, nil).Maybe()
+			}
+
 			if test.ShowCollectionFailed {
 				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 					Return(&milvuspb.ShowCollectionsResponse{
