@@ -289,12 +289,13 @@ func (scheduler *taskScheduler) upgradeTaskMetrics() {
 		}
 	}
 
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Add(float64(segmentGrowNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Add(float64(segmentReduceNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Add(float64(segmentMoveNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Add(float64(channelGrowNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Add(float64(channelReduceNum))
-	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Add(float64(channelMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Set(float64(segmentGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Set(float64(segmentGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Set(float64(segmentReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Set(float64(segmentMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Set(float64(channelGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
 }
 
 // check whether the task is valid to add,
