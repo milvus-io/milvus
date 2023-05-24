@@ -158,3 +158,10 @@ func (set *ConcurrentSet[T]) Collect() []T {
 	})
 	return elements
 }
+
+func (set *ConcurrentSet[T]) Range(f func(element T) bool) {
+	set.inner.Range(func(key, value any) bool {
+		trueKey := key.(T)
+		return f(trueKey)
+	})
+}

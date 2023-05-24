@@ -51,3 +51,18 @@ func TestUniqueSetClear(t *testing.T) {
 	assert.False(t, set.Contain(9))
 	assert.Equal(t, 0, set.Len())
 }
+
+func TestConcurrentSet(t *testing.T) {
+	set := NewConcurrentSet[int]()
+	set.Insert(1)
+	set.Insert(2)
+	set.Insert(3)
+
+	count := 0
+	set.Range(func(element int) bool {
+		count++
+		return true
+	})
+
+	assert.Len(t, set.Collect(), count)
+}

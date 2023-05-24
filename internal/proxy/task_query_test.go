@@ -1,3 +1,18 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package proxy
 
 import (
@@ -28,7 +43,6 @@ import (
 )
 
 func TestQueryTask_all(t *testing.T) {
-
 	var (
 		err error
 		ctx = context.TODO()
@@ -42,10 +56,6 @@ func TestQueryTask_all(t *testing.T) {
 
 		expr   = fmt.Sprintf("%s > 0", testInt64Field)
 		hitNum = 10
-
-		errPolicy = func(context.Context, *shardClientMgr, queryFunc, map[string][]nodeInfo) error {
-			return fmt.Errorf("fake error")
-		}
 	)
 
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
@@ -61,13 +71,14 @@ func TestQueryTask_all(t *testing.T) {
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 			},
 		},
-	}, nil)
+	}, nil).Maybe()
 
 	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
 		return qn, nil
 	}
 
 	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
+	lb := NewLBPolicyImpl(NewRoundRobinBalancer(), mgr)
 
 	rc.Start()
 	defer rc.Stop()
@@ -158,8 +169,8 @@ func TestQueryTask_all(t *testing.T) {
 				},
 			},
 		},
-		qc:       qc,
-		shardMgr: mgr,
+		qc: qc,
+		lb: lb,
 	}
 
 	assert.NoError(t, task.OnEnqueue())
@@ -182,11 +193,6 @@ func TestQueryTask_all(t *testing.T) {
 	})
 	assert.Error(t, task.PreExecute(ctx))
 
-	task.ctx = ctx
-	task.queryShardPolicy = errPolicy
-	assert.Error(t, task.Execute(ctx))
-
-	task.queryShardPolicy = RoundRobinPolicy
 	result1 := &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
 		Status: &commonpb.Status{

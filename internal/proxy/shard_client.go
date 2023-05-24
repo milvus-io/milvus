@@ -92,7 +92,14 @@ func newShardClient(info *nodeInfo, client types.QueryNode) *shardClient {
 	return ret
 }
 
-type shardClientMgr struct {
+type shardClientMgr interface {
+	GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNode, error)
+	UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error
+	Close()
+	SetClientCreatorFunc(creator queryNodeCreatorFunc)
+}
+
+type shardClientMgrImpl struct {
 	clients struct {
 		sync.RWMutex
 		data map[UniqueID]*shardClient
@@ -101,10 +108,10 @@ type shardClientMgr struct {
 }
 
 // SessionOpt provides a way to set params in SessionManager
-type shardClientMgrOpt func(s *shardClientMgr)
+type shardClientMgrOpt func(s shardClientMgr)
 
 func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
-	return func(s *shardClientMgr) { s.clientCreator = creator }
+	return func(s shardClientMgr) { s.SetClientCreatorFunc(creator) }
 }
 
 func defaultQueryNodeClientCreator(ctx context.Context, addr string) (types.QueryNode, error) {
@@ -112,8 +119,8 @@ func defaultQueryNodeClientCreator(ctx context.Context, addr string) (types.Quer
 }
 
 // NewShardClientMgr creates a new shardClientMgr
-func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgr {
-	s := &shardClientMgr{
+func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
+	s := &shardClientMgrImpl{
 		clients: struct {
 			sync.RWMutex
 			data map[UniqueID]*shardClient
@@ -126,8 +133,12 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgr {
 	return s
 }
 
+func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) {
+	c.clientCreator = creator
+}
+
 // Warning this method may modify parameter `oldLeaders`
-func (c *shardClientMgr) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error {
+func (c *shardClientMgrImpl) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error {
 	oldLocalMap := make(map[UniqueID]*nodeInfo)
 	for _, nodes := range oldLeaders {
 		for i := range nodes {
@@ -184,7 +195,7 @@ func (c *shardClientMgr) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, ne
 	return nil
 }
 
-func (c *shardClientMgr) GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNode, error) {
+func (c *shardClientMgrImpl) GetClient(ctx context.Context, nodeID UniqueID) (types.QueryNode, error) {
 	c.clients.RLock()
 	client, ok := c.clients.data[nodeID]
 	c.clients.RUnlock()
@@ -196,7 +207,7 @@ func (c *shardClientMgr) GetClient(ctx context.Context, nodeID UniqueID) (types.
 }
 
 // Close release clients
-func (c *shardClientMgr) Close() {
+func (c *shardClientMgrImpl) Close() {
 	c.clients.Lock()
 	defer c.clients.Unlock()
 

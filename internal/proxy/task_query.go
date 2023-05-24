@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 
@@ -56,15 +57,13 @@ type queryTask struct {
 	queryParams    *queryParams
 	schema         *schemapb.CollectionSchema
 
-	resultBuf        chan *internalpb.RetrieveResults
-	toReduceResults  []*internalpb.RetrieveResults
 	userOutputFields []string
 
-	queryShardPolicy pickShardPolicy
-	shardMgr         *shardClientMgr
+	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
 	plan             *planpb.PlanNode
 	partitionKeyMode bool
+	lb               LBPolicy
 }
 
 type queryParams struct {
@@ -243,10 +242,6 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 }
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
-	if t.queryShardPolicy == nil {
-		t.queryShardPolicy = RoundRobinPolicy
-	}
-
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -407,30 +402,15 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.String("requestType", "query"))
 
-	executeQuery := func(withCache bool) error {
-		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
-		if err != nil {
-			return err
-		}
-		t.resultBuf = make(chan *internalpb.RetrieveResults, len(shards))
-		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, len(shards))
+	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	err := t.lb.Execute(ctx, CollectionWorkLoad{
+		collection: t.collectionName,
+		nq:         1,
+		exec:       t.queryShard,
+	})
 
-		if err := t.queryShardPolicy(ctx, t.shardMgr, t.queryShard, shards); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	err := executeQuery(WithCache)
 	if err != nil {
-		log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
-			zap.Error(err))
-		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.DeprecateShardCache(t.collectionName)
-		err = executeQuery(WithoutCache)
-	}
-	if err != nil {
-		return fmt.Errorf("fail to query on all shard leaders, err=%s", err.Error())
+		return merr.WrapErrShardDelegatorQueryFailed(err.Error())
 	}
 
 	log.Debug("Query Execute done.")
@@ -449,17 +429,18 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	var err error
 
+	toReduceResults := make([]*internalpb.RetrieveResults, 0)
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
 		return nil
 	default:
 		log.Debug("all queries are finished or canceled")
-		close(t.resultBuf)
-		for res := range t.resultBuf {
-			t.toReduceResults = append(t.toReduceResults, res)
+		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
+			toReduceResults = append(toReduceResults, res)
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
-		}
+			return true
+		})
 	}
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
@@ -467,7 +448,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema, t.plan, t.collectionName)
 
-	t.result, err = reducer.Reduce(t.toReduceResults)
+	t.result, err = reducer.Reduce(toReduceResults)
 	if err != nil {
 		return err
 	}
@@ -509,7 +490,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 
 	log.Debug("get query result")
-	t.resultBuf <- result
+	t.resultBuf.Insert(result)
 	return nil
 }
 

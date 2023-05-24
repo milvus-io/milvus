@@ -600,7 +600,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		tr:        tr,
 		dc:        node.dataCoord,
 		qc:        node.queryCoord,
-		shardMgr:  node.shardMgr,
+		lb:        node.lbPolicy,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -2492,11 +2492,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request:  request,
-		tr:       timerecord.NewTimeRecorder("search"),
-		shardMgr: node.shardMgr,
-		qc:       node.queryCoord,
-		node:     node,
+		request: request,
+		tr:      timerecord.NewTimeRecorder("search"),
+		qc:      node.queryCoord,
+		node:    node,
+		lb:      node.lbPolicy,
 	}
 
 	travelTs := request.TravelTimestamp
@@ -2690,9 +2690,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request:  request,
-		qc:       node.queryCoord,
-		shardMgr: node.shardMgr,
+		request: request,
+		qc:      node.queryCoord,
+		lb:      node.lbPolicy,
 	}
 
 	method := "Query"
@@ -3040,8 +3040,6 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			request: queryRequest,
 			qc:      node.queryCoord,
 			ids:     ids.IdArray,
-
-			shardMgr: node.shardMgr,
 		}
 
 		log := log.Ctx(ctx).With(
