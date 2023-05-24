@@ -50,9 +50,10 @@ type searchTask struct {
 	collectionName string
 	schema         *schemapb.CollectionSchema
 
-	offset          int64
-	resultBuf       chan *internalpb.SearchResults
-	toReduceResults []*internalpb.SearchResults
+	offset           int64
+	resultBuf        chan *internalpb.SearchResults
+	toReduceResults  []*internalpb.SearchResults
+	userOutputFields []string
 
 	searchShardPolicy pickShardPolicy
 	shardMgr          *shardClientMgr
@@ -249,7 +250,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("collection:%v or partition:%v not loaded into memory when search", collectionName, t.request.GetPartitionNames())
 	}
 
-	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		return err
 	}
@@ -473,7 +474,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
-
+	t.result.Results.OutputFields = t.userOutputFields
 	log.Ctx(ctx).Debug("Search post execute done", zap.Int64("msgID", t.ID()))
 	return nil
 }

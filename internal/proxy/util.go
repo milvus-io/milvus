@@ -861,12 +861,14 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 //	output_fields=["*","%"] ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B]
 //	output_fields=["*",C]   ==> [A,B,C]
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, []string, error) {
 	var primaryFieldName string
 	scalarFieldNameMap := make(map[string]bool)
 	vectorFieldNameMap := make(map[string]bool)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
+	userOutputFieldsMap := make(map[string]bool)
+	userOutputFields := make([]string, 0)
 
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
@@ -884,21 +886,26 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 		if outputFieldName == "*" {
 			for fieldName := range scalarFieldNameMap {
 				resultFieldNameMap[fieldName] = true
+				userOutputFieldsMap[fieldName] = true
 			}
 		} else if outputFieldName == "%" {
 			for fieldName := range vectorFieldNameMap {
 				resultFieldNameMap[fieldName] = true
+				userOutputFieldsMap[fieldName] = true
 			}
 		} else {
 			if _, ok := scalarFieldNameMap[outputFieldName]; ok {
 				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
 			} else if _, ok := vectorFieldNameMap[outputFieldName]; ok {
 				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
 					resultFieldNameMap[common.MetaFieldName] = true
+					userOutputFieldsMap[outputFieldName] = true
 				} else {
-					return nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 
@@ -907,12 +914,16 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 
 	if addPrimary {
 		resultFieldNameMap[primaryFieldName] = true
+		userOutputFieldsMap[primaryFieldName] = true
 	}
 
 	for fieldName := range resultFieldNameMap {
 		resultFieldNames = append(resultFieldNames, fieldName)
 	}
-	return resultFieldNames, nil
+	for fieldName := range userOutputFieldsMap {
+		userOutputFields = append(userOutputFields, fieldName)
+	}
+	return resultFieldNames, userOutputFields, nil
 }
 
 func validateIndexName(indexName string) error {
