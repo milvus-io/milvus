@@ -10,7 +10,7 @@ from utils.util_log import test_log as log
 prefix = "db"
 
 
-@pytest.mark.tags(ct.CaseLabel.L3)
+@pytest.mark.tags(CaseLabel.L3)
 class TestDatabaseParams(TestcaseBase):
     """ Test case of database """
 
@@ -186,8 +186,8 @@ class TestDatabaseParams(TestcaseBase):
                                          check_items={ct.err_code: 1,
                                                       ct.err_msg: "rpc deadline exceeded: Retry timeout"})
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23905")
-    def test_using_invalid_db(self, get_invalid_string):
+    @pytest.mark.parametrize("invalid_db_name", [(), [], 1, [1, "2", 3], (1,), {1: 1}])
+    def test_using_invalid_db(self, invalid_db_name):
         """
         target: test using with invalid db name
         method: using invalid db
@@ -200,15 +200,27 @@ class TestDatabaseParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # using db with invalid name
-        self.database_wrap.using_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
+        self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res,
                                           check_items={ct.err_code: 1, ct.err_msg: "db existed"})
 
         # verify using db is default db
         collections, _ = self.utility_wrap.list_collections()
         assert collection_w.name in collections
 
+    @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_using_invalid_db_2(self, invalid_db_name):
+        # connect with default alias using
+        self._connect()
 
-@pytest.mark.tags(ct.CaseLabel.L3)
+        # create collection in default db
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # using db with invalid name
+        self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+
+
+@pytest.mark.tags(CaseLabel.L3)
 class TestDatabaseOperation(TestcaseBase):
 
     def teardown_method(self, method):
@@ -273,6 +285,7 @@ class TestDatabaseOperation(TestcaseBase):
                  ct.err_msg: f"database number ({ct.max_database_num + 1}) exceeds max configuration ({ct.max_database_num})"}
         self.database_wrap.create_database(cf.gen_unique_str(prefix), check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
     def test_create_collection_exceeds_per_db(self):
         """
         target: test limit collection num per db
@@ -295,6 +308,7 @@ class TestDatabaseOperation(TestcaseBase):
         self.collection_wrap.init_collection(cf.gen_unique_str(prefix), cf.gen_default_collection_schema(),
                                              check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
     def test_create_db_collections_exceeds_max_num(self):
         """
         target: test create collection in different db and each db's colelction within max,
@@ -320,7 +334,7 @@ class TestDatabaseOperation(TestcaseBase):
         self.database_wrap.create_database(db_b)
         self.database_wrap.using_database(db_b)
 
-        dbs,  _ = self.database_wrap.list_database()
+        dbs, _ = self.database_wrap.list_database()
         exist_coll_num = 0
         for db in dbs:
             self.database_wrap.using_database(db)
@@ -497,7 +511,6 @@ class TestDatabaseOperation(TestcaseBase):
         using_collections, _ = self.utility_wrap.list_collections()
         assert collection_w_default.name in using_collections
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23905")
     def test_using_db_not_existed(self):
         """
         target: test using a not existed db
@@ -509,9 +522,8 @@ class TestDatabaseOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         # list collection with not exist using db -> exception
-        self.database_wrap.using_database(db_name=cf.gen_unique_str())
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "database not exist:"})
+        self.database_wrap.using_database(db_name=cf.gen_unique_str(), check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: "database not found"})
 
         # change using to default and list collections
         self.database_wrap.using_database(db_name=ct.default_db)
@@ -519,6 +531,7 @@ class TestDatabaseOperation(TestcaseBase):
         assert collection_w.name in colls
 
 
+@pytest.mark.tags(CaseLabel.L3)
 class TestDatabaseOtherApi(TestcaseBase):
     """ test other interface that has db_name params"""
 
@@ -551,34 +564,28 @@ class TestDatabaseOtherApi(TestcaseBase):
 
         super().teardown_method(method)
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_connect_db(self, request):
-        """
-        get invalid string
-        """
-        if request.param is None:
-            pytest.skip('skip None ')
-
-        if request.param == "":
-            pytest.skip('skip empty ')
-
-        yield request.param
-
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23910")
-    def test_connect_invalid_db_name(self, host, port, get_invalid_connect_db):
+    @pytest.mark.parametrize("invalid_db_name", [(), [], 1, [1, "2", 3], (1,), {1: 1}])
+    def test_connect_invalid_db_name(self, host, port, invalid_db_name):
         """
         target: test conenct with invalid db name
         method: connect with invalid db name
         expected: connect fail
         """
-        # connect with not existed db
-        self.connection_wrap.connect(host=host, port=port, db_name=get_invalid_connect_db,
+        # connect with invalid db
+        self.connection_wrap.connect(host=host, port=port, db_name=invalid_db_name,
                                      user=ct.default_user, password=ct.default_password,
-                                     secure=cf.param_info.param_secure)
+                                     secure=cf.param_info.param_secure,
+                                     check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 1, ct.err_msg: "is illegal"})
 
-        # list collection and verify connect failed
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "not existed db"})
+    @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_connect_invalid_db_name_2(self, host, port, invalid_db_name):
+        # connect with invalid db
+        self.connection_wrap.connect(host=host, port=port, db_name=invalid_db_name,
+                                     user=ct.default_user, password=ct.default_password,
+                                     secure=cf.param_info.param_secure,
+                                     check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 2, ct.err_msg: "Fail connecting to server"})
 
     def test_connect_not_existed_db(self, host, port):
         """
@@ -594,21 +601,9 @@ class TestDatabaseOtherApi(TestcaseBase):
         db_name = cf.gen_unique_str(prefix)
         self.connection_wrap.connect(host=host, port=port, db_name=db_name,
                                      user=ct.default_user, password=ct.default_password,
-                                     secure=cf.param_info.param_secure
-                                     )
-
-        # list collection and verify connect failed
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "not existed db"})
-
-        self.database_wrap.create_database(db_name)
-        collection_w = self.init_collection_wrap(cf.gen_unique_str())
-        colls, _ = self.utility_wrap.list_collections()
-        assert collection_w.name in colls
-
-        # using default db and verify connect succ
-        self.database_wrap.using_database(ct.default_db)
-        self.utility_wrap.list_collections()
+                                     secure=cf.param_info.param_secure,
+                                     check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 2, ct.err_msg: "database not found"})
 
     def test_connect_db(self, host, port):
         """
