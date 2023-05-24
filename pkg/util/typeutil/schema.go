@@ -360,6 +360,7 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 					Type:      fieldData.Type,
 					FieldName: fieldData.FieldName,
 					FieldId:   fieldData.FieldId,
+					IsDynamic: fieldData.IsDynamic,
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{},
 					},
