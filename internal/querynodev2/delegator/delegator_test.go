@@ -49,6 +49,7 @@ type DelegatorSuite struct {
 	suite.Suite
 
 	collectionID  int64
+	partitionIDs  []int64
 	replicaID     int64
 	vchannelName  string
 	version       int64
@@ -71,6 +72,7 @@ func (s *DelegatorSuite) TearDownSuite() {
 
 func (s *DelegatorSuite) SetupTest() {
 	s.collectionID = 1000
+	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
@@ -142,7 +144,9 @@ func (s *DelegatorSuite) SetupTest() {
 				},
 			},
 		},
-	}, &querypb.LoadMetaInfo{})
+	}, &querypb.LoadMetaInfo{
+		PartitionIDs: s.partitionIDs,
+	})
 
 	s.mq = &msgstream.MockMsgStream{}
 
