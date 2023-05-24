@@ -222,10 +222,17 @@ func NewSegment(collection *Collection,
 	return segment, nil
 }
 
+func (s *LocalSegment) isValid() bool {
+	return s.ptr != nil
+}
+
 func (s *LocalSegment) InsertCount() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
+	if !s.isValid() {
+		return 0
+	}
 	var rowCount C.int64_t
 	GetPool().Submit(func() (any, error) {
 		rowCount = C.GetRowCount(s.ptr)
@@ -239,6 +246,9 @@ func (s *LocalSegment) RowNum() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
+	if !s.isValid() {
+		return 0
+	}
 	var rowCount C.int64_t
 	GetPool().Submit(func() (any, error) {
 		rowCount = C.GetRealCount(s.ptr)
@@ -252,6 +262,9 @@ func (s *LocalSegment) MemSize() int64 {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
+	if !s.isValid() {
+		return 0
+	}
 	var memoryUsageInBytes C.int64_t
 	GetPool().Submit(func() (any, error) {
 		memoryUsageInBytes = C.GetMemoryUsageInBytes(s.ptr)
@@ -285,6 +298,9 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
+	if !s.isValid() {
+		return false
+	}
 	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))
 	return bool(ret)
 }
