@@ -159,3 +159,56 @@ struct LargeType {
 };
 static_assert(std::is_same_v<LargeType&, Parameter<LargeType>>);
 }  // namespace milvus
+   //
+template <>
+struct fmt::formatter<milvus::DataType> : formatter<string_view> {
+    auto
+    format(milvus::DataType c, format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::DataType::NONE:
+                name = "NONE";
+                break;
+            case milvus::DataType::BOOL:
+                name = "BOOL";
+                break;
+            case milvus::DataType::INT8:
+                name = "INT8";
+                break;
+            case milvus::DataType::INT16:
+                name = "INT16";
+                break;
+            case milvus::DataType::INT32:
+                name = "INT32";
+                break;
+            case milvus::DataType::INT64:
+                name = "INT64";
+                break;
+            case milvus::DataType::FLOAT:
+                name = "FLOAT";
+                break;
+            case milvus::DataType::DOUBLE:
+                name = "DOUBLE";
+                break;
+            case milvus::DataType::STRING:
+                name = "STRING";
+                break;
+            case milvus::DataType::VARCHAR:
+                name = "VARCHAR";
+                break;
+            case milvus::DataType::ARRAY:
+                name = "ARRAY";
+                break;
+            case milvus::DataType::JSON:
+                name = "JSON";
+                break;
+            case milvus::DataType::VECTOR_BINARY:
+                name = "VECTOR_BINARY";
+                break;
+            case milvus::DataType::VECTOR_FLOAT:
+                name = "VECTOR_FLOAT";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
