@@ -1060,6 +1060,27 @@ func TestCore_Import(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+
+	// Remove the following case after bulkinsert can support partition key
+	t.Run("unsupport partition key", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withMeta(meta))
+
+		coll := &model.Collection{
+			Name: "a-good-name",
+			Fields: []*model.Field{
+				{IsPartitionKey: true},
+			},
+		}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll.Clone(), nil
+		}
+		resp, _ := c.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "a-good-name",
+		})
+		assert.NotNil(t, resp)
+	})
 }
 
 func TestCore_GetImportState(t *testing.T) {

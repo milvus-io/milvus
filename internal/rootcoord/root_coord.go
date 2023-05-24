@@ -1849,6 +1849,24 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 			zap.Error(err))
 		return nil, err
 	}
+
+	// In v2.2.9, bulkdinsert cannot support partition key, return error to client.
+	// Remove the following lines after bulkinsert can support partition key
+	for _, field := range colInfo.Fields {
+		if field.IsPartitionKey {
+			log.Warn("partition key is not yet supported by bulkinsert",
+				zap.String("collection name", req.GetCollectionName()),
+				zap.String("partition key", field.Name))
+			ret := &milvuspb.ImportResponse{
+				Status: failStatus(commonpb.ErrorCode_UnexpectedError,
+					fmt.Sprintf("the collection '%s' contains partition key '%s', partition key is not yet supported by bulkinsert",
+						req.GetCollectionName(), field.Name)),
+			}
+			return ret, nil
+		}
+	}
+	// Remove the upper lines after bulkinsert can support partition key
+
 	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
 	if req.GetPartitionName() == "" {
