@@ -488,21 +488,36 @@ func (s *LocalSegment) FillIndexedFieldsData(ctx context.Context,
 			continue
 		}
 
-		// TODO: optimize here. Now we'll read a whole file from storage every time we retrieve raw data by offset.
+		dataPathMap := make(map[string][][2]int64)
 		for i, offset := range result.Offset {
-			dataPath, dataOffset := s.GetFieldDataPath(index, offset)
-			endian := common.Endian
+			path, pathOffset := s.GetFieldDataPath(index, offset)
+			dataPathMap[path] = append(dataPathMap[path], [2]int64{int64(i), pathOffset})
+		}
+		endian := common.Endian
+		var wg sync.WaitGroup
+		errs := make([]error, len(dataPathMap))
+		idx := 0
+		for path, offsets := range dataPathMap {
+			wg.Add(1)
+			idx++
+			go func(path string, offsets [][2]int64, i int) {
+				defer wg.Done()
+				err := fillFieldData(ctx, vcm, path, fieldData, offsets, endian)
+				if err != nil {
+					log.Warn("failed to fill field data",
+						zap.String("dataPath", path),
+						zap.Int64("fieldID", fieldData.GetFieldId()),
+						zap.String("fieldType", fieldData.GetType().String()),
+						zap.Error(err),
+					)
+					errs[i] = err
+				}
+			}(path, offsets, idx)
+		}
+		wg.Wait()
 
-			// fill field data that fieldData[i] = dataPath[offsetInBinlog*rowBytes, (offsetInBinlog+1)*rowBytes]
-			if err := fillFieldData(ctx, vcm, dataPath, fieldData, i, dataOffset, endian); err != nil {
-				log.Warn("failed to fill field data",
-					zap.Int64("offset", offset),
-					zap.String("dataPath", dataPath),
-					zap.Int64("dataOffset", dataOffset),
-					zap.Int64("fieldID", fieldData.GetFieldId()),
-					zap.String("fieldType", fieldData.GetType().String()),
-					zap.Error(err),
-				)
+		for _, err := range errs {
+			if err != nil {
 				return err
 			}
 		}
