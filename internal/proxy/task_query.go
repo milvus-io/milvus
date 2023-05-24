@@ -52,8 +52,9 @@ type queryTask struct {
 	queryParams    *queryParams
 	schema         *schemapb.CollectionSchema
 
-	resultBuf       chan *internalpb.RetrieveResults
-	toReduceResults []*internalpb.RetrieveResults
+	resultBuf        chan *internalpb.RetrieveResults
+	toReduceResults  []*internalpb.RetrieveResults
+	userOutputFields []string
 
 	queryShardPolicy pickShardPolicy
 	shardMgr         *shardClientMgr
@@ -64,7 +65,7 @@ type queryParams struct {
 	offset int64
 }
 
-// translateOutputFields translates output fields name to output fields id.
+// translateToOutputFieldIDs translates output fields name to output fields id.
 func translateToOutputFieldIDs(outputFields []string, schema *schemapb.CollectionSchema) ([]UniqueID, error) {
 	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
 	if len(outputFields) == 0 {
@@ -305,7 +306,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"), zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
-	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
+	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
 	if err != nil {
 		return err
 	}
@@ -469,6 +470,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
+	t.result.OutputFields = t.userOutputFields
 	log.Ctx(ctx).Debug("Query PostExecute done", zap.Int64("msgID", t.ID()), zap.String("requestType", "query"))
 	return nil
 }
