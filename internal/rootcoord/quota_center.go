@@ -276,6 +276,10 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, collections
 		collections = q.writableCollections
 	}
 	for _, collection := range collections {
+		if _, ok := q.currentRates[collection]; !ok {
+			q.currentRates[collection] = make(map[internalpb.RateType]Limit)
+			q.quotaStates[collection] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
+		}
 		q.currentRates[collection][internalpb.RateType_DMLInsert] = 0
 		q.currentRates[collection][internalpb.RateType_DMLDelete] = 0
 		q.currentRates[collection][internalpb.RateType_DMLBulkLoad] = 0
@@ -293,6 +297,10 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, collections
 		collections = q.readableCollections
 	}
 	for _, collection := range collections {
+		if _, ok := q.currentRates[collection]; !ok {
+			q.currentRates[collection] = make(map[internalpb.RateType]Limit)
+			q.quotaStates[collection] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
+		}
 		q.currentRates[collection][internalpb.RateType_DQLSearch] = 0
 		q.currentRates[collection][internalpb.RateType_DQLQuery] = 0
 		q.quotaStates[collection][milvuspb.QuotaState_DenyToRead] = errorCode
