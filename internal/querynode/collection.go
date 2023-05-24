@@ -124,7 +124,7 @@ OUTER:
 		c.vChannels = append(c.vChannels, dstChan)
 	}
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vChannels)))
 }
 
 // getVChannels get virtual channels of collection
@@ -242,7 +242,7 @@ func (c *Collection) AddChannels(toLoadChannels []Channel, VPChannels map[string
 		}
 	}
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vChannels)))
 	return retVChannels
 }
 
