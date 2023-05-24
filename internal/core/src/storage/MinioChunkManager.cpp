@@ -79,6 +79,16 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     const size_t initCount = init_count_++;
     if (initCount == 0) {
         sdk_options_.httpOptions.installSigPipeHandler = true;
+        if (type == RemoteStorageType::GOOGLE_CLOUD) {
+            sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
+                // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
+                auto credentials = std::make_shared<
+                    google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
+                        ComputeEngineCredentials>();
+                return Aws::MakeShared<GoogleHttpClientFactory>(
+                    GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+            };
+        }
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -153,10 +163,27 @@ MinioChunkManager::BuildAliyunCloudClient(
     }
 }
 
+void
+MinioChunkManager::BuildGoogleCloudClient(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
+    if (storage_config.useIAM) {
+        // Using S3 client instead of google client because of compatible protocol
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            false);
+    } else {
+        throw std::runtime_error("google cloud only support iam mode now");
+    }
+}
+
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name) {
     RemoteStorageType storageType;
-    if (storage_config.address.find("aliyun") != std::string::npos) {
+    if (storage_config.address.find("google") != std::string::npos) {
+        storageType = RemoteStorageType::GOOGLE_CLOUD;
+    } else if (storage_config.address.find("aliyun") != std::string::npos) {
         storageType = RemoteStorageType::ALIYUN_CLOUD;
     } else {
         storageType = RemoteStorageType::S3;
@@ -179,14 +206,9 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         BuildS3Client(storage_config, config);
     } else if (storageType == RemoteStorageType::ALIYUN_CLOUD) {
         BuildAliyunCloudClient(storage_config, config);
+    } else if (storageType == RemoteStorageType::GOOGLE_CLOUD) {
+        BuildGoogleCloudClient(storage_config, config);
     }
-
-    // TODO ::BucketExist and CreateBucket func not work, should be fixed
-    // index node has already tried to create bucket when receive index task if bucket not exist
-    // query node has already tried to create bucket during init stage if bucket not exist
-    // if (!BucketExists(storage_config.bucket_name)) {
-    //     CreateBucket(storage_config.bucket_name);
-    // }
 
     LOG_SEGCORE_INFO_ << "init MinioChunkManager with parameter[endpoint: '"
                       << storage_config.address << "', default_bucket_name:'"
@@ -195,8 +217,8 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 }
 
 MinioChunkManager::~MinioChunkManager() {
-    ShutdownSDKAPI();
     client_.reset();
+    ShutdownSDKAPI();
 }
 
 uint64_t

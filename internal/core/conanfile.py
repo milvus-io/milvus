@@ -21,7 +21,7 @@ class MilvusConan(ConanFile):
         "aws-c-sdkutils/0.1.3@milvus/dev",
         "aws-checksums/0.1.13@milvus/dev",
         "aws-sdk-cpp/1.9.234",
-        "googleapis/cci.20220711@milvus/dev",
+        "googleapis/cci.20221108",
         "benchmark/1.7.0",
         "gtest/1.8.1",
         "protobuf/3.21.4",
@@ -43,6 +43,7 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.1.0",
         "re2/20230301",
         "folly/2023.05.22.02@milvus/dev",
+        "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
