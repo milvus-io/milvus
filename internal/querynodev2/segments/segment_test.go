@@ -1,13 +1,16 @@
 package segments
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -125,6 +128,56 @@ func (suite *SegmentSuite) TestHasRawData() {
 	suite.True(has)
 	has = suite.sealed.HasRawData(simpleFloatVecField.id)
 	suite.True(has)
+}
+
+func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
+	result := &segcorepb.RetrieveResults{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{5, 4, 3, 2, 9, 8, 7, 6},
+				}},
+		},
+		Offset: []int64{5, 4, 3, 2, 9, 8, 7, 6},
+		FieldsData: []*schemapb.FieldData{
+			genFieldData("int64 field", 100, schemapb.DataType_Int64,
+				[]int64{5, 4, 3, 2, 9, 8, 7, 6}, 1),
+			genFieldData("float vector field", 101, schemapb.DataType_FloatVector,
+				[]float32{5, 4, 3, 2, 9, 8, 7, 6}, 1),
+		},
+	}
+
+	// no index
+	err := suite.growing.ValidateIndexedFieldsData(context.Background(), result)
+	suite.NoError(err)
+	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
+	suite.NoError(err)
+
+	// with index and has raw data
+	suite.sealed.AddIndex(101, &IndexedFieldInfo{
+		IndexInfo: &querypb.FieldIndexInfo{
+			FieldID:     101,
+			EnableIndex: true,
+		},
+	})
+	suite.True(suite.sealed.ExistIndex(101))
+	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
+	suite.NoError(err)
+
+	// index doesn't have index type
+	DeleteSegment(suite.sealed)
+	suite.True(suite.sealed.ExistIndex(101))
+	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
+	suite.Error(err)
+
+	// with index but doesn't have raw data
+	index := suite.sealed.GetIndex(101)
+	_, indexParams := genIndexParams(IndexHNSW, L2)
+	index.IndexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+	DeleteSegment(suite.sealed)
+	suite.True(suite.sealed.ExistIndex(101))
+	err = suite.sealed.ValidateIndexedFieldsData(context.Background(), result)
+	suite.Error(err)
 }
 
 func TestSegment(t *testing.T) {
