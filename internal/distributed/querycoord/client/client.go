@@ -117,46 +117,38 @@ func (c *Client) Register() error {
 	return nil
 }
 
-// GetComponentStates gets the component states of QueryCoord.
-func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(grpcClient querypb.QueryCoordClient) (*T, error)) (*T, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return call(client)
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*milvuspb.ComponentStates), err
+	return ret.(*T), err
+}
+
+// GetComponentStates gets the component states of QueryCoord.
+func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.ComponentStates, error) {
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	})
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryCoord.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.StringResponse, error) {
 		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
 }
 
 // GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.StringResponse, error) {
 		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
 }
 
 // ShowCollections shows the collections in the QueryCoord.
@@ -166,16 +158,9 @@ func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowCollectionsResponse, error) {
 		return client.ShowCollections(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.ShowCollectionsResponse), err
 }
 
 // LoadCollection loads the data of the specified collections in the QueryCoord.
@@ -185,16 +170,9 @@ func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadCollection(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // ReleaseCollection release the data of the specified collections in the QueryCoord.
@@ -204,16 +182,9 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.ReleaseCollection(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // ShowPartitions shows the partitions in the QueryCoord.
@@ -223,16 +194,9 @@ func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowPartitionsResponse, error) {
 		return client.ShowPartitions(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.ShowPartitionsResponse), err
 }
 
 // LoadPartitions loads the data of the specified partitions in the QueryCoord.
@@ -242,16 +206,9 @@ func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadPartitions(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // ReleasePartitions release the data of the specified partitions in the QueryCoord.
@@ -261,16 +218,9 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.ReleasePartitions(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // SyncNewCreatedPartition notifies QueryCoord to sync new created partition if collection is loaded.
@@ -280,16 +230,9 @@ func (c *Client) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.SyncNewCreatedPartition(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // GetPartitionStates gets the states of the specified partition.
@@ -299,16 +242,9 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetPartitionStatesResponse, error) {
 		return client.GetPartitionStates(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.GetPartitionStatesResponse), err
 }
 
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
@@ -318,16 +254,9 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetSegmentInfoResponse, error) {
 		return client.GetSegmentInfo(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.GetSegmentInfoResponse), err
 }
 
 // LoadBalance migrate the sealed segments on the source node to the dst nodes.
@@ -337,16 +266,9 @@ func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.LoadBalance(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 // ShowConfigurations gets specified configurations para of QueryCoord
@@ -356,17 +278,9 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*internalpb.ShowConfigurationsResponse, error) {
 		return client.ShowConfigurations(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-
-	return ret.(*internalpb.ShowConfigurationsResponse), err
 }
 
 // GetMetrics gets the metrics information of QueryCoord.
@@ -376,16 +290,9 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.GetMetricsResponse), err
 }
 
 // GetReplicas gets the replicas of a certain collection.
@@ -395,16 +302,9 @@ func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.GetReplicasResponse, error) {
 		return client.GetReplicas(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.GetReplicasResponse), err
 }
 
 // GetShardLeaders gets the shard leaders of a certain collection.
@@ -414,29 +314,15 @@ func (c *Client) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetShardLeadersResponse, error) {
 		return client.GetShardLeaders(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.GetShardLeadersResponse), err
 }
 
 func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.CheckHealthResponse, error) {
 		return client.CheckHealth(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.CheckHealthResponse), err
 }
 
 func (c *Client) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
@@ -445,16 +331,9 @@ func (c *Client) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.CreateResourceGroup(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
@@ -463,16 +342,9 @@ func (c *Client) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.DropResourceGroup(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
@@ -481,16 +353,9 @@ func (c *Client) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.DescribeResourceGroupResponse, error) {
 		return client.DescribeResourceGroup(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*querypb.DescribeResourceGroupResponse), err
 }
 
 func (c *Client) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
@@ -499,16 +364,9 @@ func (c *Client) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.TransferNode(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
@@ -517,16 +375,9 @@ func (c *Client) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*commonpb.Status, error) {
 		return client.TransferReplica(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
@@ -535,14 +386,7 @@ func (c *Client) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*milvuspb.ListResourceGroupsResponse, error) {
 		return client.ListResourceGroups(ctx, req)
 	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.ListResourceGroupsResponse), err
 }
