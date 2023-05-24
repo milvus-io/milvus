@@ -452,6 +452,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t.result.OutputFields = t.userOutputFields
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	log.Debug("Query PostExecute done")

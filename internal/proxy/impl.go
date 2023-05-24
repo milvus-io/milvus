@@ -2782,15 +2782,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionSQLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.QueryLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-	ret := &milvuspb.QueryResults{
-		Status:     qt.result.Status,
-		FieldsData: qt.result.FieldsData,
-	}
 	sentSize := proto.Size(qt.result)
 	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
-	return ret, nil
+	return qt.result, nil
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.
