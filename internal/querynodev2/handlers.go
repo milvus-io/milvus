@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -211,11 +213,15 @@ func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequ
 	defer retrievePlan.Delete()
 
 	var results []*segcorepb.RetrieveResults
+	collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
+
 	if req.GetScope() == querypb.DataScope_Historical {
 		results, _, _, err = segments.RetrieveHistorical(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
 	} else {
 		results, _, _, err = segments.RetrieveStreaming(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
 	}
+
+	collector.Counter.Dec(metricsinfo.ExecuteQueueType, 1)
 	if err != nil {
 		return nil, err
 	}

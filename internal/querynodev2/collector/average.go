@@ -61,6 +61,15 @@ func (c *averageCollector) Add(label string, value float64) {
 	}
 }
 
+func (c *averageCollector) Reset(label string) {
+	c.Lock()
+	defer c.Unlock()
+
+	if _, ok := c.averages[label]; ok {
+		c.averages[label] = &averageData{}
+	}
+}
+
 func (c *averageCollector) Average(label string) (float64, error) {
 	c.Lock()
 	defer c.Unlock()

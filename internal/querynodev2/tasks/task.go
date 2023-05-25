@@ -11,16 +11,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type Task interface {
+	PreExecute() error
 	Execute() error
 	Done(err error)
 	Canceled() error
@@ -63,6 +66,18 @@ func NewSearchTask(ctx context.Context,
 
 		tr: timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 	}
+}
+
+func (t *SearchTask) PreExecute() error {
+	// update task wait time metric before execute
+	collector.Average.Add(metricsinfo.SearchQueueMetric, float64(t.tr.ElapseSpan().Microseconds()))
+	for _, subTask := range t.others {
+		err := subTask.PreExecute()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *SearchTask) Execute() error {
@@ -213,6 +228,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 }
 
 func (t *SearchTask) Done(err error) {
+	collector.Counter.Dec(metricsinfo.ExecuteQueueType, 1)
 	if len(t.others) > 0 {
 		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(len(t.others) + 1))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.originNqs[0]))
