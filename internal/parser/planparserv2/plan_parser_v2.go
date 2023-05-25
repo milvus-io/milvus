@@ -3,9 +3,12 @@ package planparserv2
 import (
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -30,6 +33,11 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	ast := parser.Expr()
 	if errorListener.err != nil {
 		return errorListener.err
+	}
+
+	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
+		log.Info("invalid expression", zap.String("expr", exprStr))
+		return fmt.Errorf("invalid expression: %s", exprStr)
 	}
 
 	// lexer & parser won't be used by this thread, can be put into pool.

@@ -84,14 +84,16 @@ FloatingConstant:
 
 Identifier: Nondigit (Nondigit | Digit)* | '$meta';
 
-StringLiteral: EncodingPrefix? '"' SCharSequence? '"';
+StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: Identifier('[' (StringLiteral | DecimalConstant) ']')+;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 
-fragment SCharSequence: SChar+;
+fragment DoubleSCharSequence: DoubleSChar+;
+fragment SingleSCharSequence: SingleSChar+;
 
-fragment SChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment Nondigit: [a-zA-Z_];
 fragment Digit: [0-9];
 fragment BinaryConstant: '0' [bB] [0-1]+;

@@ -615,6 +615,40 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
+	expr = `str1 like 'abc\"def-%'`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
+	expr = `str1 like 'abc"def-%'`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(0, len(result.Results.FieldsData))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
+	expr = `str2 like 'abc\"def-%'`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(0, len(result.Results.FieldsData))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
+	expr = `str2 like 'abc"def-%'`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
+	log.Info("like expression run successfully")
+
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		s.Equal(0, len(result.Results.FieldsData))
@@ -810,6 +844,8 @@ func newJSONData(fieldName string, rowNum int) *schemapb.FieldData {
 				"F": i,
 				"G": i + 10,
 			},
+			"str1": `abc\"def-` + string(rune(i)),
+			"str2": fmt.Sprintf("abc\"def-%d", i),
 		}
 		if i%2 == 0 {
 			data = map[string]interface{}{
