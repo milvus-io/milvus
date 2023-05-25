@@ -453,6 +453,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	t.result.Results.OutputFields = t.userOutputFields
 
 	log.Ctx(ctx).Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
