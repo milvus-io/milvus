@@ -284,6 +284,7 @@ func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.Se
 			common.SearchParamKey: queryInfo.GetSearchParams(),
 			common.SegmentNumKey:  estSegmentNum,
 			common.WithFilterKey:  withFilter,
+			common.CollectionKey:  req.GetReq().GetCollectionID(),
 		}
 		err := node.queryHook.Run(params)
 		if err != nil {

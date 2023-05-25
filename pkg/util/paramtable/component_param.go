@@ -151,6 +151,10 @@ func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 	p.mgr.Dispatcher.Register(key, watcher)
 }
 
+func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
+	p.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, watcher)
+}
+
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
