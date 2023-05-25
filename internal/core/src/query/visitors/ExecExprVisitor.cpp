@@ -430,7 +430,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw)
 
     auto op = expr.op_type_;
     auto val = expr.value_;
-    auto pointer = milvus::Json::pointer(std::move(expr.column_.nested_path));
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
     auto field_id = expr.column_.field_id;
     auto index_func = [=](Index* index) { return TargetBitmap{}; };
     using GetType =
@@ -696,7 +696,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
     auto right_operand = expr.right_operand_;
     auto op = expr.op_type_;
     auto val = expr.value_;
-    auto pointer = milvus::Json::pointer(std::move(expr.column_.nested_path));
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
 
 #define BinaryArithRangeJSONCompare(cmp)                      \
     do {                                                      \
@@ -930,7 +930,7 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcherJson(BinaryRangeExpr& expr_raw)
     bool upper_inclusive = expr.upper_inclusive_;
     ExprValueType val1 = expr.lower_value_;
     ExprValueType val2 = expr.upper_value_;
-    auto pointer = milvus::Json::pointer(std::move(expr.column_.nested_path));
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
 
     // no json index now
     auto index_func = [=](Index* index) { return TargetBitmap{}; };
@@ -1742,7 +1742,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
     -> BitsetType {
     using Index = index::ScalarIndex<milvus::Json>;
     auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
-    auto pointer = milvus::Json::pointer(std::move(expr.column_.nested_path));
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
     auto index_func = [=](Index* index) { return TargetBitmap{}; };
 
     std::unordered_set<ExprValueType> term_set(expr.terms_.begin(),
@@ -1852,7 +1852,7 @@ ExecExprVisitor::visit(ExistsExpr& expr) {
     AssertInfo(expr.column_.data_type == field_meta.get_data_type(),
                "[ExecExprVisitor]DataType of expr isn't field_meta data type");
     BitsetType res;
-    auto pointer = milvus::Json::pointer(std::move(expr.column_.nested_path));
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
     switch (expr.column_.data_type) {
         case DataType::JSON: {
             using Index = index::ScalarIndex<milvus::Json>;
