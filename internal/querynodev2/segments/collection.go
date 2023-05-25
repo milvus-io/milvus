@@ -25,11 +25,12 @@ package segments
 import "C"
 
 import (
+	"sync"
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
-	"sync"
-	"unsafe"
 
 	"github.com/golang/protobuf/proto"
 

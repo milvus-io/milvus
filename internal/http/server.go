@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -67,7 +68,11 @@ func ServeHTTP() {
 	go func() {
 		bindAddr := getHTTPAddr()
 		log.Info("management listen", zap.String("addr", bindAddr))
-		if err := http.ListenAndServe(bindAddr, nil); err != nil {
+		server := &http.Server{
+			Addr:              bindAddr,
+			ReadHeaderTimeout: 3 * time.Second,
+		}
+		if err := server.ListenAndServe(); err != nil {
 			log.Error("handle metrics failed", zap.Error(err))
 		}
 	}()

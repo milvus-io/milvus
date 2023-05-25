@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/integration"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/distance"
-	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/golang/protobuf/proto"

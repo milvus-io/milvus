@@ -32,7 +32,7 @@ func TestLoadFromFileSource(t *testing.T) {
 	})
 
 	t.Run("file type not support", func(t *testing.T) {
-		fs := NewFileSource(&FileInfo{[]string{"../../go.mod"}, -1})
+		fs := NewFileSource(&FileInfo{[]string{"../go.mod"}, -1})
 		err := fs.loadFromFile()
 		assert.Error(t, err)
 	})

@@ -28,6 +28,10 @@ linters:
 linters-settings:
   misspell:
     locale: US
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
   gocritic:
     enabled-checks:
       - ruleguard

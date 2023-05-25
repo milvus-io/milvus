@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//pipeline used for querynode
+// pipeline used for querynode
 type Pipeline interface {
 	base.StreamPipeline
 	ExcludedSegments(segInfos ...*datapb.SegmentInfo)

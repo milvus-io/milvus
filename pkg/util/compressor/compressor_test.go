@@ -2,14 +2,10 @@ package compressor
 
 import (
 	"bytes"
-	"fmt"
 	"io"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,88 +74,6 @@ func testCompress(t *testing.T, data string, enc Compressor, compressed, origin 
 	dec.Close()
 	err = dec.Decompress(origin)
 	assert.Error(t, err)
-}
-
-func TestGlobalMethods(t *testing.T) {
-	data := "hello zstd algorithm!"
-	compressed := new(bytes.Buffer)
-	compressedBytes := make([]byte, 0)
-	origin := new(bytes.Buffer)
-	originBytes := make([]byte, 0)
-
-	err := ZstdCompress(strings.NewReader(data), compressed)
-	assert.NoError(t, err)
-
-	compressedBytes = ZstdCompressBytes([]byte(data), compressedBytes)
-	assert.Equal(t, compressed.Bytes(), compressedBytes)
-
-	err = ZstdDecompress(compressed, origin)
-	assert.NoError(t, err)
-
-	originBytes, err = ZstdDecompressBytes(compressedBytes, originBytes)
-	assert.NoError(t, err)
-	assert.Equal(t, origin.Bytes(), originBytes)
-
-	assert.Equal(t, data, origin.String())
-
-	// Mock error reader/writer
-	errReader := &ErrReader{Err: io.ErrUnexpectedEOF}
-	errWriter := &ErrWriter{Err: io.ErrShortWrite}
-
-	compressedBytes = compressed.Bytes()
-	compressed = bytes.NewBuffer(compressedBytes) // The old compressed buffer is closed
-	err = ZstdCompress(errReader, compressed)
-	assert.ErrorIs(t, err, errReader.Err)
-
-	assert.Positive(t, len(compressedBytes))
-	reader := bytes.NewReader(compressedBytes)
-	err = ZstdDecompress(reader, errWriter)
-	assert.ErrorIs(t, err, errWriter.Err)
-
-	// Incorrect option
-	err = ZstdCompress(strings.NewReader(data), compressed, zstd.WithWindowSize(3))
-	assert.Error(t, err)
-
-	err = ZstdDecompress(compressed, origin, zstd.WithDecoderConcurrency(0))
-	assert.Error(t, err)
-}
-
-func TestCurrencyGlobalMethods(t *testing.T) {
-	prefix := "Test Currency Global Methods"
-
-	currency := runtime.GOMAXPROCS(0) * 2
-	if currency < 6 {
-		currency = 6
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(currency)
-	for i := 0; i < currency; i++ {
-		go func(idx int) {
-			defer wg.Done()
-
-			compressed := new(bytes.Buffer)
-			compressedBytes := make([]byte, 0)
-			origin := new(bytes.Buffer)
-			originBytes := make([]byte, 0)
-
-			data := prefix + fmt.Sprintf(": %d-th goroutine", idx)
-
-			err := ZstdCompress(strings.NewReader(data), compressed)
-			assert.NoError(t, err)
-			compressedBytes = ZstdCompressBytes([]byte(data), compressedBytes)
-			assert.Equal(t, compressed.Bytes(), compressedBytes)
-
-			err = ZstdDecompress(compressed, origin)
-			assert.NoError(t, err)
-			originBytes, err = ZstdDecompressBytes(compressedBytes, originBytes)
-			assert.NoError(t, err)
-			assert.Equal(t, origin.Bytes(), originBytes)
-
-			assert.Equal(t, data, origin.String())
-		}(i)
-	}
-	wg.Wait()
 }
 
 type ErrReader struct {

@@ -104,7 +104,7 @@ func (node *BaseNode) Name() string {
 	return node.name
 }
 
-//length of pipeline input chnnel
+// length of pipeline input chnnel
 func (node *BaseNode) MaxQueueLength() int32 {
 	return node.maxQueueLength
 }

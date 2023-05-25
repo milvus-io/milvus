@@ -16,6 +16,7 @@ on:
       - docker-compose.yml
       - Makefile
       - go.mod
+      - go.work
       - '!**.md'
       - '!build/ci/jenkins/**'
   pull_request:
@@ -32,6 +33,7 @@ on:
       - docker-compose.yml
       - Makefile
       - go.mod
+      - go.work
       - '!**.md'
       - '!build/ci/jenkins/**'
 

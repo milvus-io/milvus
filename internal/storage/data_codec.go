@@ -1251,9 +1251,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					binlogReader.Close()
 					return nil, nil, err
 				}
-				for idx := range stringPayload {
-					requestsStrings = append(requestsStrings, stringPayload[idx])
-				}
+				requestsStrings = append(requestsStrings, stringPayload...)
 			}
 			eventReader.Close()
 		}

@@ -141,42 +141,6 @@ func (dec *ZstdDecompressor) GetType() CompressType {
 	return CompressTypeZstd
 }
 
-// Global methods
-
-// Usa case: compress stream, large object only once
-// This can be called concurrently
-// Try ZstdCompressor for better efficiency if you need compress mutiple streams one by one
-func ZstdCompress(in io.Reader, out io.Writer, opts ...zstd.EOption) error {
-	enc, err := NewZstdCompressor(out, opts...)
-	if err != nil {
-		return err
-	}
-
-	if err = enc.Compress(in); err != nil {
-		enc.Close()
-		return err
-	}
-
-	return enc.Close()
-}
-
-// Use case: decompress stream, large object only once
-// This can be called concurrently
-// Try ZstdDecompressor for better efficiency if you need decompress mutiple streams one by one
-func ZstdDecompress(in io.Reader, out io.Writer, opts ...zstd.DOption) error {
-	dec, err := NewZstdDecompressor(in, opts...)
-	if err != nil {
-		return err
-	}
-	defer dec.Close()
-
-	if err = dec.Decompress(out); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 var (
 	globalZstdCompressor, _   = zstd.NewWriter(nil)
 	globalZstdDecompressor, _ = zstd.NewReader(nil)

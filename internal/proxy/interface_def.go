@@ -29,6 +29,7 @@ type tsoAllocator interface {
 }
 
 // use timestampAllocatorInterface to keep other components testable
+//
 //go:generate mockery --name=timestampAllocatorInterface --filename=mock_tso_test.go --outpkg=proxy --output=. --inpackage --structname=mockTimestampAllocator --with-expecter
 type timestampAllocatorInterface interface {
 	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
