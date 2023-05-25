@@ -249,6 +249,8 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::vector<FixedVector<bool>> results;
+    results.reserve(num_chunk);
+
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -297,6 +299,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
     AssertInfo(std::max(data_barrier, indexing_barrier) == num_chunk,
                "max(data_barrier, index_barrier) not equal to num_chunk");
     std::vector<FixedVector<bool>> results;
+    results.reserve(num_chunk);
 
     // for growing segment, indexing_barrier will always less than data_barrier
     // so growing segment will always execute expr plan using raw data
@@ -360,42 +363,42 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
     switch (op) {
         case OpType::Equal: {
             auto index_func = [&](Index* index) { return index->In(1, &val); };
-            auto elem_func = [&](T x) { return (x == val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x == val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::NotEqual: {
             auto index_func = [&](Index* index) {
                 return index->NotIn(1, &val);
             };
-            auto elem_func = [&](T x) { return (x != val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x != val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::GreaterEqual: {
             auto index_func = [&](Index* index) {
                 return index->Range(val, OpType::GreaterEqual);
             };
-            auto elem_func = [&](T x) { return (x >= val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x >= val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::GreaterThan: {
             auto index_func = [&](Index* index) {
                 return index->Range(val, OpType::GreaterThan);
             };
-            auto elem_func = [&](T x) { return (x > val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x > val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::LessEqual: {
             auto index_func = [&](Index* index) {
                 return index->Range(val, OpType::LessEqual);
             };
-            auto elem_func = [&](T x) { return (x <= val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x <= val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::LessThan: {
             auto index_func = [&](Index* index) {
                 return index->Range(val, OpType::LessThan);
             };
-            auto elem_func = [&](T x) { return (x < val); };
+            auto elem_func = [&](MayConstRef<T> x) { return (x < val); };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         case OpType::PrefixMatch: {
@@ -405,7 +408,9 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
                 dataset->Set(milvus::index::PREFIX_VALUE, val);
                 return index->Query(std::move(dataset));
             };
-            auto elem_func = [&](T x) { return Match(x, val, op); };
+            auto elem_func = [&](MayConstRef<T> x) {
+                return Match(x, val, op);
+            };
             return ExecRangeVisitorImpl<T>(field_id, index_func, elem_func);
         }
         // TODO: PostfixMatch
@@ -539,11 +544,12 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand, &nested_path](T x) {
-                        // visit the nested field
-                        // now it must be Json
-                        return ((x + right_operand) == val);
-                    };
+                    auto elem_func =
+                        [val, right_operand, &nested_path](MayConstRef<T> x) {
+                            // visit the nested field
+                            // now it must be Json
+                            return ((x + right_operand) == val);
+                        };
                     return ExecDataRangeVisitorImpl<T>(
                         expr.column_.field_id, index_func, elem_func);
                 }
@@ -553,7 +559,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x - right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x - right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -565,7 +571,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x * right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x * right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -577,7 +583,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x / right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x / right_operand) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -589,7 +595,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return static_cast<T>(fmod(x, right_operand)) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return (static_cast<T>(fmod(x, right_operand)) == val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -608,7 +614,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x + right_operand) != val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -620,7 +626,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x - right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x - right_operand) != val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -632,7 +638,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x * right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x * right_operand) != val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -644,7 +650,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x / right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return ((x / right_operand) != val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -656,7 +662,7 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return static_cast<T>(fmod(x, right_operand)) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) {
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return (static_cast<T>(fmod(x, right_operand)) != val);
                     };
                     return ExecDataRangeVisitorImpl<T>(
@@ -882,19 +888,27 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
         return index->Range(val1, lower_inclusive, val2, upper_inclusive);
     };
     if (lower_inclusive && upper_inclusive) {
-        auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
+        auto elem_func = [val1, val2](MayConstRef<T> x) {
+            return (val1 <= x && x <= val2);
+        };
         return ExecRangeVisitorImpl<T>(
             expr.column_.field_id, index_func, elem_func);
     } else if (lower_inclusive && !upper_inclusive) {
-        auto elem_func = [val1, val2](T x) { return (val1 <= x && x < val2); };
+        auto elem_func = [val1, val2](MayConstRef<T> x) {
+            return (val1 <= x && x < val2);
+        };
         return ExecRangeVisitorImpl<T>(
             expr.column_.field_id, index_func, elem_func);
     } else if (!lower_inclusive && upper_inclusive) {
-        auto elem_func = [val1, val2](T x) { return (val1 < x && x <= val2); };
+        auto elem_func = [val1, val2](MayConstRef<T> x) {
+            return (val1 < x && x <= val2);
+        };
         return ExecRangeVisitorImpl<T>(
             expr.column_.field_id, index_func, elem_func);
     } else {
-        auto elem_func = [val1, val2](T x) { return (val1 < x && x < val2); };
+        auto elem_func = [val1, val2](MayConstRef<T> x) {
+            return (val1 < x && x < val2);
+        };
         return ExecRangeVisitorImpl<T>(
             expr.column_.field_id, index_func, elem_func);
     }
@@ -1226,10 +1240,10 @@ ExecExprVisitor::ExecCompareLeftType(const FieldId& left_field_id,
                                      const FieldId& right_field_id,
                                      const DataType& right_field_type,
                                      CmpFunc cmp_func) {
-    std::vector<FixedVector<bool>> results;
-
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunks = upper_div(row_count_, size_per_chunk);
+    std::vector<FixedVector<bool>> results;
+    results.reserve(num_chunks);
 
     for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
         FixedVector<bool> result;
@@ -1679,7 +1693,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
     auto index_func = [&terms, n](Index* index) {
         return index->In(n, terms.data());
     };
-    auto elem_func = [&terms, &term_set](T x) {
+    auto elem_func = [&terms, &term_set](MayConstRef<T> x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
         return term_set.find(x) != term_set.end();
@@ -1712,7 +1726,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw)
         return bitset;
     };
 
-    auto elem_func = [&terms, &term_set](T x) {
+    auto elem_func = [&terms, &term_set](MayConstRef<T> x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
         return term_set.find(x) != term_set.end();

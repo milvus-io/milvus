@@ -28,6 +28,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -143,21 +144,11 @@ using BitSetBlockType = BitsetType::block_type;
 constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
 constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
 template <typename T>
-using MayRef = std::conditional_t<!std::is_trivially_copyable_v<T> ||
-                                      sizeof(T) >= REF_SIZE_THRESHOLD,
-                                  T&,
-                                  T>;
-template <typename T>
-using Parameter = std::
-    conditional_t<std::is_same_v<T, std::string>, std::string_view, MayRef<T>>;
-
-static_assert(std::is_same_v<int64_t, Parameter<int64_t>>);
-static_assert(std::is_same_v<std::string_view, Parameter<std::string>>);
-
-struct LargeType {
-    int64_t x, y, z;
-};
-static_assert(std::is_same_v<LargeType&, Parameter<LargeType>>);
+using MayConstRef = std::conditional_t<std::is_same_v<T, std::string> ||
+                                           std::is_same_v<T, milvus::Json>,
+                                       const T&,
+                                       T>;
+static_assert(std::is_same_v<const std::string&, MayConstRef<std::string>>);
 }  // namespace milvus
    //
 template <>
