@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -32,61 +31,34 @@ import (
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
 func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType segmentType, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
-	var (
-		resultCh = make(chan *segcorepb.RetrieveResults, len(segIDs))
-		errs     = make([]error, len(segIDs))
-		wg       sync.WaitGroup
-	)
+	var retrieveResults []*segcorepb.RetrieveResults
 
 	queryLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		queryLabel = metrics.GrowingSegmentLabel
 	}
 
-	for i, segID := range segIDs {
-		wg.Add(1)
-		go func(segID int64, i int) {
-			defer wg.Done()
-			seg, err := replica.getSegmentByID(segID, segType)
-			if err != nil {
-				if errors.Is(err, ErrSegmentNotFound) {
-					errs[i] = nil
-					return
-				}
-				errs[i] = err
-				return
+	for _, segID := range segIDs {
+		seg, err := replica.getSegmentByID(segID, segType)
+		if err != nil {
+			if errors.Is(err, ErrSegmentNotFound) {
+				continue
 			}
-			// record retrieve time
-			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-			result, err := seg.retrieve(plan)
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			if err = seg.fillIndexedFieldsData(ctx, collID, vcm, result); err != nil {
-				errs[i] = err
-				return
-			}
-			errs[i] = nil
-			resultCh <- result
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
-				metrics.QueryLabel, queryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		}(segID, i)
-	}
-	wg.Wait()
-	close(resultCh)
-
-	for _, err := range errs {
+			return nil, err
+		}
+		// record retrieve time
+		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+		result, err := seg.retrieve(plan)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	var retrieveResults []*segcorepb.RetrieveResults
-	for result := range resultCh {
+		if err := seg.fillIndexedFieldsData(ctx, collID, vcm, result); err != nil {
+			return nil, err
+		}
 		retrieveResults = append(retrieveResults, result)
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel, queryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
-
 	return retrieveResults, nil
 }
 

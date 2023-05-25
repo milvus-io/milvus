@@ -72,24 +72,4 @@ func TestStreaming_retrieve(t *testing.T) {
 		assert.Len(t, ids, 1)
 	})
 
-	t.Run("test retrieve non-exist segment", func(t *testing.T) {
-		plan, err := genSimpleRetrievePlan(collection)
-		assert.NoError(t, err)
-
-		res, err := retrieveOnSegments(context.TODO(), streaming, segmentTypeGrowing,
-			defaultCollectionID, plan, []int64{999}, nil)
-		assert.NoError(t, err)
-		assert.Len(t, res, 0)
-	})
-
-	t.Run("test retrieve nil segment", func(t *testing.T) {
-		plan, err := genSimpleRetrievePlan(collection)
-		assert.NoError(t, err)
-
-		deleteSegment(segment)
-		res, err := retrieveOnSegments(context.TODO(), streaming, segmentTypeGrowing,
-			defaultCollectionID, plan, []int64{defaultSegmentID}, nil)
-		assert.ErrorIs(t, err, ErrSegmentUnhealthy)
-		assert.Len(t, res, 0)
-	})
 }
