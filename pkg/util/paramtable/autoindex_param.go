@@ -17,7 +17,13 @@
 package paramtable
 
 import (
+	"fmt"
+
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 )
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -41,8 +47,9 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.Enable.Init(base.mgr)
 
 	p.IndexParams = ParamItem{
-		Key:     "autoIndex.params.build",
-		Version: "2.2.0",
+		Key:          "autoIndex.params.build",
+		Version:      "2.2.0",
+		DefaultValue: `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`,
 	}
 	p.IndexParams.Init(base.mgr)
 
@@ -69,4 +76,36 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		Version: "2.2.0",
 	}
 	p.AutoIndexTypeName.Init(base.mgr)
+
+	p.panicIfNotValidAndSetDefaultMetricType(base.mgr)
+}
+
+func (p *autoIndexConfig) panicIfNotValidAndSetDefaultMetricType(mgr *config.Manager) {
+	m := p.IndexParams.GetAsJSONMap()
+	if m == nil {
+		panic("autoIndex.build not invalid, should be json format")
+	}
+
+	indexType, ok := m[common.IndexTypeKey]
+	if !ok {
+		panic("autoIndex.build not invalid, index type not found")
+	}
+
+	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
+	if err != nil {
+		panic(fmt.Sprintf("autoIndex.build not invalid, unsupported index type: %s", indexType))
+	}
+
+	checker.SetDefaultMetricTypeIfNotExist(m)
+
+	if err := checker.StaticCheck(m); err != nil {
+		panic(fmt.Sprintf("autoIndex.build not invalid, parameters not invalid, error: %s", err.Error()))
+	}
+
+	p.reset(m, mgr)
+}
+
+func (p *autoIndexConfig) reset(m map[string]string, mgr *config.Manager) {
+	j := funcutil.MapToJSON(m)
+	mgr.SetConfig("autoIndex.params.build", string(j))
 }

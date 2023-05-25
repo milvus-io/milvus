@@ -21,6 +21,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+
+	"github.com/milvus-io/milvus/pkg/config"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/common"
@@ -89,4 +93,150 @@ func TestAutoIndexParams_build(t *testing.T) {
 	// 	assert.NoError(t, err)
 	// 	CParams.Save(CParams.AutoIndexConfig.IndexParams.Key, string(jsonStrBytes))
 	// })
+}
+
+func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
+	t.Run("not in json format", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", "not in json format")
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.Panics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+	})
+
+	t.Run("index type not found", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"M": 30}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.Panics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+	})
+
+	t.Run("unsupported index type", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"index_type": "not supported"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.Panics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+	})
+
+	t.Run("normal case, hnsw", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, ivf flat", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, ivf flat", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, diskann", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"index_type": "DISKANN"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, bin flat", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"index_type": "BIN_FLAT"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, bin ivf flat", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "BIN_IVF_FLAT"}`)
+		p := &autoIndexConfig{
+			IndexParams: ParamItem{
+				Key: "autoIndex.params.build",
+			},
+		}
+		p.IndexParams.Init(mgr)
+		assert.NotPanics(t, func() {
+			p.panicIfNotValidAndSetDefaultMetricType(mgr)
+		})
+		metricType, exist := p.IndexParams.GetAsJSONMap()[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+	})
 }

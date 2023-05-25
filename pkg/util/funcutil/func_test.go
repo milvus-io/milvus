@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -383,4 +384,14 @@ func TestUserRoleCache(t *testing.T) {
 
 	_, _, err = DecodeUserRoleCache("foo")
 	assert.Error(t, err)
+}
+
+func TestMapToJSON(t *testing.T) {
+	s := `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`
+	m, err := JSONToMap(s)
+	assert.NoError(t, err)
+	j := MapToJSON(m)
+	got, err := JSONToMap(string(j))
+	assert.NoError(t, err)
+	assert.True(t, reflect.DeepEqual(m, got))
 }

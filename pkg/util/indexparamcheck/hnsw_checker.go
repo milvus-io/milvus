@@ -4,7 +4,7 @@ type hnswChecker struct {
 	floatVectorBaseChecker
 }
 
-func (c *hnswChecker) CheckTrain(params map[string]string) error {
+func (c hnswChecker) StaticCheck(params map[string]string) error {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return errOutOfRange(EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction)
 	}
@@ -13,6 +13,13 @@ func (c *hnswChecker) CheckTrain(params map[string]string) error {
 		return errOutOfRange(HNSWM, HNSWMinM, HNSWMaxM)
 	}
 
+	return c.floatVectorBaseChecker.staticCheck(params)
+}
+
+func (c hnswChecker) CheckTrain(params map[string]string) error {
+	if err := c.StaticCheck(params); err != nil {
+		return err
+	}
 	return c.floatVectorBaseChecker.CheckTrain(params)
 }
 

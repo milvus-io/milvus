@@ -8,11 +8,7 @@ type binIVFFlatChecker struct {
 	binaryVectorBaseChecker
 }
 
-func (c *binIVFFlatChecker) CheckTrain(params map[string]string) error {
-	if err := c.binaryVectorBaseChecker.CheckTrain(params); err != nil {
-		return err
-	}
-
+func (c binIVFFlatChecker) StaticCheck(params map[string]string) error {
 	if !CheckStrByValues(params, Metric, BinIvfMetrics) {
 		return fmt.Errorf("metric type not found or not supported, supported: %v", BinIvfMetrics)
 	}
@@ -22,6 +18,14 @@ func (c *binIVFFlatChecker) CheckTrain(params map[string]string) error {
 	}
 
 	return nil
+}
+
+func (c binIVFFlatChecker) CheckTrain(params map[string]string) error {
+	if err := c.binaryVectorBaseChecker.CheckTrain(params); err != nil {
+		return err
+	}
+
+	return c.StaticCheck(params)
 }
 
 func newBinIVFFlatChecker() IndexChecker {

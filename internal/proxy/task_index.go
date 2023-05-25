@@ -61,6 +61,7 @@ type createIndexTask struct {
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
 	newTypeParams  []*commonpb.KeyValuePair
+	newExtraParams []*commonpb.KeyValuePair
 
 	collectionID UniqueID
 	fieldSchema  *schemapb.FieldSchema
@@ -103,7 +104,22 @@ func (cit *createIndexTask) OnEnqueue() error {
 	return nil
 }
 
+func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
+		{
+			Key:   common.IndexTypeKey,
+			Value: AutoIndexName,
+		},
+		{
+			Key:   common.MetricTypeKey,
+			Value: metricType,
+		},
+	}
+}
+
 func (cit *createIndexTask) parseIndexParams() error {
+	cit.newExtraParams = cit.req.GetExtraParams()
+
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
 	if !isVecIndex {
@@ -133,17 +149,73 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	if isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if Params.AutoIndexConfig.Enable.GetAsBool() {
+		if Params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
 			log.Info("create index trigger AutoIndex",
 				zap.String("original type", specifyIndexType),
 				zap.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
+
+			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
+
 			// override params by autoindex
 			for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
 				indexParamsMap[k] = v
 			}
-		} else {
+
+			if metricTypeExist {
+				// make the users' metric type first class citizen.
+				indexParamsMap[common.MetricTypeKey] = metricType
+			}
+		} else { // behavior change after 2.2.9, adapt autoindex logic here.
+			autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+
+			useAutoIndex := func() {
+				fields := make([]zap.Field, 0, len(autoIndexConfig))
+				for k, v := range autoIndexConfig {
+					indexParamsMap[k] = v
+					fields = append(fields, zap.String(k, v))
+				}
+				log.Ctx(cit.ctx).Info("AutoIndex triggered", fields...)
+			}
+
+			handle := func(numberParams int) error {
+				// empty case.
+				if len(indexParamsMap) == numberParams {
+					// though we already know there must be metric type, how to make this safer to avoid crash?
+					metricType := autoIndexConfig[common.MetricTypeKey]
+					cit.newExtraParams = wrapUserIndexParams(metricType)
+					useAutoIndex()
+					return nil
+				}
+
+				metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
+
+				if len(indexParamsMap) > numberParams+1 {
+					return fmt.Errorf("only metric type can be passed when use AutoIndex")
+				}
+
+				if len(indexParamsMap) == numberParams+1 {
+					if !metricTypeExist {
+						return fmt.Errorf("only metric type can be passed when use AutoIndex")
+					}
+
+					// only metric type is passed.
+					cit.newExtraParams = wrapUserIndexParams(metricType)
+					useAutoIndex()
+					// make the users' metric type first class citizen.
+					indexParamsMap[common.MetricTypeKey] = metricType
+				}
+
+				return nil
+			}
+
 			if !exist {
-				return fmt.Errorf("IndexType not specified")
+				if err := handle(0); err != nil {
+					return err
+				}
+			} else if specifyIndexType == AutoIndexName {
+				if err := handle(1); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -298,9 +370,11 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
-	log.Debug("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
+	log.Ctx(ctx).Info("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
 		zap.String("indexName", cit.req.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
-		zap.Any("indexParams", cit.req.GetExtraParams()))
+		zap.Any("indexParams", cit.req.GetExtraParams()),
+		zap.Any("newExtraParams", cit.newExtraParams),
+	)
 
 	if cit.req.GetIndexName() == "" {
 		cit.req.IndexName = Params.CommonCfg.DefaultIndexName.GetValue() + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
@@ -313,7 +387,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		TypeParams:      cit.newTypeParams,
 		IndexParams:     cit.newIndexParams,
 		IsAutoIndex:     cit.isAutoIndex,
-		UserIndexParams: cit.req.GetExtraParams(),
+		UserIndexParams: cit.newExtraParams,
 		Timestamp:       cit.BeginTs(),
 	}
 	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
