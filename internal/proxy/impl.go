@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -5478,6 +5479,39 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.ConnectResponse{Status: unhealthyStatus()}, nil
+	}
+
+	db := GetCurDBNameFromContextOrDefault(ctx)
+
+	// maybe an `API` like `HasDatabase` is better, `ListDatabases` is a little heavy.
+	resp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases),
+		),
+	})
+
+	if err != nil {
+		return &milvuspb.ConnectResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return &milvuspb.ConnectResponse{
+			Status: proto.Clone(resp.GetStatus()).(*commonpb.Status),
+		}, nil
+	}
+
+	if !funcutil.SliceContain(resp.GetDbNames(), db) {
+		return &milvuspb.ConnectResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError, // DatabaseNotExist?
+				Reason:    fmt.Sprintf("database not found: %s", db),
+			},
+		}, nil
 	}
 
 	ts, err := node.tsoAllocator.AllocOne(ctx)
