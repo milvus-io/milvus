@@ -13,7 +13,7 @@ class MilvusConan(ConanFile):
         "lz4/1.9.4",
         "snappy/1.1.9",
         "lzo/2.10",
-        "arrow/8.0.1",
+        "arrow/11.0.0",
         "openssl/1.1.1q",
         "s2n/1.3.31@milvus/dev",
         "aws-c-common/0.8.2@milvus/dev",
