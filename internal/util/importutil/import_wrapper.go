@@ -116,10 +116,11 @@ func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.Collection
 
 	// ignore the RowID field and Timestamp field
 	realSchema := &schemapb.CollectionSchema{
-		Name:        collectionSchema.GetName(),
-		Description: collectionSchema.GetDescription(),
-		AutoID:      collectionSchema.GetAutoID(),
-		Fields:      make([]*schemapb.FieldSchema, 0),
+		Name:               collectionSchema.GetName(),
+		Description:        collectionSchema.GetDescription(),
+		AutoID:             collectionSchema.GetAutoID(),
+		Fields:             make([]*schemapb.FieldSchema, 0),
+		EnableDynamicField: collectionSchema.GetEnableDynamicField(),
 	}
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
