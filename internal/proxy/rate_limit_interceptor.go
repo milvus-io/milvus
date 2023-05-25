@@ -66,41 +66,31 @@ func getRequestInfo(req interface{}) (int64, internalpb.RateType, int, error) {
 		return collectionID, internalpb.RateType_DQLSearch, int(r.GetNq()), nil
 	case *milvuspb.QueryRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
+		return collectionID, internalpb.RateType_DQLQuery, 1, nil // we regard the nq of query as equivalent to 1.
 	case *milvuspb.CreateCollectionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return 0, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return 0, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.LoadCollectionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return 0, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.ReleaseCollectionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLCollection, 1, nil
+		return 0, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreatePartitionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return 0, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.DropPartitionRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return 0, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.LoadPartitionsRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return 0, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.ReleasePartitionsRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLPartition, 1, nil
+		return 0, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.CreateIndexRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLIndex, 1, nil
+		return 0, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.DropIndexRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DDLIndex, 1, nil
+		return 0, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
 		return 0, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		return r.GetCollectionID(), internalpb.RateType_DDLCompaction, 1, nil
+		return 0, internalpb.RateType_DDLCompaction, 1, nil
 		// TODO: support more request
 	default:
 		if req == nil {
