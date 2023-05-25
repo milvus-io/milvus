@@ -83,7 +83,9 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	if !ok {
 		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
 		if inNode.lastMsg != nil {
-			log.Info("trigger force sync", zap.Int64("collection", inNode.collectionID), zap.Any("position", inNode.lastMsg))
+			log.Info("trigger force sync", zap.Int64("collection", inNode.collectionID),
+				zap.Any("startPositions", inNode.lastMsg.StartPositions),
+				zap.Any("endPositions", inNode.lastMsg.EndPositions))
 			return []Msg{&MsgStreamMsg{
 				BaseMsg:        NewBaseMsg(true),
 				tsMessages:     []msgstream.TsMsg{},
