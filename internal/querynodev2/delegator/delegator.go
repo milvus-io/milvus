@@ -223,6 +223,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
+	existPartitions := sd.collection.GetPartitions()
+	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+		return funcutil.SliceContain(existPartitions, segment.PartitionID)
+	})
 
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
@@ -274,6 +278,10 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
+	existPartitions := sd.collection.GetPartitions()
+	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
+		return funcutil.SliceContain(existPartitions, segment.PartitionID)
+	})
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}

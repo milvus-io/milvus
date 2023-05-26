@@ -76,11 +76,6 @@ func (d *DeleteData) Append(ad DeleteData) {
 func (sd *shardDelegator) newGrowing(segmentID int64, insertData *InsertData) segments.Segment {
 	log := sd.getLogger(context.Background()).With(zap.Int64("segmentID", segmentID))
 
-	// try add partition
-	if sd.collection.GetLoadType() == loadTypeCollection {
-		sd.collection.AddPartition(insertData.PartitionID)
-	}
-
 	segment, err := segments.NewSegment(sd.collection, segmentID, insertData.PartitionID, sd.collectionID, sd.vchannelName, segments.SegmentTypeGrowing, 0, insertData.StartPosition, insertData.StartPosition)
 	if err != nil {
 		log.Error("failed to create new segment", zap.Error(err))
