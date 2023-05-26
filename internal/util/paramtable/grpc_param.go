@@ -39,7 +39,7 @@ const (
 	DefaultLogLevel = "WARNING"
 
 	// Grpc Timeout related configs
-	DefaultDialTimeout      = 5000 * time.Millisecond
+	DefaultDialTimeout      = 200 * time.Millisecond
 	DefaultKeepAliveTime    = 10000 * time.Millisecond
 	DefaultKeepAliveTimeout = 20000 * time.Millisecond
 
@@ -53,7 +53,7 @@ const (
 	ProxyExternalPort = 19530
 )
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- grpc ---
 type grpcConfig struct {
 	ServiceParam
