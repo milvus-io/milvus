@@ -21,9 +21,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -87,5 +87,96 @@ func TestAutoIndexParams_build(t *testing.T) {
 		jsonStrBytes, err = json.Marshal(map1)
 		assert.NoError(t, err)
 		CParams.AutoIndexConfig.parseBuildParams(string(jsonStrBytes))
+	})
+}
+
+func Test_autoIndexConfig_panicIfNotInvalid(t *testing.T) {
+	t.Run("unsupported index type", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: "unsupported",
+			},
+		}
+		assert.Panics(t, p.panicIfNotInvalid)
+	})
+
+	t.Run("efConstruction not found", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: "HNSW",
+			},
+		}
+		assert.Panics(t, p.panicIfNotInvalid)
+	})
+
+	t.Run("normal case, hnsw", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexHNSW,
+				"M":                 "30",
+				"efConstruction":    "360",
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, ivf flat", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexFaissIvfFlat,
+				"nlist":             "30",
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, diskann", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexDISKANN,
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, bin flat", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexFaissBinIDMap,
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
+	})
+
+	t.Run("normal case, bin flat", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: false,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexFaissBinIvfFlat,
+				"nlist":             "30",
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
 	})
 }

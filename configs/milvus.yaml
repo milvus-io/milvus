@@ -587,3 +587,7 @@ quotaAndLimits:
       maxReadResultRate: -1 # MB/s, default no limit
     # coolOffSpeed is the speed of search&query rates cool off.
     coolOffSpeed: 0.9 # (0, 1]
+
+autoIndex:
+  params:
+    build: '{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}'
