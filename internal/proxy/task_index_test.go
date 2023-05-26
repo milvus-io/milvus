@@ -255,21 +255,11 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 		},
 		datacoord:    dc,
-		queryCoord:   nil,
 		result:       nil,
 		collectionID: collectionID,
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		qc := getMockQueryCoord()
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionIDs: []int64{},
-		}, nil)
-		cit.queryCoord = qc
-
 		err := cit.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
@@ -305,7 +295,6 @@ func Test_parseIndexParams(t *testing.T) {
 		},
 		ctx:            nil,
 		rootCoord:      nil,
-		queryCoord:     nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -390,7 +379,6 @@ func Test_parseIndexParams(t *testing.T) {
 		},
 		ctx:            nil,
 		rootCoord:      nil,
-		queryCoord:     nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -487,7 +475,6 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 			ctx:            nil,
 			rootCoord:      nil,
-			queryCoord:     nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,

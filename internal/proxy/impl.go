@@ -1625,12 +1625,11 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	defer sp.End()
 
 	cit := &createIndexTask{
-		ctx:        ctx,
-		Condition:  NewTaskCondition(ctx),
-		req:        request,
-		rootCoord:  node.rootCoord,
-		datacoord:  node.dataCoord,
-		queryCoord: node.queryCoord,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       request,
+		rootCoord: node.rootCoord,
+		datacoord: node.dataCoord,
 	}
 
 	method := "CreateIndex"
