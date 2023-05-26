@@ -46,6 +46,11 @@ function install_linux_deps() {
   fi
   # install cmake
   wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
+  if [[ $(arch) == 'aarch64' ]]; then
+    git clone https://github.com/confluentinc/librdkafka.git
+    cd librdkafka && ./configure && make -j8 && sudo make install && cd ..
+  fi
+
 }
 
 function install_mac_deps() {
