@@ -1,12 +1,10 @@
 import copy
-import time
 import os
-import pathlib
 import numpy as np
 import random
 from sklearn import preprocessing
-from common.common_func import gen_unique_unicode_str
-from minio_comm import copy_files_to_minio
+from common.common_func import gen_unique_str
+from common.minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
 
 data_source = "/tmp/bulk_insert_data"
@@ -65,13 +63,13 @@ def gen_float_vectors(nb, dim):
 
 
 def gen_str_invalid_vectors(nb, dim):
-    vectors = [[str(gen_unique_unicode_str()) for _ in range(dim)] for _ in range(nb)]
+    vectors = [[str(gen_unique_str()) for _ in range(dim)] for _ in range(nb)]
     return vectors
 
 
 def gen_binary_vectors(nb, dim):
     # binary: each int presents 8 dimension
-    # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 to 255
+    # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 and 255
     vectors = [[random.randint(0, 255) for _ in range(dim)] for _ in range(nb)]
     return vectors
 
@@ -101,7 +99,7 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
                     if str_pk:
-                        f.write('"uid":"' + str(gen_unique_unicode_str()) + '"')
+                        f.write('"uid":"' + str(gen_unique_str()) + '"')
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
                             f.write('"uid":' + str(i + start_uid + random.random()) + '')
@@ -117,11 +115,11 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                     if err_type == DataErrorType.int_on_float_scalar:
                         f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + '')
                     elif err_type == DataErrorType.str_on_float_scalar:
-                        f.write('"float_scalar":"' + str(gen_unique_unicode_str()) + '"')
+                        f.write('"float_scalar":"' + str(gen_unique_str()) + '"')
                     else:
                         f.write('"float_scalar":' + str(random.random()) + '')
                 if data_field == DataField.string_field:
-                    f.write('"string_scalar":"' + str(gen_unique_unicode_str()) + '"')
+                    f.write('"string_scalar":"' + str(gen_unique_str()) + '"')
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
                         f.write('"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + '')
@@ -161,7 +159,7 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
                     if str_pk:
-                        f.write('"uid":["' + ',"'.join(str(gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
+                        f.write('"uid":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + ']')
                         f.write("\n")
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
@@ -184,14 +182,14 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                             str(random.randint(-999999, 9999999)) for i in range(rows)) + "]")
                     elif err_type == DataErrorType.str_on_float_scalar:
                         f.write('"float_scalar":["' + ',"'.join(str(
-                            gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
+                            gen_unique_str()) + '"' for i in range(rows)) + ']')
                     else:
                         f.write('"float_scalar":[' + ",".join(
                             str(random.random()) for i in range(rows)) + "]")
                     f.write("\n")
                 if data_field == DataField.string_field:
                     f.write('"string_scalar":["' + ',"'.join(str(
-                        gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
+                        gen_unique_str()) + '"' for i in range(rows)) + ']')
                     f.write("\n")
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
@@ -270,7 +268,7 @@ def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [gen_unique_unicode_str(str(i)) for i in range(start, rows+start)]
+            data = [gen_unique_str(str(i)) for i in range(start, rows+start)]
         arr = np.array(data)
         # print(f"file_name: {file_name} data type: {arr.dtype}")
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
@@ -508,7 +506,7 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     :type data_fields: list
 
     :param file_nums: file numbers to be generated
-        The file(s) would be  geneated in data_source folder if file_nums = 1
+        The file(s) would be  generated in data_source folder if file_nums = 1
         The file(s) would be generated in different subfolers if file_nums > 1
     :type file_nums: int
 
@@ -524,4 +522,3 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
-

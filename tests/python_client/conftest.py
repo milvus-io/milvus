@@ -44,6 +44,7 @@ def pytest_addoption(parser):
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
     parser.addoption('--replica_num', type='int', action='store', default=ct.default_replica_num, help="memory replica number")
+    parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
 
 
 @pytest.fixture
@@ -166,6 +167,11 @@ def check_content(request):
 @pytest.fixture
 def field_name(request):
     return request.config.getoption("--field_name")
+
+
+@pytest.fixture
+def minio_host(request):
+    return request.config.getoption("--minio_host")
 
 
 """ fixture func """
