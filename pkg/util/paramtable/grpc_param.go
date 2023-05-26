@@ -38,7 +38,7 @@ const (
 	DefaultLogLevel = "WARNING"
 
 	// Grpc Timeout related configs
-	DefaultDialTimeout      = 5000
+	DefaultDialTimeout      = 200
 	DefaultKeepAliveTime    = 10000
 	DefaultKeepAliveTimeout = 20000
 
