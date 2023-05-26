@@ -212,14 +212,21 @@ jobs:
         run: |
           docker-compose up -d pulsar etcd minio
       - name: IntegrationTest
-        #continue-on-error: true # do not impact ci-passed for now
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_intergration_test.sh
           ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
+      - name: Archive result
+        uses: actions/upload-artifact@v3
+        with:
+          name: it-result
+          path: |
+            ./it_coverage.txt
+            *.info
+            *.out
   codecov:
     name: Upload Code Coverage
-    needs: [UT-Cpp, UT-Go]
+    needs: [UT-Cpp, UT-Go, integration-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -231,6 +238,10 @@ jobs:
         uses: actions/download-artifact@v3.0.1
         with:
           name: go-result
+      - name: Download Integration Test coverage results
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: it-result
       - name: Display structure of code coverage results
         run: |
           ls -lah
@@ -241,7 +252,7 @@ jobs:
         id: upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info
+          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
       - name: Retry Upload coverage to Codecov
@@ -250,6 +261,6 @@ jobs:
         id: retry_upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info
+          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-${{ matrix.ubuntu }}-unittests
           fail_ci_if_error: true
