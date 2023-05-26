@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1059,6 +1060,27 @@ func TestCore_Import(t *testing.T) {
 			CollectionName: "a-good-name",
 		})
 		assert.NoError(t, err)
+	})
+
+	t.Run("backup without partition name", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withMeta(meta))
+
+		coll := &model.Collection{
+			Name: "a-good-name",
+		}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll.Clone(), nil
+		}
+		resp, _ := c.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "a-good-name",
+			Options: []*commonpb.KeyValuePair{
+				{Key: importutil.BackupFlag, Value: "true"},
+			},
+		})
+		assert.NotNil(t, resp)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 
 	// Remove the following case after bulkinsert can support partition key
