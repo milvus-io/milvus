@@ -33,6 +33,7 @@ macro( build_rocksdb )
          "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
          "-DROCKSDB_INSTALL_ON_WINDOWS=ON"
          "-DFAIL_ON_WARNINGS=OFF"
+         "-DWITH_ZSTD=ON"
          ${FPIC_ARG}
          #This is used to solve 'illegal instruction' problem in some machine
          "-DPORTABLE=ON"
