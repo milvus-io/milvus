@@ -11,7 +11,7 @@
 
 #include <string>
 
-#include "knowhere/comp/prometheus_client.h"
+#include "knowhere/prometheus_client.h"
 #include "segcore/metrics_c.h"
 
 char*
