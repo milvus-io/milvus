@@ -202,16 +202,22 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	if kv.DB == nil {
 		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
+
+	keyInBytes := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		keyInBytes = append(keyInBytes, []byte(key))
+	}
 	values := make([]string, 0, len(keys))
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
-	for _, key := range keys {
-		value, err := kv.DB.Get(option, []byte(key))
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, string(value.Data()))
-		value.Free()
+
+	valueSlice, err := kv.DB.MultiGet(option, keyInBytes...)
+	if err != nil {
+		return nil, err
+	}
+	for i := range valueSlice {
+		values = append(values, string(valueSlice[i].Data()))
+		valueSlice[i].Free()
 	}
 	return values, nil
 }
@@ -220,21 +226,25 @@ func (kv *RocksdbKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	if kv.DB == nil {
 		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
+
+	keyInBytes := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		keyInBytes = append(keyInBytes, []byte(key))
+	}
 	values := make([][]byte, 0, len(keys))
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
 
-	for _, key := range keys {
-		value, err := kv.DB.Get(option, []byte(key))
-		if err != nil {
-			return nil, err
-		}
-
-		data := value.Data()
+	valueSlice, err := kv.DB.MultiGet(option, keyInBytes...)
+	if err != nil {
+		return nil, err
+	}
+	for i := range valueSlice {
+		data := valueSlice[i].Data()
 		v := make([]byte, len(data))
 		copy(v, data)
 		values = append(values, v)
-		value.Free()
+		valueSlice[i].Free()
 	}
 	return values, nil
 }
