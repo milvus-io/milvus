@@ -245,59 +245,13 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 		},
 		indexCoord:   ic,
-		queryCoord:   nil,
 		result:       nil,
 		collectionID: collectionID,
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				CollectionIDs: []int64{},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
-		cit.queryCoord = qc
-
 		err := cit.PreExecute(ctx)
 		assert.NoError(t, err)
-	})
-
-	t.Run("coll has been loaded", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				CollectionIDs: []int64{collectionID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
-		cit.queryCoord = qc
-		err := cit.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("check load error", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
-				},
-				CollectionIDs: nil,
-			}, errors.New("error")
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
-		cit.queryCoord = qc
-		err := cit.PreExecute(ctx)
-		assert.Error(t, err)
 	})
 }
 
@@ -332,7 +286,6 @@ func Test_parseIndexParams(t *testing.T) {
 		ctx:            nil,
 		rootCoord:      nil,
 		indexCoord:     nil,
-		queryCoord:     nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -418,7 +371,6 @@ func Test_parseIndexParams(t *testing.T) {
 		ctx:            nil,
 		rootCoord:      nil,
 		indexCoord:     nil,
-		queryCoord:     nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -512,7 +464,6 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 			ctx:            nil,
 			rootCoord:      nil,
-			queryCoord:     nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
