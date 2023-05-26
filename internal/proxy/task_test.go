@@ -2375,18 +2375,6 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 		},
 	}
-	qc := getQueryCoord()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		PartitionIDs: []int64{},
-	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-	}, nil)
-	cit.queryCoord = qc
 
 	t.Run("normal", func(t *testing.T) {
 		cache := newMockCache()

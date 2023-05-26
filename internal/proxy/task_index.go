@@ -52,12 +52,11 @@ const (
 
 type createIndexTask struct {
 	Condition
-	req        *milvuspb.CreateIndexRequest
-	ctx        context.Context
-	rootCoord  types.RootCoord
-	datacoord  types.DataCoord
-	queryCoord types.QueryCoord
-	result     *commonpb.Status
+	req       *milvuspb.CreateIndexRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	datacoord types.DataCoord
+	result    *commonpb.Status
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
