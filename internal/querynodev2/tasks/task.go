@@ -25,6 +25,7 @@ type Task interface {
 	Done(err error)
 	Canceled() error
 	Wait() error
+	Weight() int
 }
 
 type SearchTask struct {
@@ -233,6 +234,10 @@ func (t *SearchTask) Canceled() error {
 
 func (t *SearchTask) Wait() error {
 	return <-t.notifier
+}
+
+func (t *SearchTask) Weight() int {
+	return int(t.nq)
 }
 
 func (t *SearchTask) Result() *internalpb.SearchResults {
