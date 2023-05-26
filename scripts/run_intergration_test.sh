@@ -19,10 +19,12 @@
 # run integration test
 echo "Running integration test under ./tests/integration"
 
+FILE_COVERAGE_INFO="it_coverage.txt"
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
 
 set -ex
+echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 
 # starting the timer
 beginTime=`date +%s`
@@ -32,7 +34,11 @@ fi
 
 for d in $(go list ./tests/integration/...); do
     echo "$d"
-    go test -race ${APPLE_SILICON_FLAG} -v "$d"
+    go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    if [ -f profile.out ]; then
+        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
+        rm profile.out
+    fi
 done
 
 endTime=`date +%s`
