@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +64,24 @@ type component interface {
 	healthz.Indicator
 	Run() error
 	Stop() error
+}
+
+func cleanLocalDir(path string) {
+	_, statErr := os.Stat(path)
+	// path exist, but stat error
+	if statErr != nil && !os.IsNotExist(statErr) {
+		log.Warn("Check if path exists failed when clean local data cache", zap.Error(statErr))
+		panic(statErr)
+	}
+	// path exist, remove all
+	if statErr == nil {
+		err := os.RemoveAll(path)
+		if err != nil {
+			log.Warn("Clean local data cache failed", zap.Error(err))
+			panic(err)
+		}
+		log.Info("Clean local data cache", zap.String("path", path))
+	}
 }
 
 func runComponent[T component](ctx context.Context,
@@ -141,6 +160,10 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool, wg *syn
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.QueryNode {
 	wg.Add(1)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
+	cleanLocalDir(queryDataLocalPath)
+
 	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
 
@@ -161,6 +184,10 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool, wg *syn
 
 func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.IndexNode {
 	wg.Add(1)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
+	cleanLocalDir(indexDataLocalPath)
+
 	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
 

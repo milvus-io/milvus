@@ -31,6 +31,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -157,7 +158,8 @@ func (i *IndexNode) initKnowhere() {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
-	initcore.InitLocalStorageConfig(Params)
+	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
+	initcore.InitLocalStorageConfig(localDataRootPath)
 }
 
 func (i *IndexNode) initSession() error {
