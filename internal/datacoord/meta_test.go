@@ -375,7 +375,7 @@ func TestMeta_Basic(t *testing.T) {
 		segID0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
-		segInfo0.size = size0
+		segInfo0.size.Store(size0)
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
 
@@ -383,7 +383,7 @@ func TestMeta_Basic(t *testing.T) {
 		segID1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
-		segInfo1.size = size1
+		segInfo1.size.Store(size1)
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
 
@@ -455,7 +455,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Equal(t, len(updated.Statslogs[0].Binlogs), len(expected.Statslogs[0].Binlogs))
 		assert.Equal(t, len(updated.Deltalogs[0].Binlogs), len(expected.Deltalogs[0].Binlogs))
 		assert.Equal(t, updated.State, expected.State)
-		assert.Equal(t, updated.size, expected.size)
+		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
 
 	})

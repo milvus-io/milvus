@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -43,7 +44,7 @@ type SegmentInfo struct {
 	lastFlushTime  time.Time
 	isCompacting   bool
 	// a cache to avoid calculate twice
-	size            int64
+	size            atomic.Int64
 	lastWrittenTime time.Time
 }
 
@@ -259,9 +260,9 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		allocations:     s.allocations,
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
-		size:            s.size,
 		lastWrittenTime: s.lastWrittenTime,
 	}
+	cloned.size.Store(s.size.Load())
 
 	for _, opt := range opts {
 		opt(cloned)
@@ -382,7 +383,7 @@ func addSegmentBinlogs(field2Binlogs map[UniqueID][]*datapb.Binlog) SegmentInfoO
 }
 
 func (s *SegmentInfo) getSegmentSize() int64 {
-	if s.size <= 0 {
+	if s.size.Load() <= 0 {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
@@ -401,9 +402,11 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 				size += l.GetLogSize()
 			}
 		}
-		s.size = size
+		if size > 0 {
+			s.size.Store(size)
+		}
 	}
-	return s.size
+	return s.size.Load()
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta
