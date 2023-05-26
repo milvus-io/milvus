@@ -17,10 +17,14 @@
 package roles
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func TestRoles(t *testing.T) {
@@ -41,4 +45,35 @@ func TestRoles(t *testing.T) {
 	assert.Equal(t, len(ss), 1)
 	ss = strings.SplitN("adb=def", "=", 2)
 	assert.Equal(t, len(ss), 2)
+}
+
+func TestCleanLocalDir(t *testing.T) {
+	var params paramtable.ComponentParam
+	params.InitOnce()
+	rootPath := params.LocalStorageCfg.Path
+	localPath := filepath.Join(rootPath, "test-dir")
+
+	// clean data
+	assert.NotPanics(t, func() {
+		cleanLocalDir(localPath)
+	})
+
+	// create dir and file
+	err := os.MkdirAll(localPath, os.ModeDir)
+	assert.NoError(t, err)
+	_, err = os.Create(filepath.Join(localPath, "child"))
+	assert.NoError(t, err)
+
+	// clean with path exist
+	assert.NotPanics(t, func() {
+		cleanLocalDir(localPath)
+	})
+
+	_, err = os.Stat(localPath)
+	assert.Error(t, err)
+	assert.Equal(t, true, os.IsNotExist(err))
+	// clean with path not exist
+	assert.NotPanics(t, func() {
+		cleanLocalDir(localPath)
+	})
 }
