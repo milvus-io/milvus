@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"plugin"
 	"runtime/debug"
 	"sync"
@@ -211,7 +212,8 @@ func (node *QueryNode) InitSegcore() {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
-	initcore.InitLocalStorageConfig(paramtable.Get())
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalStorageConfig(localDataRootPath)
 
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	if len(mmapDirPath) > 0 {
