@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -72,6 +73,24 @@ type component interface {
 	Stop() error
 }
 
+func cleanLocalDir(path string) {
+	_, statErr := os.Stat(path)
+	// path exist, but stat error
+	if statErr != nil && !os.IsNotExist(statErr) {
+		log.Warn("Check if path exists failed when clean local data cache", zap.Error(statErr))
+		panic(statErr)
+	}
+	// path exist, remove all
+	if statErr == nil {
+		err := os.RemoveAll(path)
+		if err != nil {
+			log.Warn("Clean local data cache failed", zap.Error(err))
+			panic(err)
+		}
+		log.Info("Clean local data cache", zap.String("path", path))
+	}
+}
+
 func runComponent[T component](ctx context.Context,
 	localMsg bool,
 	params *paramtable.ComponentParam,
@@ -83,7 +102,6 @@ func runComponent[T component](ctx context.Context,
 
 	wg.Add(1)
 	go func() {
-		params.InitOnce()
 		if extraInit != nil {
 			extraInit()
 		}
@@ -136,10 +154,12 @@ func (mr *MilvusRoles) printLDPreLoad() {
 }
 
 func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *components.RootCoord {
+	rootcoord.Params.InitOnce()
 	return runComponent(ctx, localMsg, &rootcoord.Params, nil, components.NewRootCoord, metrics.RegisterRootCoord)
 }
 
 func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string) *components.Proxy {
+	proxy.Params.InitOnce()
 	return runComponent(ctx, localMsg, &proxy.Params,
 		func() {
 			proxy.Params.ProxyCfg.InitAlias(alias)
@@ -149,10 +169,16 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 }
 
 func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryCoord {
+	querycoord.Params.InitOnce()
 	return runComponent(ctx, localMsg, querycoord.Params, nil, components.NewQueryCoord, metrics.RegisterQueryCoord)
 }
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias string) *components.QueryNode {
+	querynode.Params.InitOnce()
+	rootPath := indexnode.Params.LocalStorageCfg.Path
+	queryDataLocalPath := filepath.Join(rootPath, typeutil.QueryNodeRole)
+	cleanLocalDir(queryDataLocalPath)
+
 	return runComponent(ctx, localMsg, &querynode.Params,
 		func() {
 			querynode.Params.QueryNodeCfg.InitAlias(alias)
@@ -162,10 +188,12 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 }
 
 func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataCoord {
+	datacoord.Params.InitOnce()
 	return runComponent(ctx, localMsg, &datacoord.Params, nil, components.NewDataCoord, metrics.RegisterDataCoord)
 }
 
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias string) *components.DataNode {
+	datanode.Params.InitOnce()
 	return runComponent(ctx, localMsg, &datanode.Params,
 		func() {
 			datanode.Params.DataNodeCfg.InitAlias(alias)
@@ -175,10 +203,16 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 }
 
 func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexCoord {
+	indexcoord.Params.InitOnce()
 	return runComponent(ctx, localMsg, &indexcoord.Params, nil, components.NewIndexCoord, metrics.RegisterIndexCoord)
 }
 
 func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias string) *components.IndexNode {
+	indexnode.Params.InitOnce()
+	rootPath := indexnode.Params.LocalStorageCfg.Path
+	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
+	cleanLocalDir(indexDataLocalPath)
+
 	return runComponent(ctx, localMsg, &indexnode.Params,
 		func() {
 			indexnode.Params.IndexNodeCfg.InitAlias(alias)

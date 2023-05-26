@@ -30,9 +30,9 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"os"
 	"path"
+	"path/filepath"
 	"plugin"
 	"runtime"
 	"runtime/debug"
@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
@@ -285,7 +286,8 @@ func (node *QueryNode) InitSegcore() error {
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 
-	initcore.InitLocalRootPath()
+	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path, typeutil.QueryNodeRole)
+	initcore.InitLocalRootPath(localDataRootPath)
 	return initcore.InitRemoteChunkManager(&Params)
 }
 

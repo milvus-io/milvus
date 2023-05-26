@@ -28,8 +28,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -37,10 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-func InitLocalRootPath() {
-	b, _ := os.Getwd()
-	LocalRootPath := filepath.Dir(b) + "/" + filepath.Base(b) + "/" + "data/"
-	CLocalRootPath := C.CString(LocalRootPath)
+func InitLocalRootPath(path string) {
+	CLocalRootPath := C.CString(path)
 	C.InitLocalRootPath(CLocalRootPath)
 	C.free(unsafe.Pointer(CLocalRootPath))
 }
