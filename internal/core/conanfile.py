@@ -50,6 +50,7 @@ class MilvusConan(ConanFile):
     generators = ("cmake", "cmake_find_package")
     default_options = {
         "rocksdb:shared": True,
+        "rocksdb:with_zstd": True,
         "arrow:parquet": True,
         "arrow:compute": True,
         "arrow:with_zstd": True,
