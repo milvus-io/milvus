@@ -59,7 +59,10 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	}
 }
 
-func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, partitionIDs ...int64) {
+// UpdateCollectionCurrentTarget updates the current target to next target,
+// WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
+// which may make the current target not available
+func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, partitionIDs ...int64) bool {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 	log := log.With(zap.Int64("collectionID", collectionID),
@@ -70,7 +73,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
 		log.Info("next target does not exist, skip it")
-		return
+		return false
 	}
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
 	mgr.next.removeCollectionTarget(collectionID)
@@ -78,6 +81,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 	log.Debug("finish to update current target for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+	return true
 }
 
 // UpdateCollectionNextTargetWithPartitions for collection_loading request, which offer partitionIDs outside
