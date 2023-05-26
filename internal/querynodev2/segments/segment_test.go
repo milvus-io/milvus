@@ -180,6 +180,18 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 	suite.Error(err)
 }
 
+func (suite *SegmentSuite) TestSegmentReleased() {
+	DeleteSegment(suite.sealed)
+
+	suite.sealed.mut.RLock()
+	suite.False(suite.sealed.isValid())
+	suite.sealed.mut.RUnlock()
+	suite.EqualValues(0, suite.sealed.InsertCount())
+	suite.EqualValues(0, suite.sealed.RowNum())
+	suite.EqualValues(0, suite.sealed.MemSize())
+	suite.False(suite.sealed.HasRawData(101))
+}
+
 func TestSegment(t *testing.T) {
 	suite.Run(t, new(SegmentSuite))
 }
