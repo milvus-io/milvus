@@ -79,6 +79,36 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, float64(1*1024*1024), qc.DMLMinDeleteRatePerCollection)
 		assert.Equal(t, float64(10*1024*1024), qc.DMLMaxBulkLoadRatePerCollection)
 		assert.Equal(t, float64(1*1024*1024), qc.DMLMinBulkLoadRatePerCollection)
+
+		// when collection limit doesn't set, use global value
+		qc.Base.Save("quotaAndLimits.dml.insertRate.collection.max", "-1")
+		qc.Base.Save("quotaAndLimits.dml.insertRate.collection.min", "-1")
+		qc.Base.Save("quotaAndLimits.dml.deleteRate.collection.max", "-1")
+		qc.Base.Save("quotaAndLimits.dml.deleteRate.collection.min", "-1")
+		qc.Base.Save("quotaAndLimits.dml.bulkLoadRate.collection.max", "-1")
+		qc.Base.Save("quotaAndLimits.dml.bulkLoadRate.collection.min", "-1")
+		qc.init(&baseParams)
+		assert.Equal(t, qc.DMLMaxInsertRate, qc.DMLMaxInsertRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinInsertRatePerCollection)
+		assert.Equal(t, qc.DMLMaxDeleteRate, qc.DMLMaxDeleteRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinDeleteRatePerCollection)
+		assert.Equal(t, qc.DMLMaxBulkLoadRate, qc.DMLMaxBulkLoadRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinBulkLoadRatePerCollection)
+
+		// test invalid config
+		qc.Base.Save("quotaAndLimits.dml.insertRate.collection.max", "1")
+		qc.Base.Save("quotaAndLimits.dml.insertRate.collection.min", "5")
+		qc.Base.Save("quotaAndLimits.dml.deleteRate.collection.max", "1")
+		qc.Base.Save("quotaAndLimits.dml.deleteRate.collection.min", "5")
+		qc.Base.Save("quotaAndLimits.dml.bulkLoadRate.collection.max", "1")
+		qc.Base.Save("quotaAndLimits.dml.bulkLoadRate.collection.min", "5")
+		qc.init(&baseParams)
+		assert.Equal(t, qc.DMLMaxInsertRate, qc.DMLMaxInsertRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinInsertRatePerCollection)
+		assert.Equal(t, qc.DMLMaxDeleteRate, qc.DMLMaxDeleteRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinDeleteRatePerCollection)
+		assert.Equal(t, qc.DMLMaxBulkLoadRate, qc.DMLMaxBulkLoadRatePerCollection)
+		assert.Equal(t, float64(0), qc.DMLMinBulkLoadRatePerCollection)
 	})
 
 	t.Run("test dql", func(t *testing.T) {
@@ -105,6 +135,28 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, float64(1), qc.DQLMinSearchRatePerCollection)
 		assert.Equal(t, float64(10), qc.DQLMaxQueryRatePerCollection)
 		assert.Equal(t, float64(1), qc.DQLMinQueryRatePerCollection)
+
+		// when collection limit doesn't set, use global value
+		qc.Base.Save("quotaAndLimits.dql.searchRate.collection.max", "-1")
+		qc.Base.Save("quotaAndLimits.dql.searchRate.collection.min", "-1")
+		qc.Base.Save("quotaAndLimits.dql.queryRate.collection.max", "-1")
+		qc.Base.Save("quotaAndLimits.dql.queryRate.collection.min", "-1")
+		qc.init(&baseParams)
+		assert.Equal(t, qc.DQLMaxSearchRate, qc.DQLMaxSearchRatePerCollection)
+		assert.Equal(t, float64(0), qc.DQLMinSearchRatePerCollection)
+		assert.Equal(t, qc.DQLMaxQueryRate, qc.DQLMaxQueryRatePerCollection)
+		assert.Equal(t, float64(0), qc.DQLMinQueryRatePerCollection)
+
+		// test invalid config value
+		qc.Base.Save("quotaAndLimits.dql.searchRate.collection.max", "1")
+		qc.Base.Save("quotaAndLimits.dql.searchRate.collection.min", "5")
+		qc.Base.Save("quotaAndLimits.dql.queryRate.collection.max", "1")
+		qc.Base.Save("quotaAndLimits.dql.queryRate.collection.min", "5")
+		qc.init(&baseParams)
+		assert.Equal(t, qc.DQLMaxSearchRate, qc.DQLMaxSearchRatePerCollection)
+		assert.Equal(t, float64(0), qc.DQLMinSearchRatePerCollection)
+		assert.Equal(t, qc.DQLMaxQueryRate, qc.DQLMaxQueryRatePerCollection)
+		assert.Equal(t, float64(0), qc.DQLMinQueryRatePerCollection)
 	})
 
 	t.Run("test limits", func(t *testing.T) {
@@ -136,5 +188,22 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, false, qc.ResultProtectionEnabled)
 		assert.Equal(t, defaultMax, qc.MaxReadResultRate)
 		assert.Equal(t, 0.9, qc.CoolOffSpeed)
+	})
+
+	t.Run("test disk quota", func(t *testing.T) {
+		assert.Equal(t, defaultMax, qc.DiskQuota)
+		assert.Equal(t, defaultMax, qc.DiskQuotaPerCollection)
+
+		// test only set global disk quota
+		qc.Base.Save("quotaAndLimits.limitWriting.diskProtection.diskQuota", "5")
+		qc.init(&baseParams)
+		assert.Equal(t, float64(5*1024*1024), qc.DiskQuota)
+		assert.Equal(t, qc.DiskQuota, qc.DiskQuotaPerCollection)
+
+		// test set invalid value
+		qc.Base.Save("quotaAndLimits.limitWriting.diskProtection.diskQuotaPerCollection", "-1")
+		qc.init(&baseParams)
+		assert.Equal(t, qc.DiskQuota, qc.DiskQuotaPerCollection)
+
 	})
 }
