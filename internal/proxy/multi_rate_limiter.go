@@ -105,8 +105,8 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 
 func IsDDLRequest(rt internalpb.RateType) bool {
 	switch rt {
-	case internalpb.RateType_DDLCollection | internalpb.RateType_DDLPartition | internalpb.RateType_DDLIndex |
-		internalpb.RateType_DDLFlush | internalpb.RateType_DDLCompaction:
+	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition, internalpb.RateType_DDLIndex,
+		internalpb.RateType_DDLFlush, internalpb.RateType_DDLCompaction:
 		return true
 	default:
 		return false
