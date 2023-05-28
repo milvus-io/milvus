@@ -87,6 +87,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
+    auto& index_meta = segment.get_index_meta();
+
     auto active_count = std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
     // step 1.1: get meta
@@ -98,7 +100,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
     auto dim = field.get_dim();
     auto topk = info.topk_;
-    auto metric_type = info.metric_type_;
+    auto metric_type = index_meta->GetFieldIndexMeta(field.get_id()).GetMetricType();
+    if (!info.metric_type_.empty()) {
+        AssertInfo(metric_type == info.metric_type_,
+                   "Metric type mismatch: field: " + metric_type + ", search: " + info.metric_type_);
+    }
     auto round_decimal = info.round_decimal_;
 
     // step 2: small indexing search
@@ -123,7 +129,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto size_per_chunk = element_end - element_begin;
 
         auto sub_view = bitset.subview(element_begin, size_per_chunk);
-        CheckBruteForceSearchParam(field, info);
+        CheckBruteForceSearchParam(field, metric_type);
         auto sub_qr = BruteForceSearch(search_dataset, chunk_data, size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid

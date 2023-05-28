@@ -112,7 +112,7 @@ func TestReduce_Invalid(t *testing.T) {
 	})
 
 	t.Run("nil search result", func(t *testing.T) {
-		collection := newCollection(defaultCollectionID, genTestCollectionSchema())
+		collection := newCollection(defaultCollectionID, genTestCollectionSchema(), genTestIndexMeta(defaultCollectionID))
 		searchReq, err := genSearchPlanAndRequests(collection, IndexHNSW, 10)
 		assert.NoError(t, err)
 		searchResults := make([]*SearchResult, 0)

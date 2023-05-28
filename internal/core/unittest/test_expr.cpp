@@ -304,7 +304,7 @@ TEST(Expr, TestRange) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -358,7 +358,7 @@ TEST(Expr, TestBinaryRangeJSON) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -429,7 +429,7 @@ TEST(Expr, TestExistsJson) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -479,7 +479,7 @@ TEST(Expr, TestUnaryRangeJson) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -575,7 +575,7 @@ TEST(Expr, TestTermJson) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -663,7 +663,7 @@ TEST(Expr, TestTerm) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -763,7 +763,7 @@ TEST(Expr, TestSimpleDsl) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     std::vector<int64_t> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
@@ -835,7 +835,7 @@ TEST(Expr, TestCompare) {
     auto i64_fid = schema->AddDebugField("age2", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int> age1_col;
     std::vector<int64_t> age2_col;
@@ -912,7 +912,7 @@ TEST(Expr, TestCompareWithScalarIndex) {
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateSealedSegment(schema);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     segcore::LoadIndexInfo load_index_info;
@@ -984,7 +984,7 @@ TEST(Expr, TestCompareExpr) {
     auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
     schema->set_primary_field_id(str1_fid);
 
-    auto seg = CreateSealedSegment(schema);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     SealedLoadFieldData(raw_data, *seg);
@@ -1133,7 +1133,7 @@ TEST(Expr, TestExprs) {
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     schema->set_primary_field_id(str1_fid);
 
-    auto seg = CreateSealedSegment(schema);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
     int N = 1000000;
     auto raw_data = DataGen(schema, N);
     // load field data
@@ -1267,7 +1267,7 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     schema->set_primary_field_id(str1_fid);
 
-    auto seg = CreateSealedSegment(schema);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     segcore::LoadIndexInfo load_index_info;
@@ -1476,7 +1476,7 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<int8_t> age8_col;
     std::vector<int16_t> age16_col;
@@ -1587,7 +1587,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSON) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -1655,7 +1655,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeJSONFloat) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -1977,7 +1977,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateSealedSegment(schema);
+    auto seg = CreateSealedSegment(schema, empty_index_meta);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     segcore::LoadIndexInfo load_index_info;
@@ -2200,7 +2200,7 @@ TEST(Expr, TestUnaryRangeWithJSON) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -2348,7 +2348,7 @@ TEST(Expr, TestTermWithJSON) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;
@@ -2468,7 +2468,7 @@ TEST(Expr, TestExistsWithJSON) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> json_col;
     int num_iters = 100;

@@ -18,14 +18,17 @@ package querynode
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
@@ -41,6 +44,34 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			Schema:       schema,
+			IndexInfoList: *&[]*indexpb.IndexInfo{
+				{
+					CollectionID: defaultCollectionID,
+					IndexName:    "querynode-test",
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   dimKey,
+							Value: strconv.Itoa(simpleFloatVecField.dim),
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   metricTypeKey,
+							Value: simpleFloatVecField.metricType,
+						},
+						{
+							Key:   common.IndexTypeKey,
+							Value: IndexFaissIVFFlat,
+						},
+						{
+							Key:   "nlist",
+							Value: "128",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: []*commonpb.KeyValuePair{},
+				},
+			},
 			Infos: []*datapb.VchannelInfo{
 				{
 					ChannelName: defaultDMLChannel,

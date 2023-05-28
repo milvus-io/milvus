@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -224,6 +225,14 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).
 		Return(&schemapb.CollectionSchema{
 			Name: "TestSubscribeChannelTask",
+		}, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).
+		Return([]*indexpb.IndexInfo{
+			{
+				CollectionID: suite.collection,
+				TypeParams:   []*commonpb.KeyValuePair{},
+				IndexParams:  []*commonpb.KeyValuePair{},
+			},
 		}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).
 		Return([]int64{100, 101}, nil)

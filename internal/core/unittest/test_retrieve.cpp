@@ -57,7 +57,7 @@ TEST(Retrieve, AutoID) {
     auto choose = [=](int i) { return i * 3 % N; };
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
@@ -111,7 +111,7 @@ TEST(Retrieve, AutoID2) {
     auto choose = [=](int i) { return i * 3 % N; };
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
@@ -160,7 +160,7 @@ TEST(Retrieve, String) {
     auto choose = [=](int i) { return i * 3 % N; };
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<std::string>(fid_str);
 
@@ -216,7 +216,7 @@ TEST(Retrieve, NotExist) {
     auto choose2 = [=](int i) { return i * 3 % N + 3 * N; };
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
@@ -266,7 +266,7 @@ TEST(Retrieve, Empty) {
     int64_t req_size = 10;
     auto choose = [=](int i) { return i * 3 % N; };
 
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
@@ -307,7 +307,7 @@ TEST(Retrieve, LargeTimestamp) {
     auto choose = [=](int i) { return i * choose_sep % N; };
     uint64_t ts_offset = 100;
     auto dataset = DataGen(schema, N, 42, ts_offset + 1);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
@@ -362,7 +362,7 @@ TEST(Retrieve, Delete) {
     auto choose = [=](int i) { return i; };
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
     auto ts_col = dataset.get_col<int64_t>(fid_ts);

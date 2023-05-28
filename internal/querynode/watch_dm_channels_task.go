@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -81,9 +82,24 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		zap.String("loadType", lType.String()),
 		zap.String("collectionName", w.req.GetSchema().GetName()),
 	)
+	// init index meta
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	for _, info := range w.req.GetIndexInfoList() {
+		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
 
 	// init collection meta
-	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
+	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema, &segcorepb.CollectionIndexMeta{
+		IndexMetas: fieldIndexMetas,
+	})
 
 	// filter out the already exist channels
 	vChannels = coll.AddChannels(vChannels, VPChannels)

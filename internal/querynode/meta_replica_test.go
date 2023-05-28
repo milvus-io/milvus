@@ -40,7 +40,7 @@ func TestMetaReplica_collection(t *testing.T) {
 		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
 		defer replica.freeAll()
-		replica.addCollection(defaultCollectionID+1, genTestCollectionSchema())
+		replica.addCollection(defaultCollectionID+1, genTestCollectionSchema(), genTestIndexMeta(defaultCollectionID+1))
 		assert.Equal(t, 2, replica.getCollectionNum())
 	})
 
@@ -265,7 +265,7 @@ func TestMetaReplica_segment(t *testing.T) {
 		defer replica.freeAll()
 
 		schema := genTestCollectionSchema()
-		collection := replica.addCollection(defaultCollectionID, schema)
+		collection := replica.addCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 		replica.addPartition(defaultCollectionID, defaultPartitionID)
 
 		// test get indexed segment info
@@ -311,7 +311,7 @@ func TestMetaReplica_segment(t *testing.T) {
 		defer replica.freeAll()
 
 		schema := genTestCollectionSchema()
-		collection := replica.addCollection(defaultCollectionID, schema)
+		collection := replica.addCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 		replica.addPartition(defaultCollectionID, defaultPartitionID)
 		replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 
@@ -378,7 +378,7 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	assert.NoError(t, err)
 
 	schema := genTestCollectionSchema()
-	collection := replica.addCollection(defaultCollectionID, schema)
+	collection := replica.addCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 	replica.addPartition(defaultCollectionID, defaultPartitionID)
 	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 
@@ -445,7 +445,7 @@ func TestMetaReplica_removeCollectionVDeltaChannel(t *testing.T) {
 	})
 
 	schema := genTestCollectionSchema()
-	collection := replica.addCollection(defaultCollectionID, schema)
+	collection := replica.addCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 	replica.addPartition(defaultCollectionID, defaultPartitionID)
 	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 

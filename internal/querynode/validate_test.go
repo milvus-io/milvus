@@ -69,6 +69,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 		assert.NoError(t, err)
 		schema := genTestCollectionSchema()
 		seg, err := genSealedSegment(schema,
+			genTestIndexMeta(defaultCollectionID),
 			defaultCollectionID,
 			defaultPartitionID+1,
 			defaultSegmentID+1,

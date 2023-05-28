@@ -34,6 +34,7 @@
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
+#include "common/IndexMeta.h"
 
 namespace milvus::segcore {
 
@@ -97,6 +98,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     const Schema&
     get_schema() const override {
         return *schema_;
+    }
+
+    const IndexMetaPtr&
+    get_index_meta() const {
+        return index_meta_;
     }
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
@@ -166,9 +172,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     friend std::unique_ptr<SegmentGrowing>
     CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
+    explicit SegmentGrowingImpl(SchemaPtr schema,
+                                IndexMetaPtr indexMeta,
+                                const SegcoreConfig& segcore_config,
+                                int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
+          index_meta_(indexMeta),
           insert_record_(*schema_, segcore_config.get_chunk_rows()),
           indexing_record_(*schema_, segcore_config_),
           id_(segment_id) {
@@ -223,6 +233,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
  private:
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
+    IndexMetaPtr index_meta_;
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;
@@ -242,9 +253,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
 inline SegmentGrowingPtr
 CreateGrowingSegment(SchemaPtr schema,
+                     IndexMetaPtr indexMeta,
                      int64_t segment_id = -1,
                      const SegcoreConfig& conf = SegcoreConfig::default_config()) {
-    return std::make_unique<SegmentGrowingImpl>(schema, conf, segment_id);
+    return std::make_unique<SegmentGrowingImpl>(schema, indexMeta, conf, segment_id);
 }
 
 }  // namespace milvus::segcore

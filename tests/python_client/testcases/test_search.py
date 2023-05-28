@@ -78,6 +78,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_metric_type(self, request):
+        if request.param == "":
+            pytest.skip("when search, empty metric is valid")
         yield request.param
 
     @pytest.fixture(scope="function", params=ct.get_invalid_ints)
@@ -3266,8 +3268,12 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, insert_entities, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
                                                                                        is_binary=False,
-                                                                                       dim=dim)[0:5]
+                                                                                       dim=dim, is_index=True)[0:5]
+        
         insert_vectors = insert_entities[0][default_search_field].tolist()
+
+        default_index = {"index_type": "FLAT", "params": {}, "metric_type": "IP"}
+        collection_w.create_index("float_vector", default_index)
 
         # 2. load collection.
         collection_w.load()

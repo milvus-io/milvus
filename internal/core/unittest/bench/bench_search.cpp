@@ -74,7 +74,7 @@ Search_SmallIndex(benchmark::State& state) {
     auto chunk_rows = state.range(1) * 1024;
     auto segconf = SegcoreConfig::default_config();
     segconf.set_chunk_rows(chunk_rows);
-    auto segment = CreateGrowingSegment(schema, -1, segconf);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, -1, segconf);
     if (!is_small_index) {
         segment->disable_small_index();
     }
@@ -92,7 +92,7 @@ BENCHMARK(Search_SmallIndex)->MinTime(5)->ArgsProduct({{true, false}, {8, 16, 32
 
 static void
 Search_Sealed(benchmark::State& state) {
-    auto segment = CreateSealedSegment(schema);
+    auto segment = CreateSealedSegment(schema, empty_index_meta);
     static int64_t N = 1024 * 1024;
     const auto dataset_ = [] {
         auto dataset_ = DataGen(schema, N);

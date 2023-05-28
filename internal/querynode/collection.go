@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -385,7 +386,7 @@ func (c *Collection) getFieldType(fieldID FieldID) (schemapb.DataType, error) {
 }
 
 // newCollection returns a new Collection
-func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
+func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) *Collection {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -394,6 +395,12 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 
 	cSchemaBlob := C.CString(schemaBlob)
 	collection := C.NewCollection(cSchemaBlob)
+
+	if indexMeta != nil {
+		indexMetaBlob := proto.MarshalTextString(indexMeta)
+		cIndexMetaBlob := C.CString(indexMetaBlob)
+		C.SetIndexMeta(collection, cIndexMetaBlob)
+	}
 
 	var newCollection = &Collection{
 		collectionPtr:      collection,

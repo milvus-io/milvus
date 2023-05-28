@@ -41,7 +41,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	var err error
 	// init meta
 	collectionID := l.req.GetCollectionID()
-	l.node.metaReplica.addCollection(collectionID, l.req.GetSchema())
+	l.node.metaReplica.addCollection(collectionID, l.req.GetSchema(), nil)
 	for _, partitionID := range l.req.GetLoadMeta().GetPartitionIDs() {
 		err = l.node.metaReplica.addPartition(collectionID, partitionID)
 		if err != nil {

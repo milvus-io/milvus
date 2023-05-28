@@ -30,12 +30,13 @@
 #include "index/ScalarIndex.h"
 #include "common/Column.h"
 #include "storage/FieldData.h"
+#include "common/IndexMeta.h"
 
 namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
+    explicit SegmentSealedImpl(SchemaPtr schema, IndexMetaPtr indexMeta, int64_t segment_id);
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -209,11 +210,12 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t id_;
     std::unordered_map<FieldId, Column> fixed_fields_;
     std::unordered_map<FieldId, std::unique_ptr<ColumnBase>> variable_fields_;
+    IndexMetaPtr index_meta_;
 };
 
 inline SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t segment_id = -1) {
-    return std::make_unique<SegmentSealedImpl>(schema, segment_id);
+CreateSealedSegment(SchemaPtr schema, IndexMetaPtr indexMeta, int64_t segment_id = -1) {
+    return std::make_unique<SegmentSealedImpl>(schema, indexMeta, segment_id);
 }
 
 }  // namespace milvus::segcore

@@ -255,7 +255,7 @@ TEST(StringExpr, Term) {
         {0, {"2000", "3000"}}, {1, {"2000"}}, {2, {"3000"}}, {3, {}}, {4, {vec_2k_3k}},
     };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -326,7 +326,7 @@ TEST(StringExpr, Compare) {
         {proto::plan::OpType::PrefixMatch, [](std::string v1, std::string v2) { return PrefixMatch(v1, v2); }},
     };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     std::vector<std::string> another_str_col;
@@ -401,7 +401,7 @@ TEST(StringExpr, UnaryRange) {
         {proto::plan::OpType::PrefixMatch, "a", [](std::string val) { return PrefixMatch(val, "a"); }},
     };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -466,7 +466,7 @@ TEST(StringExpr, BinaryRange) {
         {true, true, "2000", "1000", [](std::string val) { return false; }},
     };
 
-    auto seg = CreateGrowingSegment(schema);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
     std::vector<std::string> str_col;
     int num_iters = 100;
@@ -514,7 +514,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
     auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto query_ptr = vec_col.data();
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, GenIndexMeta(fvec_meta.get_id(), knowhere::metric::L2, dim));
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
@@ -568,7 +568,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
     auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);

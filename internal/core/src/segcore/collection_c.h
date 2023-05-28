@@ -21,6 +21,9 @@ CCollection
 NewCollection(const char* schema_proto_blob);
 
 void
+SetIndexMeta(CCollection collection, const char* index_meta_proto_blob);
+
+void
 DeleteCollection(CCollection collection);
 
 const char*

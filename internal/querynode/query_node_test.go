@@ -74,7 +74,7 @@ func TestInitHook(t *testing.T) {
 func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
 	schema := genTestCollectionSchema()
 
-	node.metaReplica.addCollection(defaultCollectionID, schema)
+	node.metaReplica.addCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 
 	collection, err := node.metaReplica.getCollectionByID(collectionID)
 	assert.NoError(t, err)

@@ -34,7 +34,7 @@ func TestPlan_Plan(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection := newCollection(collectionID, schema, genTestIndexMeta(collectionID))
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
@@ -84,7 +84,7 @@ func TestPlan_NilCollection(t *testing.T) {
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
-	collection := newCollection(collectionID, schema)
+	collection := newCollection(collectionID, schema, genTestIndexMeta(collectionID))
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 	plan, err := createSearchPlan(collection, dslString)
@@ -128,7 +128,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 
 func TestPlan_newSearchRequest(t *testing.T) {
 	iReq, _ := genSearchRequest(defaultNQ, IndexHNSW, genTestCollectionSchema())
-	collection := newCollection(defaultCollectionID, genTestCollectionSchema())
+	collection := newCollection(defaultCollectionID, genTestCollectionSchema(), genTestIndexMeta(defaultCollectionID))
 	req := &querypb.SearchRequest{
 		Req:             iReq,
 		DmlChannels:     []string{defaultDMLChannel},

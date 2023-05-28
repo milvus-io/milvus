@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
@@ -521,6 +522,42 @@ func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionS
 		},
 	}
 	return &schema
+}
+
+func genTestIndexMeta(collectionID int64) *segcorepb.CollectionIndexMeta {
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+		CollectionID: collectionID,
+		FieldID:      simpleFloatVecField.id,
+		IndexName:    "querynode-test",
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   dimKey,
+				Value: strconv.Itoa(simpleFloatVecField.dim),
+			},
+		},
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   metricTypeKey,
+				Value: simpleFloatVecField.metricType,
+			},
+			{
+				Key:   common.IndexTypeKey,
+				Value: IndexFaissIVFFlat,
+			},
+			{
+				Key:   "nlist",
+				Value: "128",
+			},
+		},
+		IsAutoIndex:     false,
+		UserIndexParams: []*commonpb.KeyValuePair{},
+	})
+
+	indexMeta := segcorepb.CollectionIndexMeta{
+		IndexMetas: fieldIndexMetas,
+	}
+	return &indexMeta
 }
 
 func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema) *etcdpb.CollectionMeta {
@@ -1243,12 +1280,13 @@ func genDeleteMsg(collectionID int64, pkType schemapb.DataType, numRows int) *ms
 // ---------- unittest util functions ----------
 // functions of replica
 func genSealedSegment(schema *schemapb.CollectionSchema,
+	indexMeta *segcorepb.CollectionIndexMeta,
 	collectionID,
 	partitionID,
 	segmentID UniqueID,
 	vChannel Channel,
 	msgLength int) (*Segment, error) {
-	col := newCollection(collectionID, schema)
+	col := newCollection(collectionID, schema, indexMeta)
 
 	seg, err := newSegment(col,
 		segmentID,
@@ -1278,6 +1316,7 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 func genSimpleSealedSegment(msgLength int) (*Segment, error) {
 	schema := genTestCollectionSchema()
 	return genSealedSegment(schema,
+		genTestIndexMeta(defaultCollectionID),
 		defaultCollectionID,
 		defaultPartitionID,
 		defaultSegmentID,
@@ -1288,7 +1327,7 @@ func genSimpleSealedSegment(msgLength int) (*Segment, error) {
 func genSimpleReplica() (ReplicaInterface, error) {
 	r := newCollectionReplica()
 	schema := genTestCollectionSchema()
-	r.addCollection(defaultCollectionID, schema)
+	r.addCollection(defaultCollectionID, schema, nil)
 	err := r.addPartition(defaultCollectionID, defaultPartitionID)
 	return r, err
 }

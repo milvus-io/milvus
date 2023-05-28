@@ -188,6 +188,12 @@ func fillSubDmChannelRequest(
 	req *querypb.WatchDmChannelsRequest,
 	broker meta.Broker,
 ) error {
+	indexes, err := broker.DescribeIndex(ctx, req.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	req.IndexInfoList = indexes
+
 	segmentIDs := typeutil.NewUniqueSet()
 	for _, vchannel := range req.GetInfos() {
 		segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)

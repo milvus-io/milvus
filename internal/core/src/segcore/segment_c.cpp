@@ -31,14 +31,14 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
+            auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), col->GetIndexMeta(), segment_id);
             seg->disable_small_index();
             segment = std::move(seg);
             break;
         }
         case Sealed:
         case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(col->get_schema(), segment_id);
+            segment = milvus::segcore::CreateSealedSegment(col->get_schema(), col->GetIndexMeta(), segment_id);
             break;
         default:
             LOG_SEGCORE_ERROR_ << "invalid segment type " << (int32_t)seg_type;

@@ -232,7 +232,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 
 		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
-		col := newCollection(defaultCollectionID, schema)
+		col := newCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 		assert.NotNil(t, col)
 		segment, err := newSegment(col,
 			defaultSegmentID,
@@ -322,7 +322,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				genPKFieldSchema(simpleInt64Field),
 			},
 		}
-		loader.metaReplica.addCollection(defaultCollectionID, schema)
+		loader.metaReplica.addCollection(defaultCollectionID, schema, nil)
 
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -388,7 +388,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
-		col := newCollection(defaultCollectionID, schema)
+		col := newCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 		assert.NotNil(t, col)
 		segment, err := newSegment(col,
 			defaultSegmentID,
@@ -429,7 +429,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
-		col := newCollection(defaultCollectionID, schema)
+		col := newCollection(defaultCollectionID, schema, genTestIndexMeta(defaultCollectionID))
 		assert.NotNil(t, col)
 		segment, err := newSegment(col,
 			defaultSegmentID,

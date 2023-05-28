@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -63,7 +64,7 @@ type ReplicaInterface interface {
 	// getCollectionIDs returns all collection ids in the collectionReplica
 	getCollectionIDs() []UniqueID
 	// addCollection creates a new collection and add it to collectionReplica
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) *Collection
 	// removeCollection removes the collection from collectionReplica
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
@@ -197,7 +198,7 @@ func (replica *metaReplica) getCollectionIDs() []UniqueID {
 }
 
 // addCollection creates a new collection and add it to collectionReplica
-func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
+func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) *Collection {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -205,7 +206,7 @@ func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemap
 		return col
 	}
 
-	var newC = newCollection(collectionID, schema)
+	var newC = newCollection(collectionID, schema, indexMeta)
 	replica.collections[collectionID] = newC
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
 	return newC

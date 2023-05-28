@@ -33,6 +33,7 @@
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
 #include <google/protobuf/unknown_field_set.h>
 #include "schema.pb.h"
+#include "common.pb.h"
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
 #define PROTOBUF_INTERNAL_EXPORT_segcore_2eproto
@@ -48,7 +49,7 @@ struct TableStruct_segcore_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[4]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[6]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -58,6 +59,12 @@ extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table
 namespace milvus {
 namespace proto {
 namespace segcore {
+class CollectionIndexMeta;
+class CollectionIndexMetaDefaultTypeInternal;
+extern CollectionIndexMetaDefaultTypeInternal _CollectionIndexMeta_default_instance_;
+class FieldIndexMeta;
+class FieldIndexMetaDefaultTypeInternal;
+extern FieldIndexMetaDefaultTypeInternal _FieldIndexMeta_default_instance_;
 class InsertRecord;
 class InsertRecordDefaultTypeInternal;
 extern InsertRecordDefaultTypeInternal _InsertRecord_default_instance_;
@@ -74,6 +81,8 @@ extern RetrieveResultsDefaultTypeInternal _RetrieveResults_default_instance_;
 }  // namespace proto
 }  // namespace milvus
 PROTOBUF_NAMESPACE_OPEN
+template<> ::milvus::proto::segcore::CollectionIndexMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::CollectionIndexMeta>(Arena*);
+template<> ::milvus::proto::segcore::FieldIndexMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::FieldIndexMeta>(Arena*);
 template<> ::milvus::proto::segcore::InsertRecord* Arena::CreateMaybeMessage<::milvus::proto::segcore::InsertRecord>(Arena*);
 template<> ::milvus::proto::segcore::LoadFieldMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::LoadFieldMeta>(Arena*);
 template<> ::milvus::proto::segcore::LoadSegmentMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::LoadSegmentMeta>(Arena*);
@@ -677,6 +686,347 @@ class InsertRecord :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_segcore_2eproto;
 };
+// -------------------------------------------------------------------
+
+class FieldIndexMeta :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.segcore.FieldIndexMeta) */ {
+ public:
+  FieldIndexMeta();
+  virtual ~FieldIndexMeta();
+
+  FieldIndexMeta(const FieldIndexMeta& from);
+  FieldIndexMeta(FieldIndexMeta&& from) noexcept
+    : FieldIndexMeta() {
+    *this = ::std::move(from);
+  }
+
+  inline FieldIndexMeta& operator=(const FieldIndexMeta& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline FieldIndexMeta& operator=(FieldIndexMeta&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const FieldIndexMeta& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const FieldIndexMeta* internal_default_instance() {
+    return reinterpret_cast<const FieldIndexMeta*>(
+               &_FieldIndexMeta_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    4;
+
+  friend void swap(FieldIndexMeta& a, FieldIndexMeta& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(FieldIndexMeta* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline FieldIndexMeta* New() const final {
+    return CreateMaybeMessage<FieldIndexMeta>(nullptr);
+  }
+
+  FieldIndexMeta* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<FieldIndexMeta>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const FieldIndexMeta& from);
+  void MergeFrom(const FieldIndexMeta& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(FieldIndexMeta* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.segcore.FieldIndexMeta";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_segcore_2eproto);
+    return ::descriptor_table_segcore_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTypeParamsFieldNumber = 4,
+    kIndexParamsFieldNumber = 5,
+    kUserIndexParamsFieldNumber = 7,
+    kIndexNameFieldNumber = 3,
+    kFieldIDFieldNumber = 1,
+    kCollectionIDFieldNumber = 2,
+    kIsAutoIndexFieldNumber = 6,
+  };
+  // repeated .milvus.proto.common.KeyValuePair type_params = 4;
+  int type_params_size() const;
+  void clear_type_params();
+  ::milvus::proto::common::KeyValuePair* mutable_type_params(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+      mutable_type_params();
+  const ::milvus::proto::common::KeyValuePair& type_params(int index) const;
+  ::milvus::proto::common::KeyValuePair* add_type_params();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+      type_params() const;
+
+  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
+  int index_params_size() const;
+  void clear_index_params();
+  ::milvus::proto::common::KeyValuePair* mutable_index_params(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+      mutable_index_params();
+  const ::milvus::proto::common::KeyValuePair& index_params(int index) const;
+  ::milvus::proto::common::KeyValuePair* add_index_params();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+      index_params() const;
+
+  // repeated .milvus.proto.common.KeyValuePair user_index_params = 7;
+  int user_index_params_size() const;
+  void clear_user_index_params();
+  ::milvus::proto::common::KeyValuePair* mutable_user_index_params(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+      mutable_user_index_params();
+  const ::milvus::proto::common::KeyValuePair& user_index_params(int index) const;
+  ::milvus::proto::common::KeyValuePair* add_user_index_params();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+      user_index_params() const;
+
+  // string index_name = 3;
+  void clear_index_name();
+  const std::string& index_name() const;
+  void set_index_name(const std::string& value);
+  void set_index_name(std::string&& value);
+  void set_index_name(const char* value);
+  void set_index_name(const char* value, size_t size);
+  std::string* mutable_index_name();
+  std::string* release_index_name();
+  void set_allocated_index_name(std::string* index_name);
+
+  // int64 fieldID = 1;
+  void clear_fieldid();
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
+  void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 collectionID = 2;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // bool is_auto_index = 6;
+  void clear_is_auto_index();
+  bool is_auto_index() const;
+  void set_is_auto_index(bool value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.segcore.FieldIndexMeta)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > type_params_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > index_params_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > user_index_params_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  bool is_auto_index_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_segcore_2eproto;
+};
+// -------------------------------------------------------------------
+
+class CollectionIndexMeta :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.segcore.CollectionIndexMeta) */ {
+ public:
+  CollectionIndexMeta();
+  virtual ~CollectionIndexMeta();
+
+  CollectionIndexMeta(const CollectionIndexMeta& from);
+  CollectionIndexMeta(CollectionIndexMeta&& from) noexcept
+    : CollectionIndexMeta() {
+    *this = ::std::move(from);
+  }
+
+  inline CollectionIndexMeta& operator=(const CollectionIndexMeta& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CollectionIndexMeta& operator=(CollectionIndexMeta&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const CollectionIndexMeta& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const CollectionIndexMeta* internal_default_instance() {
+    return reinterpret_cast<const CollectionIndexMeta*>(
+               &_CollectionIndexMeta_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    5;
+
+  friend void swap(CollectionIndexMeta& a, CollectionIndexMeta& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(CollectionIndexMeta* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline CollectionIndexMeta* New() const final {
+    return CreateMaybeMessage<CollectionIndexMeta>(nullptr);
+  }
+
+  CollectionIndexMeta* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<CollectionIndexMeta>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const CollectionIndexMeta& from);
+  void MergeFrom(const CollectionIndexMeta& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(CollectionIndexMeta* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.segcore.CollectionIndexMeta";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_segcore_2eproto);
+    return ::descriptor_table_segcore_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kIndexMetasFieldNumber = 2,
+    kMaxIndexRowCountFieldNumber = 1,
+  };
+  // repeated .milvus.proto.segcore.FieldIndexMeta index_metas = 2;
+  int index_metas_size() const;
+  void clear_index_metas();
+  ::milvus::proto::segcore::FieldIndexMeta* mutable_index_metas(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::segcore::FieldIndexMeta >*
+      mutable_index_metas();
+  const ::milvus::proto::segcore::FieldIndexMeta& index_metas(int index) const;
+  ::milvus::proto::segcore::FieldIndexMeta* add_index_metas();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::segcore::FieldIndexMeta >&
+      index_metas() const;
+
+  // int64 maxIndexRowCount = 1;
+  void clear_maxindexrowcount();
+  ::PROTOBUF_NAMESPACE_ID::int64 maxindexrowcount() const;
+  void set_maxindexrowcount(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.segcore.CollectionIndexMeta)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::segcore::FieldIndexMeta > index_metas_;
+  ::PROTOBUF_NAMESPACE_ID::int64 maxindexrowcount_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_segcore_2eproto;
+};
 // ===================================================================
 
 
@@ -929,9 +1279,239 @@ inline void InsertRecord::set_num_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.segcore.InsertRecord.num_rows)
 }
 
+// -------------------------------------------------------------------
+
+// FieldIndexMeta
+
+// int64 fieldID = 1;
+inline void FieldIndexMeta::clear_fieldid() {
+  fieldid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 FieldIndexMeta::fieldid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.fieldID)
+  return fieldid_;
+}
+inline void FieldIndexMeta::set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  fieldid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.FieldIndexMeta.fieldID)
+}
+
+// int64 collectionID = 2;
+inline void FieldIndexMeta::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 FieldIndexMeta::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.collectionID)
+  return collectionid_;
+}
+inline void FieldIndexMeta::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.FieldIndexMeta.collectionID)
+}
+
+// string index_name = 3;
+inline void FieldIndexMeta::clear_index_name() {
+  index_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& FieldIndexMeta::index_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.index_name)
+  return index_name_.GetNoArena();
+}
+inline void FieldIndexMeta::set_index_name(const std::string& value) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.FieldIndexMeta.index_name)
+}
+inline void FieldIndexMeta::set_index_name(std::string&& value) {
+  
+  index_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.segcore.FieldIndexMeta.index_name)
+}
+inline void FieldIndexMeta::set_index_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.segcore.FieldIndexMeta.index_name)
+}
+inline void FieldIndexMeta::set_index_name(const char* value, size_t size) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.segcore.FieldIndexMeta.index_name)
+}
+inline std::string* FieldIndexMeta::mutable_index_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.FieldIndexMeta.index_name)
+  return index_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* FieldIndexMeta::release_index_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.segcore.FieldIndexMeta.index_name)
+  
+  return index_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void FieldIndexMeta::set_allocated_index_name(std::string* index_name) {
+  if (index_name != nullptr) {
+    
+  } else {
+    
+  }
+  index_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), index_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.segcore.FieldIndexMeta.index_name)
+}
+
+// repeated .milvus.proto.common.KeyValuePair type_params = 4;
+inline int FieldIndexMeta::type_params_size() const {
+  return type_params_.size();
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::mutable_type_params(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.FieldIndexMeta.type_params)
+  return type_params_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+FieldIndexMeta::mutable_type_params() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.FieldIndexMeta.type_params)
+  return &type_params_;
+}
+inline const ::milvus::proto::common::KeyValuePair& FieldIndexMeta::type_params(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.type_params)
+  return type_params_.Get(index);
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::add_type_params() {
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.FieldIndexMeta.type_params)
+  return type_params_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+FieldIndexMeta::type_params() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.FieldIndexMeta.type_params)
+  return type_params_;
+}
+
+// repeated .milvus.proto.common.KeyValuePair index_params = 5;
+inline int FieldIndexMeta::index_params_size() const {
+  return index_params_.size();
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::mutable_index_params(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.FieldIndexMeta.index_params)
+  return index_params_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+FieldIndexMeta::mutable_index_params() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.FieldIndexMeta.index_params)
+  return &index_params_;
+}
+inline const ::milvus::proto::common::KeyValuePair& FieldIndexMeta::index_params(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.index_params)
+  return index_params_.Get(index);
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::add_index_params() {
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.FieldIndexMeta.index_params)
+  return index_params_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+FieldIndexMeta::index_params() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.FieldIndexMeta.index_params)
+  return index_params_;
+}
+
+// bool is_auto_index = 6;
+inline void FieldIndexMeta::clear_is_auto_index() {
+  is_auto_index_ = false;
+}
+inline bool FieldIndexMeta::is_auto_index() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.is_auto_index)
+  return is_auto_index_;
+}
+inline void FieldIndexMeta::set_is_auto_index(bool value) {
+  
+  is_auto_index_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.FieldIndexMeta.is_auto_index)
+}
+
+// repeated .milvus.proto.common.KeyValuePair user_index_params = 7;
+inline int FieldIndexMeta::user_index_params_size() const {
+  return user_index_params_.size();
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::mutable_user_index_params(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.FieldIndexMeta.user_index_params)
+  return user_index_params_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+FieldIndexMeta::mutable_user_index_params() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.FieldIndexMeta.user_index_params)
+  return &user_index_params_;
+}
+inline const ::milvus::proto::common::KeyValuePair& FieldIndexMeta::user_index_params(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.FieldIndexMeta.user_index_params)
+  return user_index_params_.Get(index);
+}
+inline ::milvus::proto::common::KeyValuePair* FieldIndexMeta::add_user_index_params() {
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.FieldIndexMeta.user_index_params)
+  return user_index_params_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+FieldIndexMeta::user_index_params() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.FieldIndexMeta.user_index_params)
+  return user_index_params_;
+}
+
+// -------------------------------------------------------------------
+
+// CollectionIndexMeta
+
+// int64 maxIndexRowCount = 1;
+inline void CollectionIndexMeta::clear_maxindexrowcount() {
+  maxindexrowcount_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionIndexMeta::maxindexrowcount() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.CollectionIndexMeta.maxIndexRowCount)
+  return maxindexrowcount_;
+}
+inline void CollectionIndexMeta::set_maxindexrowcount(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  maxindexrowcount_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.CollectionIndexMeta.maxIndexRowCount)
+}
+
+// repeated .milvus.proto.segcore.FieldIndexMeta index_metas = 2;
+inline int CollectionIndexMeta::index_metas_size() const {
+  return index_metas_.size();
+}
+inline void CollectionIndexMeta::clear_index_metas() {
+  index_metas_.Clear();
+}
+inline ::milvus::proto::segcore::FieldIndexMeta* CollectionIndexMeta::mutable_index_metas(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.CollectionIndexMeta.index_metas)
+  return index_metas_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::segcore::FieldIndexMeta >*
+CollectionIndexMeta::mutable_index_metas() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.CollectionIndexMeta.index_metas)
+  return &index_metas_;
+}
+inline const ::milvus::proto::segcore::FieldIndexMeta& CollectionIndexMeta::index_metas(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.CollectionIndexMeta.index_metas)
+  return index_metas_.Get(index);
+}
+inline ::milvus::proto::segcore::FieldIndexMeta* CollectionIndexMeta::add_index_metas() {
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.CollectionIndexMeta.index_metas)
+  return index_metas_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::segcore::FieldIndexMeta >&
+CollectionIndexMeta::index_metas() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.CollectionIndexMeta.index_metas)
+  return index_metas_;
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
