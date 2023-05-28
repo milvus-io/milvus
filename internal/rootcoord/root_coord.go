@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -1850,22 +1851,35 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		return nil, err
 	}
 
-	// In v2.2.9, bulkdinsert cannot support partition key, return error to client.
-	// Remove the following lines after bulkinsert can support partition key
-	for _, field := range colInfo.Fields {
-		if field.IsPartitionKey {
-			log.Warn("partition key is not yet supported by bulkinsert",
-				zap.String("collection name", req.GetCollectionName()),
-				zap.String("partition key", field.Name))
+	isBackUp := importutil.IsBackup(req.GetOptions())
+	if isBackUp {
+		if len(req.GetPartitionName()) == 0 {
+			log.Info("partition name not specified when backup recovery",
+				zap.String("collection name", req.GetCollectionName()))
 			ret := &milvuspb.ImportResponse{
 				Status: failStatus(commonpb.ErrorCode_UnexpectedError,
-					fmt.Sprintf("the collection '%s' contains partition key '%s', partition key is not yet supported by bulkinsert",
-						req.GetCollectionName(), field.Name)),
+					"partition name not specified when backup"),
 			}
 			return ret, nil
 		}
+	} else {
+		// In v2.2.9, bulkdinsert cannot support partition key, return error to client.
+		// Remove the following lines after bulkinsert can support partition key
+		for _, field := range colInfo.Fields {
+			if field.IsPartitionKey {
+				log.Info("partition key is not yet supported by bulkinsert",
+					zap.String("collection name", req.GetCollectionName()),
+					zap.String("partition key", field.Name))
+				ret := &milvuspb.ImportResponse{
+					Status: failStatus(commonpb.ErrorCode_UnexpectedError,
+						fmt.Sprintf("the collection '%s' contains partition key '%s', partition key is not yet supported by bulkinsert",
+							req.GetCollectionName(), field.Name)),
+				}
+				return ret, nil
+			}
+		}
+		// Remove the upper lines after bulkinsert can support partition key
 	}
-	// Remove the upper lines after bulkinsert can support partition key
 
 	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
