@@ -126,6 +126,7 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 		IndexParams:  fieldSchema.IndexParams,
 		AutoID:       fieldSchema.AutoID,
 		IsDynamic:    fieldSchema.IsDynamic,
+		DefaultValue: fieldSchema.DefaultValue,
 	}
 }
 

@@ -503,6 +503,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 					TypeParams:   field.TypeParams,
 					IndexParams:  field.IndexParams,
 					IsDynamic:    field.IsDynamic,
+					DefaultValue: field.DefaultValue,
 				})
 			}
 		}
