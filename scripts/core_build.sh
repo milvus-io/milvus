@@ -104,8 +104,9 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 OPEN_SIMD="OFF"
+USE_DYNAMIC_SIMD="OFF"
 
-while getopts "p:d:t:s:f:n:i:a:ulrcghzmeb" arg; do
+while getopts "p:d:t:s:f:n:i:y:a:ulrcghzmeb" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -162,6 +163,9 @@ while getopts "p:d:t:s:f:n:i:a:ulrcghzmeb" arg; do
     ;;
   i)
     OPEN_SIMD=$OPTARG
+    ;;
+  y)
+    USE_DYNAMIC_SIMD=$OPTARG
     ;;
   h) # help
     echo "
@@ -260,6 +264,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DUSE_ASAN=${USE_ASAN} \
 -DOPEN_SIMD=${OPEN_SIMD} \
+-DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD}
 -DCPU_ARCH=${CPU_ARCH} \
 ${CPP_SRC_DIR}"
 
