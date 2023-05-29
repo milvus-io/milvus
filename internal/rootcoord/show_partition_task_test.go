@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -130,5 +131,42 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(task.Rsp.GetPartitionNames()))
+	})
+
+	t.Run("filter dropping partition", func(t *testing.T) {
+		meta := newMockMetaTable()
+		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+			return &model.Collection{
+				CollectionID: collectionID,
+				Name:         "test coll",
+				Partitions: []*model.Partition{
+					{
+						PartitionID:   1,
+						PartitionName: "test partition1",
+						State:         etcdpb.PartitionState_PartitionCreated,
+					},
+					{
+						PartitionID:   2,
+						PartitionName: "test partition2",
+						State:         etcdpb.PartitionState_PartitionDropping,
+					},
+				},
+			}, nil
+		}
+		core := newTestCore(withMeta(meta))
+		task := &showPartitionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.ShowPartitionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_ShowPartitions,
+				},
+				CollectionID: 1,
+			},
+			Rsp: &milvuspb.ShowPartitionsResponse{},
+		}
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
+		assert.Equal(t, 1, len(task.Rsp.GetPartitionNames()))
 	})
 }
