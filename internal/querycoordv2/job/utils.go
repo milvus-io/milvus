@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -62,11 +63,16 @@ func loadPartitions(ctx context.Context,
 	meta *meta.Meta,
 	cluster session.Cluster,
 	broker meta.Broker,
+	withSchema bool,
 	collection int64,
 	partitions ...int64) error {
-	schema, err := broker.GetCollectionSchema(ctx, collection)
-	if err != nil {
-		return err
+	var err error
+	var schema *schemapb.CollectionSchema
+	if withSchema {
+		schema, err = broker.GetCollectionSchema(ctx, collection)
+		if err != nil {
+			return err
+		}
 	}
 	indexes, err := broker.DescribeIndex(ctx, collection)
 	if err != nil {

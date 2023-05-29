@@ -159,7 +159,7 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, req.GetCollectionID(), lackPartitionIDs...)
+	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func (job *LoadPartitionJob) Execute() error {
 	}
 
 	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, req.GetCollectionID(), lackPartitionIDs...)
+	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
 	if err != nil {
 		return err
 	}
