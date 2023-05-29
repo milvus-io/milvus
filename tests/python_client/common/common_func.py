@@ -28,6 +28,7 @@ def ts_float32(val):
     """Used if *val* is an instance of numpy.float32."""
     return np.float64(val)
 
+
 class ParamInfo:
     def __init__(self):
         self.param_host = ""

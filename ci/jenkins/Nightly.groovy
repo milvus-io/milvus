@@ -87,7 +87,7 @@ pipeline {
                     axes {
                         axis {
                             name 'MILVUS_SERVER_TYPE'
-                            values 'standalone', 'distributed-pulsar', 'distributed-kafka'
+                            values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication'
                         }
                         axis {
                             name 'MILVUS_CLIENT'
@@ -107,6 +107,7 @@ pipeline {
                                             // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             def mqMode='pulsar' // default using is pulsar
                                             def mysql_architecture = "standalone"
+                                            def authenticationEnabled = "false"
                                             if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                 clusterEnabled = "true"
                                             } else if ("${MILVUS_SERVER_TYPE}" == "distributed-kafka") {
@@ -114,6 +115,8 @@ pipeline {
 //                                                 mysqlEnabled = "true"
                                                 mqMode='kafka'
 //                                                 mysql_architecture = "replication"
+                                            } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
+                                                authenticationEnabled = "true"
                                             }
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 if ("${imageTag}"==''){
@@ -160,6 +163,7 @@ pipeline {
                                                     --set indexNode.disk.enabled=true \
                                                     --set queryNode.disk.enabled=true \
                                                     --set standalone.disk.enabled=true \
+                                                    --set common.security.authorizationEnabled=${authenticationEnabled} \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
                                                     -f values/mysql.yaml \
@@ -203,16 +207,30 @@ pipeline {
                                                     mqMode='kafka'
                                                     tag="L0 L1 L2 ClusterOnly"
                                                     e2e_timeout_seconds = 6 * 60 * 60
+                                                } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
+                                                    tag="L3"
+                                                    e2e_timeout_seconds = 1 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
-                                                    sh """ 
-                                                    MILVUS_HELM_RELEASE_NAME="${release_name}" \
-                                                    MILVUS_HELM_NAMESPACE="milvus-ci" \
-                                                    MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                    TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                    MQ_MODE="${mqMode}" \
-                                                    ./ci_e2e.sh  "-n 6 --tags ${tag}"
-                                                    """
+                                                    if ("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
+                                                        sh """ 
+                                                        MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                        MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                        MQ_MODE="${mqMode}" \
+                                                        ./ci_e2e.sh  "-n 4 --tags ${tag} testcases/test_utility.py::TestUtilityUserPassword testcases/test_utility.py::TestUtilityInvalidUserPassword"
+                                                        """
+                                                    } else {
+                                                        sh """ 
+                                                        MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                        MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                        MQ_MODE="${mqMode}" \
+                                                        ./ci_e2e.sh  "-n 6 --tags ${tag}"
+                                                        """
+                                                    }
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                                 }
