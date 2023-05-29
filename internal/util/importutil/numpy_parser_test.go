@@ -142,6 +142,26 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 	err = parser.validateHeader(nil)
 	assert.Error(t, err)
 
+	t.Run("not a valid numpy array", func(t *testing.T) {
+		filePath := TempFilesPath + "invalid.npy"
+		err = CreateNumpyFile(filePath, "aaa")
+		assert.Nil(t, err)
+
+		file, err := os.Open(filePath)
+		assert.Nil(t, err)
+		defer file.Close()
+
+		adapter, err := NewNumpyAdapter(file)
+		assert.Nil(t, err)
+
+		columnReader := &NumpyColumnReader{
+			fieldName: "invalid",
+			reader:    adapter,
+		}
+		err = parser.validateHeader(columnReader)
+		assert.Error(t, err)
+	})
+
 	validateHeader := func(data interface{}, fieldSchema *schemapb.FieldSchema) error {
 		filePath := TempFilesPath + fieldSchema.GetName() + ".npy"
 
