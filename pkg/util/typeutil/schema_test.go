@@ -209,6 +209,64 @@ func TestSchema(t *testing.T) {
 	})
 }
 
+func TestSchema_GetVectorFieldSchema(t *testing.T) {
+
+	schemaNormal := &schemapb.CollectionSchema{
+		Name:        "testColl",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "field_int64",
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     5,
+			},
+			{
+				FieldID:      107,
+				Name:         "field_float_vector",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     101,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("GetVectorFieldSchema", func(t *testing.T) {
+		fieldSchema, err := GetVectorFieldSchema(schemaNormal)
+		assert.Equal(t, "field_float_vector", fieldSchema.Name)
+		assert.Nil(t, err)
+	})
+
+	schemaInvalid := &schemapb.CollectionSchema{
+		Name:        "testColl",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "field_int64",
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     5,
+			},
+		},
+	}
+
+	t.Run("GetVectorFieldSchemaInvalid", func(t *testing.T) {
+		_, err := GetVectorFieldSchema(schemaInvalid)
+		assert.Error(t, err)
+	})
+
+}
+
 func TestSchema_invalid(t *testing.T) {
 	t.Run("Duplicate field name", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
