@@ -560,7 +560,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         fields = [cf.gen_int64_field(), cf.gen_float_vec_field()]
-        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
+        error = {ct.err_code: 1, ct.err_msg: "Param primary_field must be str type."}
         self.collection_schema_wrap.init_collection_schema(fields, primary_field=primary_field,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -630,7 +630,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         int_field_one = cf.gen_int64_field(is_primary=True)
         int_field_two = cf.gen_int64_field(name="int2", is_primary=True)
-        error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one."}
+        error = {ct.err_code: 1, ct.err_msg: "Primary key field can only be one."}
         self.collection_schema_wrap.init_collection_schema(
             fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
             check_task=CheckTasks.err_res, check_items=error)
@@ -2238,7 +2238,6 @@ class TestLoadCollection(TestcaseBase):
                             default_limit, partition_names=[partition1])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_release_partition(self):
         """
         target: test load collection after load collection and release partition
@@ -2264,7 +2263,6 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.skip(reason="issue #23499")
     def test_load_partitions_after_release_partition(self):
         """
         target: test load collection after release partition and load partitions
@@ -2288,7 +2286,6 @@ class TestLoadCollection(TestcaseBase):
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_release_partition_collection(self):
         """
         target: test load collection after release partition and collection
@@ -2311,7 +2308,6 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23532")
     def test_load_partitions_after_release_partition_collection(self):
         """
         target: test load partitions after release partition and collection
@@ -2371,7 +2367,6 @@ class TestLoadCollection(TestcaseBase):
         partition_w2.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23499")
     def test_load_collection_after_drop_partition_and_release_another(self):
         """
         target: test load collection after drop a partition and release another
@@ -2386,6 +2381,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w, partition1)
         partition_w2 = self.init_partition_wrap(collection_w, partition2)
         collection_w.load()
+        partition_w1.release()
         partition_w1.drop()
         partition_w2.release()
         error = {ct.err_code: 1, ct.err_msg: 'not loaded into memory'}
@@ -3344,7 +3340,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23534")
     def test_load_collection_after_load_release_partition(self):
         """
         target: test load collection after load and release partition
@@ -3384,7 +3379,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23534")
     def test_load_collection_after_load_partition_release_partitions(self):
         """
         target: test load collection after load partition and release partitions
@@ -3408,7 +3402,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition1, partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23536")
     def test_load_partition_after_load_drop_partition(self):
         """
         target: test load partition after load and drop partition
@@ -3428,7 +3421,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition2])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23937")
     def test_load_collection_after_load_drop_partition(self):
         """
         target: test load collection after load and drop partition
@@ -3454,7 +3446,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23536")
     def test_release_load_partition_after_load_drop_partition(self):
         """
         target: test release load partition after load and drop partition
@@ -3557,7 +3548,6 @@ class TestLoadPartition(TestcaseBase):
         collection_w.query(default_term_expr)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23176")
     def test_release_unloaded_partition(self):
         """
         target: test load collection after load and drop partition

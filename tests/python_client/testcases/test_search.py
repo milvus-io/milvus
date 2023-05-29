@@ -6667,8 +6667,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 class TestCollectionLoadOperation(TestcaseBase):
     """ Test case of search combining load and other functions """
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24040")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_load_collection_release_partition(self):
         """
         target: test delete load collection release partition
@@ -6692,8 +6691,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w1.release()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
@@ -6703,8 +6702,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23532")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_collection_release_collection(self):
         """
         target: test delete load collection release collection
@@ -6730,8 +6728,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w2.load()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
@@ -6741,7 +6739,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_partition_release_collection(self):
         """
         target: test delete load partition release collection
@@ -6776,8 +6774,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24074")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_release_collection_load_partition(self):
         """
         target: test delete load collection release collection
@@ -6803,8 +6800,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w2.load()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
@@ -6814,7 +6811,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_partition_drop_partition(self):
         """
         target: test delete load partition drop partition
@@ -6850,7 +6847,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_delete_release_partition(self):
         """
         target: test delete load collection release partition
@@ -6887,8 +6884,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24040")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_delete_release_collection(self):
         """
         target: test delete load collection release partition
@@ -6914,8 +6910,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w1.load()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.check_search_results,
@@ -6925,7 +6921,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_delete_drop_partition(self):
         """
         target: test load partition delete drop partition
@@ -6961,8 +6957,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24040")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition_delete(self):
         """
         target: test load collection release partition delete
@@ -6986,8 +6981,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.delete(f"int64 in {delete_ids}")
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 50})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
@@ -6997,8 +6992,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23989")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_release_collection_delete(self):
         """
         target: test load partition release collection delete
@@ -7035,8 +7029,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 50})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23989")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_drop_partition_delete(self):
         """
         target: test load partition drop partition delete
@@ -7073,7 +7066,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_collection_release_partition(self):
         """
         target: test compact load collection release partition
@@ -7111,8 +7104,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23532")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_load_collection_release_collection(self):
         """
         target: test compact load collection release collection
@@ -7153,8 +7145,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue ")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_partition_release_collection(self):
         """
         target: test compact load partition release collection
@@ -7194,8 +7185,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24048")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_compact_drop_partition(self):
         """
         target: test load collection compact drop partition
@@ -7235,7 +7225,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_compact_release_collection(self):
         """
         target: test load partition compact release collection
@@ -7275,7 +7265,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition_compact(self):
         """
         target: test load collection release partition compact
@@ -7313,8 +7303,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24040")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_release_partition(self):
         """
         target: test delete load collection release partition
@@ -7337,8 +7326,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w1.release()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
@@ -7348,8 +7337,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23532 #24040")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_release_collection(self):
         """
         target: test delete load collection release partition
@@ -7385,7 +7373,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_partition_release_collection(self):
         """
         target: test delete load collection release partition
@@ -7419,7 +7407,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_partition_drop_partition(self):
         """
         target: test delete load collection release partition
@@ -7455,7 +7443,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_drop_partition(self):
         """
         target: test delete load collection release partition
@@ -7490,8 +7478,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24039 #24042")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_flush_release_partition(self):
         """
         target: test delete load collection release partition
@@ -7530,7 +7517,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_flush_release_collection(self):
         """
         target: test delete load collection release partition
@@ -7566,8 +7553,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24048")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_flush_release_partition(self):
         """
         target: test delete load collection release partition
@@ -7602,8 +7588,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24039")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition_flush(self):
         """
         target: test delete load collection release partition
@@ -7626,8 +7611,8 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.flush()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.check_search_results,
@@ -7637,8 +7622,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #23532")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_collection_flush(self):
         """
         target: test delete load collection release partition
@@ -7675,7 +7659,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 1, "limit": 100})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_release_collection_flush(self):
         """
         target: test delete load collection release partition
@@ -7709,7 +7693,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_drop_partition_flush(self):
         """
         target: test delete load collection release partition
@@ -7744,8 +7728,7 @@ class TestCollectionLoadOperation(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1, ct.err_msg: 'not found'})
 
-    @pytest.mark.tags(CaseLabel.L3)
-    # @pytest.mark.xfail(reason="issue #24040")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection_multi_times(self):
         """
         target: test load and release multiple times
@@ -7764,8 +7747,8 @@ class TestCollectionLoadOperation(TestcaseBase):
             partition_w2.load()
         # search on collection, partition1, partition2
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1, "limit": 100})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w1.name],
                             check_task=CheckTasks.err_res,
