@@ -43,7 +43,6 @@ ScalarIndexSort<T>::Build(const size_t n, const T* values) {
     if (is_built_)
         return;
     if (n == 0) {
-        // todo: throw an exception
         throw std::invalid_argument(
             "ScalarIndexSort cannot build null values!");
     }
