@@ -237,7 +237,6 @@ func TestServer_GetIndexState(t *testing.T) {
 				allocations:     nil,
 				lastFlushTime:   time.Time{},
 				isCompacting:    false,
-				size:            0,
 				lastWrittenTime: time.Time{},
 			},
 		}},
@@ -307,7 +306,6 @@ func TestServer_GetIndexState(t *testing.T) {
 				allocations:     nil,
 				lastFlushTime:   time.Time{},
 				isCompacting:    false,
-				size:            0,
 				lastWrittenTime: time.Time{},
 			},
 		}},
@@ -433,7 +431,6 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
-			size:            0,
 			lastWrittenTime: time.Time{},
 		}
 
@@ -468,7 +465,6 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
-			size:            0,
 			lastWrittenTime: time.Time{},
 		}
 		resp, err := s.GetSegmentIndexState(ctx, req)
@@ -565,7 +561,6 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 					allocations:     nil,
 					lastFlushTime:   time.Time{},
 					isCompacting:    false,
-					size:            0,
 					lastWrittenTime: time.Time{},
 				},
 			},
@@ -618,7 +613,6 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 					allocations:     nil,
 					lastFlushTime:   time.Time{},
 					isCompacting:    false,
-					size:            0,
 					lastWrittenTime: time.Time{},
 				},
 			},
