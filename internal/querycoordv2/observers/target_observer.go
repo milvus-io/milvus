@@ -259,18 +259,17 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
-	log.Warn("observer trigger update current target",
-		zap.Int64("collectionID", collectionID))
-	ob.targetMgr.UpdateCollectionCurrentTarget(collectionID)
-
-	ob.mut.Lock()
-	defer ob.mut.Unlock()
-	notifiers := ob.readyNotifiers[collectionID]
-	for _, notifier := range notifiers {
-		close(notifier)
-	}
-	// Reuse the capacity of notifiers slice
-	if notifiers != nil {
-		ob.readyNotifiers[collectionID] = notifiers[:0]
+	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
+	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
+		ob.mut.Lock()
+		defer ob.mut.Unlock()
+		notifiers := ob.readyNotifiers[collectionID]
+		for _, notifier := range notifiers {
+			close(notifier)
+		}
+		// Reuse the capacity of notifiers slice
+		if notifiers != nil {
+			ob.readyNotifiers[collectionID] = notifiers[:0]
+		}
 	}
 }
