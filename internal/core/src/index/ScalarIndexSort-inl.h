@@ -66,10 +66,10 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built");
 
     auto index_data_size = data_.size() * sizeof(IndexStructure<T>);
-    std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
+    std::unique_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
     memcpy(index_data.get(), data_.data(), index_data_size);
 
-    std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
+    std::unique_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
     auto index_size = data_.size();
     memcpy(index_length.get(), &index_size, sizeof(size_t));
 
