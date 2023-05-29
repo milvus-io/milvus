@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -54,6 +55,9 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, meta := range colls {
+		if meta.State != etcdpb.CollectionState_CollectionCreated {
+			continue
+		}
 		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, meta.Name)
 		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.CollectionID)
 		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)

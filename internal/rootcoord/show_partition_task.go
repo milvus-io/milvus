@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -59,6 +60,9 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 	}
 
 	for _, part := range coll.Partitions {
+		if part.State != etcdpb.PartitionState_PartitionCreated {
+			continue
+		}
 		t.Rsp.PartitionIDs = append(t.Rsp.PartitionIDs, part.PartitionID)
 		t.Rsp.PartitionNames = append(t.Rsp.PartitionNames, part.PartitionName)
 		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, part.PartitionCreatedTimestamp)

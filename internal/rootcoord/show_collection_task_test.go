@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -96,5 +97,35 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(task.Rsp.GetCollectionNames()))
+	})
+
+	t.Run("filter dropping collection", func(t *testing.T) {
+		meta := newMockMetaTable()
+		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+			return []*model.Collection{
+				{
+					Name:  "test coll",
+					State: etcdpb.CollectionState_CollectionCreated,
+				},
+				{
+					Name:  "test coll2",
+					State: etcdpb.CollectionState_CollectionDropping,
+				},
+			}, nil
+		}
+		core := newTestCore(withMeta(meta))
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.ShowCollectionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_ShowCollections,
+				},
+			},
+			Rsp: &milvuspb.ShowCollectionsResponse{},
+		}
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
 	})
 }
