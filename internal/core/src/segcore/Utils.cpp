@@ -520,10 +520,10 @@ std::vector<storage::FieldDataPtr>
 LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
     auto rcm = storage::RemoteChunkManagerFactory::GetInstance().GetRemoteChunkManager();
     std::sort(remote_files.begin(), remote_files.end(), [](const std::string& a, const std::string& b) {
-        return std::stol(a.substr(a.find_last_of("/") + 1)) < std::stol(b.substr(b.find_last_of("/") + 1));
+        return std::stol(a.substr(a.find_last_of('/') + 1)) < std::stol(b.substr(b.find_last_of('/') + 1));
     });
 
-    auto parallel_degree = uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    const uint64_t parallel_degree = DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE;
     std::vector<std::string> batch_files;
     std::vector<storage::FieldDataPtr> field_datas;
 
@@ -548,7 +548,7 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
     }
 
     AssertInfo(field_datas.size() == remote_files.size(), "inconsistent file num and raw data num!");
-    return std::vector<storage::FieldDataPtr>(std::move(field_datas));
+    return {std::move(field_datas)};
 }
 
 }  // namespace milvus::segcore

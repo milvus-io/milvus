@@ -423,16 +423,16 @@ std::vector<FieldDataPtr>
 GetObjectData(RemoteChunkManager* remote_chunk_manager, const std::vector<std::string>& remote_files) {
     auto& pool = ThreadPool::GetInstance();
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
     }
 
     std::vector<FieldDataPtr> datas;
-    for (int i = 0; i < futures.size(); ++i) {
-        auto res = futures[i].get();
+    for (auto& future : futures) {
+        auto res = future.get();
         datas.emplace_back(res->GetFieldData());
     }
-    ReleaseArrowUnused();
     return datas;
 }
 
@@ -459,7 +459,6 @@ PutIndexData(RemoteChunkManager* remote_chunk_manager,
         auto res = future.get();
         remote_paths_to_size[res.first] = res.second;
     }
-    ReleaseArrowUnused();
     return remote_paths_to_size;
 }
 

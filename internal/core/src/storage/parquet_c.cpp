@@ -203,7 +203,6 @@ ReleasePayloadWriter(CPayloadWriter handler) {
     auto p = reinterpret_cast<PayloadWriter*>(handler);
     if (p != nullptr) {
         delete p;
-        milvus::storage::ReleaseArrowUnused();
     }
 }
 
@@ -384,7 +383,6 @@ ReleasePayloadReader(CPayloadReader payloadReader) {
         AssertInfo(payloadReader != nullptr, "released payloadReader should not be null pointer");
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         delete (p);
-        milvus::storage::ReleaseArrowUnused();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
