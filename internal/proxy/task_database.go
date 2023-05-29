@@ -126,6 +126,10 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ddt.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 	ddt.result, err = ddt.rootCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
+
+	if ddt.result != nil && ddt.result.ErrorCode == commonpb.ErrorCode_Success {
+		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
+	}
 	return err
 }
 

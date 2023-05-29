@@ -80,6 +80,8 @@ type Cache interface {
 	GetUserRole(username string) []string
 	RefreshPolicyInfo(op typeutil.CacheOp) error
 	InitPolicyInfo(info []string, userRoles []string)
+
+	RemoveDatabase(ctx context.Context, database string)
 }
 
 type collectionInfo struct {
@@ -939,4 +941,10 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 		return fmt.Errorf("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}
 	return nil
+}
+
+func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.collInfo, database)
 }

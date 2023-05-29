@@ -20,11 +20,10 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/grpc/metadata"
-
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -641,6 +640,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	err = node.sched.Start()
 	assert.NoError(t, err)
 	defer node.sched.Close()
+	globalMetaCache, _ = NewMetaCache(nil, nil, nil)
 
 	t.Run("drop database fail", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
