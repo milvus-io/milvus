@@ -87,6 +87,8 @@ func TestDropDatabaseTask(t *testing.T) {
 		assert.Equal(t, Timestamp(100), task.BeginTs())
 		assert.Equal(t, Timestamp(100), task.EndTs())
 		assert.Equal(t, "db", task.GetDbName())
+
+		globalMetaCache, _ = NewMetaCache(nil, nil, nil)
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 

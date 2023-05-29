@@ -731,6 +731,35 @@ func (_c *MockCache_RemoveCredential_Call) Return() *MockCache_RemoveCredential_
 	return _c
 }
 
+// RemoveDatabase provides a mock function with given fields: ctx, database
+func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) {
+	_m.Called(ctx, database)
+}
+
+// MockCache_RemoveDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabase'
+type MockCache_RemoveDatabase_Call struct {
+	*mock.Call
+}
+
+// RemoveDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+func (_e *MockCache_Expecter) RemoveDatabase(ctx interface{}, database interface{}) *MockCache_RemoveDatabase_Call {
+	return &MockCache_RemoveDatabase_Call{Call: _e.mock.On("RemoveDatabase", ctx, database)}
+}
+
+func (_c *MockCache_RemoveDatabase_Call) Run(run func(ctx context.Context, database string)) *MockCache_RemoveDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call {
+	_c.Call.Return()
+	return _c
+}
+
 // RemovePartition provides a mock function with given fields: ctx, database, collectionName, partitionName
 func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionName string, partitionName string) {
 	_m.Called(ctx, database, collectionName, partitionName)
