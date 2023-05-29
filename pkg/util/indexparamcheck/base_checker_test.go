@@ -105,3 +105,8 @@ func Test_baseChecker_CheckValidDataType(t *testing.T) {
 		}
 	}
 }
+
+func Test_baseChecker_StaticCheck(t *testing.T) {
+	// TODO
+	assert.Error(t, newBaseChecker().StaticCheck(nil))
+}

@@ -22,6 +22,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/config"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -489,6 +491,123 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 		err := cit3.parseIndexParams()
+		assert.Error(t, err)
+	})
+}
+
+func Test_wrapUserIndexParams(t *testing.T) {
+	params := wrapUserIndexParams("L2")
+	assert.Equal(t, 2, len(params))
+	assert.Equal(t, "index_type", params[0].Key)
+	assert.Equal(t, AutoIndexName, params[0].Value)
+	assert.Equal(t, "metric_type", params[1].Key)
+	assert.Equal(t, "L2", params[1].Value)
+}
+
+func Test_parseIndexParams_AutoIndex(t *testing.T) {
+	Params.Init()
+	mgr := config.NewManager()
+	mgr.SetConfig("autoIndex.enable", "false")
+	mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+	Params.AutoIndexConfig.Enable.Init(mgr)
+	Params.AutoIndexConfig.IndexParams.Init(mgr)
+	autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+	fieldSchema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		},
+	}
+
+	t.Run("case 1, empty parameters", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: autoIndexConfig[common.MetricTypeKey]},
+		}, task.newExtraParams)
+	})
+
+	t.Run("case 2, only metric type passed", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}, task.newExtraParams)
+	})
+
+	t.Run("case 3, AutoIndex & metric_type passed", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+				},
+			},
+		}
+		err := task.parseIndexParams()
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}, task.newExtraParams)
+	})
+
+	t.Run("case 4, duplicate and useless parameters passed", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: "not important", Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams()
+		assert.Error(t, err)
+	})
+
+	t.Run("case 5, duplicate and useless parameters passed", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: "not important", Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams()
+		assert.Error(t, err)
+	})
+
+	t.Run("case 6, autoindex & duplicate", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchema,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: "not important", Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams()
 		assert.Error(t, err)
 	})
 }

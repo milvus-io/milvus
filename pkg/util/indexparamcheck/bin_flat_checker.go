@@ -4,9 +4,12 @@ type binFlatChecker struct {
 	binaryVectorBaseChecker
 }
 
-// CheckTrain checks if a binary flat index can be built with the specific parameters.
-func (c *binFlatChecker) CheckTrain(params map[string]string) error {
+func (c binFlatChecker) CheckTrain(params map[string]string) error {
 	return c.binaryVectorBaseChecker.CheckTrain(params)
+}
+
+func (c binFlatChecker) StaticCheck(params map[string]string) error {
+	return c.staticCheck(params)
 }
 
 func newBinFlatChecker() IndexChecker {

@@ -5,11 +5,15 @@ type diskannChecker struct {
 	floatVectorBaseChecker
 }
 
-func (c *diskannChecker) CheckTrain(params map[string]string) error {
+func (c diskannChecker) StaticCheck(params map[string]string) error {
+	return c.staticCheck(params)
+}
+
+func (c diskannChecker) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
 		return errOutOfRange(DIM, DiskAnnMinDim, DefaultMaxDim)
 	}
-	return c.floatVectorBaseChecker.CheckTrain(params)
+	return c.StaticCheck(params)
 }
 
 func newDiskannChecker() IndexChecker {

@@ -553,3 +553,7 @@ trace:
   sampleFraction: 0
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
+
+autoIndex:
+  params:
+    build: '{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}'
