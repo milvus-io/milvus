@@ -51,7 +51,7 @@ ScalarIndexSort<T>::Build(const size_t n, const T* values) {
     idx_to_offsets_.resize(n);
     T* p = const_cast<T*>(values);
     for (size_t i = 0; i < n; ++i) {
-        data_.emplace_back(IndexStructure(*p++, i));
+        data_.emplace_back(*p++, i);
     }
     std::sort(data_.begin(), data_.end());
     for (size_t i = 0; i < data_.size(); ++i) {
