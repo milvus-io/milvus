@@ -345,7 +345,7 @@ grpc:
   serverMaxRecvSize: 536870912
   client:
     compressionEnabled: false
-    dialTimeout: 5000
+    dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
     maxMaxAttempts: 5
