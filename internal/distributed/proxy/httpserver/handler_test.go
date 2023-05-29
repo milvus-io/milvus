@@ -142,6 +142,10 @@ func (m *mockProxyComponent) DescribeIndex(ctx context.Context, request *milvusp
 	return &milvuspb.DescribeIndexResponse{Status: testStatus}, nil
 }
 
+func (m *mockProxyComponent) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	return &milvuspb.GetIndexStatisticsResponse{Status: testStatus}, nil
+}
+
 func (m *mockProxyComponent) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	return &milvuspb.GetIndexStateResponse{Status: testStatus}, nil
 }
