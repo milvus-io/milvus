@@ -951,10 +951,11 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 		if path == "" {
 			return nil, fmt.Errorf("invalid identifier: %s", identifier)
 		}
-		if strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"") {
+		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
+			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
 			path = path[1 : len(path)-1]
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
-			return nil, fmt.Errorf("json key must be enclosed in double quotes: \"%s\"", path)
+			return nil, fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
 		}
 		nestedPath = append(nestedPath, path)
 	}
