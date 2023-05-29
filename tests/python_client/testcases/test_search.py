@@ -198,8 +198,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         try:
             collection_w.search()
         except TypeError as e:
-            assert "missing 4 required positional arguments: 'data', " \
-                   "'anns_field', 'param', and 'limit'" in str(e)
+            assert "missing 3 required positional arguments: 'data', " \
+                   "'param', and 'limit'" in str(e)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_vectors(self, get_invalid_vectors):
@@ -982,6 +982,41 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": f"only support to travel back to 0s so far"})
         # 3. search after insert time_stamp
         collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            travel_timestamp=0,
+                            guarantee_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_normal_without_sepcify_anns_field(self):
+        """
+        target: test search normal case
+        method: create connection, collection, insert and search
+        expected: 1. search returned with 0 before travel timestamp
+                  2. search successfully with limit(topK) after travel timestamp
+        """
+        nq = 2
+        dim = 32
+        auto_id = True
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=True)[0:5]
+        # 2. search before insert time_stamp
+        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], "",
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            travel_timestamp=time_stamp - 1,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"only support to travel back to 0s so far"})
+        # 3. search after insert time_stamp
+        collection_w.search(vectors[:nq], "",
                             default_search_params, default_limit,
                             default_search_exp,
                             travel_timestamp=0,
