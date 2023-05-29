@@ -689,6 +689,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 	return nil
 }
 
+// GetVectorFieldSchema get vector field schema from collection schema.
+func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.Fields {
+		if IsVectorType(fieldSchema.DataType) {
+			return fieldSchema, nil
+		}
+	}
+	return nil, errors.New("vector field is not found")
+}
+
 // GetPrimaryFieldSchema get primary field schema from collection schema
 func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.Fields {

@@ -12,7 +12,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230522080721-ef84459b8f87
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230529034923-4579ee9d5723
 	github.com/panjf2000/ants/v2 v2.4.8
 	github.com/prometheus/client_golang v1.11.1
 	github.com/samber/lo v1.27.0

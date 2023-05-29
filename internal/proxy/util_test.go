@@ -1703,3 +1703,35 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 	_, err = checkPrimaryFieldData(case6.schema, case6.result, case6.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 }
+
+func Test_ParseGuaranteeTs(t *testing.T) {
+	strongTs := typeutil.Timestamp(0)
+	boundedTs := typeutil.Timestamp(2)
+	tsNow := tsoutil.GetCurrentTime()
+	tsMax := tsoutil.GetCurrentTime()
+
+	assert.Equal(t, tsMax, parseGuaranteeTs(strongTs, tsMax))
+	ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+	assert.Equal(t, tsoutil.AddPhysicalDurationOnTs(tsMax, -ratio), parseGuaranteeTs(boundedTs, tsMax))
+	assert.Equal(t, tsNow, parseGuaranteeTs(tsNow, tsMax))
+}
+
+func Test_ParseGuaranteeTsFromConsistency(t *testing.T) {
+	strong := commonpb.ConsistencyLevel_Strong
+	bounded := commonpb.ConsistencyLevel_Bounded
+	eventually := commonpb.ConsistencyLevel_Eventually
+	session := commonpb.ConsistencyLevel_Session
+	customized := commonpb.ConsistencyLevel_Customized
+
+	tsDefault := typeutil.Timestamp(0)
+	tsEventually := typeutil.Timestamp(1)
+	tsNow := tsoutil.GetCurrentTime()
+	tsMax := tsoutil.GetCurrentTime()
+
+	assert.Equal(t, tsMax, parseGuaranteeTsFromConsistency(tsDefault, tsMax, strong))
+	ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+	assert.Equal(t, tsoutil.AddPhysicalDurationOnTs(tsMax, -ratio), parseGuaranteeTsFromConsistency(tsDefault, tsMax, bounded))
+	assert.Equal(t, tsNow, parseGuaranteeTsFromConsistency(tsNow, tsMax, session))
+	assert.Equal(t, tsNow, parseGuaranteeTsFromConsistency(tsNow, tsMax, customized))
+	assert.Equal(t, tsEventually, parseGuaranteeTsFromConsistency(tsDefault, tsMax, eventually))
+}

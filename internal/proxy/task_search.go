@@ -276,10 +276,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
-		if err != nil {
-			return errors.New(AnnsFieldKey + " not found in search_params")
+		if err != nil || len(annsField) == 0 {
+			if enableMultipleVectorFields {
+				return errors.New(AnnsFieldKey + " not found in search_params")
+			}
+			vecFieldSchema, err2 := typeutil.GetVectorFieldSchema(t.schema)
+			if err2 != nil {
+				return errors.New(AnnsFieldKey + " not found in schema")
+			}
+			annsField = vecFieldSchema.Name
 		}
-
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams())
 		if err != nil {
 			return err
@@ -330,10 +336,29 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.SearchRequest.TravelTimestamp = travelTimestamp
-
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+	if err2 != nil {
+		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
+			zap.Any("collectionName", collectionName), zap.Error(err2))
+		return err2
+	}
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
-	guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
+	t.SearchRequest.TravelTimestamp = travelTimestamp
+	var consistencyLevel commonpb.ConsistencyLevel
+	useDefaultConsistency := t.request.GetUseDefaultConsistency()
+	if useDefaultConsistency {
+		consistencyLevel = collectionInfo.consistencyLevel
+		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+	} else {
+		consistencyLevel = t.request.GetConsistencyLevel()
+		//Compatibility logic, parse guarantee timestamp
+		if consistencyLevel == 0 && guaranteeTs > 0 {
+			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
+		} else {
+			// parse from guarantee timestamp and user input consistency level
+			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		}
+	}
 	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
@@ -345,6 +370,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	log.Ctx(ctx).Debug("search PreExecute done.",
 		zap.Uint64("travel_ts", travelTimestamp), zap.Uint64("guarantee_ts", guaranteeTs),
+		zap.Bool("use_default_consistency", useDefaultConsistency),
+		zap.Any("consistency level", consistencyLevel),
 		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()))
 
 	return nil
