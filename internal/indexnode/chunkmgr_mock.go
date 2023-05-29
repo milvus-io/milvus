@@ -202,7 +202,7 @@ func (c *mockChunkmgr) mockFieldData(numrows, dim int, collectionID, partitionID
 	insertCodec := &storage.InsertCodec{
 		Schema: collMeta,
 	}
-	blobs, _, err := insertCodec.Serialize(partitionID, segmentID, insertData)
+	blobs, err := insertCodec.Serialize(partitionID, segmentID, insertData)
 	if err != nil {
 		panic(err)
 	}

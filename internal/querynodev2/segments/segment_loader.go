@@ -359,8 +359,8 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, commonpb.SegmentState_Sealed)
 
 		log.Info("loading bloom filter for remote...")
-		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
-		err := loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs)
+		pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
+		err := loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, logType)
 		if err != nil {
 			log.Warn("load remote segment bloom filter failed",
 				zap.Int64("partitionID", partitionID),
@@ -459,8 +459,8 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	// load statslog if it's growing segment
 	if segment.typ == SegmentTypeGrowing {
 		log.Info("loading statslog...")
-		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
-		err := loader.loadBloomFilter(ctx, segment.segmentID, segment.bloomFilterSet, pkStatsBinlogs)
+		pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
+		err := loader.loadBloomFilter(ctx, segment.segmentID, segment.bloomFilterSet, pkStatsBinlogs, logType)
 		if err != nil {
 			return err
 		}
@@ -470,16 +470,24 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	return loader.LoadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
 }
 
-func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) []string {
+func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
 	result := make([]string, 0)
 	for _, fieldBinlog := range fieldBinlogs {
 		if fieldBinlog.FieldID == pkFieldID {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
-				result = append(result, binlog.GetLogPath())
+				_, logidx := path.Split(binlog.GetLogPath())
+				// if special status log exist
+				// only load one file
+				switch logidx {
+				case storage.CompoundStatsType.LogIdx():
+					return []string{binlog.GetLogPath()}, storage.CompoundStatsType
+				default:
+					result = append(result, binlog.GetLogPath())
+				}
 			}
 		}
 	}
-	return result
+	return result, storage.DefaultStatsType
 }
 
 func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segment *LocalSegment, fieldBinlogs []*datapb.FieldBinlog) error {
@@ -784,7 +792,9 @@ func (loader *segmentLoader) loadSealedSegments(segment *LocalSegment, insertDat
 	return nil
 }
 
-func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet, binlogPaths []string) error {
+func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
+	binlogPaths []string, logType storage.StatsLogType) error {
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segmentID),
 	)
@@ -798,16 +808,26 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	if err != nil {
 		return err
 	}
-	blobs := make([]*storage.Blob, 0)
+	blobs := []*storage.Blob{}
 	for i := 0; i < len(values); i++ {
 		blobs = append(blobs, &storage.Blob{Value: values[i]})
 	}
 
-	stats, err := storage.DeserializeStats(blobs)
-	if err != nil {
-		log.Warn("failed to deserialize stats", zap.Error(err))
-		return err
+	var stats []*storage.PrimaryKeyStats
+	if logType == storage.CompoundStatsType {
+		stats, err = storage.DeserializeStatsList(blobs[0])
+		if err != nil {
+			log.Warn("failed to deserialize stats list", zap.Error(err))
+			return err
+		}
+	} else {
+		stats, err = storage.DeserializeStats(blobs)
+		if err != nil {
+			log.Warn("failed to deserialize stats", zap.Error(err))
+			return err
+		}
 	}
+
 	var size uint
 	for _, stat := range stats {
 		pkStat := &storage.PkStatistics{

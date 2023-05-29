@@ -217,7 +217,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 			continue
 		}
 
-		log.Info("recover growing segments form checkpoints",
+		log.Info("recover growing segments from checkpoints",
 			zap.String("vChannelName", us.GetInsertChannel()),
 			zap.Int64("segmentID", us.GetID()),
 			zap.Int64("numRows", us.GetNumOfRows()),
@@ -233,6 +233,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 				partitionID:  segment.PartitionID,
 				numOfRows:    segment.GetNumOfRows(),
 				statsBinLogs: segment.Statslogs,
+				binLogs:      segment.GetBinlogs(),
 				endPos:       segment.GetDmlPosition(),
 				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
 				return nil, err
@@ -265,10 +266,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 			if err := dsService.channel.addSegment(addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        segment.GetID(),
-				collID:       segment.CollectionID,
-				partitionID:  segment.PartitionID,
+				collID:       segment.GetCollectionID(),
+				partitionID:  segment.GetPartitionID(),
 				numOfRows:    segment.GetNumOfRows(),
-				statsBinLogs: segment.Statslogs,
+				statsBinLogs: segment.GetStatslogs(),
+				binLogs:      segment.GetBinlogs(),
 				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp(),
 			}); err != nil {
 				return nil, err

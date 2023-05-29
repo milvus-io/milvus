@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 )
 
 var channelMetaNodeTestDir = "/tmp/milvus_test/channel_meta"
@@ -700,6 +702,68 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 
 }
 
+func TestChannelMeta_loadStats(t *testing.T) {
+	f := &MetaFactory{}
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
+	t.Run("list with merged stats log", func(t *testing.T) {
+		meta := f.GetCollectionMeta(UniqueID(10001), "test_load_stats", schemapb.DataType_Int64)
+		// load normal stats log
+		seg1 := &Segment{
+			segmentID:   1,
+			partitionID: 2,
+		}
+
+		// load flushed stats log
+		seg2 := &Segment{
+			segmentID:   2,
+			partitionID: 2,
+		}
+
+		//gen pk stats bytes
+		stats := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
+		iCodec := storage.NewInsertCodecWithSchema(meta)
+
+		cm := &mockCm{}
+
+		channel := newChannel("channel", 1, meta.Schema, rc, cm)
+		channel.segments[seg1.segmentID] = seg1
+		channel.segments[seg2.segmentID] = seg2
+
+		// load normal stats log
+		blob, err := iCodec.SerializePkStats(stats, 10)
+		assert.NoError(t, err)
+		cm.MultiReadReturn = [][]byte{blob.Value}
+
+		_, err = channel.loadStats(
+			context.Background(), seg1.segmentID, 1,
+			[]*datapb.FieldBinlog{{
+				FieldID: 106,
+				Binlogs: []*datapb.Binlog{{
+					//<StatsLogPath>/<collectionID>/<partitionID>/<segmentID>/<FieldID>/<logIdx>
+					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 1, 106, 10)),
+				}}}}, 0)
+		assert.NoError(t, err)
+
+		// load flushed stats log
+		blob, err = iCodec.SerializePkStatsList([]*storage.PrimaryKeyStats{stats}, 10)
+		assert.NoError(t, err)
+		cm.MultiReadReturn = [][]byte{blob.Value}
+
+		_, err = channel.loadStats(
+			context.Background(), seg2.segmentID, 1,
+			[]*datapb.FieldBinlog{{
+				FieldID: 106,
+				Binlogs: []*datapb.Binlog{{
+					//<StatsLogPath>/<collectionID>/<partitionID>/<segmentID>/<FieldID>/<logIdx>
+					LogPath: path.Join(common.SegmentStatslogPath, metautil.JoinIDPath(1, 2, 2, 106), storage.CompoundStatsType.LogIdx()),
+				}}}}, 0)
+		assert.NoError(t, err)
+	})
+}
+
 func TestChannelMeta_UpdatePKRange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -976,18 +1040,6 @@ func (s *ChannelMetaSuite) TestHasSegment() {
 			s.Assert().Equal(test.expected, got)
 		})
 	}
-}
-
-func (s *ChannelMetaSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
-	s.channel.segMu.RLock()
-	defer s.channel.segMu.RUnlock()
-
-	seg, ok := s.channel.segments[id]
-	if ok && seg.isValid() {
-		return seg, true
-	}
-
-	return nil, false
 }
 
 func TestChannelMetaSuite(t *testing.T) {

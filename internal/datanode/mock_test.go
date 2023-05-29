@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -1118,6 +1119,17 @@ func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *Insert
 		//TODO::
 	}
 	return iD
+}
+
+func genTestStat(meta *etcdpb.CollectionMeta) *storage.PrimaryKeyStats {
+	var pkFieldID, pkFieldType int64
+	for _, field := range meta.Schema.Fields {
+		if field.IsPrimaryKey {
+			pkFieldID = field.FieldID
+			pkFieldType = int64(field.DataType)
+		}
+	}
+	return storage.NewPrimaryKeyStats(pkFieldID, pkFieldType, 0)
 }
 
 func genInsertData() *InsertData {

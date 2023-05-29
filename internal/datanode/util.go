@@ -56,3 +56,10 @@ func startTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span)
 	}
 	return otel.Tracer(typeutil.DataNodeRole).Start(ctx, name)
 }
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}

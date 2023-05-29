@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path"
 	"runtime"
 	"sync"
 	"time"
@@ -63,25 +64,28 @@ type Channel interface {
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
 	getChannelName(segID UniqueID) string
 
+	addSegment(req addSegmentReq) error
+	getSegment(segID UniqueID) *Segment
+	removeSegments(segID ...UniqueID)
+	hasSegment(segID UniqueID, countFlushed bool) bool
+
+	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
+	RollPKstats(segID UniqueID, stats *storage.PrimaryKeyStats)
+
 	listAllSegmentIDs() []UniqueID
 	listNotFlushedSegmentIDs() []UniqueID
-	addSegment(req addSegmentReq) error
 	listPartitionSegments(partID UniqueID) []UniqueID
 	filterSegments(partitionID UniqueID) []*Segment
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
 	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
-	hasSegment(segID UniqueID, countFlushed bool) bool
-	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 	listSegmentIDsToSync(ts Timestamp) []UniqueID
 	setSegmentLastSyncTs(segID UniqueID, ts Timestamp)
 
 	updateSegmentRowNumber(segID UniqueID, numRows int64)
 	updateSegmentMemorySize(segID UniqueID, memorySize int64)
-	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
-	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats)
 	getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
 
@@ -130,6 +134,7 @@ type addSegmentReq struct {
 	numOfRows                  int64
 	startPos, endPos           *msgpb.MsgPosition
 	statsBinLogs               []*datapb.FieldBinlog
+	binLogs                    []*datapb.FieldBinlog
 	recoverTs                  Timestamp
 	importing                  bool
 }
@@ -195,23 +200,6 @@ func (c *ChannelMeta) getChannelName(segID UniqueID) string {
 	return c.channelName
 }
 
-// maxRowCountPerSegment returns max row count for a segment based on estimation of row size.
-func (c *ChannelMeta) maxRowCountPerSegment(ts Timestamp) (int64, error) {
-	log := log.With(zap.Int64("collectionID", c.collectionID), zap.Uint64("timpstamp", ts))
-	schema, err := c.getCollectionSchema(c.collectionID, ts)
-	if err != nil {
-		log.Warn("failed to get collection schema", zap.Error(err))
-		return 0, err
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
-	if err != nil {
-		log.Warn("failed to estimate size per record", zap.Error(err))
-		return 0, err
-	}
-	threshold := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-	return int64(threshold / float64(sizePerRecord)), nil
-}
-
 // addSegment adds the segment to current channel. Segments can be added as *new*, *normal* or *flushed*.
 // Make sure to verify `channel.hasSegment(segID)` == false before calling `channel.addSegment()`.
 func (c *ChannelMeta) addSegment(req addSegmentReq) error {
@@ -256,6 +244,14 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	c.segments[req.segID] = seg
 	c.segMu.Unlock()
 	return nil
+}
+
+func (c *ChannelMeta) getSegment(segID UniqueID) *Segment {
+	seg, ok := c.segments[segID]
+	if !ok {
+		return nil
+	}
+	return seg
 }
 
 func (c *ChannelMeta) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
@@ -397,13 +393,26 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 	}
 
 	// filter stats binlog files which is pk field stats log
-	var bloomFilterFiles []string
+	bloomFilterFiles := []string{}
+	logType := storage.DefaultStatsType
+
 	for _, binlog := range statsBinlogs {
 		if binlog.FieldID != pkField {
 			continue
 		}
+	Loop:
 		for _, log := range binlog.GetBinlogs() {
-			bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
+			_, logidx := path.Split(log.GetLogPath())
+			// if special status log exist
+			// only load one file
+			switch logidx {
+			case storage.CompoundStatsType.LogIdx():
+				bloomFilterFiles = []string{log.GetLogPath()}
+				logType = storage.CompoundStatsType
+				break Loop
+			default:
+				bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
+			}
 		}
 	}
 
@@ -424,11 +433,21 @@ func (c *ChannelMeta) loadStats(ctx context.Context, segmentID int64, collection
 		blobs = append(blobs, &Blob{Value: values[i]})
 	}
 
-	stats, err := storage.DeserializeStats(blobs)
-	if err != nil {
-		log.Warn("failed to deserialize bloom filter files", zap.Error(err))
-		return nil, merr.WrapErrParameterInvalid("valid statslog", "corrupted statslog", err.Error())
+	var stats []*storage.PrimaryKeyStats
+	if logType == storage.CompoundStatsType {
+		stats, err = storage.DeserializeStatsList(blobs[0])
+		if err != nil {
+			log.Warn("failed to deserialize stats list", zap.Error(err))
+			return nil, err
+		}
+	} else {
+		stats, err = storage.DeserializeStats(blobs)
+		if err != nil {
+			log.Warn("failed to deserialize stats", zap.Error(err))
+			return nil, err
+		}
 	}
+
 	var size uint
 	result := make([]*storage.PkStatistics, 0, len(stats))
 	for _, stat := range stats {
@@ -455,23 +474,27 @@ func (c *ChannelMeta) initPKstats(ctx context.Context, s *Segment, statsBinlogs 
 	return nil
 }
 
-func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats) {
+func (c *ChannelMeta) RollPKstats(segID UniqueID, stat *storage.PrimaryKeyStats) {
+	if stat == nil {
+		log.Warn("sync but no any pk stats", zap.Int64("segmentID", segID))
+		return
+	}
+
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 	seg, ok := c.segments[segID]
 	log.Info("roll pk stats", zap.Int64("segment id", segID))
 	if ok && seg.notFlushed() {
-		for _, stat := range stats {
-			pkStat := &storage.PkStatistics{
-				PkFilter: stat.BF,
-				MinPK:    stat.MinPk,
-				MaxPK:    stat.MaxPk,
-			}
-			seg.historyStats = append(seg.historyStats, pkStat)
+		pkStat := &storage.PkStatistics{
+			PkFilter: stat.BF,
+			MinPK:    stat.MinPk,
+			MaxPK:    stat.MaxPk,
 		}
+		seg.historyStats = append(seg.historyStats, pkStat)
 		seg.currentStat = nil
 		return
 	}
+
 	// should not happen at all
 	if ok {
 		log.Warn("only growing segment should roll PK stats", zap.Int64("segment", segID), zap.Any("type", seg.sType))

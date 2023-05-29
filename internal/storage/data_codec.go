@@ -287,6 +287,15 @@ type InsertData struct {
 	Infos []BlobInfo
 }
 
+func (iData *InsertData) IsEmpty() bool {
+	if iData == nil {
+		return true
+	}
+
+	timeFieldData, ok := iData.Data[common.TimeStampField]
+	return (!ok) || (timeFieldData.RowNum() <= 0)
+}
+
 // InsertCodec serializes and deserializes the insert data
 // Blob key example:
 // ${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/${log_idx}
@@ -304,20 +313,95 @@ func NewInsertCodecWithSchema(schema *etcdpb.CollectionMeta) *InsertCodec {
 	return &InsertCodec{Schema: schema}
 }
 
+// Serialize Pk stats log
+func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum int64) (*Blob, error) {
+	if stats == nil || stats.BF == nil {
+		return nil, fmt.Errorf("sericalize empty pk stats")
+	}
+
+	//Serialize by pk stats
+	blobKey := fmt.Sprintf("%d", stats.FieldID)
+	statsWriter := &StatsWriter{}
+	err := statsWriter.Generate(stats)
+	if err != nil {
+		return nil, err
+	}
+
+	buffer := statsWriter.GetBuffer()
+	return &Blob{
+		Key:    blobKey,
+		Value:  buffer,
+		RowNum: rowNum,
+	}, nil
+}
+
+// Serialize Pk stats list to one blob
+func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, rowNum int64) (*Blob, error) {
+	if len(stats) == 0 {
+		return nil, nil
+	}
+
+	blobKey := fmt.Sprintf("%d", stats[0].FieldID)
+	statsWriter := &StatsWriter{}
+	err := statsWriter.GenerateList(stats)
+	if err != nil {
+		return nil, err
+	}
+
+	buffer := statsWriter.GetBuffer()
+	return &Blob{
+		Key:    blobKey,
+		Value:  buffer,
+		RowNum: rowNum,
+	}, nil
+}
+
+// Serialize Pk stats log by insert data
+func (insertCodec *InsertCodec) SerializePkStatsByData(data *InsertData) (*Blob, error) {
+	timeFieldData, ok := data.Data[common.TimeStampField]
+	if !ok {
+		return nil, fmt.Errorf("data doesn't contains timestamp field")
+	}
+	if timeFieldData.RowNum() <= 0 {
+		return nil, fmt.Errorf("there's no data in InsertData")
+	}
+	rowNum := int64(timeFieldData.RowNum())
+
+	for _, field := range insertCodec.Schema.Schema.Fields {
+		// stats fields
+		if !field.GetIsPrimaryKey() {
+			continue
+		}
+		singleData := data.Data[field.FieldID]
+		blobKey := fmt.Sprintf("%d", field.FieldID)
+		statsWriter := &StatsWriter{}
+		err := statsWriter.GenerateByData(field.FieldID, field.DataType, singleData)
+		if err != nil {
+			return nil, err
+		}
+		buffer := statsWriter.GetBuffer()
+		return &Blob{
+			Key:    blobKey,
+			Value:  buffer,
+			RowNum: rowNum,
+		}, nil
+	}
+	return nil, fmt.Errorf("there is no pk field")
+}
+
 // Serialize transfer insert data to blob. It will sort insert data by timestamp.
 // From schema, it gets all fields.
 // For each field, it will create a binlog writer, and write an event to the binlog.
 // It returns binlog buffer in the end.
-func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
+func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, error) {
 	blobs := make([]*Blob, 0)
-	statsBlobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[common.TimeStampField]
 	if !ok {
-		return nil, nil, fmt.Errorf("data doesn't contains timestamp field")
+		return nil, fmt.Errorf("data doesn't contains timestamp field")
 	}
 	if timeFieldData.RowNum() <= 0 {
-		return nil, nil, fmt.Errorf("there's no data in InsertData")
+		return nil, fmt.Errorf("there's no data in InsertData")
 	}
 	rowNum := int64(timeFieldData.RowNum())
 
@@ -346,14 +430,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			case schemapb.DataType_BinaryVector:
 				eventWriter, err = writer.NextInsertEventWriter(singleData.(*BinaryVectorFieldData).Dim)
 			default:
-				return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
+				return nil, fmt.Errorf("undefined data type %d", field.DataType)
 			}
 		} else {
 			eventWriter, err = writer.NextInsertEventWriter()
 		}
 		if err != nil {
 			writer.Close()
-			return nil, nil, err
+			return nil, err
 		}
 
 		eventWriter.SetEventTimestamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
@@ -363,7 +447,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
 		case schemapb.DataType_Int8:
@@ -371,7 +455,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
 		case schemapb.DataType_Int16:
@@ -379,7 +463,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
 		case schemapb.DataType_Int32:
@@ -387,7 +471,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
 		case schemapb.DataType_Int64:
@@ -395,7 +479,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
@@ -403,7 +487,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
 		case schemapb.DataType_Double:
@@ -411,7 +495,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
@@ -420,7 +504,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
@@ -430,7 +514,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*ArrayFieldData).GetMemorySize()))
@@ -440,7 +524,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				if err != nil {
 					eventWriter.Close()
 					writer.Close()
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*JSONFieldData).GetMemorySize()))
@@ -449,7 +533,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BinaryVectorFieldData).GetMemorySize()))
 		case schemapb.DataType_FloatVector:
@@ -457,14 +541,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			if err != nil {
 				eventWriter.Close()
 				writer.Close()
-				return nil, nil, err
+				return nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatVectorFieldData).GetMemorySize()))
 		default:
-			return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
+			return nil, fmt.Errorf("undefined data type %d", field.DataType)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		writer.SetEventTimeStamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 
@@ -472,14 +556,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			eventWriter.Close()
 			writer.Close()
-			return nil, nil, err
+			return nil, err
 		}
 
 		buffer, err := writer.GetBuffer()
 		if err != nil {
 			eventWriter.Close()
 			writer.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		blobKey := fmt.Sprintf("%d", field.FieldID)
 		blobs = append(blobs, &Blob{
@@ -489,24 +573,9 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		})
 		eventWriter.Close()
 		writer.Close()
-
-		// stats fields
-		if field.GetIsPrimaryKey() {
-			statsWriter := &StatsWriter{}
-			err = statsWriter.GeneratePrimaryKeyStats(field.FieldID, field.DataType, singleData)
-			if err != nil {
-				return nil, nil, err
-			}
-			statsBuffer := statsWriter.GetBuffer()
-			statsBlobs = append(statsBlobs, &Blob{
-				Key:    blobKey,
-				Value:  statsBuffer,
-				RowNum: rowNum,
-			})
-		}
 	}
 
-	return blobs, statsBlobs, nil
+	return blobs, nil
 }
 
 func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (

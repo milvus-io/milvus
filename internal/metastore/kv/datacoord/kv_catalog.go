@@ -826,6 +826,16 @@ func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, lo
 	}
 }
 
+func hasSepcialStatslog(logs *datapb.FieldBinlog) bool {
+	for _, statslog := range logs.Binlogs {
+		_, logidx := path.Split(statslog.LogPath)
+		if logidx == storage.CompoundStatsType.LogIdx() {
+			return true
+		}
+	}
+	return false
+}
+
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
 	binlogs, deltalogs, statslogs []*datapb.FieldBinlog) (map[string]string, error) {
 
@@ -833,8 +843,9 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
 	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)
 	// check stats log and bin log size match
-	if len(binlogs) != 0 && len(statslogs) != 0 {
-		if len(statslogs[0].GetBinlogs()) != len(binlogs[0].GetBinlogs()) {
+	// num of stats log may one more than num of binlogs if segment flushed and merged stats log
+	if len(binlogs) != 0 && len(statslogs) != 0 && !hasSepcialStatslog(statslogs[0]) {
+		if len(binlogs[0].GetBinlogs()) != len(statslogs[0].GetBinlogs()) {
 			log.Warn("find invalid segment while bin log size didn't match stat log size",
 				zap.Int64("collection", collectionID),
 				zap.Int64("partition", partitionID),
@@ -843,7 +854,7 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 				zap.Any("stats", statslogs),
 				zap.Any("delta", deltalogs),
 			)
-			return nil, fmt.Errorf("Segment can not be saved because of binlog "+
+			return nil, fmt.Errorf("segment can not be saved because of binlog "+
 				"file not match stat log number: collection %v, segment %v", collectionID, segmentID)
 		}
 	}

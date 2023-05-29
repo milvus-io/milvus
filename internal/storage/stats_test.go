@@ -32,7 +32,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 	sw := &StatsWriter{}
-	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
@@ -57,7 +57,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
 }
 
@@ -71,7 +71,7 @@ func TestStatsWriter_BF(t *testing.T) {
 	}
 	t.Log(data.RowNum())
 	sw := &StatsWriter{}
-	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
 	assert.NoError(t, err)
 
 	stats := &PrimaryKeyStats{}
@@ -95,7 +95,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 		Data: []string{"bc", "ac", "abd", "cd", "milvus"},
 	}
 	sw := &StatsWriter{}
-	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_VarChar, data)
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_VarChar, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
@@ -114,7 +114,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
 }
 

@@ -681,9 +681,18 @@ func genStorageBlob(collectionID int64,
 	if err != nil {
 		return nil, nil, err
 	}
-	binLogs, statsLogs, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
-	return binLogs, statsLogs, err
+	binLogs, err := inCodec.Serialize(partitionID, segmentID, insertData)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	statsLog, err := inCodec.SerializePkStatsByData(insertData)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return binLogs, []*storage.Blob{statsLog}, nil
 }
 
 func genCollectionMeta(collectionID int64, partitionID int64, schema *schemapb.CollectionSchema) *etcdpb.CollectionMeta {
