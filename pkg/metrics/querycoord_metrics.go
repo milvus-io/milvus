@@ -22,6 +22,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const (
+	SegmentGrowTaskLabel   = "segment_grow"
+	SegmentReduceTaskLabel = "segment_reduce"
+	SegmentMoveTaskLabel   = "segment_move"
+
+	ChannelGrowTaskLabel   = "channel_grow"
+	ChannelReduceTaskLabel = "channel_reduce"
+	ChannelMoveTaskLabel   = "channel_move"
+
+	QueryCoordTaskType = "querycoord_task_type"
+)
+
 var (
 	QueryCoordNumCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -83,7 +95,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "task_num",
 			Help:      "the number of tasks in QueryCoord's scheduler",
-		}, []string{})
+		}, []string{QueryCoordTaskType})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
