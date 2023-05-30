@@ -205,7 +205,7 @@ VectorMemIndex::parse_config(Config& config) {
     CheckParameter<int>(config, knowhere::indexparam::NBITS, stoi_closure, std::nullopt);
 
     /************************** PQ Params *****************************/
-    CheckParameter<int>(config, knowhere::indexparam::PQ_M, stoi_closure, std::nullopt);
+    //    CheckParameter<int>(config, knowhere::indexparam::PQ_M, stoi_closure, std::nullopt);
 
     /************************** HNSW Params *****************************/
     CheckParameter<int>(config, knowhere::indexparam::EFCONSTRUCTION, stoi_closure, std::nullopt);

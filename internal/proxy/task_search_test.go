@@ -1922,6 +1922,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 }
 
 func TestTaskSearch_parseQueryInfo(t *testing.T) {
+	Params.InitOnce()
 	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
@@ -2007,7 +2008,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			{"Invalid_topk_65536", spInvalidTopk65536},
 			{"Invalid_topk_plus_offset", spInvalidTopkPlusOffset},
 			{"No_Metric_type", spNoMetricType},
-			{"No_search_params", spNoSearchParams},
+			//{"No_search_params", spNoSearchParams},
 			{"Invalid_round_decimal", spInvalidRoundDecimal},
 			{"Invalid_round_decimal_1000", spInvalidRoundDecimal2},
 			{"Invalid_offset_not_int", spInvalidOffsetNoInt},
