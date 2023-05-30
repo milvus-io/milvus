@@ -47,7 +47,7 @@ func retrieveOnSegments(ctx context.Context, manager *Manager, segType SegmentTy
 		wg.Add(1)
 		go func(segID int64, i int) {
 			defer wg.Done()
-			segment, _ := manager.Segment.Get(segID).(*LocalSegment)
+			segment, _ := manager.Segment.GetWithType(segID, segType).(*LocalSegment)
 			if segment == nil {
 				errs[i] = nil
 				return

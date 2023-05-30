@@ -234,7 +234,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	// Wait for all segments loaded
 	for _, segment := range segments {
-		if loader.manager.Segment.Get(segment.GetSegmentID()) != nil {
+		if loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil {
 			continue
 		}
 
