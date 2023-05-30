@@ -1393,7 +1393,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetTy
     using Index = index::ScalarIndex<milvus::Json>;
     auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
     auto pointer = milvus::Json::pointer(expr.column_.nested_path);
-    auto index_func = [=](Index* index) { return TargetBitmap{}; };
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
 
     std::unordered_set<ExprValueType> term_set(expr.terms_.begin(), expr.terms_.end());
 
@@ -1406,6 +1406,16 @@ ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetTy
         using GetType = std::conditional_t<std::is_same_v<ExprValueType, std::string>, std::string_view, ExprValueType>;
         auto x = json.template at<GetType>(pointer);
         if (x.error()) {
+            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                auto x = json.template at<double>(pointer);
+                if (x.error()) {
+                    return false;
+                }
+
+                auto value = x.value();
+                // if the term set is {1}, and the value is 1.1, we should not return true.
+                return std::floor(value) == value && term_set.find(ExprValueType(value)) != term_set.end();
+            }
             return false;
         }
         return term_set.find(ExprValueType(x.value())) != term_set.end();
