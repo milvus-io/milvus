@@ -701,29 +701,29 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	tr := timerecord.NewTimeRecorder("searchChannel")
-	log.Debug("search channel...")
+	tr := timerecord.NewTimeRecorder("searchSegments")
+	log.Debug("search segments...")
 
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		log.Warn("failed to search channel", zap.Error(segments.ErrCollectionNotFound))
+		log.Warn("failed to search segments", zap.Error(segments.ErrCollectionNotFound))
 		return nil, segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
 	}
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
 	if !node.scheduler.Add(task) {
 		err := merr.WrapErrTaskQueueFull()
-		log.Warn("failed to search channel", zap.Error(err))
+		log.Warn("failed to search segments", zap.Error(err))
 		return nil, err
 	}
 
 	err := task.Wait()
 	if err != nil {
-		log.Warn("failed to search channel", zap.Error(err))
+		log.Warn("failed to search segments", zap.Error(err))
 		return nil, err
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("search channel done, channel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -732,7 +732,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
-	return task.Result(), nil
+
+	result := task.Result()
+	if result.CostAggregation != nil {
+		// update channel's response time
+		result.CostAggregation.ResponseTime = int64(latency)
+	}
+	return result, nil
 }
 
 // Search performs replica search tasks.
@@ -813,7 +819,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		}
 
 		runningGp.Go(func() error {
-
 			ret, err := node.searchChannel(runningCtx, req, ch)
 			mu.Lock()
 			defer mu.Unlock()
@@ -835,24 +840,27 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "searchRequestReduce")
-	ret, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	result, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		metrics.SearchLabel).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	if !req.FromShardLeader {
-		collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
-		collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
+	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
+	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).
+		Add(float64(proto.Size(req)))
+
+	if result.CostAggregation != nil {
+		// update channel's response time
+		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
+		result.CostAggregation.TotalNQ = currentTotalNQ
 	}
-	return ret, nil
+	return result, nil
 }
 
 // only used for delegator query segments from worker
@@ -882,7 +890,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 	defer node.lifetime.Done()
 
-	log.Debug("start do query with channel",
+	log.Debug("start do query segments",
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
@@ -890,7 +898,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	tr := timerecord.NewTimeRecorder("queryChannel")
+	tr := timerecord.NewTimeRecorder("querySegments")
 	results, err := node.querySegments(queryCtx, req)
 	if err != nil {
 		log.Warn("failed to query channel", zap.Error(err))
@@ -910,6 +918,11 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	results.CostAggregation = &internalpb.CostAggregation{
+		ServiceTime:  latency.Milliseconds(),
+		ResponseTime: latency.Milliseconds(),
+		TotalNQ:      0,
+	}
 	return results, nil
 }
 

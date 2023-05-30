@@ -117,6 +117,15 @@ message SearchResults {
   bytes sliced_blob = 10;
   int64 sliced_num_count = 11;
   int64 sliced_offset = 12;
+
+  // search request cost
+  CostAggregation costAggregation = 13;
+}
+
+message CostAggregation {
+  int64 responseTime = 1;
+  int64 serviceTime = 2;
+  int64 totalNQ = 3;
 }
 
 message RetrieveRequest {
@@ -136,6 +145,8 @@ message RetrieveRequest {
   int64 iteration_extension_reduce_rate = 14;
 }
 
+
+
 message RetrieveResults {
   common.MsgBase base = 1;
   common.Status status = 2;
@@ -145,6 +156,9 @@ message RetrieveResults {
   repeated int64 sealed_segmentIDs_retrieved = 6;
   repeated string channelIDs_retrieved = 7;
   repeated int64 global_sealed_segmentIDs = 8;
+
+   // query request cost
+   CostAggregation costAggregation = 13;
 }
 
 message LoadIndex {
