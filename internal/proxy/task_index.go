@@ -391,7 +391,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		TypeParams:      cit.newTypeParams,
 		IndexParams:     cit.newIndexParams,
 		IsAutoIndex:     cit.isAutoIndex,
-		UserIndexParams: cit.req.GetExtraParams(),
+		UserIndexParams: cit.newExtraParams,
 		Timestamp:       cit.BeginTs(),
 		FieldDataType:   cit.fieldSchema.GetDataType(),
 	}
