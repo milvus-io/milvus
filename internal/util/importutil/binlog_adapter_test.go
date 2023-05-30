@@ -1033,6 +1033,29 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 	assert.Equal(t, 0, segmentsData[2][fieldID].RowNum())
 }
 
+func Test_BinlogAdapterVerifyField(t *testing.T) {
+	ctx := context.Background()
+
+	segmentsData := make([]map[storage.FieldID]storage.FieldData, 0, 1)
+	segmentData := initSegmentData(sampleSchema())
+	segmentsData = append(segmentsData, segmentData)
+
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		return nil
+	}
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
+	assert.NotNil(t, adapter)
+	assert.Nil(t, err)
+
+	err = adapter.verifyField(103, segmentsData)
+	assert.NoError(t, err)
+	err = adapter.verifyField(999999, segmentsData)
+	assert.Error(t, err)
+
+	err = adapter.readInsertlog(999999, "dummy", segmentsData, []int32{1})
+	assert.Error(t, err)
+}
+
 func Test_BinlogAdapterReadInsertlog(t *testing.T) {
 	ctx := context.Background()
 
