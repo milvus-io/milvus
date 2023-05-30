@@ -28,6 +28,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -51,14 +52,15 @@ type JobSuite struct {
 	loadTypes   map[int64]querypb.LoadType
 
 	// Dependencies
-	kv             kv.MetaKv
-	store          meta.Store
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	targetMgr      *meta.TargetManager
-	targetObserver *observers.TargetObserver
-	broker         *meta.MockBroker
-	nodeMgr        *session.NodeManager
+	kv                kv.MetaKv
+	store             meta.Store
+	dist              *meta.DistributionManager
+	meta              *meta.Meta
+	targetMgr         *meta.TargetManager
+	targetObserver    *observers.TargetObserver
+	broker            *meta.MockBroker
+	nodeMgr           *session.NodeManager
+	checkerController *checkers.CheckerController
 
 	// Test objects
 	scheduler *Scheduler
@@ -154,6 +156,8 @@ func (suite *JobSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
 	suite.NoError(err)
+
+	suite.checkerController = &checkers.CheckerController{}
 }
 
 func (suite *JobSuite) TearDownTest() {
@@ -687,6 +691,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -706,6 +711,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -732,6 +738,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -757,6 +764,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -784,6 +792,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -970,6 +979,7 @@ func (suite *JobSuite) releaseAll() {
 			suite.meta,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
