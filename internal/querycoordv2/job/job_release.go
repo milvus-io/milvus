@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -33,13 +34,14 @@ import (
 
 type ReleaseCollectionJob struct {
 	*BaseJob
-	req            *querypb.ReleaseCollectionRequest
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	broker         meta.Broker
-	cluster        session.Cluster
-	targetMgr      *meta.TargetManager
-	targetObserver *observers.TargetObserver
+	req               *querypb.ReleaseCollectionRequest
+	dist              *meta.DistributionManager
+	meta              *meta.Meta
+	broker            meta.Broker
+	cluster           session.Cluster
+	targetMgr         *meta.TargetManager
+	targetObserver    *observers.TargetObserver
+	checkerController *checkers.CheckerController
 }
 
 func NewReleaseCollectionJob(ctx context.Context,
@@ -50,16 +52,18 @@ func NewReleaseCollectionJob(ctx context.Context,
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
+	checkerController *checkers.CheckerController,
 ) *ReleaseCollectionJob {
 	return &ReleaseCollectionJob{
-		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:            req,
-		dist:           dist,
-		meta:           meta,
-		broker:         broker,
-		cluster:        cluster,
-		targetMgr:      targetMgr,
-		targetObserver: targetObserver,
+		BaseJob:           NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:               req,
+		dist:              dist,
+		meta:              meta,
+		broker:            broker,
+		cluster:           cluster,
+		targetMgr:         targetMgr,
+		targetObserver:    targetObserver,
+		checkerController: checkerController,
 	}
 }
 
@@ -93,7 +97,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
 	job.targetObserver.ReleaseCollection(req.GetCollectionID())
-	waitCollectionReleased(job.dist, req.GetCollectionID())
+	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
@@ -105,13 +109,14 @@ type ReleasePartitionJob struct {
 	*BaseJob
 	releasePartitionsOnly bool
 
-	req            *querypb.ReleasePartitionsRequest
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	broker         meta.Broker
-	cluster        session.Cluster
-	targetMgr      *meta.TargetManager
-	targetObserver *observers.TargetObserver
+	req               *querypb.ReleasePartitionsRequest
+	dist              *meta.DistributionManager
+	meta              *meta.Meta
+	broker            meta.Broker
+	cluster           session.Cluster
+	targetMgr         *meta.TargetManager
+	targetObserver    *observers.TargetObserver
+	checkerController *checkers.CheckerController
 }
 
 func NewReleasePartitionJob(ctx context.Context,
@@ -122,16 +127,18 @@ func NewReleasePartitionJob(ctx context.Context,
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
+	checkerController *checkers.CheckerController,
 ) *ReleasePartitionJob {
 	return &ReleasePartitionJob{
-		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:            req,
-		dist:           dist,
-		meta:           meta,
-		broker:         broker,
-		cluster:        cluster,
-		targetMgr:      targetMgr,
-		targetObserver: targetObserver,
+		BaseJob:           NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:               req,
+		dist:              dist,
+		meta:              meta,
+		broker:            broker,
+		cluster:           cluster,
+		targetMgr:         targetMgr,
+		targetObserver:    targetObserver,
+		checkerController: checkerController,
 	}
 }
 
@@ -175,7 +182,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetMgr.RemoveCollection(req.GetCollectionID())
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
 		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
-		waitCollectionReleased(job.dist, req.GetCollectionID())
+		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
@@ -184,7 +191,7 @@ func (job *ReleasePartitionJob) Execute() error {
 			return utils.WrapError(msg, err)
 		}
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
-		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
+		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	return nil
