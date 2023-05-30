@@ -285,7 +285,7 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, collections
 		q.currentRates[collection][internalpb.RateType_DMLBulkLoad] = 0
 		q.quotaStates[collection][milvuspb.QuotaState_DenyToWrite] = errorCode
 	}
-	log.Warn("QuotaCenter force to deny writing",
+	log.RatedWarn(10, "QuotaCenter force to deny writing",
 		zap.Int64s("collectionIDs", collections),
 		zap.String("reason", errorCode.String()))
 }
@@ -334,6 +334,7 @@ func (q *QuotaCenter) guaranteeMinRate(minRate float64, rateType internalpb.Rate
 
 // calculateReadRates calculates and sets dql rates.
 func (q *QuotaCenter) calculateReadRates() {
+	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if Params.QuotaConfig.ForceDenyReading.GetAsBool() {
 		q.forceDenyReading(commonpb.ErrorCode_ForceDeny)
 		return
@@ -393,13 +394,13 @@ func (q *QuotaCenter) calculateReadRates() {
 		for _, collection := range collections {
 			if q.currentRates[collection][internalpb.RateType_DQLSearch] != Inf && realTimeSearchRate > 0 {
 				q.currentRates[collection][internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
-				log.Warn("QuotaCenter cool read rates off done",
+				log.RatedWarn(10, "QuotaCenter cool read rates off done",
 					zap.Int64("collectionID", collection),
 					zap.Any("searchRate", q.currentRates[collection][internalpb.RateType_DQLSearch]))
 			}
 			if q.currentRates[collection][internalpb.RateType_DQLQuery] != Inf && realTimeQueryRate > 0 {
 				q.currentRates[collection][internalpb.RateType_DQLQuery] = Limit(realTimeQueryRate * coolOffSpeed)
-				log.Warn("QuotaCenter cool read rates off done",
+				log.RatedWarn(10, "QuotaCenter cool read rates off done",
 					zap.Int64("collectionID", collection),
 					zap.Any("queryRate", q.currentRates[collection][internalpb.RateType_DQLQuery]))
 			}
@@ -407,8 +408,6 @@ func (q *QuotaCenter) calculateReadRates() {
 
 		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat(), internalpb.RateType_DQLSearch, collections...)
 		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat(), internalpb.RateType_DQLQuery, collections...)
-		log.Info("QueryNodeMetrics when cool-off",
-			zap.Any("metrics", q.queryNodeMetrics))
 	}
 
 	// TODO: unify search and query?
@@ -419,7 +418,6 @@ func (q *QuotaCenter) calculateReadRates() {
 
 // calculateWriteRates calculates and sets dml rates.
 func (q *QuotaCenter) calculateWriteRates() error {
-	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
 		q.forceDenyWriting(commonpb.ErrorCode_ForceDeny)
 		return nil
@@ -468,9 +466,6 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		}
 		q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat(), internalpb.RateType_DMLInsert)
 		q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat(), internalpb.RateType_DMLDelete)
-		log.RatedDebug(10, "QuotaCenter cool write rates off done",
-			zap.Int64("collectionID", collection),
-			zap.Float64("factor", factor))
 	}
 
 	return nil
@@ -738,7 +733,7 @@ func (q *QuotaCenter) checkDiskQuota() {
 	colDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	for collection, binlogSize := range q.dataCoordMetrics.CollectionBinlogSize {
 		if float64(binlogSize) >= colDiskQuota {
-			log.Warn("collection disk quota exceeded",
+			log.RatedWarn(10, "collection disk quota exceeded",
 				zap.Int64("collection", collection),
 				zap.Int64("coll disk usage", binlogSize),
 				zap.Float64("coll disk quota", colDiskQuota))
@@ -750,7 +745,7 @@ func (q *QuotaCenter) checkDiskQuota() {
 	}
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
-		log.Warn("total disk quota exceeded",
+		log.RatedWarn(10, "total disk quota exceeded",
 			zap.Int64("total disk usage", total),
 			zap.Float64("total disk quota", totalDiskQuota))
 		q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted)
