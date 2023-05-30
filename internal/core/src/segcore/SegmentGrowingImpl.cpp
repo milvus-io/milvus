@@ -67,7 +67,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
-    for (auto field : insert_data->fields_data()) {
+    for (auto& field : insert_data->fields_data()) {
         auto field_id = FieldId(field.field_id());
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
