@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -36,7 +37,7 @@ import (
 // waitCollectionReleased blocks until
 // all channels and segments of given collection(partitions) are released,
 // empty partition list means wait for collection released
-func waitCollectionReleased(dist *meta.DistributionManager, collection int64, partitions ...int64) {
+func waitCollectionReleased(dist *meta.DistributionManager, checkerController *checkers.CheckerController, collection int64, partitions ...int64) {
 	partitionSet := typeutil.NewUniqueSet(partitions...)
 	for {
 		var (
@@ -55,6 +56,8 @@ func waitCollectionReleased(dist *meta.DistributionManager, collection int64, pa
 			break
 		}
 
+		// trigger check more frequently
+		checkerController.Check()
 		time.Sleep(200 * time.Millisecond)
 	}
 }
