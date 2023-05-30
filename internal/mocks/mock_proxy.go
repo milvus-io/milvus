@@ -1817,6 +1817,53 @@ func (_c *Proxy_GetIndexState_Call) Return(_a0 *milvuspb.GetIndexStateResponse, 
 	return _c
 }
 
+// GetIndexStatistics provides a mock function with given fields: ctx, request
+func (_m *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	ret := _m.Called(ctx, request)
+
+	var r0 *milvuspb.GetIndexStatisticsResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetIndexStatisticsRequest) *milvuspb.GetIndexStatisticsResponse); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetIndexStatisticsResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetIndexStatisticsRequest) error); ok {
+		r1 = rf(ctx, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_GetIndexStatistics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexStatistics'
+type Proxy_GetIndexStatistics_Call struct {
+	*mock.Call
+}
+
+// GetIndexStatistics is a helper method to define mock.On call
+//  - ctx context.Context
+//  - request *milvuspb.GetIndexStatisticsRequest
+func (_e *Proxy_Expecter) GetIndexStatistics(ctx interface{}, request interface{}) *Proxy_GetIndexStatistics_Call {
+	return &Proxy_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics", ctx, request)}
+}
+
+func (_c *Proxy_GetIndexStatistics_Call) Run(run func(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest)) *Proxy_GetIndexStatistics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetIndexStatisticsRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_GetIndexStatistics_Call) Return(_a0 *milvuspb.GetIndexStatisticsResponse, _a1 error) *Proxy_GetIndexStatistics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetLoadState provides a mock function with given fields: ctx, request
 func (_m *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
 	ret := _m.Called(ctx, request)

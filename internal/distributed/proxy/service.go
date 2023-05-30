@@ -658,6 +658,11 @@ func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIn
 	return s.proxy.DescribeIndex(ctx, request)
 }
 
+// GetIndexStatistics get the information of index.
+func (s *Server) GetIndexStatistics(ctx context.Context, request *milvuspb.GetIndexStatisticsRequest) (*milvuspb.GetIndexStatisticsResponse, error) {
+	return s.proxy.GetIndexStatistics(ctx, request)
+}
+
 // GetIndexBuildProgress gets index build progress with filed_name and index_name.
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
 // Deprecated: use DescribeIndex instead

@@ -4032,3 +4032,21 @@ func TestProxy_GetLoadState(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_InsufficientMemoryToLoad, progressResp.Status.ErrorCode)
 	})
 }
+
+func TestProxy_GetIndexStatistics(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	proxy, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	assert.NotNil(t, proxy)
+	t.Run("TestProxy_GetIndexStatistics", func(t *testing.T) {
+		resp, err := proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
+			Base:           nil,
+			DbName:         "",
+			CollectionName: "hello_milvus",
+			IndexName:      "",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
