@@ -1124,7 +1124,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 		growingSegments := make(map[int64]*msgpb.MsgPosition)
 		for _, entry := range growing {
-			segment := node.manager.Segment.Get(entry.SegmentID)
+			segment := node.manager.Segment.GetWithType(entry.SegmentID, segments.SegmentTypeGrowing)
 			if segment == nil {
 				log.Warn("leader view growing not found", zap.String("channel", key), zap.Int64("segmentID", entry.SegmentID))
 				growingSegments[entry.SegmentID] = &msgpb.MsgPosition{}

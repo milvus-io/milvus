@@ -71,10 +71,11 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	} else {
 		newSegmentIDs = segmentIDs
 		for _, segmentID := range newSegmentIDs {
-			segment := manager.Segment.Get(segmentID)
-			if segment == nil {
+			segments := manager.Segment.GetBy(WithID(segmentID), segmentFilter)
+			if len(segments) != 1 {
 				continue
 			}
+			segment := segments[0]
 			if !funcutil.SliceContain(searchPartIDs, segment.Partition()) {
 				err := fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segmentID, segment.Partition(), searchPartIDs)
 				return searchPartIDs, newSegmentIDs, err
