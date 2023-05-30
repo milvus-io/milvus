@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 )
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -63,6 +64,14 @@ func (p *autoIndexConfig) initParams() {
 	if !p.Enable {
 		// init a default ExtraParams
 		p.BigDataExtraParams = autoindex.NewBigDataIndexExtraParams()
+
+		// logic for open source autoindex.
+		p.indexParamsStr = p.Base.LoadWithDefault(
+			"autoIndex.params.build",
+			`{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`,
+		)
+		p.parseBuildParams(p.indexParamsStr)
+		p.panicIfNotInvalid()
 		return
 	}
 	p.indexParamsStr = p.Base.LoadWithDefault("autoIndex.params.build", "")
@@ -96,5 +105,20 @@ func (p *autoIndexConfig) parseExtraParams(paramsStr string) {
 	if err != nil {
 		err2 := fmt.Errorf("parse auto index extra params failed:%w", err)
 		panic(err2)
+	}
+}
+
+func (p *autoIndexConfig) panicIfNotInvalid() {
+	indexType := p.IndexParams[common.IndexTypeKey]
+
+	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
+	if err != nil {
+		panic(fmt.Sprintf("autoIndex.build not invalid, unsupported index type: %s", indexType))
+	}
+
+	checker.SetDefaultMetricTypeIfNotExist(p.IndexParams)
+
+	if err := checker.StaticCheck(p.IndexParams); err != nil {
+		panic(fmt.Sprintf("autoIndex.build not invalid, parameters not invalid, error: %s", err.Error()))
 	}
 }
