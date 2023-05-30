@@ -145,25 +145,52 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ..
 			unIndexedIDs.Insert(s.GetID())
 		}
 	}
-	hasUnIndexed := true
-	for hasUnIndexed {
-		hasUnIndexed = false
-		for id := range unIndexedIDs {
-			// Indexed segments are compacted to a raw segment,
-			// replace it with the indexed ones
-			if len(segmentInfos[id].GetCompactionFrom()) > 0 {
-				unIndexedIDs.Remove(id)
-				for _, segID := range segmentInfos[id].GetCompactionFrom() {
-					if indexed.Contain(segID) {
-						indexedIDs.Insert(segID)
-					} else {
-						unIndexedIDs.Insert(segID)
-						hasUnIndexed = true
-					}
-				}
-				droppedIDs.Remove(segmentInfos[id].GetCompactionFrom()...)
+	// ================================================
+	// Segments blood relationship:
+	//          a   b
+	//           \ /
+	//            c   d
+	//             \ /
+	//              e
+	//
+	// GC:        a, b
+	// Indexed:   c, d, e
+	//              ||
+	//              || (Index dropped and creating new index and not finished)
+	//              \/
+	// UnIndexed: c, d, e
+	//
+	// Retrieve unIndexed expected result:
+	// unIndexed: c, d
+	// ================================================
+	isValid := func(ids ...UniqueID) bool {
+		for _, id := range ids {
+			if seg, ok := segmentInfos[id]; !ok || seg == nil {
+				return false
 			}
 		}
+		return true
+	}
+	retrieveUnIndexed := func() bool {
+		continueRetrieve := false
+		for id := range unIndexedIDs {
+			compactionFrom := segmentInfos[id].GetCompactionFrom()
+			if len(compactionFrom) > 0 && isValid(compactionFrom...) {
+				for _, fromID := range compactionFrom {
+					if indexed.Contain(fromID) {
+						indexedIDs.Insert(fromID)
+					} else {
+						unIndexedIDs.Insert(fromID)
+						continueRetrieve = true
+					}
+				}
+				unIndexedIDs.Remove(id)
+				droppedIDs.Remove(compactionFrom...)
+			}
+		}
+		return continueRetrieve
+	}
+	for retrieveUnIndexed() {
 	}
 
 	return &datapb.VchannelInfo{
