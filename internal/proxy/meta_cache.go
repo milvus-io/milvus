@@ -94,6 +94,7 @@ type collectionInfo struct {
 	shardLeaders        *shardLeaders
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
+	consistencyLevel    commonpb.ConsistencyLevel
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -337,6 +338,7 @@ func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, 
 	m.collInfo[collectionName].collID = coll.CollectionID
 	m.collInfo[collectionName].createdTimestamp = coll.CreatedTimestamp
 	m.collInfo[collectionName].createdUtcTimestamp = coll.CreatedUtcTimestamp
+	m.collInfo[collectionName].consistencyLevel = coll.ConsistencyLevel
 }
 
 func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
@@ -477,6 +479,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 		PhysicalChannelNames: coll.PhysicalChannelNames,
 		CreatedTimestamp:     coll.CreatedTimestamp,
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
+		ConsistencyLevel:     coll.ConsistencyLevel,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {

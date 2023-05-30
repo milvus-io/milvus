@@ -630,7 +630,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         int_field_one = cf.gen_int64_field(is_primary=True)
         int_field_two = cf.gen_int64_field(name="int2", is_primary=True)
-        error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one."}
+        error = {ct.err_code: 0, ct.err_msg: "Expected only one primary key field"}
         self.collection_schema_wrap.init_collection_schema(
             fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
             check_task=CheckTasks.err_res, check_items=error)

@@ -654,6 +654,19 @@ func ReplaceID2Name(oldStr string, id int64, name string) string {
 	return strings.ReplaceAll(oldStr, strconv.FormatInt(id, 10), name)
 }
 
+func parseGuaranteeTsFromConsistency(ts, tMax typeutil.Timestamp, consistency commonpb.ConsistencyLevel) typeutil.Timestamp {
+	switch consistency {
+	case commonpb.ConsistencyLevel_Strong:
+		ts = tMax
+	case commonpb.ConsistencyLevel_Bounded:
+		ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+		ts = tsoutil.AddPhysicalDurationOnTs(tMax, -ratio)
+	case commonpb.ConsistencyLevel_Eventually:
+		ts = 1
+	}
+	return ts
+}
+
 func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 	switch ts {
 	case strongTS:
