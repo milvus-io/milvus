@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/atomic"
 
@@ -26,9 +25,7 @@ type Scheduler struct {
 	queryProcessQueue chan *QueryTask
 	queryWaitQueue    chan *QueryTask
 
-	pool             *conc.Pool[any]
-	runningThreadNum int
-	cond             *sync.Cond
+	pool *conc.Pool[any]
 }
 
 func NewScheduler() *Scheduler {
@@ -42,7 +39,6 @@ func NewScheduler() *Scheduler {
 		// queryProcessQueue: make(chan),
 
 		pool: conc.NewPool[any](maxReadConcurrency, ants.WithPreAlloc(true)),
-		cond: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -155,23 +151,7 @@ func (s *Scheduler) processAll(ctx context.Context) {
 }
 
 func (s *Scheduler) process(t Task) {
-	s.cond.L.Lock()
-	for s.runningThreadNum >= s.pool.Cap() {
-		s.cond.Wait()
-	}
-	s.runningThreadNum += t.Weight()
-	s.cond.L.Unlock()
-
 	s.pool.Submit(func() (any, error) {
-		defer func() {
-			s.cond.L.Lock()
-			defer s.cond.L.Unlock()
-			s.runningThreadNum -= t.Weight()
-			if s.runningThreadNum < s.pool.Cap() {
-				s.cond.Broadcast()
-			}
-		}()
-
 		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 
 		err := t.Execute()
