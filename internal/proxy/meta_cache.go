@@ -94,6 +94,7 @@ type collectionInfo struct {
 	createdUtcTimestamp uint64
 	isLoaded            bool
 	database            string
+	consistencyLevel    commonpb.ConsistencyLevel
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -401,6 +402,7 @@ func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, 
 	m.collInfo[database][collectionName].collID = coll.CollectionID
 	m.collInfo[database][collectionName].createdTimestamp = coll.CreatedTimestamp
 	m.collInfo[database][collectionName].createdUtcTimestamp = coll.CreatedUtcTimestamp
+	m.collInfo[database][collectionName].consistencyLevel = coll.ConsistencyLevel
 }
 
 func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error) {
@@ -560,6 +562,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CreatedTimestamp:     coll.CreatedTimestamp,
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 		DbName:               coll.GetDbName(),
+		ConsistencyLevel:     coll.ConsistencyLevel,
 	}
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
