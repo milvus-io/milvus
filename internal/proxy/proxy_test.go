@@ -1548,10 +1548,8 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("get dd channel", func(t *testing.T) {
-		f := func() {
-			_, _ = proxy.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
-		}
-		assert.Panics(t, f)
+		resp, _ := proxy.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	wg.Add(1)
