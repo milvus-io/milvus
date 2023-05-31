@@ -32,7 +32,10 @@ def filter_collections_by_prefix(prefix):
     res = []
     for col in col_list:
         if col.startswith(prefix):
-            res.append(col)
+            if any(index_name in col for index_name in all_index_types):
+                res.append(col)
+            else:
+                logger.warning(f"collection {col} has no supported index, skip")
     logger.info(f"filtered collections with prefix {prefix}: {res}")
     return res
 
