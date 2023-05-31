@@ -723,11 +723,21 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 }
 
 func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
-	panic("TODO: implement me")
+	return &milvuspb.DescribeAliasResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
-	panic("TODO: implement me")
+	return &milvuspb.ListAliasesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 // GetCompactionState gets the state of a compaction

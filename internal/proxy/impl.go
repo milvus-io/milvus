@@ -2858,11 +2858,21 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 }
 
 func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
-	panic("TODO: implement me")
+	return &milvuspb.DescribeAliasResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
-	panic("TODO: implement me")
+	return &milvuspb.ListAliasesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 // DropAlias alter the alias of collection.
@@ -3159,7 +3169,12 @@ func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*
 
 // GetDdChannel returns the used channel for dd operations.
 func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	panic("implement me")
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 // GetPersistentSegmentInfo get the information of sealed segment.
@@ -5059,11 +5074,21 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 }
 
 func (node *Proxy) ListIndexedSegment(ctx context.Context, request *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
-	panic("TODO: implement me")
+	return &federpb.ListIndexedSegmentResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 func (node *Proxy) DescribeSegmentIndexData(ctx context.Context, request *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
-	panic("TODO: implement me")
+	return &federpb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
