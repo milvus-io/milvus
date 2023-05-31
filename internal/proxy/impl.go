@@ -5491,6 +5491,10 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	db := GetCurDBNameFromContextOrDefault(ctx)
+	logsToBePrinted := append(getLoggerOfClientInfo(request.GetClientInfo()), zap.String("db", db))
+	log := log.Ctx(ctx).With(logsToBePrinted...)
+
+	log.Info("connect received")
 
 	// maybe an `API` like `HasDatabase` is better, `ListDatabases` is a little heavy.
 	resp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
@@ -5500,6 +5504,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	})
 
 	if err != nil {
+		log.Info("connect failed, failed to list databases", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -5509,12 +5514,16 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Info("connect failed, failed to list databases",
+			zap.String("code", resp.GetStatus().GetErrorCode().String()),
+			zap.String("reason", resp.GetStatus().GetReason()))
 		return &milvuspb.ConnectResponse{
 			Status: proto.Clone(resp.GetStatus()).(*commonpb.Status),
 		}, nil
 	}
 
 	if !funcutil.SliceContain(resp.GetDbNames(), db) {
+		log.Info("connect failed, target database not exist")
 		return &milvuspb.ConnectResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError, // DatabaseNotExist?
@@ -5525,6 +5534,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
+		log.Info("connect failed, failed to allocate timestamp", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

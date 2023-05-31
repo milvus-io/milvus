@@ -41,7 +41,8 @@ func (c clientInfo) getLogger() []zap.Field {
 }
 
 func (c clientInfo) ctxLogRegister(ctx context.Context) {
-	log.Ctx(ctx).Info("client register", c.getLogger()...)
+	fields := append(c.getLogger(), zap.String("db", GetCurDBNameFromContextOrDefault(ctx)))
+	log.Ctx(ctx).Info("client register", fields...)
 }
 
 func (c clientInfo) logDeregister() {
