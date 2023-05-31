@@ -219,6 +219,51 @@ func testIndexCoord(t *testing.T) {
 				Infos: segmentInfos,
 			}, nil
 		},
+		CallGetRecoveryInfoV2: func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+			return &datapb.GetRecoveryInfoResponseV2{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Channels: []*datapb.VchannelInfo{
+					{
+						CollectionID:        collID,
+						ChannelName:         "",
+						SeekPosition:        nil,
+						UnflushedSegments:   nil,
+						FlushedSegments:     nil,
+						DroppedSegments:     nil,
+						UnflushedSegmentIds: nil,
+						FlushedSegmentIds:   []UniqueID{segID},
+						DroppedSegmentIds:   nil,
+					},
+				},
+				Segments: []*datapb.SegmentInfo{
+					{
+						ID:           segID,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumOfRows:    10240,
+						State:        commonpb.SegmentState_Flushed,
+						StartPosition: &internalpb.MsgPosition{
+							Timestamp: createTs,
+						},
+						Binlogs: []*datapb.FieldBinlog{
+							{
+								FieldID: fieldID,
+								Binlogs: []*datapb.Binlog{
+									{
+										LogPath: "file1",
+									},
+									{
+										LogPath: "file2",
+									},
+								},
+							},
+						},
+					},
+				},
+			}, nil
+		},
 	}
 	err = ic.SetDataCoord(dcm)
 	assert.Nil(t, err)
@@ -405,7 +450,7 @@ func testIndexCoord(t *testing.T) {
 			mockIndexs[222][indexIDTest] = progressIndex
 		})
 		resp, err = ic.DescribeIndex(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
@@ -427,7 +472,7 @@ func testIndexCoord(t *testing.T) {
 			}
 		})
 		resp, err = ic.DescribeIndex(ctx, req)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 		dcm.SetFunc(func() {
@@ -455,11 +500,47 @@ func testIndexCoord(t *testing.T) {
 				}, nil
 			}
 		})
+		dcm.CallGetFlushedSegment = getFlushedSegmentsMock([]int64{222, 333, 444})
+
+		dcm.SetFunc(func() {
+			dcm.CallGetRecoveryInfoV2 = func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+				return &datapb.GetRecoveryInfoResponseV2{}, errors.New("mock error")
+			}
+		})
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.SetFunc(func() {
+			dcm.CallGetRecoveryInfoV2 = func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+				return &datapb.GetRecoveryInfoResponseV2{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "mock fail",
+					},
+				}, nil
+			}
+		})
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.SetFunc(func() {
+			dcm.CallGetRecoveryInfoV2 = func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+				return &datapb.GetRecoveryInfoResponseV2{
+					Channels: []*datapb.VchannelInfo{
+						{
+							UnflushedSegmentIds: []int64{222, 333, 444},
+						},
+					},
+				}, nil
+			}
+		})
 		resp, err = ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, commonpb.IndexState_InProgress, resp.IndexInfos[0].State)
-		assert.Equal(t, int64(2048), resp.IndexInfos[0].IndexedRows)
+		assert.Equal(t, int64(0), resp.IndexInfos[0].IndexedRows)
 		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].TotalRows)
 
 		updateMockIndexs(func() {
@@ -470,6 +551,62 @@ func testIndexCoord(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, commonpb.IndexState_Failed, resp.IndexInfos[0].State)
+
+		dcm.SetFunc(func() {
+			dcm.CallListSegmentsInfo = func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+				return &datapb.ListSegmentsInfoResponse{
+					Infos: []*datapb.SegmentInfo{
+						{ID: 555, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{ID: 666, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{ID: 777, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+					},
+				}, nil
+			}
+		})
+		dcm.CallGetFlushedSegment = getFlushedSegmentsMock([]int64{555, 666, 777})
+		dcm.SetFunc(func() {
+			dcm.CallGetRecoveryInfoV2 = func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+				return &datapb.GetRecoveryInfoResponseV2{
+					Channels: []*datapb.VchannelInfo{
+						{
+							FlushedSegmentIds: []int64{55, 66, 77},
+						},
+					},
+					Segments: []*datapb.SegmentInfo{
+						{
+							ID:            55,
+							CollectionID:  collID,
+							NumOfRows:     2048,
+							State:         commonpb.SegmentState_Flushed,
+							StartPosition: &internalpb.MsgPosition{Timestamp: createTs - 1},
+						},
+						{
+							ID:            66,
+							CollectionID:  collID,
+							NumOfRows:     2048,
+							State:         commonpb.SegmentState_Flushed,
+							StartPosition: &internalpb.MsgPosition{Timestamp: createTs - 1},
+						},
+						{
+							ID:            77,
+							CollectionID:  collID,
+							NumOfRows:     2048,
+							State:         commonpb.SegmentState_Flushed,
+							StartPosition: &internalpb.MsgPosition{Timestamp: createTs - 1},
+						},
+					},
+				}, nil
+			}
+		})
+		// indexed segment: 55, 66, 77 and compaction to 555, 666, 777,
+		// so total rows = 2048*3, indexed rows = 2048*3, pending index rows = 2048*3, state = InProgress
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.IndexState_InProgress, resp.IndexInfos[0].State)
+		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].IndexedRows)
+		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].TotalRows)
+		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].PendingIndexRows)
 	})
 
 	t.Run("DescribeIndex", func(t *testing.T) {

@@ -380,6 +380,7 @@ type DataCoordMock struct {
 	CallAcquireSegmentLock func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
 	CallReleaseSegmentLock func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
 	CallListSegmentsInfo   func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error)
+	CallGetRecoveryInfoV2  func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error)
 }
 
 func (dcm *DataCoordMock) Init() error {
@@ -421,6 +422,10 @@ func (dcm *DataCoordMock) GetFlushedSegments(ctx context.Context, req *datapb.Ge
 
 func (dcm *DataCoordMock) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
 	return dcm.CallListSegmentsInfo(ctx, req)
+}
+
+func (dcm *DataCoordMock) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+	return dcm.CallGetRecoveryInfoV2(ctx, req)
 }
 
 func NewDataCoordMock() *DataCoordMock {
