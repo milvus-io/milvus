@@ -106,6 +106,15 @@ func (it *insertTask) checkLengthOfFieldsData() error {
 		}
 	}
 
+	var dataNameSet = typeutil.NewSet[string]()
+	for _, data := range it.FieldsData {
+		fieldName := data.GetFieldName()
+		if dataNameSet.Contain(fieldName) {
+			return errDuplicateFieldData(fieldName)
+		}
+		dataNameSet.Insert(fieldName)
+	}
+
 	if len(it.FieldsData) < neededFieldsNum {
 		return errFieldsLessThanNeeded(len(it.FieldsData), neededFieldsNum)
 	}

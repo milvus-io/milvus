@@ -55,10 +55,12 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
 				{
+					Name:     "field1",
 					AutoID:   false,
 					DataType: schemapb.DataType_Int64,
 				},
 				{
+					Name:     "field2",
 					AutoID:   false,
 					DataType: schemapb.DataType_Int64,
 				},
@@ -80,18 +82,35 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	// the num of passed fields is less than needed
 	case2.FieldsData = []*schemapb.FieldData{
 		{
-			Type: schemapb.DataType_Int64,
+			FieldName: "field1",
+			Type:      schemapb.DataType_Int64,
 		},
 	}
 	err = case2.checkLengthOfFieldsData()
 	assert.NotEqual(t, nil, err)
+	// duplicate field data
+	case2.FieldsData = []*schemapb.FieldData{
+		{
+			FieldName: "field1",
+			Type:      schemapb.DataType_Int64,
+		},
+		{
+			FieldName: "field1",
+			Type:      schemapb.DataType_Int64,
+		},
+	}
+	err = case2.checkLengthOfFieldsData()
+	assert.Error(t, err)
+
 	// satisfied
 	case2.FieldsData = []*schemapb.FieldData{
 		{
-			Type: schemapb.DataType_Int64,
+			FieldName: "field1",
+			Type:      schemapb.DataType_Int64,
 		},
 		{
-			Type: schemapb.DataType_Int64,
+			FieldName: "field2",
+			Type:      schemapb.DataType_Int64,
 		},
 	}
 	err = case2.checkLengthOfFieldsData()

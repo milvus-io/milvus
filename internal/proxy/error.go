@@ -58,6 +58,10 @@ func errFieldsLessThanNeeded(fieldsNum, needed int) error {
 	return fmt.Errorf("the length(%d) of passed fields is less than needed(%d)", fieldsNum, needed)
 }
 
+func errDuplicateFieldData(fieldName string) error {
+	return fmt.Errorf("the data of passed field(%s) is duplicated", fieldName)
+}
+
 func errUnsupportedDataType(dType schemapb.DataType) error {
 	return fmt.Errorf("%v is not supported now", dType)
 }
