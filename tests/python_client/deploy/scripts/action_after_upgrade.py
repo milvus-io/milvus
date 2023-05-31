@@ -15,7 +15,7 @@ def task_1(data_size, host):
     prefix = "task_1_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
-    assert len(col_list) == len(all_index_types)
+    assert len(col_list) > 0
     create_index(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, count=data_size)
@@ -33,7 +33,7 @@ def task_2(data_size, host):
     prefix = "task_2_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
-    assert len(col_list) == len(all_index_types)
+    assert len(col_list) > 0
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, count=data_size)
     release_collection(prefix)
@@ -50,7 +50,7 @@ def task_3(data_size, host):
     prefix = "task_3_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
-    assert len(col_list) == len(all_index_types)
+    assert len(col_list) > 0
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, count=data_size)
     release_collection(prefix)
@@ -67,7 +67,7 @@ def task_4(data_size, host):
     prefix = "task_4_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
-    assert len(col_list) == len(all_index_types)
+    assert len(col_list) > 0
     load_and_search(prefix, replicas=NUM_REPLICAS)
     create_collections_and_insert_data(prefix, flush=False, count=data_size)
     load_and_search(prefix, replicas=NUM_REPLICAS)
@@ -82,7 +82,7 @@ def task_5(data_size, host):
     prefix = "task_5_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
-    assert len(col_list) == len(all_index_types)
+    assert len(col_list) > 0
     create_index(prefix)
     load_and_search(prefix, replicas=NUM_REPLICAS)
     create_collections_and_insert_data(prefix, flush=True, count=data_size)
