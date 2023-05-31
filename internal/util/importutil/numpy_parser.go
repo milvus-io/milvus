@@ -271,6 +271,12 @@ func (p *NumpyParser) validateHeader(columnReader *NumpyColumnReader) error {
 
 	elementType := columnReader.reader.GetType()
 	shape := columnReader.reader.GetShape()
+	// if user only save an element in a numpy file, the shape list will be empty
+	if len(shape) == 0 {
+		log.Error("Numpy parser: the content stored in numpy file is not valid numpy array",
+			zap.String("fieldName", columnReader.fieldName))
+		return fmt.Errorf("the content stored in numpy file is not valid numpy array for field '%s'", columnReader.fieldName)
+	}
 	columnReader.rowCount = shape[0]
 
 	// 1. field data type should be consist to numpy data type
