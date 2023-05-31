@@ -362,6 +362,14 @@ func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) 
 	return err
 }
 
+func WrapErrParameterDuplicateFieldData(fieldName string, msg ...string) error {
+	err := errors.Wrapf(ErrParameterInvalid, "field name=%v", fieldName)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Metrics related
 func WrapErrMetricNotFound(name string, msg ...string) error {
 	err := errors.Wrapf(ErrMetricNotFound, "metric=%s", name)
