@@ -3773,7 +3773,12 @@ func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*
 
 // GetDdChannel returns the used channel for dd operations.
 func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	panic("implement me")
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me",
+		},
+	}, nil
 }
 
 // GetPersistentSegmentInfo get the information of sealed segment.

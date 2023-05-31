@@ -17,11 +17,11 @@
 package memkv
 
 import (
+	"errors"
 	"strings"
 	"sync"
 
 	"github.com/google/btree"
-
 	"github.com/milvus-io/milvus/internal/common"
 )
 
@@ -284,7 +284,7 @@ func (kv *MemoryKV) Close() {
 
 // MultiRemoveWithPrefix not implemented
 func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
-	panic("not implement")
+	return errors.New("not implement")
 }
 
 // MultiSaveAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomically.
