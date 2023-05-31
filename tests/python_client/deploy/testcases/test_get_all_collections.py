@@ -2,7 +2,7 @@ import json
 import pytest
 
 from base.client_base import TestcaseBase
-from deploy.common import get_collections
+from deploy.common import get_deploy_test_collections
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
@@ -20,8 +20,8 @@ class TestGetCollections(TestcaseBase):
         data = {
             "all": all_collections,
         }
-        with open("/tmp/ci_logs/all_collections.json", "w") as f:
+        with open("/tmp/ci_logs/deploy_test_all_collections.json", "w") as f:
             f.write(json.dumps(data))
-        log.info(f"write {len(all_collections)} collections to /tmp/ci_logs/all_collections.json")
-        collections_in_json = get_collections()
+        log.info(f"write {len(all_collections)} collections to /tmp/ci_logs/deploy_test_all_collections.json")
+        collections_in_json = get_deploy_test_collections()
         assert len(all_collections) == len(collections_in_json)

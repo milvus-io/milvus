@@ -68,13 +68,6 @@ def hello_milvus(host="127.0.0.1"):
     t1 = time.time()
     print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
 
-    # create index and load table
-    default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
-    print(f"\nCreate index...")
-    t0 = time.time()
-    collection.create_index(field_name="float_vector", index_params=default_index)
-    t1 = time.time()
-    print(f"\nCreate index cost {t1 - t0:.4f} seconds")
     print("\nGet replicas number")
     try:
         replicas_info = collection.get_replicas()
@@ -83,6 +76,17 @@ def hello_milvus(host="127.0.0.1"):
     except Exception as e:
         print(str(e))
         replica_number = 1
+
+    # create index and load table
+    default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+    print(f"\nCreate index...")
+    t0 = time.time()
+
+    collection.release()
+
+    collection.create_index(field_name="float_vector", index_params=default_index)
+    t1 = time.time()
+    print(f"\nCreate index cost {t1 - t0:.4f} seconds")
     print(f"\nload collection...")
     t0 = time.time()
     collection.load(replica_number=replica_number)

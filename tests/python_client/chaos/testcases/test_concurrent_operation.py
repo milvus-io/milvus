@@ -4,10 +4,10 @@ import json
 from time import sleep
 from pymilvus import connections
 from chaos.checker import (InsertChecker,
-                           FlushChecker, 
+                           FlushChecker,
+                           CompactChecker, 
                            SearchChecker,
                            QueryChecker,
-                           IndexChecker,
                            DeleteChecker,
                            Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
@@ -26,6 +26,11 @@ def assert_statistic(checkers, expectations={}):
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
+        if 'compact' in str(k):
+            log.info("skip compact check")
+            log.info(
+                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            continue           
         if expectations.get(k, '') == constants.FAIL:
             log.info(
                 f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
@@ -53,7 +58,7 @@ class TestBase:
     expect_create = constants.SUCC
     expect_insert = constants.SUCC
     expect_flush = constants.SUCC
-    expect_index = constants.SUCC
+    expect_compact = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
     host = '127.0.0.1'
@@ -84,9 +89,9 @@ class TestOperations(TestBase):
         checkers = {
             Op.insert: InsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
-            # Op.index: IndexChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
+            Op.compact:CompactChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
         }
         self.health_checkers = checkers

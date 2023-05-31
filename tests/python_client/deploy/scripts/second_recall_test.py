@@ -1,8 +1,10 @@
 import h5py
 import numpy as np
 import time
-from loguru import logger
+import sys
+import threading
 from pathlib import Path
+from loguru import logger
 from pymilvus import connections, Collection
 
 
@@ -58,7 +60,7 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
     search_params = gen_search_param(index_type)
     for i in range(3):
         t0 = time.time()
-        logger.info(f"Search...")
+        logger.info(f"\nSearch...")
         # define output_fields of search result
         res = collection.search(
             test[:nq], "float_vector", search_params, topK, output_fields=["int64"], timeout=TIMEOUT
@@ -96,5 +98,6 @@ if __name__ == "__main__":
     parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
     args = parser.parse_args()
     host = args.host
+    tasks = []
     for index_type in ["HNSW"]:
         search_test(host, index_type)

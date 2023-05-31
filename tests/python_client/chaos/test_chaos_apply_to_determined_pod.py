@@ -1,4 +1,3 @@
-import threading
 import pytest
 import time
 from time import sleep
@@ -6,9 +5,10 @@ from pathlib import Path
 from pymilvus import connections
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
+from chaos import chaos_commons as cc
 import logging as log
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name, get_milvus_deploy_tool
-from utils.util_common import update_key_value, update_key_name, gen_experiment_config
+from utils.util_k8s import (wait_pods_ready, get_milvus_instance_name,
+                            get_milvus_deploy_tool, get_etcd_leader, get_etcd_followers)
 import constants
 
 
@@ -54,33 +54,30 @@ class TestChaosApply:
         chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
 
-    def test_chaos_apply(self, chaos_type, target_component, target_number, chaos_duration, chaos_interval):
+    def test_chaos_apply(self, chaos_type, target_pod, chaos_duration, chaos_interval):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
         log.info(connections.get_connection_addr('default'))
         release_name = self.release_name
-        chaos_config = gen_experiment_config(
-            f"{str(Path(__file__).absolute().parent)}/chaos_objects/{chaos_type.replace('-', '_')}/chaos_{target_component}_{chaos_type.replace('-', '_')}.yaml")
-        chaos_config['metadata']['name'] = f"test-{target_component}-{chaos_type.replace('_','-')}-{int(time.time())}"
-        chaos_config['metadata']['namespace'] = self.chaos_ns
+        deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
+        target_pod_list = []
+        if target_pod == 'etcd_leader':
+            etcd_leader = get_etcd_leader(release_name, deploy_tool)
+            if etcd_leader is None:
+                raise Exception("no etcd leader")
+            target_pod_list.append(etcd_leader)
+        if target_pod == 'etcd_followers':
+            etcd_followers = get_etcd_followers(release_name, deploy_tool)
+            if etcd_followers is None:
+                raise Exception("no etcd followers")
+            target_pod_list.extend(etcd_followers)
+        log.info(f"target_pod_list: {target_pod_list}")
+        chaos_type = chaos_type.replace('_', '-')
+        chaos_config = cc.gen_experiment_config(f"{str(Path(__file__).absolute().parent)}/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
+        chaos_config['metadata']['name'] = f"test-{target_pod.replace('_', '-')}-{chaos_type}-{int(time.time())}"
         meta_name = chaos_config.get('metadata', None).get('name', None)
-        update_key_value(chaos_config, "release", release_name)
-        update_key_value(chaos_config, "app.kubernetes.io/instance", release_name)
-        update_key_value(chaos_config, "namespaces", [self.milvus_ns])
-        update_key_value(chaos_config, "value", target_number)
-        self.chaos_config = chaos_config
-        if "s" in chaos_interval:
-            schedule = f"*/{chaos_interval[:-1]} * * * * *"
-        if "m" in chaos_interval:
-            schedule = f"00 */{chaos_interval[:-1]} * * * *"
-        update_key_value(chaos_config, "schedule", schedule)
-        # update chaos_duration from string to int with unit second
-        chaos_duration = chaos_duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
-        chaos_duration = eval(chaos_duration)
-        update_key_value(chaos_config, "duration", f"{chaos_duration//60}m")
-        if self.deploy_by == "milvus-operator":
-            update_key_name(chaos_config, "component", "app.kubernetes.io/component")
-        self._chaos_config = chaos_config  # cache the chaos config for tear down
+        chaos_config['spec']['selector']['pods']['chaos-testing'] = target_pod_list
+        self.chaos_config = chaos_config  # cache the chaos config for tear down  # cache the chaos config for tear down
         log.info(f"chaos_config: {chaos_config}")
         # apply chaos object
         chaos_res = CusResource(kind=chaos_config['kind'],
@@ -94,6 +91,8 @@ class TestChaosApply:
         assert meta_name in chaos_list
         res = chaos_res.get(meta_name)
         log.info(f"chaos inject result: {res['kind']}, {res['metadata']['name']}")
+        chaos_duration = chaos_duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
+        chaos_duration = eval(chaos_duration)
         sleep(chaos_duration)
         # delete chaos
         chaos_res.delete(meta_name)

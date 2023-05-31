@@ -4,9 +4,7 @@ from collections import defaultdict
 import pytest
 
 from base.client_base import TestcaseBase
-from common import common_func as cf
-from common import common_type as ct
-from deploy.common import get_collections
+from deploy.common import get_chaos_test_collections
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
@@ -36,8 +34,8 @@ class TestGetCollections(TestcaseBase):
         data = {
             "all": selected_collections,
         }
-        with open("/tmp/ci_logs/all_collections.json", "w") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json", "w") as f:
             f.write(json.dumps(data))
-        log.info(f"write {len(selected_collections)} collections to /tmp/ci_logs/all_collections.json")
-        collections_in_json = get_collections()
+        log.info(f"write {len(selected_collections)} collections to /tmp/ci_logs/chaos_test_all_collections.json")
+        collections_in_json = get_chaos_test_collections()
         assert len(selected_collections) == len(collections_in_json)

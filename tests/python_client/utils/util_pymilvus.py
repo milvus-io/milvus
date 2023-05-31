@@ -723,7 +723,7 @@ def gen_invalid_vectors():
     return invalid_vectors
 
 
-def gen_invaild_search_params():
+def gen_invalid_search_params():
     invalid_search_key = 100
     search_params = []
     for index_type in all_index_types:

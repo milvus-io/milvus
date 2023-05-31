@@ -2,7 +2,6 @@ cluster:
   enabled: true
 log:
   level: debug
-
 image:
   all:
     repository: milvusdb/milvus

@@ -28,6 +28,7 @@ NUM_REPLICAS = 2
 
 def filter_collections_by_prefix(prefix):
     col_list = list_collections()
+    logger.info(f"all collections: {col_list}")
     res = []
     for col in col_list:
         if col.startswith(prefix):
