@@ -111,6 +111,11 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.NotNil(t, err)
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.UpsertRequest{
+			DbName:         "db_test",
+			CollectionName: "col1",
+		})
+		assert.NotNil(t, err)
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: "col1",
 		})

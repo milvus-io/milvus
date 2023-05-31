@@ -74,6 +74,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCompaction.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeInsert.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDelete.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpsert.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
