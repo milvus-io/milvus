@@ -95,7 +95,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "stored_binlog_size",
-			Help:      "binlog size of segments",
+			Help:      "binlog size of healthy segments",
 		}, []string{
 			collectionIDLabelName,
 			segmentIDLabelName,
