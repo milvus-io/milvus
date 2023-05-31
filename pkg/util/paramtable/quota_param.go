@@ -344,7 +344,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			// [0, inf)
 			if rate < 0 {
-				return max
+				return p.DMLMaxInsertRate.GetValue()
 			}
 			return fmt.Sprintf("%f", rate)
 		},
@@ -432,7 +432,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			// [0, inf)
 			if rate < 0 {
-				return max
+				return p.DMLMaxDeleteRate.GetValue()
 			}
 			return fmt.Sprintf("%f", rate)
 		},
@@ -520,7 +520,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			// [0, inf)
 			if rate < 0 {
-				return max
+				return p.DMLMaxBulkLoadRate.GetValue()
 			}
 			return fmt.Sprintf("%f", rate)
 		},
@@ -612,7 +612,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			// [0, inf)
 			if getAsFloat(v) < 0 {
-				return max
+				return p.DQLMaxSearchRate.GetValue()
 			}
 			return v
 		},
@@ -692,7 +692,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			}
 			// [0, inf)
 			if getAsFloat(v) < 0 {
-				return max
+				return p.DQLMaxQueryRate.GetValue()
 			}
 			return v
 		},
@@ -950,7 +950,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, +inf)
 			if level <= 0 {
-				level = getAsFloat(quota)
+				return max
 			}
 			// megabytes to bytes
 			return fmt.Sprintf("%f", megaBytes2Bytes(level))
@@ -971,7 +971,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, +inf)
 			if level <= 0 {
-				level = getAsFloat(quota)
+				return p.DiskQuota.GetValue()
 			}
 			// megabytes to bytes
 			return fmt.Sprintf("%f", megaBytes2Bytes(level))

@@ -81,6 +81,34 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, float64(1)*1024*1024, params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(10)*1024*1024, params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(1)*1024*1024, params.QuotaConfig.DMLMinBulkLoadRatePerCollection.GetAsFloat())
+
+		// test only set global rate limit
+		params.Save(params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DMLMaxDeleteRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DMLMinDeleteRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DMLMinBulkLoadRatePerCollection.Key, "-1")
+		assert.Equal(t, params.QuotaConfig.DMLMaxInsertRate.GetAsFloat(), params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat())
+		assert.Equal(t, params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat(), params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat())
+		assert.Equal(t, params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat(), params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinBulkLoadRatePerCollection.GetAsFloat())
+
+		// test invalid config value
+		params.Save(params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "1")
+		params.Save(params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "5")
+		params.Save(params.QuotaConfig.DMLMaxDeleteRatePerCollection.Key, "1")
+		params.Save(params.QuotaConfig.DMLMinDeleteRatePerCollection.Key, "5")
+		params.Save(params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.Key, "1")
+		params.Save(params.QuotaConfig.DMLMinBulkLoadRatePerCollection.Key, "5")
+		assert.Equal(t, float64(1*1024*1024), params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(1*1024*1024), params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinDeleteRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(1*1024*1024), params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DMLMinBulkLoadRatePerCollection.GetAsFloat())
 	})
 
 	t.Run("test dql", func(t *testing.T) {
@@ -107,6 +135,26 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, float64(1), params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(10), params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(1), params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat())
+
+		// test only config global value
+		params.Save(params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DQLMinSearchRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DQLMaxQueryRatePerCollection.Key, "-1")
+		params.Save(params.QuotaConfig.DQLMinQueryRatePerCollection.Key, "-1")
+		assert.Equal(t, params.QuotaConfig.DQLMaxSearchRate.GetAsFloat(), params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat())
+		assert.Equal(t, params.QuotaConfig.DQLMaxQueryRate.GetAsFloat(), params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat())
+
+		// test invalid config
+		params.Save(params.QuotaConfig.DQLMaxSearchRatePerCollection.Key, "1")
+		params.Save(params.QuotaConfig.DQLMinSearchRatePerCollection.Key, "5")
+		params.Save(params.QuotaConfig.DQLMaxQueryRatePerCollection.Key, "1")
+		params.Save(params.QuotaConfig.DQLMinQueryRatePerCollection.Key, "5")
+		assert.Equal(t, float64(1), params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DQLMinSearchRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(1), params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(0), params.QuotaConfig.DQLMinQueryRatePerCollection.GetAsFloat())
 	})
 
 	t.Run("test limits", func(t *testing.T) {
@@ -138,5 +186,15 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, false, qc.ResultProtectionEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxReadResultRate.GetAsFloat())
 		assert.Equal(t, 0.9, qc.CoolOffSpeed.GetAsFloat())
+	})
+
+	t.Run("test disk quota", func(t *testing.T) {
+		assert.Equal(t, defaultMax, qc.DiskQuota.GetAsFloat())
+		assert.Equal(t, defaultMax, qc.DiskQuotaPerCollection.GetAsFloat())
+
+		// test invalid config
+		params.Save(params.QuotaConfig.DiskQuotaPerCollection.Key, "-1")
+		assert.Equal(t, qc.DiskQuota.GetAsFloat(), qc.DiskQuotaPerCollection.GetAsFloat())
+
 	})
 }
