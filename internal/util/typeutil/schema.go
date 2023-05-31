@@ -229,6 +229,16 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	return &schemaHelper, nil
 }
 
+// GetVectorFieldSchema get vector field schema from collection schema.
+func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.Fields {
+		if IsVectorType(fieldSchema.DataType) {
+			return fieldSchema, nil
+		}
+	}
+	return nil, errors.New("vector field is not found")
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
