@@ -957,9 +957,12 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	isPrimaryKeyNum := 0
 
 	var dataNameSet = typeutil.NewSet[string]()
-
 	for _, data := range insertMsg.FieldsData {
-		dataNameSet.Insert(data.GetFieldName())
+		fieldName := data.GetFieldName()
+		if dataNameSet.Contain(fieldName) {
+			return merr.WrapErrParameterDuplicateFieldData(fieldName, "The FieldDatas parameter being passed contains duplicate data for a field.")
+		}
+		dataNameSet.Insert(fieldName)
 	}
 
 	for _, fieldSchema := range schema.Fields {

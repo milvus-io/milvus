@@ -1168,6 +1168,20 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case5.insertMsg.FieldsData), 3)
 
+	// duplicate field datas
+	case5.insertMsg.FieldsData = []*schemapb.FieldData{
+		{
+			FieldName: "a",
+			Type:      schemapb.DataType_Int64,
+		},
+		{
+			FieldName: "a",
+			Type:      schemapb.DataType_Int64,
+		},
+	}
+	err = fillFieldsDataBySchema(case5.schema, case5.insertMsg)
+	assert.Error(t, err)
+
 	// not pk, but autoid == true
 	case6 := insertTask{
 		schema: &schemapb.CollectionSchema{
