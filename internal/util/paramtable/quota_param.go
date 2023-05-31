@@ -341,7 +341,7 @@ func (p *quotaConfig) initDMLMaxInsertRatePerCollection() {
 	}
 	// [0, inf)
 	if p.DMLMaxInsertRatePerCollection < 0 {
-		p.DMLMaxInsertRatePerCollection = defaultMax
+		p.DMLMaxInsertRatePerCollection = p.DMLMaxInsertRate
 	}
 }
 
@@ -358,7 +358,7 @@ func (p *quotaConfig) initDMLMinInsertRatePerCollection() {
 	}
 	if !p.checkMinMaxLegal(p.DMLMinInsertRatePerCollection, p.DMLMaxInsertRatePerCollection) {
 		p.DMLMinInsertRatePerCollection = defaultMin
-		p.DMLMaxInsertRatePerCollection = defaultMax
+		p.DMLMaxInsertRatePerCollection = p.DMLMaxInsertRate
 	}
 }
 
@@ -405,7 +405,7 @@ func (p *quotaConfig) initDMLMaxDeleteRatePerCollection() {
 	}
 	// [0, inf)
 	if p.DMLMaxDeleteRatePerCollection < 0 {
-		p.DMLMaxDeleteRatePerCollection = defaultMax
+		p.DMLMaxDeleteRatePerCollection = p.DMLMaxDeleteRate
 	}
 }
 
@@ -422,7 +422,7 @@ func (p *quotaConfig) initDMLMinDeleteRatePerCollection() {
 	}
 	if !p.checkMinMaxLegal(p.DMLMinDeleteRatePerCollection, p.DMLMaxDeleteRatePerCollection) {
 		p.DMLMinDeleteRatePerCollection = defaultMin
-		p.DMLMaxDeleteRatePerCollection = defaultMax
+		p.DMLMaxDeleteRatePerCollection = p.DMLMaxDeleteRate
 	}
 }
 
@@ -469,7 +469,7 @@ func (p *quotaConfig) initDMLMaxBulkLoadRatePerCollection() {
 	}
 	// [0, inf)
 	if p.DMLMaxBulkLoadRatePerCollection < 0 {
-		p.DMLMaxBulkLoadRatePerCollection = defaultMax
+		p.DMLMaxBulkLoadRatePerCollection = p.DMLMaxBulkLoadRate
 	}
 }
 
@@ -486,7 +486,7 @@ func (p *quotaConfig) initDMLMinBulkLoadRatePerCollection() {
 	}
 	if !p.checkMinMaxLegal(p.DMLMinBulkLoadRatePerCollection, p.DMLMaxBulkLoadRatePerCollection) {
 		p.DMLMinBulkLoadRatePerCollection = defaultMin
-		p.DMLMaxBulkLoadRatePerCollection = defaultMax
+		p.DMLMaxBulkLoadRatePerCollection = p.DMLMaxBulkLoadRate
 	}
 }
 
@@ -530,7 +530,7 @@ func (p *quotaConfig) initDQLMaxSearchRatePerCollection() {
 	p.DQLMaxSearchRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.searchRate.collection.max", defaultMax)
 	// [0, inf)
 	if p.DQLMaxSearchRatePerCollection < 0 {
-		p.DQLMaxSearchRatePerCollection = defaultMax
+		p.DQLMaxSearchRatePerCollection = p.DQLMaxSearchRate
 	}
 }
 
@@ -546,7 +546,7 @@ func (p *quotaConfig) initDQLMinSearchRatePerCollection() {
 	}
 	if !p.checkMinMaxLegal(p.DQLMinSearchRatePerCollection, p.DQLMaxSearchRatePerCollection) {
 		p.DQLMinSearchRatePerCollection = defaultMin
-		p.DQLMaxSearchRatePerCollection = defaultMax
+		p.DQLMaxSearchRatePerCollection = p.DQLMaxSearchRate
 	}
 }
 
@@ -586,7 +586,7 @@ func (p *quotaConfig) initDQLMaxQueryRatePerCollection() {
 	p.DQLMaxQueryRatePerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.dql.queryRate.collection.max", defaultMax)
 	// [0, inf)
 	if p.DQLMaxQueryRatePerCollection < 0 {
-		p.DQLMaxQueryRatePerCollection = defaultMax
+		p.DQLMaxQueryRatePerCollection = p.DQLMaxQueryRate
 	}
 }
 
@@ -602,7 +602,7 @@ func (p *quotaConfig) initDQLMinQueryRatePerCollection() {
 	}
 	if !p.checkMinMaxLegal(p.DQLMinQueryRatePerCollection, p.DQLMaxQueryRatePerCollection) {
 		p.DQLMinQueryRatePerCollection = defaultMin
-		p.DQLMaxQueryRatePerCollection = defaultMax
+		p.DQLMaxQueryRatePerCollection = p.DQLMaxQueryRate
 	}
 }
 
@@ -738,6 +738,7 @@ func (p *quotaConfig) initDiskQuota() {
 	if p.DiskQuota <= 0 {
 		p.DiskQuota = defaultDiskQuotaInMB
 	}
+
 	if p.DiskQuota < defaultDiskQuotaInMB {
 		log.Info("init disk quota", zap.String("diskQuota(MB)", fmt.Sprintf("%v", p.DiskQuota)))
 	} else {
@@ -755,8 +756,11 @@ func (p *quotaConfig) initDiskQuotaPerCollection() {
 	p.DiskQuotaPerCollection = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.DiskQuotaPerCollection", defaultDiskQuotaInMB)
 	// (0, +inf)
 	if p.DiskQuotaPerCollection <= 0 {
-		p.DiskQuotaPerCollection = defaultDiskQuotaInMB
+		p.DiskQuotaPerCollection = p.DiskQuota
+		log.Info("init disk quota per DB", zap.String("diskQuotaPerCollection(MB)", fmt.Sprintf("%v", p.DiskQuotaPerCollection)))
+		return
 	}
+
 	if p.DiskQuotaPerCollection < defaultDiskQuotaInMB {
 		log.Info("init disk quota per DB", zap.String("diskQuotaPerCollection(MB)", fmt.Sprintf("%v", p.DiskQuotaPerCollection)))
 	} else {
