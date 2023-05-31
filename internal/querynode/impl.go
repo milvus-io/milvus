@@ -747,6 +747,14 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 	}
 
+	// Define the metric type when it has not been explicitly assigned by the user.
+	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() == "" {
+		collection, err := node.metaReplica.getCollectionByID(req.GetReq().GetCollectionID())
+		if err == nil {
+			req.Req.MetricType = collection.getMetricType()
+		}
+	}
+
 	toReduceResults := make([]*internalpb.SearchResults, 0)
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	mu := &sync.Mutex{}

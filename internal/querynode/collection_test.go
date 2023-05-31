@@ -159,3 +159,12 @@ func TestCollection_getFieldType(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, fieldType)
 }
+
+func TestCollection_getMetricType(t *testing.T) {
+	collectionID := UniqueID(0)
+	schema := genTestCollectionSchema()
+	collection := newCollection(collectionID, schema)
+	collection.setMetricType("L2")
+	mt := collection.getMetricType()
+	assert.Equal(t, "L2", mt)
+}
