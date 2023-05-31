@@ -326,7 +326,7 @@ func (node *QueryNode) Init() error {
 
 		cpuNum := runtime.GOMAXPROCS(0)
 
-		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true), ants.WithPanicHandler(func(v any) { panic(v) }))
 		if err != nil {
 			log.Error("QueryNode init channel pool failed", zap.Error(err))
 			initError = err
