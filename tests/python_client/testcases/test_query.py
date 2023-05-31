@@ -18,7 +18,7 @@ prefix = "query"
 exp_res = "exp_res"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 default_mix_expr = "int64 >= 0 && varchar >= \"0\""
-default_invaild_expr = "varchar >= 0"
+default_invalid_expr = "varchar >= 0"
 default_string_term_expr = f'{ct.default_string_field_name} in [\"0\", \"1\"]'
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
@@ -880,7 +880,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         partition_names = cf.gen_unique_str()
-        error = {ct.err_code: 1, ct.err_msg: f'PartitonName: {partition_names} not found'}
+        error = {ct.err_code: 1, ct.err_msg: f'PartitionName: {partition_names} not found'}
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1538,7 +1538,7 @@ class TestqueryString(TestcaseBase):
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_invaild_string_expressions())
+    @pytest.mark.parametrize("expression", cf.gen_invalid_string_expressions())
     def test_query_with_invalid_string_expr(self, expression):
         """
         target: test query data
@@ -1579,10 +1579,10 @@ class TestqueryString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_string_with_invaild_prefix_expr(self):
+    def test_query_string_with_invalid_prefix_expr(self):
         """
         target: test query with invalid prefix string expression
-        method: specify string primary field, use invaild prefix string expr
+        method: specify string primary field, use invalid prefix string expr
         expected: raise error
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]

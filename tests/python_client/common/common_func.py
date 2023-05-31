@@ -171,9 +171,11 @@ def gen_collection_schema_all_datatype(description=ct.default_desc,
     return schema
 
 
-def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False):
+def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False,
+                          enable_dynamic_field=False):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
-                                                                    description=description, auto_id=auto_id)
+                                                                    description=description, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field)
     return schema
 
 
@@ -396,7 +398,7 @@ def gen_invalid_field_types():
     return field_types
 
 
-def gen_invaild_search_params_type():
+def gen_invalid_search_params_type():
     invalid_search_key = 100
     search_params = []
     for index_type in ct.all_index_types:
@@ -543,7 +545,7 @@ def gen_normal_string_expressions(field):
     return expressions
 
 
-def gen_invaild_string_expressions():
+def gen_invalid_string_expressions():
     expressions = [
         "varchar in [0,  \"1\"]",
         "varchar not in [\"0\", 1, 2]"
