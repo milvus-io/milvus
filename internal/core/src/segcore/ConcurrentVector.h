@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <simdjson.h>
 #include <tbb/concurrent_vector.h>
 
 #include <atomic>
@@ -195,10 +196,27 @@ class ConcurrentVectorImpl : public VectorBase {
 
     void
     set_data_raw(ssize_t element_offset, const std::vector<storage::FieldDataPtr>& datas) override {
+        // As the JSON data are stored as a string in FieldData,
+        // we need to cast it to milvus::Json here.
+        std::vector<milvus::Json> json_data;
+
         for (auto& field_data : datas) {
             auto num_rows = field_data->get_num_rows();
-            set_data_raw(element_offset, field_data->Data(), num_rows);
+
+            const void* data = field_data->Data();
+            if constexpr (std::is_same_v<Type, milvus::Json>) {
+                json_data.reserve(num_rows);
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    auto json_bytes = reinterpret_cast<const std::string*>(field_data->RawValue(i));
+                    json_data.emplace_back(simdjson::padded_string(*json_bytes));
+                }
+                data = json_data.data();
+            }
+
+            set_data_raw(element_offset, data, num_rows);
             element_offset += num_rows;
+
+            json_data.clear();
         }
     }
 
