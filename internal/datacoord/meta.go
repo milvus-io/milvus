@@ -264,9 +264,9 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
+			metrics.DataCoordStoredBinlogSize.WithLabelValues(
+				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
 		}
-		metrics.DataCoordStoredBinlogSize.WithLabelValues(
-			fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
 	}
 	return total, collectionBinlogSize
 }
