@@ -140,7 +140,7 @@ class TestActionBeforeReinstall(TestDeployBase):
                            check_task=CheckTasks.check_query_not_empty)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("replica_number", [0,1,2])
+    @pytest.mark.parametrize("replica_number", [0, 1, 2])
     @pytest.mark.parametrize("is_compacted", [True, False])
     @pytest.mark.parametrize("is_deleted", [True, False])
     @pytest.mark.parametrize("is_string_indexed", [True, False])
@@ -149,7 +149,7 @@ class TestActionBeforeReinstall(TestDeployBase):
     # @pytest.mark.parametrize("is_empty", [True, False])  # , "BIN_FLAT" (keep one is enough)
     @pytest.mark.parametrize("index_type", random.sample(dc.all_index_types, 3))  # , "BIN_FLAT"
     def test_task_all(self, index_type, is_compacted,
-                        segment_status, is_vector_indexed, is_string_indexed, replica_number, is_deleted, data_size):
+                      segment_status, is_vector_indexed, is_string_indexed, replica_number, is_deleted, data_size):
         """
         before reinstall: create collection and insert data, load and search
         after reinstall: get collection, search, create index, load, and search
@@ -174,7 +174,7 @@ class TestActionBeforeReinstall(TestDeployBase):
         # insert with flush multiple times to generate multiple sealed segment
         for i in range(5):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
-                                                is_flush=False, name=name)[0]
+                                         is_flush=False, name=name)
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
         else:

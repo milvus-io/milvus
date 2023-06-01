@@ -219,7 +219,7 @@ pipeline {
                                                         MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                         TEST_TIMEOUT="${e2e_timeout_seconds}" \
                                                         MQ_MODE="${mqMode}" \
-                                                        ./ci_e2e.sh  "-n 4 --tags ${tag} testcases/test_utility.py::TestUtilityUserPassword testcases/test_utility.py::TestUtilityInvalidUserPassword"
+                                                        ./ci_e2e.sh  "-n 6 --tags ${tag} testcases/test_utility.py::TestUtilityUserPassword testcases/test_utility.py::TestUtilityInvalidUserPassword"
                                                         """
                                                     } else {
                                                         sh """ 
