@@ -18,15 +18,21 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -117,11 +123,12 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, metricType string, collectionID int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:     loadType,
 		CollectionID: collectionID,
 		PartitionIDs: partitions,
+		MetricType:   metricType,
 	}
 }
 
@@ -192,4 +199,27 @@ func getShardLeader(replicaMgr *meta.ReplicaManager, distMgr *meta.DistributionM
 		return 0, false
 	}
 	return distMgr.GetShardLeader(replica, channel)
+}
+
+func getMetricType(ctx context.Context, collection int64, schema *schemapb.CollectionSchema, broker meta.Broker) (string, error) {
+	indexInfos, err := broker.DescribeIndex(ctx, collection)
+	if err != nil {
+		return "", err
+	}
+	vecField, err := typeutil.GetVectorFieldSchema(schema)
+	if err != nil {
+		return "", err
+	}
+	indexInfo, ok := lo.Find(indexInfos, func(info *indexpb.IndexInfo) bool {
+		return info.GetFieldID() == vecField.GetFieldID()
+	})
+	if !ok || indexInfo == nil {
+		err = fmt.Errorf("cannot find index info for %s field", vecField.GetName())
+		return "", err
+	}
+	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.GetIndexParams())
+	if err != nil {
+		return "", err
+	}
+	return metricType, nil
 }

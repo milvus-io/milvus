@@ -248,6 +248,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}, req.GetLoadMeta())
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
 		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
 	if err != nil {
@@ -755,6 +757,15 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+
+	// Define the metric type when it has not been explicitly assigned by the user.
+	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() == "" {
+		collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
+		if collection != nil {
+			req.Req.MetricType = collection.GetMetricType()
+		}
+	}
+
 	var toReduceResults []*internalpb.SearchResults
 	var mu sync.Mutex
 	runningGp, runningCtx := errgroup.WithContext(ctx)

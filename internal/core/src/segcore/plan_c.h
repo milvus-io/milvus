@@ -52,6 +52,9 @@ const char*
 GetMetricType(CSearchPlan plan);
 
 void
+SetMetricType(CSearchPlan plan, const char* metric_type);
+
+void
 DeleteSearchPlan(CSearchPlan plan);
 
 void

@@ -81,6 +81,7 @@ type Collection struct {
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
+	metricType    string
 	schema        *schemapb.CollectionSchema
 }
 
@@ -120,6 +121,14 @@ func (c *Collection) RemovePartition(partitionID int64) {
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
+}
+
+func (c *Collection) SetMetricType(metricType string) {
+	c.metricType = metricType
+}
+
+func (c *Collection) GetMetricType() string {
+	return c.metricType
 }
 
 // newCollection returns a new Collection

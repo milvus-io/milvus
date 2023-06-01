@@ -166,6 +166,21 @@ get_invalid_dict = [
     {"a".join("a" for i in range(256)): "a"}
 ]
 
+get_invalid_metric_type = [
+    [],
+    1,
+    [1, "2", 3],
+    (1,),
+    {1: 1},
+    None,
+    " ",
+    "12-s",
+    "12 s",
+    "(mn)",
+    "中文",
+    "%$#",
+    "".join("a" for i in range(max_name_length + 1))]
+
 get_dict_without_host_port = [
     {"host": "host"},
     {"": ""}

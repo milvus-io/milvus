@@ -134,6 +134,15 @@ GetMetricType(CSearchPlan plan) {
 }
 
 void
+SetMetricType(CSearchPlan plan, const char* metric_type) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    if (search_plan->plan_node_->search_info_.metric_type_ == "") {
+        search_plan->plan_node_->search_info_.metric_type_ =
+            std::string(metric_type);
+    }
+}
+
+void
 DeleteSearchPlan(CSearchPlan cPlan) {
     auto plan = (milvus::query::Plan*)cPlan;
     delete plan;

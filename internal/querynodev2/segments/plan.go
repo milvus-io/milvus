@@ -58,6 +58,7 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	}
 
 	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	newPlan.setMetricType(col.GetMetricType())
 	return newPlan, nil
 }
 
@@ -74,12 +75,19 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	}
 
 	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	newPlan.setMetricType(col.GetMetricType())
 	return newPlan, nil
 }
 
 func (plan *SearchPlan) getTopK() int64 {
 	topK := C.GetTopK(plan.cSearchPlan)
 	return int64(topK)
+}
+
+func (plan *SearchPlan) setMetricType(metricType string) {
+	cmt := C.CString(metricType)
+	defer C.free(unsafe.Pointer(cmt))
+	C.SetMetricType(plan.cSearchPlan, cmt)
 }
 
 func (plan *SearchPlan) getMetricType() string {
