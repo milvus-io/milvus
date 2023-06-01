@@ -884,6 +884,16 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
+	t.Run("GetIndexStatistics", func(t *testing.T) {
+		req := &indexpb.GetIndexStatisticsRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+		}
+		resp, err := ic.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
+	})
+
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
 		req := &indexpb.GetIndexBuildProgressRequest{
 			CollectionID: collID,
@@ -1429,5 +1439,214 @@ func TestIndexCoord_GetIndexBuildProgress(t *testing.T) {
 		resp, err := ic.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestIndexCoord_GetIndexStatistics(t *testing.T) {
+	var (
+		collID                 = UniqueID(1)
+		partID                 = UniqueID(2)
+		fieldID                = UniqueID(10)
+		indexID                = UniqueID(100)
+		segIDBeforeCreateIndex = UniqueID(999)
+		segIDAfterCreateIndex  = UniqueID(1001)
+		segIDFlushed           = UniqueID(1002)
+		//buildID      = UniqueID(10000)
+		indexName  = "default_idx"
+		typeParams = []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "128"},
+		}
+		indexParams = []*commonpb.KeyValuePair{
+			{Key: "index_type", Value: "IVF_FLAT"},
+		}
+		indexCreateTS = uint64(1000)
+		ctx           = context.Background()
+	)
+
+	ic := &IndexCoord{
+		metaTable: &metaTable{
+			catalog: &indexcoord.Catalog{Txn: NewMockEtcdKV()},
+			collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					//finished
+					indexID: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID,
+						IndexID:         indexID,
+						IndexName:       indexName,
+						IsDeleted:       false,
+						CreateTime:      indexCreateTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segIDAfterCreateIndex: { // segment build after index created
+					indexID: &model.SegmentIndex{
+						IndexState:   commonpb.IndexState_Finished,
+						SegmentID:    segIDAfterCreateIndex,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumRows:      10240,
+						CreateTime:   indexCreateTS + 1,
+					},
+				},
+				segIDBeforeCreateIndex: { // segment build before index created
+					indexID: &model.SegmentIndex{
+						IndexState:   commonpb.IndexState_Finished,
+						SegmentID:    segIDBeforeCreateIndex,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumRows:      10240,
+						CreateTime:   indexCreateTS,
+					},
+				},
+			},
+		},
+	}
+
+	dcm := &DataCoordMock{
+		CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return &datapb.GetFlushedSegmentsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Segments: []int64{segIDBeforeCreateIndex, segIDAfterCreateIndex, segIDFlushed},
+			}, nil
+		},
+		CallAcquireSegmentLock: func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		CallListSegmentsInfo: func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+			segmentInfos := make([]*datapb.SegmentInfo, 0)
+			for _, segID := range req.SegmentIDs {
+				segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+					ID:           segID,
+					CollectionID: collID,
+					PartitionID:  partID,
+					NumOfRows:    10240,
+					State:        commonpb.SegmentState_Flushed,
+					StartPosition: &internalpb.MsgPosition{
+						Timestamp: indexCreateTS,
+					},
+				})
+			}
+			return &datapb.ListSegmentsInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Infos: segmentInfos,
+			}, nil
+		},
+		CallGetRecoveryInfoV2: func(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
+			return &datapb.GetRecoveryInfoResponseV2{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Channels: []*datapb.VchannelInfo{
+					{
+						CollectionID:        collID,
+						ChannelName:         "",
+						SeekPosition:        nil,
+						UnflushedSegments:   nil,
+						FlushedSegments:     nil,
+						DroppedSegments:     nil,
+						UnflushedSegmentIds: nil,
+						FlushedSegmentIds:   []UniqueID{segIDBeforeCreateIndex, segIDAfterCreateIndex, segIDFlushed},
+						DroppedSegmentIds:   nil,
+					},
+				},
+				Segments: []*datapb.SegmentInfo{
+					{
+						ID:           segIDBeforeCreateIndex,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumOfRows:    10240,
+						State:        commonpb.SegmentState_Flushed,
+						StartPosition: &internalpb.MsgPosition{
+							Timestamp: indexCreateTS - 100,
+						},
+					},
+					{
+						ID:           segIDAfterCreateIndex,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumOfRows:    10240,
+						State:        commonpb.SegmentState_Flushed,
+						StartPosition: &internalpb.MsgPosition{
+							Timestamp: indexCreateTS + 100,
+						},
+					},
+					{
+						ID:           segIDFlushed,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumOfRows:    10240,
+						State:        commonpb.SegmentState_Flushed,
+						StartPosition: &internalpb.MsgPosition{
+							Timestamp: indexCreateTS + 200,
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	err := ic.SetDataCoord(dcm)
+	assert.Nil(t, err)
+	ic.stateCode.Store(commonpb.StateCode_Healthy)
+
+	t.Run("success", func(t *testing.T) {
+		req := &indexpb.GetIndexStatisticsRequest{
+			CollectionID: collID,
+			IndexName:    "",
+		}
+		resp, err := ic.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int64(10240*3), resp.GetIndexInfos()[0].GetIndexedRows())
+		assert.Equal(t, int64(10240*3), resp.GetIndexInfos()[0].GetTotalRows())
+	})
+
+	t.Run("fail because datacoord method error", func(t *testing.T) {
+		req := &indexpb.GetIndexStatisticsRequest{
+			CollectionID: collID,
+			IndexName:    "",
+		}
+		ic.dataCoordClient = &DataCoordMock{
+			CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+				return nil, errors.New("mock error")
+			}}
+		resp, err := ic.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("GetIndexStatistics after drop index", func(t *testing.T) {
+		status, err := ic.DropIndex(ctx, &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: nil,
+			IndexName:    "",
+			DropAll:      true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+		req := &indexpb.GetIndexStatisticsRequest{
+			CollectionID: collID,
+			IndexName:    "",
+		}
+		resp, err := ic.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetStatus().GetErrorCode())
 	})
 }

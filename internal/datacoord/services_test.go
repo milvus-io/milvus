@@ -224,8 +224,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -302,7 +302,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -391,8 +391,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
 		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
@@ -442,7 +442,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -511,8 +511,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
