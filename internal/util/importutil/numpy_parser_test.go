@@ -125,8 +125,38 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 	err = parser.validateFileNames(fileNames)
 	assert.Error(t, err)
 
-	//valid
+	// valid
 	fileNames = append(fileNames, "FieldFloatVector.npy")
+	err = parser.validateFileNames(fileNames)
+	assert.NoError(t, err)
+
+	// has dynamic field
+	parser.collectionSchema = &schemapb.CollectionSchema{
+		Name:               "schema",
+		Description:        "schema",
+		AutoID:             true,
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "FieldInt64",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:   102,
+				Name:      "FieldDynamic",
+				IsDynamic: true,
+				DataType:  schemapb.DataType_JSON,
+			},
+		},
+	}
+	fileNames = []string{"FieldInt64.npy"}
+	err = parser.validateFileNames(fileNames)
+	assert.NoError(t, err)
+
+	fileNames = append(fileNames, "FieldDynamic.npy")
 	err = parser.validateFileNames(fileNames)
 	assert.NoError(t, err)
 }
@@ -641,6 +671,37 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
 	assert.Nil(t, primaryKey)
+
+	// has dynamic field
+	parser.collectionSchema = &schemapb.CollectionSchema{
+		Name:               "schema",
+		Description:        "schema",
+		AutoID:             true,
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "FieldInt64",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:   102,
+				Name:      "FieldDynamic",
+				IsDynamic: true,
+				DataType:  schemapb.DataType_JSON,
+			},
+		},
+	}
+	segmentData[101] = &storage.Int64FieldData{
+		Data: []int64{1, 2, 4},
+	}
+
+	rowCount, primaryKey, err = parser.checkRowCount(segmentData)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, rowCount)
+	assert.NotNil(t, primaryKey)
 }
 
 func Test_NumpyParserSplitFieldsData(t *testing.T) {
@@ -728,6 +789,41 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 		assert.Error(t, err)
 
 		schema.AutoID = false
+	})
+
+	t.Run("has dynamic field", func(t *testing.T) {
+		parser.collectionSchema = &schemapb.CollectionSchema{
+			Name:               "schema",
+			Description:        "schema",
+			AutoID:             true,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      101,
+					Name:         "FieldInt64",
+					IsPrimaryKey: true,
+					AutoID:       false,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:   102,
+					Name:      "FieldDynamic",
+					IsDynamic: true,
+					DataType:  schemapb.DataType_JSON,
+				},
+			},
+		}
+		shards = make([]map[storage.FieldID]storage.FieldData, 0, parser.shardNum)
+		for i := 0; i < int(parser.shardNum); i++ {
+			segmentData := initSegmentData(parser.collectionSchema)
+			shards = append(shards, segmentData)
+		}
+		segmentData = make(map[storage.FieldID]storage.FieldData)
+		segmentData[101] = &storage.Int64FieldData{
+			Data: []int64{1, 2, 4},
+		}
+		err = parser.splitFieldsData(segmentData, shards)
+		assert.NoError(t, err)
 	})
 }
 

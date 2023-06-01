@@ -738,6 +738,10 @@ func (p *NumpyParser) checkRowCount(fieldsData map[storage.FieldID]storage.Field
 		if !schema.GetAutoID() {
 			v, ok := fieldsData[schema.GetFieldID()]
 			if !ok {
+				if schema.GetIsDynamic() {
+					// user might not provide numpy file for dynamic field, skip it, will auto-generate later
+					continue
+				}
 				log.Error("Numpy parser: field not provided", zap.String("fieldName", schema.GetName()))
 				return 0, nil, fmt.Errorf("field '%s' not provided", schema.GetName())
 			}
@@ -852,12 +856,16 @@ func (p *NumpyParser) splitFieldsData(fieldsData map[storage.FieldID]storage.Fie
 			schema := p.collectionSchema.Fields[k]
 			srcData := fieldsData[schema.GetFieldID()]
 			targetData := shards[shard][schema.GetFieldID()]
+			if srcData == nil && schema.GetIsDynamic() {
+				// user might not provide numpy file for dynamic field, skip it, will auto-generate later
+				continue
+			}
 			if srcData == nil || targetData == nil {
 				log.Error("Numpy parser: cannot append data since source or target field data is nil",
 					zap.String("FieldName", schema.GetName()),
 					zap.Bool("sourceNil", srcData == nil), zap.Bool("targetNil", targetData == nil))
-				return fmt.Errorf("cannot append data for field '%s' since source or target field data is nil",
-					primaryKey.GetName())
+				return fmt.Errorf("cannot append data for field '%s', possibly no any fields corresponding to this numpy file, or a required numpy file is not provided",
+					schema.GetName())
 			}
 			appendFunc := appendFunctions[schema.GetName()]
 			err := appendFunc(srcData, i, targetData)
