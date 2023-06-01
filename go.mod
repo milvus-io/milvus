@@ -20,7 +20,7 @@ require (
 	github.com/golang/protobuf v1.5.3
 	github.com/klauspost/compress v1.14.4
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230529034923-4579ee9d5723
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230531124827-410c849303a9
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/panjf2000/ants/v2 v2.7.2

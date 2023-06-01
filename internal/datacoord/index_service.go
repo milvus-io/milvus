@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // serverID return the session serverID
@@ -324,19 +325,67 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	return ret, nil
 }
 
+func (s *Server) countIndexedRows(indexInfo *indexpb.IndexInfo, segments []*SegmentInfo) int64 {
+	unIndexed, indexed := typeutil.NewSet[int64](), typeutil.NewSet[int64]()
+	for _, seg := range segments {
+		segIdx, ok := seg.segmentIndexes[indexInfo.IndexID]
+		if !ok {
+			unIndexed.Insert(seg.GetID())
+			continue
+		}
+		switch segIdx.IndexState {
+		case commonpb.IndexState_Finished:
+			indexed.Insert(seg.GetID())
+		default:
+			unIndexed.Insert(seg.GetID())
+		}
+	}
+	retrieveContinue := len(unIndexed) != 0
+	for retrieveContinue {
+		for segID := range unIndexed {
+			unIndexed.Remove(segID)
+			segment := s.meta.GetSegment(segID)
+			if segment == nil || len(segment.CompactionFrom) == 0 {
+				continue
+			}
+			for _, fromID := range segment.CompactionFrom {
+				fromSeg := s.meta.GetSegment(fromID)
+				if fromSeg == nil {
+					continue
+				}
+				if segIndex, ok := fromSeg.segmentIndexes[indexInfo.IndexID]; ok && segIndex.IndexState == commonpb.IndexState_Finished {
+					indexed.Insert(fromID)
+					continue
+				}
+				unIndexed.Insert(fromID)
+			}
+		}
+		retrieveContinue = len(unIndexed) != 0
+	}
+	indexedRows := int64(0)
+	for segID := range indexed {
+		segment := s.meta.GetSegment(segID)
+		if segment != nil {
+			indexedRows += segment.GetNumOfRows()
+		}
+	}
+	return indexedRows
+}
+
 // completeIndexInfo get the index row count and index task state
 // if realTime, calculate current statistics
 // if not realTime, which means get info of the prior `CreateIndex` action, skip segments created after index's create time
 func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segments []*SegmentInfo, realTime bool) {
 	var (
-		cntNone       = 0
-		cntUnissued   = 0
-		cntInProgress = 0
-		cntFinished   = 0
-		cntFailed     = 0
-		failReason    string
-		totalRows     = int64(0)
-		indexedRows   = int64(0)
+		cntNone          = 0
+		cntUnissued      = 0
+		cntInProgress    = 0
+		cntFinished      = 0
+		cntFailed        = 0
+		failReason       string
+		totalRows        = int64(0)
+		indexedRows      = int64(0)
+		pendingIndexRows = int64(0)
 	)
 
 	for _, seg := range segments {
@@ -347,7 +396,11 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 			if seg.GetStartPosition().GetTimestamp() <= index.CreateTime {
 				cntUnissued++
 			}
+			pendingIndexRows += seg.GetNumOfRows()
 			continue
+		}
+		if segIdx.IndexState != commonpb.IndexState_Finished {
+			pendingIndexRows += seg.GetNumOfRows()
 		}
 
 		// if realTime, calculate current statistics
@@ -374,8 +427,13 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		}
 	}
 
+	if realTime {
+		indexInfo.IndexedRows = indexedRows
+	} else {
+		indexInfo.IndexedRows = s.countIndexedRows(indexInfo, segments)
+	}
 	indexInfo.TotalRows = totalRows
-	indexInfo.IndexedRows = indexedRows
+	indexInfo.PendingIndexRows = pendingIndexRows
 	switch {
 	case cntFailed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
@@ -390,6 +448,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 
 	log.Info("completeIndexInfo success", zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
 		zap.Int64("totalRows", indexInfo.TotalRows), zap.Int64("indexRows", indexInfo.IndexedRows),
+		zap.Int64("pendingIndexRows", indexInfo.PendingIndexRows),
 		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason))
 }
 
@@ -434,9 +493,12 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		}, nil
 	}
 	indexInfo := &indexpb.IndexInfo{
-		IndexedRows: 0,
-		TotalRows:   0,
-		State:       0,
+		CollectionID:     req.CollectionID,
+		IndexID:          indexes[0].IndexID,
+		IndexedRows:      0,
+		TotalRows:        0,
+		PendingIndexRows: 0,
+		State:            0,
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
@@ -447,8 +509,9 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		IndexedRows: indexInfo.IndexedRows,
-		TotalRows:   indexInfo.TotalRows,
+		IndexedRows:      indexInfo.IndexedRows,
+		TotalRows:        indexInfo.TotalRows,
+		PendingIndexRows: indexInfo.PendingIndexRows,
 	}, nil
 }
 

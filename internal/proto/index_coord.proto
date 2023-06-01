@@ -58,6 +58,7 @@ message IndexInfo {
   string index_state_fail_reason = 10;
   bool is_auto_index = 11;
   repeated common.KeyValuePair user_index_params = 12;
+  int64 pending_index_rows = 13;
 }
 
 message FieldIndex {
@@ -191,6 +192,7 @@ message GetIndexBuildProgressResponse {
   common.Status status = 1;
   int64 indexed_rows = 2;
   int64 total_rows = 3;
+  int64 pending_index_rows = 4;
 }
 
 message StorageConfig {
