@@ -849,7 +849,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		zap.Int64("MsgID", dct.ID()),
 		zap.Uint64("BeginTS", dct.BeginTs()),
 		zap.Uint64("EndTS", dct.EndTs()),
-		zap.String("db", request.DbName),
+		zap.String("db", dct.result.GetDbName()),
 		zap.String("collection", request.CollectionName))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
