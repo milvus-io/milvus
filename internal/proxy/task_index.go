@@ -505,6 +505,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 			Params:               params,
 			IndexedRows:          indexInfo.GetIndexedRows(),
 			TotalRows:            indexInfo.GetTotalRows(),
+			PendingIndexRows:     indexInfo.GetPendingIndexRows(),
 			State:                indexInfo.GetState(),
 			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
 		}
