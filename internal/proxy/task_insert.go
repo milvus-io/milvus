@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -425,7 +426,9 @@ func (it *insertTask) repackInsertDataByPartition(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	beforeAssign := time.Now()
 	assignedSegmentInfos, err := it.segIDAssigner.GetSegmentID(it.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	metrics.ProxyAssignSegmentIDLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(time.Since(beforeAssign).Milliseconds()))
 	if err != nil {
 		log.Warn("allocate segmentID for insert data failed",
 			zap.Int64("collectionID", it.CollectionID),
