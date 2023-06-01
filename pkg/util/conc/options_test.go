@@ -14,38 +14,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package segments
+package conc
 
 import (
-	"runtime"
-	"sync"
+	"testing"
+	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"go.uber.org/atomic"
+	"github.com/stretchr/testify/assert"
 )
 
-var (
-	p        atomic.Pointer[conc.Pool[any]]
-	initOnce sync.Once
-)
+func TestPoolOption(t *testing.T) {
+	opt := &poolOption{}
 
-// InitPool initialize
-func InitPool() {
-	initOnce.Do(func() {
-		pool := conc.NewPool[any](
-			paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt(),
-			conc.WithPreAlloc(true),
-			conc.WithDisablePurge(true),
-		)
-		conc.WarmupPool(pool, runtime.LockOSThread)
+	o := WithPreAlloc(true)
+	o(opt)
+	assert.True(t, opt.preAlloc)
 
-		p.Store(pool)
-	})
-}
+	o = WithNonBlocking(true)
+	o(opt)
+	assert.True(t, opt.nonBlocking)
 
-// GetPool returns the singleton pool instance.
-func GetPool() *conc.Pool[any] {
-	InitPool()
-	return p.Load()
+	o = WithDisablePurge(true)
+	o(opt)
+	assert.True(t, opt.disablePurge)
+
+	o = WithExpiryDuration(time.Second)
+	o(opt)
+	assert.Equal(t, time.Second, opt.expiryDuration)
+
+	o = WithConcealPanic(true)
+	o(opt)
+	assert.True(t, opt.concealPanic)
 }

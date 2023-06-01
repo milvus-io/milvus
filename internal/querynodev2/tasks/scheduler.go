@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/panjf2000/ants/v2"
 )
 
 const (
@@ -38,7 +37,7 @@ func NewScheduler() *Scheduler {
 		mergedSearchTasks:  make(chan *SearchTask),
 		// queryProcessQueue: make(chan),
 
-		pool: conc.NewPool[any](maxReadConcurrency, ants.WithPreAlloc(true)),
+		pool: conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 	}
 }
 

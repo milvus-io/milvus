@@ -54,3 +54,15 @@ func TestPool(t *testing.T) {
 		assert.Equal(t, err, errDup)
 	}
 }
+
+func TestPoolWithPanic(t *testing.T) {
+	pool := NewPool[any](1, WithConcealPanic(true))
+
+	future := pool.Submit(func() (any, error) {
+		panic("mocked panic")
+	})
+
+	// make sure error returned when conceal panic
+	_, err := future.Await()
+	assert.Error(t, err)
+}

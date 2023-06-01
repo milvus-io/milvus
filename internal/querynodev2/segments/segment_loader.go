@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	ants "github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -91,7 +90,7 @@ func NewLoader(
 		ioPoolSize = configPoolSize
 	}
 
-	ioPool := conc.NewPool[*storage.Blob](ioPoolSize, ants.WithPreAlloc(true))
+	ioPool := conc.NewPool[*storage.Blob](ioPoolSize, conc.WithPreAlloc(true))
 
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 
