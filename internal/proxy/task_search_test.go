@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -1876,9 +1875,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qn.searchError = fmt.Errorf("mock error")
 	assert.Error(t, task.Execute(ctx))
 
-	tempQueryNode := querynode.NewQueryNode(context.Background(), nil)
-	tempQueryNode.IsStandAlone = true
-	assert.Error(t, task.Execute(ctx))
+	//tempQueryNode := querynode.NewQueryNode(context.Background(), nil)
+	//tempQueryNode.IsStandAlone = true
+	//assert.Error(t, task.Execute(ctx))
 
 	qn.searchError = nil
 	qn.getSearchResult = func() *internalpb.SearchResults {

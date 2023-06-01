@@ -84,6 +84,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// init collection meta
 	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
+	coll.setMetricType(w.req.GetLoadMeta().GetMetricType())
 
 	// filter out the already exist channels
 	vChannels = coll.AddChannels(vChannels, VPChannels)

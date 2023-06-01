@@ -63,6 +63,9 @@ type Collection struct {
 	releasedPartitions map[UniqueID]struct{}
 	releaseTime        Timestamp
 	released           bool
+
+	metricTypeMu sync.RWMutex
+	metricType   string
 }
 
 // ID returns collection id
@@ -382,6 +385,18 @@ func (c *Collection) getFieldType(fieldID FieldID) (schemapb.DataType, error) {
 		return schemapb.DataType_None, err
 	}
 	return field.GetDataType(), nil
+}
+
+func (c *Collection) setMetricType(metricType string) {
+	c.metricTypeMu.Lock()
+	defer c.metricTypeMu.Unlock()
+	c.metricType = metricType
+}
+
+func (c *Collection) getMetricType() string {
+	c.metricTypeMu.RLock()
+	defer c.metricTypeMu.RUnlock()
+	return c.metricType
 }
 
 // newCollection returns a new Collection
