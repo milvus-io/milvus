@@ -228,10 +228,14 @@ type DataCoordFactory struct {
 
 	AddSegmentError      bool
 	AddSegmentNotSuccess bool
+	AddSegmentEmpty      bool
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	return &datapb.AssignSegmentIDResponse{
+	if ds.AddSegmentError {
+		return nil, errors.New("Error")
+	}
+	res := &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -240,7 +244,15 @@ func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.Ass
 				SegID: 666,
 			},
 		},
-	}, nil
+	}
+	if ds.AddSegmentNotSuccess {
+		res.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}
+	} else if ds.AddSegmentEmpty {
+		res.SegIDAssignments = []*datapb.SegmentIDAssignment{}
+	}
+	return res, nil
 }
 
 func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {

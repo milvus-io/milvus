@@ -513,6 +513,11 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = false
 
+		node.dataCoord.(*DataCoordFactory).AddSegmentEmpty = true
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		node.dataCoord.(*DataCoordFactory).AddSegmentEmpty = false
+
 		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
