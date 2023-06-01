@@ -76,6 +76,7 @@ func (p *autoIndexConfig) initParams() {
 	}
 	p.indexParamsStr = p.Base.LoadWithDefault("autoIndex.params.build", "")
 	p.parseBuildParams(p.indexParamsStr)
+	p.panicIfNotInvalid()
 
 	p.SearchParamsYamlStr = p.Base.LoadWithDefault("autoIndex.params.search", "")
 

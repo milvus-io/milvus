@@ -126,6 +126,21 @@ func Test_autoIndexConfig_panicIfNotInvalid(t *testing.T) {
 		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
 	})
 
+	t.Run("normal case, hnsw2", func(t *testing.T) {
+		p := &autoIndexConfig{
+			Enable: true,
+			IndexParams: map[string]string{
+				common.IndexTypeKey: indexparamcheck.IndexHNSW,
+				"M":                 "30",
+				"efConstruction":    "360",
+			},
+		}
+		assert.NotPanics(t, p.panicIfNotInvalid)
+		metricType, exist := p.IndexParams[common.MetricTypeKey]
+		assert.True(t, exist)
+		assert.Equal(t, indexparamcheck.FloatVectorDefaultMetricType, metricType)
+	})
+
 	t.Run("normal case, ivf flat", func(t *testing.T) {
 		p := &autoIndexConfig{
 			Enable: false,
