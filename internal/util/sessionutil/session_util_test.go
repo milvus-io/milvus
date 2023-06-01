@@ -617,6 +617,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1 := NewSession(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
+	s1.SetEnableRetryKeepAlive(false)
 	s1.Register()
 	wg.Add(1)
 	s1.liveCh = ch
@@ -637,6 +638,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2 := NewSession(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
+	s2.SetEnableRetryKeepAlive(false)
 	s2.Register()
 	wg.Add(1)
 	go s2.ProcessActiveStandBy(func() error {
@@ -652,7 +654,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	assert.False(t, flag)
 	ch <- true
 	assert.False(t, flag)
-	close(ch)
+	s1.safeCloseLiveCh()
 	<-signal
 	assert.True(t, flag)
 
@@ -862,6 +864,61 @@ func (s *SessionSuite) TestRevoke() {
 			}
 		})
 	}
+}
+
+func (s *SessionSuite) TestKeepAliveRetryEnable() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+
+	// Register
+	ch, err := session.registerService()
+	if err != nil {
+		panic(err)
+	}
+	session.SetEnableRetryKeepAlive(true)
+	session.liveCh = make(chan bool)
+	session.processKeepAliveResponse(ch)
+	session.LivenessCheck(ctx, nil)
+	session.keepAliveCancel()
+
+	// sleep a while wait goroutine process
+	time.Sleep(time.Millisecond * 100)
+	// expected Disconnected = false, means session is not closed
+	assert.Equal(s.T(), false, session.Disconnected())
+}
+
+func (s *SessionSuite) TestKeepAliveRetryDisable() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+
+	// Register
+	ch, err := session.registerService()
+	if err != nil {
+		panic(err)
+	}
+	session.SetEnableRetryKeepAlive(false)
+	session.liveCh = make(chan bool)
+	session.processKeepAliveResponse(ch)
+	session.LivenessCheck(ctx, nil)
+	session.keepAliveCancel()
+
+	// sleep a while wait goroutine process
+	time.Sleep(time.Millisecond * 100)
+	// expected Disconnected = true, means session is closed
+	assert.Equal(s.T(), true, session.Disconnected())
+}
+
+func (s *SessionSuite) TestSafeCloseLiveCh() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+	session.liveCh = make(chan bool)
+	session.safeCloseLiveCh()
+	assert.NotPanics(s.T(), func() {
+		session.safeCloseLiveCh()
+	})
 }
 
 func TestSessionSuite(t *testing.T) {
