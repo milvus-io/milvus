@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -144,7 +143,7 @@ var _ Channel = &ChannelMeta{}
 func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(rc, collID)
 
-	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0), ants.WithPreAlloc(false), ants.WithNonblocking(false))
+	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0), conc.WithPreAlloc(false), conc.WithNonBlocking(false))
 
 	channel := ChannelMeta{
 		collectionID: collID,

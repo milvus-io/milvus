@@ -17,6 +17,7 @@
 package conc
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 
@@ -27,13 +28,19 @@ import (
 // A goroutine pool
 type Pool[T any] struct {
 	inner *ants.Pool
+	opt   *poolOption
 }
 
 // NewPool returns a goroutine pool.
 // cap: the number of workers.
 // This panic if provide any invalid option.
-func NewPool[T any](cap int, opts ...ants.Option) *Pool[T] {
-	pool, err := ants.NewPool(cap, opts...)
+func NewPool[T any](cap int, opts ...PoolOption) *Pool[T] {
+	opt := defaultPoolOption()
+	for _, o := range opts {
+		o(opt)
+	}
+
+	pool, err := ants.NewPool(cap, opt.antsOptions()...)
 	if err != nil {
 		panic(err)
 	}
@@ -46,7 +53,7 @@ func NewPool[T any](cap int, opts ...ants.Option) *Pool[T] {
 // NewDefaultPool returns a pool with cap of the number of logical CPU,
 // and pre-alloced goroutines.
 func NewDefaultPool[T any]() *Pool[T] {
-	return NewPool[T](runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
+	return NewPool[T](runtime.GOMAXPROCS(0), WithPreAlloc(true))
 }
 
 // Submit a task into the pool,
@@ -57,6 +64,12 @@ func (pool *Pool[T]) Submit(method func() (T, error)) *Future[T] {
 	future := newFuture[T]()
 	err := pool.inner.Submit(func() {
 		defer close(future.ch)
+		defer func() {
+			if x := recover(); x != nil {
+				future.err = fmt.Errorf("panicked with error: %v", x)
+				panic(x) // throw panic out
+			}
+		}()
 		res, err := method()
 		if err != nil {
 			future.err = err
