@@ -111,6 +111,7 @@ type DataCoordCatalog interface {
 	// AlterSegmentsAndAddNewSegment for transaction
 	AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error
 	AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error
+	AsyncAlterSegmentExcludeLogs(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
@@ -125,6 +126,7 @@ type DataCoordCatalog interface {
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
+	Start(ctx context.Context) error
 }
 
 type IndexCoordCatalog interface {

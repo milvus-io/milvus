@@ -622,8 +622,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
-
+		segmentManager.meta.catalog = datacoord.NewCatalog(fkv, "", "")
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)
 		err = segmentManager.tryToSealSegment(ts, "c1")
@@ -648,7 +647,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
+		segmentManager.meta.catalog = datacoord.NewCatalog(fkv, "", "")
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)

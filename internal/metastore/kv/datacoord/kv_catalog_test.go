@@ -3,8 +3,11 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -785,6 +788,222 @@ func Test_parseBinlogKey(t *testing.T) {
 		assert.Equal(t, int64(1), ret1)
 		assert.Equal(t, int64(1), ret2)
 		assert.Equal(t, int64(1), ret3)
+	})
+}
+
+func TestCatalog_AsyncAlterSegmentExcludeLogs(t *testing.T) {
+	t.Run("failed for nil segments", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		catalog := NewCatalog(txn, rootPath, "")
+		err := catalog.AsyncAlterSegmentExcludeLogs(context.TODO(), nil, nil)
+		assert.NotNil(t, err)
+	})
+	t.Run("cache kvs to async meta updater", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		catalog := NewCatalog(txn, rootPath, "")
+		oldSegment := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1000,
+			PartitionID:  100,
+		}
+		newSegment := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1000,
+			PartitionID:  100,
+		}
+		err := catalog.AsyncAlterSegmentExcludeLogs(context.TODO(), newSegment, oldSegment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(catalog.asyncUpdater.currentMap), 1)
+		key, _, _ := buildSegmentKv(newSegment)
+		assert.NotNil(t, catalog.asyncUpdater.currentMap[key])
+	})
+
+	t.Run("update unflushed segment to flushed", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		catalog := NewCatalog(txn, rootPath, "")
+		oldSegment := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1000,
+			PartitionID:  100,
+			State:        commonpb.SegmentState_Growing,
+		}
+		newSegment := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1000,
+			PartitionID:  100,
+			State:        commonpb.SegmentState_Flushed,
+		}
+		catalog.asyncUpdater.stopped.Store(true)
+		err := catalog.AsyncAlterSegmentExcludeLogs(context.TODO(), newSegment, oldSegment)
+		assert.NotNil(t, err)
+		assert.Equal(t, err, fmt.Errorf("cannot cache meta kv to stopped asyncMetaUpdater"))
+		catalog.asyncUpdater.stopped.Store(false)
+		err = catalog.AsyncAlterSegmentExcludeLogs(context.TODO(), newSegment, oldSegment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(catalog.asyncUpdater.currentMap), 2)
+		flushedKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+		assert.NotNil(t, catalog.asyncUpdater.currentMap[flushedKey])
+	})
+}
+
+func TestCatalog_AsyncMetaUpdater(t *testing.T) {
+	t.Run("start failure", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		catalog := NewCatalog(txn, rootPath, "")
+		ctx := context.TODO()
+		catalog.asyncUpdater = nil
+		err := catalog.Start(ctx)
+		assert.NotNil(t, err)
+		assert.Equal(t, err, fmt.Errorf("catalog async Updater is not initialized"))
+	})
+
+	t.Run("async updating meta", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		savedKvs := make(map[string]string)
+		txn.multiSave = func(kvs map[string]string) error {
+			savedKvs = kvs
+			return nil
+		}
+		catalog := NewCatalog(txn, rootPath, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		syncMetaInterval = 1 * time.Second
+		syncCheckInterval = 1 * time.Second
+		err := catalog.Start(ctx)
+		assert.Nil(t, err)
+		oldSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 5000,
+		}
+		newSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 8000,
+		}
+		catalog.AsyncAlterSegmentExcludeLogs(ctx, newSegment, oldSegment)
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, 1, len(savedKvs))
+		assert.Equal(t, 0, len(catalog.asyncUpdater.lastMap))
+		assert.Equal(t, 0, len(catalog.asyncUpdater.currentMap))
+		cancel()
+		time.Sleep(1 * time.Second)
+		assert.True(t, catalog.asyncUpdater.stopped.Load())
+	})
+
+	t.Run("async stopped cache for error", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		var innerSaveFunc = func(kvs map[string]string) error {
+			return fmt.Errorf("write etcd failed")
+		}
+		var lock sync.Mutex
+		txn.multiSave = func(kvs map[string]string) error {
+			lock.Lock()
+			defer lock.Unlock()
+			return innerSaveFunc(kvs)
+		}
+		catalog := NewCatalog(txn, rootPath, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		syncMetaInterval = 1 * time.Second
+		syncCheckInterval = 1 * time.Second
+
+		err := catalog.Start(ctx)
+		assert.Nil(t, err)
+		oldSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 5000,
+		}
+		newSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 8000,
+		}
+		catalog.AsyncAlterSegmentExcludeLogs(ctx, newSegment, oldSegment)
+		time.Sleep(3 * time.Second)
+		//as txn cannot be written, asyncUpdater should be stopped to avoid enlarging errors
+		assert.True(t, catalog.asyncUpdater.stopped.Load())
+		assert.Equal(t, 1, len(catalog.asyncUpdater.lastMap))
+		//lastMap will not be empty because sync meta failed
+		assert.Equal(t, 0, len(catalog.asyncUpdater.currentMap))
+		time.Sleep(2 * time.Second)
+		//reset saveFn to enable sync func
+		savedKVs := make(map[string]string)
+		lock.Lock()
+		innerSaveFunc = func(kvs map[string]string) error {
+			savedKVs = kvs
+			return nil
+		}
+		lock.Unlock()
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, 0, len(catalog.asyncUpdater.lastMap))
+		assert.Equal(t, 0, len(catalog.asyncUpdater.currentMap))
+		assert.False(t, catalog.asyncUpdater.stopped.Load())
+		assert.Equal(t, len(savedKVs), 1)
+		cancel()
+		time.Sleep(1 * time.Second)
+		assert.True(t, catalog.asyncUpdater.stopped.Load())
+	})
+
+	t.Run("sync meta updates invalidate async meta cache", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		savedKvs := make(map[string]string)
+		txn.multiSave = func(kvs map[string]string) error {
+			savedKvs = kvs
+			return nil
+		}
+		catalog := NewCatalog(txn, rootPath, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		syncMetaInterval = 1 * time.Second
+		syncCheckInterval = 1 * time.Second
+		err := catalog.Start(ctx)
+		assert.Nil(t, err)
+		oldSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 5000,
+			NumOfRows:      500,
+		}
+		newSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 8000,
+			NumOfRows:      1500,
+		}
+		catalog.AsyncAlterSegmentExcludeLogs(ctx, newSegment, oldSegment)
+
+		syncUpdatedSegment := &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   1000,
+			PartitionID:    100,
+			State:          commonpb.SegmentState_Growing,
+			LastExpireTime: 8000,
+			NumOfRows:      2500,
+		}
+		catalog.AlterSegment(ctx, syncUpdatedSegment, oldSegment)
+		//invalidate before next cycle come, two maps should both be empty
+		time.Sleep(1 * time.Second)
+		assert.Equal(t, 0, len(catalog.asyncUpdater.currentMap))
+		assert.Equal(t, 0, len(catalog.asyncUpdater.lastMap))
+		assert.Equal(t, 1, len(savedKvs))
+
+		key, value, _ := buildSegmentKv(syncUpdatedSegment)
+		//the final effective kv must be from the second sync operation
+		assert.Equal(t, savedKvs[key], value)
+		cancel()
+		time.Sleep(1 * time.Second)
+		assert.True(t, catalog.asyncUpdater.stopped.Load())
 	})
 }
 

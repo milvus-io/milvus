@@ -482,6 +482,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(etcdKV, chunkManager.RootPath(), Params.EtcdCfg.MetaRootPath)
+		err = catalog.Start(s.ctx)
+		if err != nil {
+			return err
+		}
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
 		if err != nil {
 			return err

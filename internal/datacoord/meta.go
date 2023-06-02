@@ -892,7 +892,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
+		if err := m.catalog.AsyncAlterSegmentExcludeLogs(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
 			log.Error("meta update: add allocation failed",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))

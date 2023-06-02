@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
@@ -154,9 +155,16 @@ func TestSyncCpLagBehindTooMuch(t *testing.T) {
 			[]int64{1, 2},
 		},
 	}
+	setSegmentsType := func(segments []*Segment) {
+		for _, segment := range segments {
+			segment.setType(datapb.SegmentType_Flushed)
+		}
+	}
+
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
 			policy := syncCPLagTooBehind()
+			setSegmentsType(test.segments)
 			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
 			assert.ElementsMatch(t, test.idsToSync, ids)
 		})
