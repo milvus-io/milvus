@@ -228,12 +228,15 @@ enum ArithOpType : int {
   Mul = 3,
   Div = 4,
   Mod = 5,
+  BAnd = 6,
+  BXOr = 7,
+  BOr = 8,
   ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ArithOpType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ArithOpType_IsValid(int value);
 constexpr ArithOpType ArithOpType_MIN = Unknown;
-constexpr ArithOpType ArithOpType_MAX = Mod;
+constexpr ArithOpType ArithOpType_MAX = BOr;
 constexpr int ArithOpType_ARRAYSIZE = ArithOpType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ArithOpType_descriptor();

@@ -10,19 +10,25 @@ import (
 )
 
 var arithExprMap = map[int]planpb.ArithOpType{
-	parser.PlanParserADD: planpb.ArithOpType_Add,
-	parser.PlanParserSUB: planpb.ArithOpType_Sub,
-	parser.PlanParserMUL: planpb.ArithOpType_Mul,
-	parser.PlanParserDIV: planpb.ArithOpType_Div,
-	parser.PlanParserMOD: planpb.ArithOpType_Mod,
+	parser.PlanParserADD:  planpb.ArithOpType_Add,
+	parser.PlanParserSUB:  planpb.ArithOpType_Sub,
+	parser.PlanParserMUL:  planpb.ArithOpType_Mul,
+	parser.PlanParserDIV:  planpb.ArithOpType_Div,
+	parser.PlanParserMOD:  planpb.ArithOpType_Mod,
+	parser.PlanParserBAND: planpb.ArithOpType_BAnd,
+	parser.PlanParserBXOR: planpb.ArithOpType_BXOr,
+	parser.PlanParserBOR:  planpb.ArithOpType_BOr,
 }
 
 var arithNameMap = map[int]string{
-	parser.PlanParserADD: "add",
-	parser.PlanParserSUB: "subtract",
-	parser.PlanParserMUL: "multiply",
-	parser.PlanParserDIV: "divide",
-	parser.PlanParserMOD: "modulo",
+	parser.PlanParserADD:  "add",
+	parser.PlanParserSUB:  "subtract",
+	parser.PlanParserMUL:  "multiply",
+	parser.PlanParserDIV:  "divide",
+	parser.PlanParserMOD:  "modulo",
+	parser.PlanParserBAND: "bitand",
+	parser.PlanParserBXOR: "bitxor",
+	parser.PlanParserBOR:  "bitor",
 }
 
 var cmpOpMap = map[int]planpb.OpType{
@@ -281,15 +287,63 @@ func Power(a, b *planpb.GenericValue) *ExprWithType {
 }
 
 func BitAnd(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
-}
+	ret := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{},
+			},
+		},
+	}
 
-func BitOr(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	aInt, bInt := IsInteger(a), IsInteger(b)
+	if !aInt || !bInt {
+		return nil, fmt.Errorf("bitand can only apply on integer")
+	}
+
+	ret.dataType = schemapb.DataType_Int64
+	ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() & b.GetInt64Val())
+
+	return ret, nil
 }
 
 func BitXor(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	ret := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{},
+			},
+		},
+	}
+
+	aInt, bInt := IsInteger(a), IsInteger(b)
+	if !aInt || !bInt {
+		return nil, fmt.Errorf("bitxor can only apply on integer")
+	}
+
+	ret.dataType = schemapb.DataType_Int64
+	ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() ^ b.GetInt64Val())
+
+	return ret, nil
+}
+
+func BitOr(a, b *planpb.GenericValue) (*ExprWithType, error) {
+	ret := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{},
+			},
+		},
+	}
+
+	aInt, bInt := IsInteger(a), IsInteger(b)
+	if !aInt || !bInt {
+		return nil, fmt.Errorf("bitor can only apply on integer")
+	}
+
+	ret.dataType = schemapb.DataType_Int64
+	ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() | b.GetInt64Val())
+
+	return ret, nil
 }
 
 func ShiftLeft(a, b *planpb.GenericValue) (*ExprWithType, error) {

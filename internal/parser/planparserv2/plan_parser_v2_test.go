@@ -197,6 +197,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 10 == 9`,
 		`Int64Field % 10 != 9`,
 		`A % 10 != 2`,
+		`(Int64Field & 1) != 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -288,6 +289,7 @@ func TestExpr_Constant(t *testing.T) {
 		`1 / 2.0`,
 		`1 / 2`,
 		`1 % 2`,
+		`1 & 2`,
 		// ------------------- logical operations ----------------
 		`true and false`,
 		`true or false`,
@@ -348,6 +350,7 @@ func TestExpr_Combinations(t *testing.T) {
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
 		`A > 50 or B < 40`,
+		`(Int64Field & 1) !=0 and (Int32Field & 2) !=0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -468,9 +471,10 @@ func TestExpr_Invalid(t *testing.T) {
 		`"str" and false`,
 		`BoolField and false`,
 		`Int32Field and Int64Field`,
-		// -------------------- unsupported ----------------------
-		`1 ^ 2`,
+		`1 ^ 2`, //bitwise is supported but not a boolean
 		`1 & 2`,
+		// -------------------- unsupported ----------------------
+
 		`1 ** 2`,
 		`1 << 2`,
 		`1 | 2`,

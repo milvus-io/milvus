@@ -143,6 +143,9 @@ static const std::map<std::string, ArithOpType> arith_op_mapping_ = {
     {"mul", ArithOpType::Mul},
     {"div", ArithOpType::Div},
     {"mod", ArithOpType::Mod},
+    {"band", ArithOpType::BAnd},
+    {"bxor", ArithOpType::BXOr},
+    {"bor", ArithOpType::BOr},
 };
 
 static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
@@ -152,6 +155,9 @@ static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
     {ArithOpType::Mul, "mul"},
     {ArithOpType::Div, "div"},
     {ArithOpType::Mod, "mod"},
+    {ArithOpType::BAnd, "band"},
+    {ArithOpType::BOr, "bor"},
+    {ArithOpType::BXOr, "bxor"},
 };
 
 struct BinaryArithOpEvalRangeExpr : Expr {

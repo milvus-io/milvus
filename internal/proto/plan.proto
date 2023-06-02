@@ -27,6 +27,9 @@ enum ArithOpType {
   Mul = 3;
   Div = 4;
   Mod = 5;
+  BAnd = 6;
+  BXOr = 7;
+  BOr = 8;
 };
 
 message GenericValue {

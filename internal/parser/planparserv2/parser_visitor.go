@@ -866,14 +866,95 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 }
 
-// VisitBitXor not supported.
+func (v *ParserVisitor) VisitBitAnd(ctx *parser.BitAndContext) interface{} {
+	return handleBitWise(ctx.Expr(0), v, ctx.Expr(1), parser.PlanParserBAND)
+}
 func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
-	return fmt.Errorf("BitXor is not supported: %s", ctx.GetText())
+	return handleBitWise(ctx.Expr(0), v, ctx.Expr(1), parser.PlanParserBOR)
+}
+func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
+	return handleBitWise(ctx.Expr(0), v, ctx.Expr(1), parser.PlanParserBXOR)
 }
 
-// VisitBitAnd not supported.
-func (v *ParserVisitor) VisitBitAnd(ctx *parser.BitAndContext) interface{} {
-	return fmt.Errorf("BitAnd is not supported: %s", ctx.GetText())
+func handleBitWise(leftExprContext parser.IExprContext, v *ParserVisitor, rightExprContext parser.IExprContext, opTokenType int) interface{} {
+	left := leftExprContext.Accept(v)
+	if err := getError(left); err != nil {
+		return err
+	}
+
+	right := rightExprContext.Accept(v)
+	if err := getError(right); err != nil {
+		return err
+	}
+
+	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
+	if leftValue != nil && rightValue != nil {
+		switch opTokenType {
+		case parser.PlanParserBAND:
+			n, err := BitAnd(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBXOR:
+			n, err := BitXor(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBOR:
+			n, err := BitOr(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		default:
+			return fmt.Errorf("unexpected op: %s", arithNameMap[opTokenType])
+		}
+	}
+
+	var leftExpr *ExprWithType
+	var rightExpr *ExprWithType
+	reverse := true
+
+	if leftValue != nil {
+		leftExpr = toValueExpr(leftValue)
+	} else {
+		reverse = false
+		leftExpr = getExpr(left)
+	}
+	if rightValue != nil {
+		rightExpr = toValueExpr(rightValue)
+	} else {
+		rightExpr = getExpr(right)
+	}
+
+	if leftExpr == nil || rightExpr == nil {
+		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", leftExprContext.GetText(), arithNameMap[opTokenType], rightExprContext.GetText())
+	}
+
+	if (!typeutil.IsIntegerType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType)) ||
+		(!typeutil.IsIntegerType(rightExpr.dataType) && !typeutil.IsJSONType(rightExpr.dataType)) {
+		return fmt.Errorf("'%s' can only be used between integer or json field expressions", arithNameMap[opTokenType])
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithExpr{
+			BinaryArithExpr: &planpb.BinaryArithExpr{
+				Left:  leftExpr.expr,
+				Right: rightExpr.expr,
+				Op:    arithExprMap[opTokenType],
+			},
+		},
+	}
+	dataType, err := calcDataType(leftExpr, rightExpr, reverse)
+	if err != nil {
+		return err
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: dataType,
+	}
 }
 
 // VisitPower parses power expression.
@@ -899,11 +980,6 @@ func (v *ParserVisitor) VisitPower(ctx *parser.PowerContext) interface{} {
 // VisitShift unsupported.
 func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
 	return fmt.Errorf("shift is not supported: %s", ctx.GetText())
-}
-
-// VisitBitOr unsupported.
-func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
-	return fmt.Errorf("BitOr is not supported: %s", ctx.GetText())
 }
 
 // getColumnInfoFromJSONIdentifier parse JSON field name and JSON nested path.

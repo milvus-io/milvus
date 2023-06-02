@@ -637,17 +637,18 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "Equal\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005"
   "Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMatch\020\007\022\020"
   "\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Range\020\n\022\006"
-  "\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013\n\007Unkn"
+  "\n\002In\020\013\022\t\n\005NotIn\020\014*d\n\013ArithOpType\022\013\n\007Unkn"
   "own\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007\n\003Div\020"
-  "\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io/milvu"
-  "s/internal/proto/planpbb\006proto3"
+  "\004\022\007\n\003Mod\020\005\022\010\n\004BAnd\020\006\022\010\n\004BXOr\020\007\022\007\n\003BOr\020\010B"
+  "3Z1github.com/milvus-io/milvus/internal/"
+  "proto/planpbb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 3671, descriptor_table_protodef_plan_2eproto,
+    false, false, 3700, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
     &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 19,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
@@ -744,6 +745,9 @@ bool ArithOpType_IsValid(int value) {
     case 3:
     case 4:
     case 5:
+    case 6:
+    case 7:
+    case 8:
       return true;
     default:
       return false;

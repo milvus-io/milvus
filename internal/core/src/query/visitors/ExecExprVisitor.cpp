@@ -99,6 +99,53 @@ class ExecExprVisitor : ExprVisitor {
     BitsetTypeOpt bitset_opt_;
 };
 }  // namespace impl
+template <typename T>
+inline T
+_bitand(T a, T b) {
+    return a & b;
+}
+inline double
+_bitand(double a, double b) {
+    PanicInfo("unsupported bitand between doubles");
+    return 0;
+}
+inline float
+_bitand(float a, float b) {
+    PanicInfo("unsupported bitand between floats");
+    return 0;
+}
+
+template <typename T>
+inline T
+_bitxor(T a, T b) {
+    return a ^ b;
+}
+inline double
+_bitxor(double a, double b) {
+    PanicInfo("unsupported bitxor between doubles");
+    return 0;
+}
+inline float
+_bitxor(float a, float b) {
+    PanicInfo("unsupported bitxor between floats");
+    return 0;
+}
+
+template <typename T>
+inline T
+_bitor(T a, T b) {
+    return a | b;
+}
+inline double
+_bitor(double a, double b) {
+    PanicInfo("unsupported bitor between doubles");
+    return 0;
+}
+inline float
+_bitor(float a, float b) {
+    PanicInfo("unsupported bitor between floats");
+    return 0;
+}
 
 void
 ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
@@ -603,6 +650,42 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                     return ExecDataRangeVisitorImpl<T>(
                         expr.column_.field_id, index_func, elem_func);
                 }
+                case ArithOpType::BAnd: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitand(x, right_operand) == val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitand(x, right_operand) == val;
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BXOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitxor(x, right_operand) == val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitxor(x, right_operand) == val;
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitor(x, right_operand) == val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitor(x, right_operand) == val;
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
                 }
@@ -666,6 +749,42 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                     };
                     auto elem_func = [val, right_operand](MayConstRef<T> x) {
                         return (static_cast<T>(fmod(x, right_operand)) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BAnd: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitand(x, right_operand) != val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitand(x, right_operand) != val;
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BXOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitxor(x, right_operand) != val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitxor(x, right_operand) != val;
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return _bitor(x, right_operand) != val;
+                    };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return _bitor(x, right_operand) != val;
                     };
                     return ExecDataRangeVisitorImpl<T>(
                         expr.column_.field_id, index_func, elem_func);
@@ -790,6 +909,42 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
                     return ExecDataRangeVisitorImpl<milvus::Json>(
                         expr.column_.field_id, index_func, elem_func);
                 }
+                case ArithOpType::BAnd: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitand(x.value(), right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BXOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitxor(x.value(), right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitor(x.value(), right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
                 }
@@ -854,6 +1009,42 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcherJson(
                         BinaryArithRangeJSONCompareNotEqual(
                             static_cast<ExprValueType>(
                                 fmod(x.value(), right_operand)) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BAnd: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitand(x.value(), right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BXOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitxor(x.value(), right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<milvus::Json>(
+                        expr.column_.field_id, index_func, elem_func);
+                }
+                case ArithOpType::BOr: {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
+                        return false;
+                    };
+                    auto elem_func = [&](const milvus::Json& json) {
+                        BinaryArithRangeJSONCompare(
+                            _bitor(x.value(), right_operand) != val);
                     };
                     return ExecDataRangeVisitorImpl<milvus::Json>(
                         expr.column_.field_id, index_func, elem_func);
