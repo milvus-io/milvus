@@ -92,6 +92,9 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 	if !IsDDLRequest(rt) {
 		// only dml and dql have collection level rate limits
 		ret = checkFunc(m.collectionLimiters[collectionID])
+		if ret != commonpb.ErrorCode_Success {
+			m.globalDDLLimiter.cancel(rt, n)
+		}
 	}
 
 	// then check global level rate limits
@@ -192,6 +195,14 @@ func (rl *rateLimiter) limit(rt internalpb.RateType, n int) (bool, float64) {
 		return false, -1
 	}
 	return !limit.AllowN(time.Now(), n), float64(limit.Limit())
+}
+
+func (rl *rateLimiter) cancel(rt internalpb.RateType, n int) {
+	limit, ok := rl.limiters.Get(rt)
+	if !ok {
+		return
+	}
+	limit.Cancel(n)
 }
 
 func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
