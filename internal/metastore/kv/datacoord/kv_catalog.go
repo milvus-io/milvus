@@ -52,7 +52,8 @@ type Catalog struct {
 }
 
 func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath string) *Catalog {
-	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath, metaRootpath: metaRootpath}
+	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath,
+		metaRootpath: metaRootpath}
 }
 
 func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
@@ -411,7 +412,6 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 		//}
 		//kvs[flushSegKey] = segBytes
 	}
-
 	return kc.MetaKv.MultiSave(kvs)
 }
 
@@ -437,7 +437,6 @@ func (kc *Catalog) RevertAlterSegmentsAndAddNewSegment(ctx context.Context, oldS
 		binlogKeys := buildBinlogKeys(removeSegment)
 		removals = append(removals, binlogKeys...)
 	}
-
 	err := kc.MetaKv.MultiSaveAndRemove(kvs, removals)
 	if err != nil {
 		log.Warn("batch save and remove segments failed", zap.Error(err))
@@ -629,6 +628,18 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 		return false
 	}
 	return len(keys) == 0 && len(values) == 0
+}
+
+func (kc *Catalog) GetGlobalMaxSegmentExpireTs() (uint64, error) {
+	globalTsStr, err := kc.MetaKv.Load(GlobalSegmentMaxExpireTimeKey)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(globalTsStr, 10, 64)
+}
+
+func (kc *Catalog) SaveGlobalMaxSegmentExpireTs(ctx context.Context, lastExpire uint64) error {
+	return kc.MetaKv.Save(GlobalSegmentMaxExpireTimeKey, strconv.FormatUint(lastExpire, 10))
 }
 
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,

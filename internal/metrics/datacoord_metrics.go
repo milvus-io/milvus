@@ -131,6 +131,15 @@ var (
 			Buckets:   buckets,
 		}, []string{})
 
+	DataCoordAssignSegmentsDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "segments_assign_duration",
+			Help:      "time cost for assigning segments",
+			Buckets:   buckets,
+		}, []string{})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -190,6 +199,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordDmlChannelNum)
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
+	registry.MustRegister(DataCoordAssignSegmentsDuration)
 }
 
 func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {

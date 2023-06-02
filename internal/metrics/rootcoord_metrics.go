@@ -177,7 +177,7 @@ var (
 		})
 )
 
-//RegisterRootCoord registers RootCoord metrics
+// RegisterRootCoord registers RootCoord metrics
 func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.Register(RootCoordProxyCounter)
 

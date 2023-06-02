@@ -26,9 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -82,6 +86,8 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp) error
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
+	Start(ctx context.Context)
+	Stop()
 }
 
 // Allocation records the allocation info
@@ -112,6 +118,13 @@ type SegmentManager struct {
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
 	rcc                 types.RootCoord
+	//for global segment last expire
+	expireLock                 sync.RWMutex
+	globalMaxSegmentLastExpire uint64
+	finishedRestartExpireCheck bool
+	stopAllocateSegments       *atomic.Bool
+	stopper                    context.CancelFunc
+	stopWaiter                 sync.WaitGroup
 }
 
 type allocHelper struct {
@@ -196,48 +209,195 @@ func defaultFlushPolicy() flushPolicy {
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) *SegmentManager {
+func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) (*SegmentManager, error) {
 	manager := &SegmentManager{
-		meta:                meta,
-		allocator:           allocator,
-		helper:              defaultAllocHelper(),
-		segments:            make([]UniqueID, 0),
-		estimatePolicy:      defaultCalUpperLimitPolicy(),
-		allocPolicy:         defaultAllocatePolicy(),
-		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
-		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
-		flushPolicy:         defaultFlushPolicy(),
-		rcc:                 rcc,
+		meta:                       meta,
+		allocator:                  allocator,
+		helper:                     defaultAllocHelper(),
+		segments:                   make([]UniqueID, 0),
+		estimatePolicy:             defaultCalUpperLimitPolicy(),
+		allocPolicy:                defaultAllocatePolicy(),
+		segmentSealPolicies:        defaultSegmentSealPolicy(), // default only segment size policy
+		channelSealPolicies:        []channelSealPolicy{},      // no default channel seal policy
+		flushPolicy:                defaultFlushPolicy(),
+		rcc:                        rcc,
+		finishedRestartExpireCheck: false,
+		stopAllocateSegments:       atomic.NewBool(true),
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
 	}
+	if err := manager.loadGlobalSegmentExpire(); err != nil {
+		return nil, err
+	}
 	manager.loadSegmentsFromMeta()
-	return manager
+	return manager, nil
+}
+
+func (manager *SegmentManager) Start(ctx context.Context) {
+	managerCtx, cancelManager := context.WithCancel(ctx)
+	manager.stopper = cancelManager
+	manager.stopWaiter.Add(1)
+	go manager.saveGlobalSegmentExpireLoop(managerCtx)
+}
+
+func (manager *SegmentManager) Stop() {
+	if manager.stopper != nil {
+		manager.stopper()
+		manager.stopWaiter.Wait()
+	}
+}
+
+func (manager *SegmentManager) saveGlobalSegmentExpireLoop(ctx context.Context) {
+	ticker := time.NewTicker(Params.DataCoordCfg.GlobalSegmentLastExpireCheckInterval)
+	defer ticker.Stop()
+	defer manager.stopWaiter.Done()
+	var lastSyncGlobalExpirationTime = time.Now().Add(-1 * Params.DataCoordCfg.GlobalSegmentLastExpireSyncInterval)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("stop saving global segment expire loop")
+			manager.maybeSyncGlobalMaxSegmentExpire(&lastSyncGlobalExpirationTime)
+			return
+		case <-ticker.C:
+			if !manager.isFinishedExpireCheck() {
+				continue
+			}
+			if err := manager.maybeSyncGlobalMaxSegmentExpire(&lastSyncGlobalExpirationTime); err != nil {
+				log.Error("failed to sync meta, stop allocating segments", zap.Error(err))
+				manager.setStoppedAllocation(true)
+			} else {
+				manager.setStoppedAllocation(false)
+			}
+		}
+	}
+}
+
+func (manager *SegmentManager) maybeSyncGlobalMaxSegmentExpire(lastSyncGlobalExpirationTime *time.Time) error {
+	sinceLastSyncDuration := time.Since(*lastSyncGlobalExpirationTime)
+	currentGlobalMaxLastExpire := manager.getGlobalSegmentExpire()
+	if sinceLastSyncDuration >= (Params.DataCoordCfg.GlobalSegmentLastExpireSyncInterval*3)/2 {
+		err := errors.New("dangerous! globalSegmentExpire has not been synced to meta store for mor than 2 intervals," +
+			"we have to panic dataCoord to avoid data loss")
+		log.Fatal(err.Error(),
+			zap.Uint64("globalMaxSegmentLastExpire", currentGlobalMaxLastExpire))
+		panic(err)
+	}
+	if sinceLastSyncDuration > Params.DataCoordCfg.GlobalSegmentLastExpireSyncInterval {
+		//write global expire kv to etcd, no retry
+		currentTsPhyTime := tsoutil.PhysicalTime(currentGlobalMaxLastExpire)
+		log.Info("try to sync global last expire to meta store",
+			zap.Time("currentGlobalLastExpire", currentTsPhyTime))
+		err := manager.meta.SaveGlobalMaxSegmentExpireTs(currentGlobalMaxLastExpire)
+		if err != nil {
+			log.Error("failed to sync globalSegmentExpire meta store", zap.Error(err))
+			return errors.New("dangerous! globalSegmentExpire failed be synced to meta store, " +
+				"there is a danger of data loss")
+		}
+		*lastSyncGlobalExpirationTime = time.Now()
+		log.Info("sync global segment last expire ts success",
+			zap.Time("currentGlobalLastExpire", currentTsPhyTime))
+	}
+	return nil
+}
+
+func (manager *SegmentManager) saveGlobalSegmentExpire(expireTs uint64) {
+	manager.expireLock.Lock()
+	defer manager.expireLock.Unlock()
+	if expireTs > manager.globalMaxSegmentLastExpire {
+		manager.globalMaxSegmentLastExpire = expireTs
+	}
+}
+
+func (manager *SegmentManager) getGlobalSegmentExpire() uint64 {
+	manager.expireLock.RLock()
+	defer manager.expireLock.RUnlock()
+	return manager.globalMaxSegmentLastExpire
+}
+
+func (manager *SegmentManager) isFinishedExpireCheck() bool {
+	manager.expireLock.RLock()
+	defer manager.expireLock.RUnlock()
+	return manager.finishedRestartExpireCheck
+}
+
+func (manager *SegmentManager) setFinishedExpireCheck(finished bool) {
+	manager.expireLock.Lock()
+	defer manager.expireLock.Unlock()
+	manager.finishedRestartExpireCheck = finished
+}
+
+func (manager *SegmentManager) isStoppedAllocation() bool {
+	manager.expireLock.RLock()
+	defer manager.expireLock.RUnlock()
+	return manager.stopAllocateSegments.Load()
+}
+
+func (manager *SegmentManager) setStoppedAllocation(stopped bool) {
+	manager.expireLock.Lock()
+	defer manager.expireLock.Unlock()
+	manager.stopAllocateSegments.Store(stopped)
+}
+
+func (manager *SegmentManager) loadGlobalSegmentExpire() error {
+	if lastGlobalSegmentExpire, err := manager.meta.GetGlobalMaxSegmentExpire(); err != nil {
+		log.Warn("cannot get last global segment expire time, use current ts instead")
+		var latestTs uint64 = 0
+		allocateErr := retry.Do(context.Background(), func() error {
+			tsResponse, tryErr := manager.rcc.AllocTimestamp(context.Background(), &rootcoordpb.AllocTimestampRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+					commonpbutil.WithMsgID(0),
+					commonpbutil.WithTimeStamp(0),
+					commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+				),
+				Count: 1,
+			})
+			log.Warn("failed to get ts from rootCoord for globalLastExpire", zap.Error(tryErr))
+			if tryErr != nil {
+				return tryErr
+			}
+			latestTs = tsResponse.Timestamp
+			return nil
+		}, retry.Attempts(120), retry.Sleep(1*time.Second))
+
+		if allocateErr != nil {
+			log.Warn("cannot allocate latest ts from rootCoord", zap.Error(allocateErr))
+			return errors.New("global max expire ts is unavailable for segment manager")
+		}
+		log.Info("segmentManager use the latest global last expire from rootCoord", zap.Uint64("globalLastExpire", latestTs))
+		manager.saveGlobalSegmentExpire(latestTs)
+	} else {
+		log.Info("segmentManager use global last expire from meta store", zap.Uint64("globalLastExpire", lastGlobalSegmentExpire))
+		manager.saveGlobalSegmentExpire(lastGlobalSegmentExpire)
+	}
+	return nil
 }
 
 // loadSegmentsFromMeta generate corresponding segment status for each segment from meta
-func (s *SegmentManager) loadSegmentsFromMeta() {
-	segments := s.meta.GetUnFlushedSegments()
+func (manager *SegmentManager) loadSegmentsFromMeta() {
+	segments := manager.meta.GetUnFlushedSegments()
 	segmentsID := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		segmentsID = append(segmentsID, segment.GetID())
 	}
-	s.segments = segmentsID
+	manager.segments = segmentsID
 }
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
-func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
+func (manager *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if manager.isStoppedAllocation() {
+		return nil, errors.New("segment manager is in " +
+			"stoppedAllocate status, cannot allocate segment for the moment")
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
 	// filter segments
 	segments := make([]*SegmentInfo, 0)
-	for _, segmentID := range s.segments {
-		segment := s.meta.GetHealthySegment(segmentID)
+	for _, segmentID := range manager.segments {
+		segment := manager.meta.GetHealthySegment(segmentID)
 		if segment == nil {
 			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
 			continue
@@ -249,72 +409,72 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	}
 
 	// Apply allocation policy.
-	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
+	maxCountPerSegment, err := manager.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segments,
+	newSegmentAllocations, existedSegmentAllocations := manager.allocPolicy(segments,
 		requestRows, int64(maxCountPerSegment))
 
 	// create new segments and add allocations
-	expireTs, err := s.genExpireTs(ctx, false)
+	expireTs, err := manager.genExpireTs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
 	for _, allocation := range newSegmentAllocations {
-		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
+		segment, err := manager.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
 		if err != nil {
 			return nil, err
 		}
 		allocation.ExpireTime = expireTs
 		allocation.SegmentID = segment.GetID()
-		if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
+		if err := manager.meta.AddAllocation(segment.GetID(), allocation); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, allocation := range existedSegmentAllocations {
 		allocation.ExpireTime = expireTs
-		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
+		if err := manager.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
 			return nil, err
 		}
 	}
-
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
+	manager.saveGlobalSegmentExpire(expireTs)
 	return allocations, nil
 }
 
 // allocSegmentForImport allocates one segment allocation for bulk insert.
-func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
+func (manager *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64) (*Allocation, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
 	// Init allocation.
 	allocation := getAllocation(requestRows)
 	// Create new segments and add allocations to meta.
 	// To avoid mixing up with growing segments, the segment state is "Importing"
-	expireTs, err := s.genExpireTs(ctx, true)
+	expireTs, err := manager.genExpireTs(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
-	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing)
+	segment, err := manager.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing)
 	if err != nil {
 		return nil, err
 	}
 	// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
 	// TODO: This is a hack and will be removed once the whole ImportManager is migrated from RootCoord to DataCoord.
-	if s.rcc == nil {
+	if manager.rcc == nil {
 		log.Error("RootCoord client not set")
 		return nil, errors.New("RootCoord client not set")
 	}
 
 	allocation.ExpireTime = expireTs
 	allocation.SegmentID = segment.GetID()
-	if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
+	if err := manager.meta.AddAllocation(segment.GetID(), allocation); err != nil {
 		return nil, err
 	}
 	return allocation, nil
@@ -329,8 +489,8 @@ func isGrowing(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Growing
 }
 
-func (s *SegmentManager) genExpireTs(ctx context.Context, isImport bool) (Timestamp, error) {
-	ts, err := s.allocator.allocTimestamp(ctx)
+func (manager *SegmentManager) genExpireTs(ctx context.Context, isImport bool) (Timestamp, error) {
+	ts, err := manager.allocator.allocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -344,16 +504,16 @@ func (s *SegmentManager) genExpireTs(ctx context.Context, isImport bool) (Timest
 	return expireTs, nil
 }
 
-func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
+func (manager *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
 	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	id, err := s.allocator.allocID(ctx)
+	id, err := manager.allocator.allocID(ctx)
 	if err != nil {
 		log.Error("failed to open new segment while allocID", zap.Error(err))
 		return nil, err
 	}
-	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
+	maxNumOfRows, err := manager.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
 		return nil, err
@@ -373,65 +533,65 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		segmentInfo.IsImporting = true
 	}
 	segment := NewSegmentInfo(segmentInfo)
-	if err := s.meta.AddSegment(segment); err != nil {
+	if err := manager.meta.AddSegment(segment); err != nil {
 		log.Error("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}
-	s.segments = append(s.segments, id)
-	log.Info("datacoord: estimateTotalRows: ",
+	manager.segments = append(manager.segments, id)
+	log.Info("dataCoord: open new segment estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),
 		zap.String("Channel", segmentInfo.InsertChannel))
 
-	return segment, s.helper.afterCreateSegment(segmentInfo)
+	return segment, manager.helper.afterCreateSegment(segmentInfo)
 }
 
-func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
+func (manager *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
 	// it's ok to use meta.GetCollection here, since collection meta is set before using segmentManager
-	collMeta := s.meta.GetCollection(collectionID)
+	collMeta := manager.meta.GetCollection(collectionID)
 	if collMeta == nil {
 		return -1, fmt.Errorf("failed to get collection %d", collectionID)
 	}
-	return s.estimatePolicy(collMeta.Schema)
+	return manager.estimatePolicy(collMeta.Schema)
 }
 
 // DropSegment drop the segment from manager.
-func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
+func (manager *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, id := range s.segments {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for i, id := range manager.segments {
 		if id == segmentID {
-			s.segments = append(s.segments[:i], s.segments[i+1:]...)
+			manager.segments = append(manager.segments[:i], manager.segments[i+1:]...)
 			break
 		}
 	}
-	segment := s.meta.GetHealthySegment(segmentID)
+	segment := manager.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
 	}
-	s.meta.SetAllocations(segmentID, []*Allocation{})
+	manager.meta.SetAllocations(segmentID, []*Allocation{})
 	for _, allocation := range segment.allocations {
 		putAllocation(allocation)
 	}
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
+func (manager *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	var ret []UniqueID
-	segCandidates := s.segments
+	segCandidates := manager.segments
 	if len(segIDs) != 0 {
 		segCandidates = segIDs
 	}
 	for _, id := range segCandidates {
-		info := s.meta.GetHealthySegment(id)
+		info := manager.meta.GetHealthySegment(id)
 		if info == nil {
 			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
 			continue
@@ -446,7 +606,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		if (!isImport && info.State != commonpb.SegmentState_Growing) || (isImport && info.State != commonpb.SegmentState_Importing) {
 			continue
 		}
-		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+		if err := manager.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
 		ret = append(ret, id)
@@ -454,26 +614,46 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	return ret, nil
 }
 
+// this function is expected to be called sequentially
+func (manager *SegmentManager) segmentServiceAvailable(t Timestamp) bool {
+	if manager.isFinishedExpireCheck() {
+		return true
+	}
+	currentGlobalMaxSegmentLastExpire := manager.getGlobalSegmentExpire()
+	guardTs := tsoutil.AddPhysicalDurationOnTs(currentGlobalMaxSegmentLastExpire,
+		2*Params.DataCoordCfg.GlobalSegmentLastExpireSyncInterval)
+	if t > guardTs {
+		manager.setFinishedExpireCheck(true)
+		manager.setStoppedAllocation(false)
+		return true
+	}
+
+	return false
+}
+
 // GetFlushableSegments get segment ids with Sealed State and flushable (meets flushPolicy)
-func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (manager *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
+	if !manager.segmentServiceAvailable(t) {
+		return nil, nil
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
-	if err := s.tryToSealSegment(t, channel); err != nil {
+	if err := manager.tryToSealSegment(t, channel); err != nil {
 		return nil, err
 	}
 
-	s.cleanupSealedSegment(t, channel)
+	manager.cleanupSealedSegment(t, channel)
 
-	ret := make([]UniqueID, 0, len(s.segments))
-	for _, id := range s.segments {
-		info := s.meta.GetHealthySegment(id)
+	ret := make([]UniqueID, 0, len(manager.segments))
+	for _, id := range manager.segments {
+		info := manager.meta.GetHealthySegment(id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
-		if s.flushPolicy(info, t) {
+		if manager.flushPolicy(info, t) {
 			ret = append(ret, id)
 		}
 	}
@@ -482,11 +662,11 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 }
 
 // ExpireAllocations notify segment status to expire old allocations
-func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, id := range s.segments {
-		segment := s.meta.GetHealthySegment(id)
+func (manager *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for _, id := range manager.segments {
+		segment := manager.meta.GetHealthySegment(id)
 		if segment == nil || segment.InsertChannel != channel {
 			continue
 		}
@@ -499,15 +679,15 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 				allocations = append(allocations, segment.allocations[i])
 			}
 		}
-		s.meta.SetAllocations(segment.GetID(), allocations)
+		manager.meta.SetAllocations(segment.GetID(), allocations)
 	}
 	return nil
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
-	valids := make([]int64, 0, len(s.segments))
-	for _, id := range s.segments {
-		segment := s.meta.GetHealthySegment(id)
+func (manager *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
+	valids := make([]int64, 0, len(manager.segments))
+	for _, id := range manager.segments {
+		segment := manager.meta.GetHealthySegment(id)
 		if segment == nil || segment.InsertChannel != channel {
 			valids = append(valids, id)
 			continue
@@ -515,19 +695,19 @@ func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 
 		if isEmptySealedSegment(segment, ts) {
 			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Any("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			manager.meta.SetState(id, commonpb.SegmentState_Dropped)
 			continue
 		}
 
 		if segment.GetState() == commonpb.SegmentState_Importing && segment.GetLastExpireTime() < ts {
 			log.Info("cleanup staled importing segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
-			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			manager.meta.SetState(id, commonpb.SegmentState_Dropped)
 			continue
 		}
 
 		valids = append(valids, id)
 	}
-	s.segments = valids
+	manager.segments = valids
 }
 
 func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
@@ -535,10 +715,10 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 }
 
 // tryToSealSegment applies segment & channel seal policies
-func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
+func (manager *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
-	for _, id := range s.segments {
-		info := s.meta.GetHealthySegment(id)
+	for _, id := range manager.segments {
+		info := manager.meta.GetHealthySegment(id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
@@ -547,9 +727,9 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 			continue
 		}
 		// change shouldSeal to segment seal policy logic
-		for _, policy := range s.segmentSealPolicies {
+		for _, policy := range manager.segmentSealPolicies {
 			if policy(info, ts) {
-				if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
+				if err := manager.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 				break
@@ -557,7 +737,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		}
 	}
 	for channel, segmentInfos := range channelInfo {
-		for _, policy := range s.channelSealPolicies {
+		for _, policy := range manager.channelSealPolicies {
 			vs := policy(channel, segmentInfos, ts)
 			for _, info := range vs {
 				if info.State == commonpb.SegmentState_Sealed ||
@@ -565,7 +745,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 					info.State == commonpb.SegmentState_Flushed {
 					continue
 				}
-				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
+				if err := manager.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 			}
@@ -575,13 +755,13 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 }
 
 // DropSegmentsOfChannel drops all segments in a channel
-func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (manager *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
-	validSegments := make([]int64, 0, len(s.segments))
-	for _, sid := range s.segments {
-		segment := s.meta.GetHealthySegment(sid)
+	validSegments := make([]int64, 0, len(manager.segments))
+	for _, sid := range manager.segments {
+		segment := manager.meta.GetHealthySegment(sid)
 		if segment == nil {
 			continue
 		}
@@ -589,11 +769,11 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 			validSegments = append(validSegments, sid)
 			continue
 		}
-		s.meta.SetAllocations(sid, nil)
+		manager.meta.SetAllocations(sid, nil)
 		for _, allocation := range segment.allocations {
 			putAllocation(allocation)
 		}
 	}
 
-	s.segments = validSegments
+	manager.segments = validSegments
 }

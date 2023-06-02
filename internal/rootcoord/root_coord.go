@@ -1529,7 +1529,6 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		setNotServingStatus(ret.GetStatus(), code)
 		return ret, nil
 	}
-
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),

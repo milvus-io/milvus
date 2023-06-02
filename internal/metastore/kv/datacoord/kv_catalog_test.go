@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -868,4 +869,19 @@ func TestCatalog_GcConfirm(t *testing.T) {
 		mock.AnythingOfType("string")).
 		Return(nil, nil, nil)
 	assert.True(t, kc.GcConfirm(context.TODO(), 100, 10000))
+}
+
+func TestCatalog_SaveAndLoadGlobalSegmentLastExpire(t *testing.T) {
+	txn := mocks.NewMetaKv(t)
+	txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+	catalog := NewCatalog(txn, rootPath, "")
+	lastExpireTs := uint64(100)
+
+	err := catalog.SaveGlobalMaxSegmentExpireTs(context.TODO(), lastExpireTs)
+	assert.NoError(t, err)
+
+	txn.EXPECT().Load(mock.Anything).Return(strconv.FormatUint(lastExpireTs, 10), nil)
+	loadedLastExpire, getErr := catalog.GetGlobalMaxSegmentExpireTs()
+	assert.NoError(t, getErr)
+	assert.Equal(t, lastExpireTs, loadedLastExpire)
 }

@@ -126,6 +126,8 @@ type DataCoordCatalog interface {
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
+	GetGlobalMaxSegmentExpireTs() (uint64, error)
+	SaveGlobalMaxSegmentExpireTs(ctx context.Context, lastExpire uint64) error
 }
 
 type IndexCoordCatalog interface {

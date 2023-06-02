@@ -1429,7 +1429,9 @@ type dataCoordConfig struct {
 	Address string
 
 	// --- ETCD ---
-	ChannelWatchSubPath string
+	ChannelWatchSubPath                  string
+	GlobalSegmentLastExpireSyncInterval  time.Duration
+	GlobalSegmentLastExpireCheckInterval time.Duration
 
 	// --- CHANNEL ---
 	WatchTimeoutInterval         time.Duration
@@ -1477,6 +1479,8 @@ type dataCoordConfig struct {
 func (p *dataCoordConfig) init(base *BaseTable) {
 	p.Base = base
 	p.initChannelWatchPrefix()
+	p.initGlobalSegmentLastExpireSyncInterval()
+	p.initGlobalSegmentLastExpireCheckInterval()
 
 	p.initWatchTimeoutInterval()
 	p.initChannelBalanceSilentDuration()
@@ -1511,6 +1515,16 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
 	p.initEnableActiveStandby()
+}
+
+func (p *dataCoordConfig) initGlobalSegmentLastExpireSyncInterval() {
+	p.GlobalSegmentLastExpireSyncInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.segment.globalExpireSyncInterval", 60)) * time.Second
+	log.Info("init GlobalSegmentLastExpireSyncInterval", zap.Duration("interval", p.GlobalSegmentLastExpireSyncInterval))
+}
+
+func (p *dataCoordConfig) initGlobalSegmentLastExpireCheckInterval() {
+	p.GlobalSegmentLastExpireCheckInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.segment.globalExpireCheckInterval", 5)) * time.Second
+	log.Info("init GlobalSegmentLastExpireCheckInterval", zap.Duration("interval", p.GlobalSegmentLastExpireCheckInterval))
 }
 
 func (p *dataCoordConfig) initWatchTimeoutInterval() {

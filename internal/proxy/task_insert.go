@@ -515,6 +515,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	defer sp.Finish()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
+	log := log.Ctx(ctx).With(zap.String("collection", it.GetCollectionName()),
+		zap.String("partition", it.GetPartitionName()), zap.Int64("task_id", it.ID()),
+		zap.Int64("msgID", it.Base.MsgID))
 
 	collectionName := it.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, it.GetDbName(), collectionName)
@@ -538,12 +541,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	log.Ctx(ctx).Debug("send insert request to virtual channels",
-		zap.String("collection", it.GetCollectionName()),
-		zap.String("partition", it.GetPartitionName()),
+	log.Debug("send insert request to virtual channels",
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()),
 		zap.Duration("get cache duration", getCacheDur),
 		zap.Duration("get msgStream duration", getMsgStreamDur))
 
@@ -561,9 +561,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 
 	assignSegmentIDDur := tr.RecordSpan()
-	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID),
-		zap.String("collection name", it.CollectionName),
-		zap.Duration("assign segmentID duration", assignSegmentIDDur))
+	log.Debug("assign segmentID for insert data success", zap.Duration("assign segmentID duration", assignSegmentIDDur))
 	err = stream.Produce(msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -571,10 +569,10 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	sendMsgDur := tr.RecordSpan()
-	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
+	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
 	totalExecDur := tr.ElapseSpan()
-	log.Debug("Proxy Insert Execute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName),
-		zap.Duration("send message duration", sendMsgDur),
+	log.Debug("Proxy Insert Execute done", zap.Duration("send message duration", sendMsgDur),
 		zap.Duration("execute duration", totalExecDur))
 
 	return nil

@@ -47,8 +47,12 @@ type metaMemoryKV struct {
 	memkv.MemoryKV
 }
 
+const DefaultGlobalSegmentMaxExpireTime = "10000"
+
 func NewMetaMemoryKV() *metaMemoryKV {
-	return &metaMemoryKV{MemoryKV: *memkv.NewMemoryKV()}
+	memoryKV := memkv.NewMemoryKV()
+	memoryKV.Save(datacoord.GlobalSegmentMaxExpireTimeKey, DefaultGlobalSegmentMaxExpireTime)
+	return &metaMemoryKV{MemoryKV: *memoryKV}
 }
 
 func (mm *metaMemoryKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
@@ -118,7 +122,9 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target 
 }
 
 func newMemoryMeta() (*meta, error) {
-	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	metaKV := NewMetaMemoryKV()
+	metaKV.Save(datacoord.GlobalSegmentMaxExpireTimeKey, DefaultGlobalSegmentMaxExpireTime)
+	catalog := datacoord.NewCatalog(metaKV, "", "")
 	return newMeta(context.TODO(), catalog, nil)
 }
 

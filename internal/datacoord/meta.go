@@ -187,6 +187,14 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	return cloneColl
 }
 
+func (m *meta) SaveGlobalMaxSegmentExpireTs(lastExpire uint64) error {
+	return m.catalog.SaveGlobalMaxSegmentExpireTs(m.ctx, lastExpire)
+}
+
+func (m *meta) GetGlobalMaxSegmentExpire() (uint64, error) {
+	return m.catalog.GetGlobalMaxSegmentExpireTs()
+}
+
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
 type chanPartSegments struct {
 	collectionID UniqueID
@@ -260,8 +268,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(segment *SegmentInfo) error {
-	log.Info("meta update: adding segment",
-		zap.Int64("segment ID", segment.GetID()))
+	log.Info("meta update: adding segment", zap.Int64("segment ID", segment.GetID()))
 	m.Lock()
 	defer m.Unlock()
 	if err := m.catalog.AddSegment(m.ctx, segment.SegmentInfo); err != nil {
@@ -272,8 +279,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
-	log.Info("meta update: adding segment - complete",
-		zap.Int64("segment ID", segment.GetID()))
+	log.Info("meta update: adding segment - complete", zap.Int64("segment ID", segment.GetID()))
 	return nil
 }
 
@@ -422,7 +428,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),
 		zap.Any("check points", checkpoints),
-		zap.Any("start position", startPositions),
+		zap.Any("start positions", PruneSegmentStartPositions(startPositions)),
 		zap.Bool("importing", importing))
 	m.Lock()
 	defer m.Unlock()
@@ -877,32 +883,20 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	log.Info("meta update: add allocation",
-		zap.Int64("segmentID", segmentID),
+	log.Info("meta update: add allocation", zap.Int64("segmentID", segmentID),
 		zap.Any("allocation", allocation))
 	m.Lock()
 	defer m.Unlock()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		// TODO: Error handling.
-		log.Warn("meta update: add allocation failed - segment not found",
-			zap.Int64("segmentID", segmentID))
+		log.Warn("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
 		return nil
 	}
-	// Persist segment updates first.
-	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
-	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
-			log.Error("meta update: add allocation failed",
-				zap.Int64("segment ID", segmentID),
-				zap.Error(err))
-			return err
-		}
-	}
-	// Update in-memory meta.
+	// As we use global segment lastExpire to guarantee data correctness after restart
+	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
 	m.segments.AddAllocation(segmentID, allocation)
-	log.Info("meta update: add allocation - complete",
-		zap.Int64("segmentID", segmentID))
+	log.Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
 	return nil
 }
 
