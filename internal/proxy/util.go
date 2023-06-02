@@ -82,9 +82,16 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func validateLimit(limit int64) error {
-	if limit <= 0 || limit > Params.CommonCfg.TopKLimit {
-		return fmt.Errorf("should be in range [1, %d], but got %d", Params.CommonCfg.TopKLimit, limit)
+func validateTopKLimit(limit int64) error {
+	if limit <= 0 || limit > Params.QuotaConfig.TopKLimit {
+		return fmt.Errorf("should be in range [1, %d], but got %d", Params.QuotaConfig.TopKLimit, limit)
+	}
+	return nil
+}
+
+func validateNQLimit(limit int64) error {
+	if limit <= 0 || limit > Params.QuotaConfig.NQLimit {
+		return fmt.Errorf("nq (number of search vector per search request) should be in range [1, %d], but got %d", Params.QuotaConfig.NQLimit, limit)
 	}
 	return nil
 }
@@ -330,7 +337,7 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 
 // ValidateFieldAutoID call after validatePrimaryKey
 func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
-	var idx = -1
+	idx := -1
 	for i, field := range coll.Fields {
 		if field.AutoID {
 			if idx != -1 {
@@ -921,7 +928,6 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
-
 		}
 	}
 
@@ -1013,7 +1019,8 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 }
 
 func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
-	msgBase *commonpb.MsgBase, collectionID int64) (int64, error) {
+	msgBase *commonpb.MsgBase, collectionID int64,
+) (int64, error) {
 	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
@@ -1046,7 +1053,8 @@ func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
 }
 
 func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
-	msgBase *commonpb.MsgBase, partitionNames []string, collectionName string, collectionID int64) (int64, error) {
+	msgBase *commonpb.MsgBase, partitionNames []string, collectionName string, collectionID int64,
+) (int64, error) {
 	IDs2Names := make(map[int64]string)
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
@@ -1119,7 +1127,8 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 
 func setMsgID(ctx context.Context,
 	msgs []msgstream.TsMsg,
-	idAllocator *allocator.IDAllocator) error {
+	idAllocator *allocator.IDAllocator,
+) error {
 	var idBegin int64
 	var err error
 
