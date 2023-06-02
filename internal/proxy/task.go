@@ -647,9 +647,10 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.CollectionIDs {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+				log.Debug("Failed to get collection info. This collection may be not released",
+					zap.Any("collectionID", id),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
-				return errors.New("failed to show collections")
+				continue
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 			if err != nil {
