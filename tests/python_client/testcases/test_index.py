@@ -1,5 +1,6 @@
 from time import sleep
 import pytest
+import copy
 
 from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
@@ -18,6 +19,7 @@ prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
 uid = "test_index"
@@ -1554,7 +1556,8 @@ class TestIndexString(TestcaseBase):
         assert collection_w.has_index(index_name=index_name2)[0] == True
         collection_w.drop_index(index_name=index_name2)
         assert len(collection_w.indexes) == 0
-    
+
+
 class TestIndexDiskann(TestcaseBase):
     """
     ******************************************************************
@@ -1837,3 +1840,67 @@ class TestIndexDiskann(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "invalid index params"})
+
+
+class TestAutoIndex(TestcaseBase):
+    """ Test case of Auto index """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_create_autoindex_with_no_params(self):
+        """
+        target: test create auto index with no params
+        method: create index with only one field name
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w.create_index(field_name)
+        actual_index_params = collection_w.index()[0].params
+        assert default_autoindex_params == actual_index_params
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_params", cf.gen_autoindex_params())
+    def test_create_autoindex_with_params(self, index_params):
+        """
+        target: test create auto index with params
+        method: create index with different params
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w.create_index(field_name, index_params)
+        actual_index_params = collection_w.index()[0].params
+        log.info(collection_w.index()[0].params)
+        expect_autoindex_params = copy.copy(default_autoindex_params)
+        if index_params.get("index_type"):
+            if index_params["index_type"] != 'AUTOINDEX':
+                expect_autoindex_params = index_params
+        if index_params.get("metric_type"):
+            expect_autoindex_params["metric_type"] = index_params["metric_type"]
+        assert actual_index_params == expect_autoindex_params
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_autoindex_with_invalid_params(self):
+        """
+        target: test create auto index with invalid params
+        method: create index with invalid params
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        index_params = {"metric_type": "L2", "nlist": "1024", "M": "100"}
+        collection_w.create_index(field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1,
+                                               "err_msg": "only metric type can be "
+                                                          "passed when use AutoIndex"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_autoindex_on_binary_vectors(self):
+        """
+        target: test create auto index on binary vectors
+        method: create index on binary vectors
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_binary=True, is_index=True)[0]
+        collection_w.create_index(binary_field_name, {},
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1,
+                                               "err_msg": "float vector is only supported"})

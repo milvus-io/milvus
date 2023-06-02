@@ -241,7 +241,7 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def create_index(self, field_name, index_params, index_name=None, check_task=None, check_items=None, **kwargs):
+    def create_index(self, field_name, index_params=None, index_name=None, check_task=None, check_items=None, **kwargs):
         disktimeout = 600
         timeout = kwargs.get("timeout", disktimeout * 2)
         index_name = INDEX_NAME if index_name is None else index_name
