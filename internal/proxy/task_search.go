@@ -106,7 +106,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 	}
-	if err := validateLimit(topK); err != nil {
+	if err := validateTopKLimit(topK); err != nil {
 		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
 	}
 
@@ -119,14 +119,14 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 		}
 
 		if offset != 0 {
-			if err := validateLimit(offset); err != nil {
+			if err := validateTopKLimit(offset); err != nil {
 				return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 			}
 		}
 	}
 
 	queryTopK := topK + offset
-	if err := validateLimit(queryTopK); err != nil {
+	if err := validateTopKLimit(queryTopK); err != nil {
 		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
@@ -364,7 +364,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
-		//Compatibility logic, parse guarantee timestamp
+		// Compatibility logic, parse guarantee timestamp
 		if consistencyLevel == 0 && guaranteeTs > 0 {
 			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 		} else {
@@ -388,7 +388,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	// Check if nq is valid:
 	// https://milvus.io/docs/limitations.md
-	if err := validateLimit(nq); err != nil {
+	if err := validateNQLimit(nq); err != nil {
 		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
 	}
 	t.SearchRequest.Nq = nq
@@ -520,7 +520,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	queryNode := querynode.GetQueryNode()
 	var result *internalpb.SearchResults
 	var err error
-	var isStandAlone = queryNode != nil && queryNode.IsStandAlone
+	isStandAlone := queryNode != nil && queryNode.IsStandAlone
 
 	if isStandAlone {
 		result, err = queryNode.Search(ctx, req)

@@ -91,6 +91,12 @@ type quotaConfig struct {
 	// limits
 	MaxCollectionNum      int
 	MaxCollectionNumPerDB int
+	// Search limit, which applies on:
+	// maximum # of results to return (topK), and
+	// maximum # of search requests (nq).
+	// Check https://milvus.io/docs/limitations.md for more details.
+	TopKLimit int64
+	NQLimit   int64
 
 	// limit writing
 	ForceDenyWriting                     bool
@@ -165,6 +171,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 	// limits
 	p.initMaxCollectionNum()
 	p.initMaxCollectionNumPerDB()
+	p.initTopKLimit()
+	p.initNQLimit()
 
 	// limit writing
 	p.initForceDenyWriting()
@@ -612,6 +620,14 @@ func (p *quotaConfig) initMaxCollectionNum() {
 
 func (p *quotaConfig) initMaxCollectionNumPerDB() {
 	p.MaxCollectionNumPerDB = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNumPerDB", 65536)
+}
+
+func (p *quotaConfig) initTopKLimit() {
+	p.TopKLimit = p.Base.ParseInt64WithDefault("quotaAndLimits.limits.topK", 16384)
+}
+
+func (p *quotaConfig) initNQLimit() {
+	p.NQLimit = p.Base.ParseInt64WithDefault("quotaAndLimits.limits.nq", 16384)
 }
 
 func (p *quotaConfig) initForceDenyWriting() {
