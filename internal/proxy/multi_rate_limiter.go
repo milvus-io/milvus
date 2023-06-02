@@ -87,13 +87,16 @@ func (m *MultiRateLimiter) Check(collectionID int64, rt internalpb.RateType, n i
 		return commonpb.ErrorCode_Success
 	}
 
-	// first, check global level rate limits
-	ret := checkFunc(m.globalDDLLimiter)
-
-	// second check collection level rate limits
-	if ret == commonpb.ErrorCode_Success && !IsDDLRequest(rt) {
+	// first, check collection level rate limits
+	var ret commonpb.ErrorCode
+	if !IsDDLRequest(rt) {
 		// only dml and dql have collection level rate limits
 		ret = checkFunc(m.collectionLimiters[collectionID])
+	}
+
+	// then check global level rate limits
+	if ret == commonpb.ErrorCode_Success {
+		ret = checkFunc(m.globalDDLLimiter)
 	}
 
 	return ret
