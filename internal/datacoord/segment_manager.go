@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"sync"
 	"time"
 
@@ -101,17 +103,18 @@ var _ Manager = (*SegmentManager)(nil)
 
 // SegmentManager handles segment related logic
 type SegmentManager struct {
-	meta                *meta
-	mu                  sync.RWMutex
-	allocator           allocator
-	helper              allocHelper
-	segments            []UniqueID
-	estimatePolicy      calUpperLimitPolicy
-	allocPolicy         AllocatePolicy
-	segmentSealPolicies []segmentSealPolicy
-	channelSealPolicies []channelSealPolicy
-	flushPolicy         flushPolicy
-	rcc                 types.RootCoord
+	meta                       *meta
+	mu                         sync.RWMutex
+	allocator                  allocator
+	helper                     allocHelper
+	segments                   []UniqueID
+	estimatePolicy             calUpperLimitPolicy
+	allocPolicy                AllocatePolicy
+	segmentSealPolicies        []segmentSealPolicy
+	channelSealPolicies        []channelSealPolicy
+	flushPolicy                flushPolicy
+	rcc                        types.RootCoord
+	lastGlobalMaxSegmentExpire uint64
 }
 
 type allocHelper struct {
@@ -196,7 +199,7 @@ func defaultFlushPolicy() flushPolicy {
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) *SegmentManager {
+func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) (*SegmentManager, error) {
 	manager := &SegmentManager{
 		meta:                meta,
 		allocator:           allocator,
@@ -212,8 +215,34 @@ func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opt
 	for _, opt := range opts {
 		opt.apply(manager)
 	}
+	if err := manager.loadGlobalSegmentExpire(); err != nil {
+		return nil, err
+	}
 	manager.loadSegmentsFromMeta()
-	return manager
+	return manager, nil
+}
+
+func (manager *SegmentManager) loadGlobalSegmentExpire() error {
+	if lastGlobalSegmentExpire, err := manager.meta.GetGlobalMaxSegmentExpire(); err != nil {
+		log.Warn("cannot get last global segment expire time, use current ts instead")
+		tsResponse, err := manager.rcc.AllocTimestamp(context.Background(), &rootcoordpb.AllocTimestampRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+				commonpbutil.WithMsgID(0),
+				commonpbutil.WithTimeStamp(0),
+				commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			),
+			Count: 1,
+		})
+		if err != nil {
+			log.Warn("cannot allocate latest ts from rootCoord")
+			return errors.New("global max expire ts is unavailable for segment manager")
+		}
+		manager.lastGlobalMaxSegmentExpire = tsResponse.Timestamp
+	} else {
+		manager.lastGlobalMaxSegmentExpire = lastGlobalSegmentExpire
+	}
+	return nil
 }
 
 // loadSegmentsFromMeta generate corresponding segment status for each segment from meta
@@ -268,18 +297,17 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		}
 		allocation.ExpireTime = expireTs
 		allocation.SegmentID = segment.GetID()
-		if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
+		if err := s.meta.AddAllocation(ctx, segment.GetID(), allocation); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, allocation := range existedSegmentAllocations {
 		allocation.ExpireTime = expireTs
-		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
+		if err := s.meta.AddAllocation(ctx, allocation.SegmentID, allocation); err != nil {
 			return nil, err
 		}
 	}
-
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
 	return allocations, nil
 }
@@ -314,7 +342,7 @@ func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID
 
 	allocation.ExpireTime = expireTs
 	allocation.SegmentID = segment.GetID()
-	if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
+	if err := s.meta.AddAllocation(ctx, segment.GetID(), allocation); err != nil {
 		return nil, err
 	}
 	return allocation, nil
@@ -378,7 +406,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	s.segments = append(s.segments, id)
-	log.Info("datacoord: estimateTotalRows: ",
+	log.Info("dataCoord: open new segment estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),
@@ -454,8 +482,15 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	return ret, nil
 }
 
+func (s *SegmentManager) hasReachedFlushServiceTimePoint(t Timestamp) bool {
+	return t >= s.lastGlobalMaxSegmentExpire
+}
+
 // GetFlushableSegments get segment ids with Sealed State and flushable (meets flushPolicy)
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
+	if !s.hasReachedFlushServiceTimePoint(t) {
+		return nil, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)

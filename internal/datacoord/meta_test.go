@@ -532,7 +532,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 	}
 
 	m := &meta{
-		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		catalog: datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 		segments: &SegmentsInfo{map[int64]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:        1,
@@ -576,7 +576,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	}
 
 	m := &meta{
-		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		catalog:  datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 		segments: prepareSegments,
 	}
 
@@ -662,7 +662,7 @@ func TestMeta_PrepareCompleteCompactionMutationEmptyCompactTo(t *testing.T) {
 	}
 
 	m := &meta{
-		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		catalog:  datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 		segments: prepareSegments,
 	}
 
@@ -740,7 +740,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
+				catalog:  datacoord.NewCatalog(tt.fields.client, "", ""),
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
@@ -789,7 +789,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
+				catalog:  datacoord.NewCatalog(tt.fields.client, "", ""),
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)

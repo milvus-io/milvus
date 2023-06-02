@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -141,8 +144,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		return resp, nil
 	}
 
-	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-AssignSegmentID")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+	method := "AssignSegmentID"
+	tr := timerecord.NewTimeRecorder(method)
+	log := log.With(zap.String("traceID", traceID))
 
+	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 	for _, r := range req.SegmentIDRequests {
 		log.Info("handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
@@ -155,12 +164,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
 		// Note: this request wouldn't be received if collection didn't exist.
 		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
+		tr.CtxRecord(ctx, "getCollection")
 		if err != nil {
 			log.Warn("cannot get collection schema", zap.Error(err))
 		}
 
 		// Add the channel to cluster for watching.
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
+		tr.CtxRecord(ctx, "cluster watch channel")
 
 		segmentAllocations := make([]*Allocation, 0)
 		if r.GetIsImport() {
@@ -183,7 +194,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			segmentAllocations = append(segmentAllocations, segAlloc...)
 		}
 
-		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
+		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()),
+			zap.Any("assignments", segmentAllocations), zap.Duration("allocTimeCost", tr.RecordSpan()))
 
 		for _, allocation := range segmentAllocations {
 			result := &datapb.SegmentIDAssignment{
@@ -201,6 +213,13 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			assigns = append(assigns, result)
 		}
 	}
+	assignSegmentsDuration := tr.ElapseSpan()
+	if assignSegmentsDuration > 1000*time.Millisecond {
+		log.Warn("assign segments time cost too much",
+			zap.Int64("assignDurationMs", assignSegmentsDuration.Milliseconds()),
+			zap.Int("request_length", len(req.SegmentIDRequests)))
+	}
+	metrics.DataCoordAssignSegmentsDuration.WithLabelValues().Observe(float64(assignSegmentsDuration.Milliseconds()))
 	return &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -434,12 +453,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 	)
 
-	log.Info("receive SaveBinlogPaths request",
-		zap.Bool("isFlush", req.GetFlushed()),
-		zap.Bool("isDropped", req.GetDropped()),
-		zap.Any("startPositions", req.GetStartPositions()),
-		zap.Any("checkpoints", req.GetCheckPoints()))
-
 	// validate
 	nodeID := req.GetBase().GetSourceID()
 	// virtual channel name
@@ -457,6 +470,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	segmentID := req.GetSegmentID()
 	segment := s.meta.GetSegment(segmentID)
+
+	log.Info("receive SaveBinlogPaths request",
+		zap.String("channel", segment.GetInsertChannel()),
+		zap.Int64("segmentID", segmentID),
+		zap.Bool("isFlushed", req.GetFlushed()),
+		zap.Bool("isDropped", req.GetDropped()),
+		zap.Any("startPositions", PruneSegmentStartPositions(req.GetStartPositions())),
+		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	if segment == nil {
 		log.Error("failed to get segment, segment not exists")

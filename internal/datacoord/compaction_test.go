@@ -340,7 +340,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	plans := map[int64]*compactionTask{1: task}
 
 	errMeta := &meta{
-		catalog: &datacoord.Catalog{MetaKv: &saveFailKV{MetaKv: NewMetaMemoryKV()}},
+		catalog: datacoord.NewCatalog(&saveFailKV{MetaKv: NewMetaMemoryKV()}, "", ""),
 		segments: &SegmentsInfo{
 			map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
@@ -350,7 +350,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	}
 
 	meta := &meta{
-		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		catalog: datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 		segments: &SegmentsInfo{
 			map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
@@ -503,7 +503,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		plans := map[int64]*compactionTask{1: task}
 
 		meta := &meta{
-			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			catalog: datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 			segments: &SegmentsInfo{
 				map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},
@@ -598,7 +598,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		plans := map[int64]*compactionTask{1: task}
 
 		meta := &meta{
-			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			catalog: datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
 			segments: &SegmentsInfo{
 				map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},

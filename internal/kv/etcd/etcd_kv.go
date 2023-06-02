@@ -26,6 +26,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -403,7 +405,7 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	CheckTxnStringValueSizeAndWarn(kvs)
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
-		log.Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+		log.Warn("Etcd MultiSave error", zap.Strings("keys", lo.Keys(kvs)), zap.Int("len", len(kvs)), zap.Error(err))
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err

@@ -187,6 +187,10 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	return cloneColl
 }
 
+func (m *meta) GetGlobalMaxSegmentExpire() (uint64, error) {
+	return m.catalog.GetGlobalMaxSegmentExpireTs()
+}
+
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
 type chanPartSegments struct {
 	collectionID UniqueID
@@ -260,8 +264,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(segment *SegmentInfo) error {
-	log.Info("meta update: adding segment",
-		zap.Int64("segment ID", segment.GetID()))
+	log.Info("meta update: adding segment", zap.Int64("segment ID", segment.GetID()))
 	m.Lock()
 	defer m.Unlock()
 	if err := m.catalog.AddSegment(m.ctx, segment.SegmentInfo); err != nil {
@@ -272,8 +275,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
-	log.Info("meta update: adding segment - complete",
-		zap.Int64("segment ID", segment.GetID()))
+	log.Info("meta update: adding segment - complete", zap.Int64("segment ID", segment.GetID()))
 	return nil
 }
 
@@ -422,7 +424,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),
 		zap.Any("check points", checkpoints),
-		zap.Any("start position", startPositions),
+		zap.Any("start positions", PruneSegmentStartPositions(startPositions)),
 		zap.Bool("importing", importing))
 	m.Lock()
 	defer m.Unlock()
@@ -876,10 +878,7 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 }
 
 // AddAllocation add allocation in segment
-func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	log.Info("meta update: add allocation",
-		zap.Int64("segmentID", segmentID),
-		zap.Any("allocation", allocation))
+func (m *meta) AddAllocation(ctx context.Context, segmentID UniqueID, allocation *Allocation) error {
 	m.Lock()
 	defer m.Unlock()
 	curSegInfo := m.segments.GetSegment(segmentID)
@@ -892,7 +891,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
+		if err := m.catalog.AsyncAlterSegmentExcludeLogs(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
 			log.Error("meta update: add allocation failed",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))
@@ -901,8 +900,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	}
 	// Update in-memory meta.
 	m.segments.AddAllocation(segmentID, allocation)
-	log.Info("meta update: add allocation - complete",
-		zap.Int64("segmentID", segmentID))
+	log.Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
 	return nil
 }
 

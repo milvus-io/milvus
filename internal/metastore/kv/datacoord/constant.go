@@ -17,13 +17,14 @@
 package datacoord
 
 const (
-	MetaPrefix                = "datacoord-meta"
-	SegmentPrefix             = MetaPrefix + "/s"
-	SegmentBinlogPathPrefix   = MetaPrefix + "/binlog"
-	SegmentDeltalogPathPrefix = MetaPrefix + "/deltalog"
-	SegmentStatslogPathPrefix = MetaPrefix + "/statslog"
-	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
-	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
+	MetaPrefix                    = "datacoord-meta"
+	SegmentPrefix                 = MetaPrefix + "/s"
+	SegmentBinlogPathPrefix       = MetaPrefix + "/binlog"
+	SegmentDeltalogPathPrefix     = MetaPrefix + "/deltalog"
+	SegmentStatslogPathPrefix     = MetaPrefix + "/statslog"
+	ChannelRemovePrefix           = MetaPrefix + "/channel-removal"
+	ChannelCheckpointPrefix       = MetaPrefix + "/channel-cp"
+	GlobalSegmentMaxExpireTimeKey = MetaPrefix + "/global-segment-expire"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"
