@@ -413,6 +413,10 @@ class TestInsertOperation(TestcaseBase):
     def dim(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_without_connection(self):
         """
@@ -849,6 +853,67 @@ class TestInsertOperation(TestcaseBase):
         data = cf.gen_default_dataframe_data(nb)
         collection_w.insert(data=data)
         assert collection_w.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_insert_one_field_using_default_value(self, default_value, auto_id):
+        """
+        target: test insert with one field using default value
+        method: 1. create a collection with one field using default value
+                2. insert using []/None to replace the field value
+        expected: insert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [
+            [i for i in range(ct.default_nb)],
+            [np.float32(i) for i in range(ct.default_nb)],
+            default_value,
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        if auto_id:
+            del data[0]
+        collection_w.insert(data)
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_insert_multi_fields_using_default_value(self, default_value, auto_id):
+        """
+        target: test insert with multi fields using default value
+        method: 1. default value fields before vector, insert [], None, fail
+                2. default value fields all after vector field, insert empty, succeed
+        expected: report error and insert successfully
+        """
+        # 1. default value fields before vector, insert [], None, fail
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(1.0)),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [[i for i in range(ct.default_nb)], default_value,
+                # if multi default_value fields before vector field, every field must use []/None
+                cf.gen_vectors(ct.default_nb, ct.default_dim)]
+        if auto_id:
+            del data[0]
+        collection_w.insert(data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "The data type of field varchar doesn't match"})
+        # 2. default value fields all after vector field, insert empty, succeed
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(),
+                  cf.gen_float_field(default_value=np.float32(1.0)),
+                  cf.gen_string_field(default_value="abc")]
+        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [[i for i in range(ct.default_nb)], cf.gen_vectors(ct.default_nb, ct.default_dim)]
+        data1 = [[i for i in range(ct.default_nb)], cf.gen_vectors(ct.default_nb, ct.default_dim),
+                 [np.float32(i) for i in range(ct.default_nb)]]
+        if auto_id:
+            del data[0], data1[0]
+        collection_w.insert(data)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.insert(data1)
 
 
 class TestInsertAsync(TestcaseBase):
