@@ -343,3 +343,51 @@ func BenchmarkLimiter_AllowN(b *testing.B) {
 		}
 	})
 }
+
+func TestLimiter_Cancel(t *testing.T) {
+	// The test runs for a few (fake) seconds executing many requests
+	// and then checks that overall number of requests is reasonable.
+	const (
+		limit = 100
+		burst = 100
+	)
+	var (
+		numOK = int32(0)
+		tt    = makeTestTime(t)
+	)
+
+	lim := NewLimiter(limit, burst)
+
+	start := tt.now()
+	end := start.Add(5 * time.Second)
+	i := 0
+	cancelNum := 100
+	for tt.now().Before(end) {
+		if ok := lim.AllowN(tt.now(), 1); ok {
+			numOK++
+			// inject some cancellations
+			if i <= cancelNum {
+				lim.Cancel(1)
+				numOK--
+			}
+		}
+
+		// This will still offer ~500 requests per second, but won't consume
+		// outrageous amount of CPU.
+		tt.advance(100 * time.Microsecond)
+		i++
+	}
+	elapsed := tt.since(start)
+	ideal := burst + (limit * float64(elapsed) / float64(time.Second))
+
+	// We should never get more requests than allowed.
+	t.Log("numOK =", numOK, "want", int32(ideal), "ideal", ideal)
+	if want := int32(ideal); numOK > want {
+		t.Errorf("numOK = %d, want %d (ideal %f)", numOK, want, ideal)
+	}
+	// We should get very close to the number of requests allowed.
+	t.Log("numOK =", numOK, "want", int32(0.999*ideal), "ideal", ideal)
+	if want := int32(0.999 * ideal); numOK < want {
+		t.Errorf("numOK = %d, want %d (ideal %f)", numOK, want, ideal)
+	}
+}
