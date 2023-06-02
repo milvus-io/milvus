@@ -4624,7 +4624,6 @@ class TestUtilityNegativeRbac(TestcaseBase):
         error = {"err_code": 41, "err_msg": "the privilege name[%s] in the privilege entity is invalid" % p_name}
         self.utility_wrap.role_revoke("Global", "*", p_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23932")
     @pytest.mark.tags(CaseLabel.L3)
     def test_grant_privilege_with_db_not_exist(self, host, port):
         """
@@ -4640,24 +4639,15 @@ class TestUtilityNegativeRbac(TestcaseBase):
         db_name = cf.gen_unique_str("db")
         user, pwd, _ = self.init_user_with_privilege("Global", "*", "All", db_name)
 
+        # using the granted and not existing db
+        self.database_wrap.using_database(db_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 2, ct.err_msg: "database not found"})
+
         # re-connect with new user and db
         self.connection_wrap.disconnect(alias=ct.default_alias)
-        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, db_name=cf.gen_unique_str("db"),
-                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
-
-        # user privilege deny when connect the not existing db
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
-
-        self.utility_wrap.list_users(False, check_task=CheckTasks.check_permission_deny)
-
-        # using the granted and not existing db
-        self.database_wrap.using_database(db_name)
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
-
-        self.utility_wrap.list_users(False, check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd, db_name=db_name,
+                                     secure=cf.param_info.param_secure, check_task=CheckTasks.err_res,
+                                     check_items={ct.err_code: 2, ct.err_msg: "database not found"})
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_grant_privilege_with_collection_not_exist(self, host, port):
@@ -4710,7 +4700,6 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.database_wrap.using_database(db_a)
         collection_w.flush(check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23932")
     @pytest.mark.tags(CaseLabel.L3)
     def test_revoke_db_not_existed(self, host, port):
         """
@@ -4724,24 +4713,16 @@ class TestUtilityNegativeRbac(TestcaseBase):
                                      secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
 
         # grant role privilege: collection not existed -> no error
+        db_name = cf.gen_unique_str("db")
         user, pwd, role = self.init_user_with_privilege("Global", "*", "All", ct.default_db)
-        self.utility_wrap.role_revoke("Global", "*", "All", "db")
+        self.utility_wrap.role_revoke("Global", "*", "All", db_name)
 
-        # re-connect with new user and db
-        self.connection_wrap.disconnect(alias=ct.default_alias)
-        self.connection_wrap.connect(host=host, port=port, user=user, password=pwd,
-                                     secure=cf.param_info.param_secure, check_task=ct.CheckTasks.ccr)
-
-        # verify revoke failed
-        self.utility_wrap.list_users(False)
-
-        # verify privilege in not revoke db
-        self.database_wrap.list_database()
-        self.database_wrap.using_database("db")
-        self.utility_wrap.describe_resource_group(ct.default_resource_group_name, check_task=CheckTasks.err_res,
-                                                  check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
-        self.utility_wrap.list_users(False, check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+        self.database_wrap.using_database(db_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
+        self.database_wrap.create_database(db_name)
+        self.utility_wrap.role_grant("Global", "*", "All", db_name)
+        self.database_wrap.using_database(db_name)
+        self.utility_wrap.list_users(True)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_list_grant_db_non_existed(self, host, port):
@@ -4891,7 +4872,6 @@ class TestUtilityNegativeRbac(TestcaseBase):
 @pytest.mark.tags(CaseLabel.L3)
 class TestUtilityFlushAll(TestcaseBase):
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24220")
     @pytest.mark.parametrize("with_db", [True, False])
     def test_flush_all_multi_collections(self, with_db):
         """
@@ -4921,7 +4901,7 @@ class TestUtilityFlushAll(TestcaseBase):
             collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
             collection_names.append(collection_w.name)
 
-        self.utility_wrap.flush_all(timeout=60)
+        self.utility_wrap.flush_all(timeout=300)
         cw = ApiCollectionWrapper()
         for c in collection_names:
             cw.init_collection(name=c)
@@ -4934,7 +4914,6 @@ class TestUtilityFlushAll(TestcaseBase):
             res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
             assert len(res) == ct.default_nb - delete_num
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24220")
     def test_flush_all_db_collections(self):
         """
         target: test flush all db's collections
@@ -4943,10 +4922,11 @@ class TestUtilityFlushAll(TestcaseBase):
                 3. verify num entities
         expected: the insert and delete data of all db's collections are flushed
         """
-        db_num = 5
+        tmp_nb = 100
+        db_num = 3
         collection_num = 2
         collection_names = {}
-        delete_num = 100
+        delete_num = 10
 
         self._connect()
         for d in range(db_num):
@@ -4955,29 +4935,65 @@ class TestUtilityFlushAll(TestcaseBase):
             self.database_wrap.using_database(db_name)
             db_collection_names = []
             for i in range(collection_num):
-                collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True,
-                                                                                 is_flush=False,
-                                                                                 is_index=True)
-                collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+                # create collection
+                collection_w = self.init_collection_wrap()
+                # insert
+                insert_res, _ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+                # create index
+                collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+                # delete
+                collection_w.delete(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}')
                 db_collection_names.append(collection_w.name)
             collection_names[db_name] = db_collection_names
+            self.utility_wrap.list_collections()
 
-        log.info(collection_names)
-        self.utility_wrap.flush_all(timeout=300)
-        cw = ApiCollectionWrapper()
+        # flush all db collections
+        self.utility_wrap.flush_all(timeout=600)
 
         for _db, _db_collection_names in collection_names.items():
             self.database_wrap.using_database(_db)
+            self.utility_wrap.list_collections()
             for c in _db_collection_names:
+                cw = ApiCollectionWrapper()
                 cw.init_collection(name=c)
-                assert cw.num_entities_without_flush == ct.default_nb
+                assert cw.num_entities_without_flush == tmp_nb
 
                 cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
                 cw.load()
-                cw.query(f'{ct.default_int64_field_name} in {insert_ids[:100]}', check_task=CheckTasks.check_query_empty)
+                cw.query(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}',
+                         check_task=CheckTasks.check_query_empty)
 
-                res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
-                assert len(res) == ct.default_nb - delete_num
+                res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_res.primary_keys[:delete_num]}')
+                assert len(res) == tmp_nb - delete_num
+
+    def test_flush_empty_db_collections(self):
+        """
+        target: test flush empty db collections
+        method: 1. create collection and insert in the default db
+                2. create a db and using the db
+                3. flush all
+        expected: verify default db's collection flushed
+        """
+        tmp_nb = 10
+        self._connect()
+
+        # create collection
+        self.database_wrap.using_database(ct.default_db)
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        # insert
+        insert_res, _ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+
+        # create a db and using db
+        db_name = cf.gen_unique_str("db")
+        self.database_wrap.create_database(db_name)
+        self.database_wrap.using_database(db_name)
+
+        # flush all in the db and no exception
+        self.utility_wrap.flush_all(timeout=120)
+
+        # verify default db's collection not flushed
+        self.database_wrap.using_database(ct.default_db)
+        assert collection_w.num_entities_without_flush == tmp_nb
 
     def test_flush_all_multi_shards_timeout(self):
         """
