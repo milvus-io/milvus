@@ -2,7 +2,6 @@ from conans import ConanFile, CMake
 
 
 class MilvusConan(ConanFile):
-
     settings = "os", "compiler", "build_type", "arch"
     requires = (
         "rocksdb/6.29.5",
@@ -20,6 +19,7 @@ class MilvusConan(ConanFile):
         "aws-c-compression/0.2.15@milvus/dev",
         "aws-c-sdkutils/0.1.3@milvus/dev",
         "aws-checksums/0.1.13@milvus/dev",
+        "aws-c-cal/0.5.20@milvus/dev",
         "aws-sdk-cpp/1.9.234",
         "googleapis/cci.20221108",
         "benchmark/1.7.0",
@@ -60,7 +60,7 @@ class MilvusConan(ConanFile):
         "boost:without_locale": False,
         "glog:with_gflags": False,
         "prometheus-cpp:with_pull": False,
-        "fmt:header_only": True
+        "fmt:header_only": True,
     }
 
     def configure(self):
