@@ -197,7 +197,9 @@ require (
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f // indirect
 	github.com/getsentry/raven-go v0.2.0 // indirect
+	github.com/google/flatbuffers v2.0.5+incompatible // indirect
 	github.com/pelletier/go-toml/v2 v2.0.7 // indirect
+	github.com/pierrec/lz4/v4 v4.1.12 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.0.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.0.1 // indirect
