@@ -772,13 +772,24 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
+	if collection == nil {
+		failRet.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
+		return failRet, nil
+	}
+
+	// Check if the metric type specified in search params matches the metric type in the index info.
+	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() != "" {
+		if req.GetReq().GetMetricType() != collection.GetMetricType() {
+			failRet.Status = merr.Status(merr.WrapErrParameterInvalid(collection.GetMetricType(), req.GetReq().GetMetricType(),
+				fmt.Sprintf("collection:%d, metric type not match", collection.ID())))
+			return failRet, nil
+		}
+	}
 
 	// Define the metric type when it has not been explicitly assigned by the user.
 	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() == "" {
-		collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
-		if collection != nil {
-			req.Req.MetricType = collection.GetMetricType()
-		}
+		req.Req.MetricType = collection.GetMetricType()
 	}
 
 	var toReduceResults []*internalpb.SearchResults

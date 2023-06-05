@@ -4089,7 +4089,10 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, insert_entities, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
                                                                                        is_binary=False,
+                                                                                       is_index=False,
                                                                                        dim=dim)[0:5]
+        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "IP"}
+        collection_w.create_index(ct.default_float_vec_field_name, flat_index)
         insert_vectors = insert_entities[0][default_search_field].tolist()
 
         # 2. load collection.
