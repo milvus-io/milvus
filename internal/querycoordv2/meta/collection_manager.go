@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -126,6 +127,16 @@ func (m *CollectionManager) Recover(broker Broker) error {
 	}
 
 	for _, collection := range collections {
+		// Dropped collection should be deprecated
+		_, err = broker.GetCollectionSchema(context.Background(), collection.GetCollectionID())
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection.GetCollectionID()))
+			m.store.ReleaseCollection(collection.GetCollectionID())
+			continue
+		}
+		if err != nil {
+			return err
+		}
 		// Collections not loaded done should be deprecated
 		if collection.GetStatus() != querypb.LoadStatus_Loaded || collection.GetReplicaNumber() <= 0 {
 			log.Info("skip recovery and release collection",
@@ -142,15 +153,37 @@ func (m *CollectionManager) Recover(broker Broker) error {
 	}
 
 	for collection, partitions := range partitions {
+		existPartitions, err := broker.GetPartitions(context.Background(), collection)
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Info("skip dropped collection during recovery", zap.Int64("collection", collection))
+			m.store.ReleaseCollection(collection)
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		omitPartitions := make([]int64, 0)
+		partitions = lo.Filter(partitions, func(partition *querypb.PartitionLoadInfo, _ int) bool {
+			if !lo.Contains(existPartitions, partition.GetPartitionID()) {
+				omitPartitions = append(omitPartitions, partition.GetPartitionID())
+				return false
+			}
+			return true
+		})
+		if len(omitPartitions) > 0 {
+			log.Info("skip dropped partitions during recovery",
+				zap.Int64("collection", collection), zap.Int64s("partitions", omitPartitions))
+			m.store.ReleasePartition(collection, omitPartitions...)
+		}
+
 		sawLoaded := false
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
-			if partition.GetStatus() != querypb.LoadStatus_Loaded || partition.GetReplicaNumber() <= 0 {
+			if partition.GetStatus() != querypb.LoadStatus_Loaded {
 				log.Info("skip recovery and release partition",
 					zap.Int64("collectionID", collection),
 					zap.Int64("partitionID", partition.GetPartitionID()),
 					zap.String("status", partition.GetStatus().String()),
-					zap.Int32("replicaNumber", partition.GetReplicaNumber()),
 				)
 				m.store.ReleasePartition(collection, partition.GetPartitionID())
 				continue
