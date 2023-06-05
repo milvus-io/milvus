@@ -186,6 +186,11 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
 
+    virtual std::vector<SegOffset>
+    search_ids(const BitsetView& view,
+               const std::vector<int64_t>& offsets,
+               Timestamp timestamp) const = 0;
+
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 

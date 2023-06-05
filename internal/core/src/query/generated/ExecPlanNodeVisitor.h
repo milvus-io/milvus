@@ -68,6 +68,31 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return ret;
     }
 
+    void
+    SetExprCacheOffsets(std::vector<int64_t>&& offsets) {
+        expr_cached_pk_id_offsets_ = std::move(offsets);
+    }
+
+    void
+    AddExprCacheOffset(int64_t offset) {
+        expr_cached_pk_id_offsets_.push_back(offset);
+    }
+
+    const std::vector<int64_t>&
+    GetExprCacheOffsets() {
+        return expr_cached_pk_id_offsets_;
+    }
+
+    void
+    SetExprUsePkIndex(bool use_pk_index) {
+        expr_use_pk_index_ = use_pk_index;
+    }
+
+    bool
+    GetExprUsePkIndex() {
+        return expr_use_pk_index_;
+    }
+
  private:
     template <typename VectorType>
     void
@@ -80,5 +105,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     SearchResultOpt search_result_opt_;
     RetrieveResultOpt retrieve_result_opt_;
+    bool expr_use_pk_index_ = false;
+    std::vector<int64_t> expr_cached_pk_id_offsets_;
 };
 }  // namespace milvus::query

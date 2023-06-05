@@ -204,6 +204,11 @@ class SegmentSealedImpl : public SegmentSealed {
     search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
+    search_ids(const BitsetView& view,
+               const std::vector<int64_t>& offsets,
+               Timestamp timestamp) const override;
+
+    std::vector<SegOffset>
     search_ids(const BitsetType& view, Timestamp timestamp) const override;
 
     void
