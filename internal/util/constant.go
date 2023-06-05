@@ -96,6 +96,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowCollections.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRenameCollection.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropOwnership.String()),
@@ -108,6 +109,10 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferReplica.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferNode.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateDatabase.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropDatabase.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListDatabases.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
