@@ -32,8 +32,6 @@ KnowhereInitImpl(const char* conf_file) {
     auto init = [&]() {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
-        knowhere::KnowhereConfig::SetLogHandler();
-        knowhere::KnowhereConfig::SetStatisticsLevel(0);
         knowhere::KnowhereConfig::ShowVersion();
         google::InitGoogleLogging("milvus");
     };
