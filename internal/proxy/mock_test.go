@@ -341,7 +341,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 	}
 	switch dataType {
 	case schemapb.DataType_Bool:
-		fieldData.FieldName = testBoolField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_BoolData{
@@ -352,7 +352,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_Int32:
-		fieldData.FieldName = testInt32Field
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_IntData{
@@ -363,7 +363,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_Int64:
-		fieldData.FieldName = testInt64Field
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
@@ -374,7 +374,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_Float:
-		fieldData.FieldName = testFloatField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{
@@ -385,7 +385,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_Double:
-		fieldData.FieldName = testDoubleField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
@@ -396,7 +396,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_VarChar:
-		fieldData.FieldName = testVarCharField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
@@ -407,7 +407,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_FloatVector:
-		fieldData.FieldName = testFloatVecField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
 				Dim: int64(testVecDim),
@@ -419,7 +419,7 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 			},
 		}
 	case schemapb.DataType_BinaryVector:
-		fieldData.FieldName = testBinaryVecField
+		fieldData.FieldName = fieldName
 		fieldData.Field = &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
 				Dim: int64(testVecDim),

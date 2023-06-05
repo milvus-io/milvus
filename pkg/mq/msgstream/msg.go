@@ -42,6 +42,7 @@ type TsMsg interface {
 	TraceCtx() context.Context
 	SetTraceCtx(ctx context.Context)
 	ID() UniqueID
+	SetID(id UniqueID)
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
@@ -120,6 +121,11 @@ var _ TsMsg = &InsertMsg{}
 // ID returns the ID of this message pack
 func (it *InsertMsg) ID() UniqueID {
 	return it.Base.MsgID
+}
+
+// SetID set the ID of this message pack
+func (it *InsertMsg) SetID(id UniqueID) {
+	it.Base.MsgID = id
 }
 
 // Type returns the type of this message pack
@@ -299,6 +305,11 @@ func (dt *DeleteMsg) ID() UniqueID {
 	return dt.Base.MsgID
 }
 
+// SetID set the ID of this message pack
+func (dt *DeleteMsg) SetID(id UniqueID) {
+	dt.Base.MsgID = id
+}
+
 // Type returns the type of this message pack
 func (dt *DeleteMsg) Type() MsgType {
 	return dt.Base.MsgType
@@ -399,6 +410,11 @@ func (tst *TimeTickMsg) ID() UniqueID {
 	return tst.Base.MsgID
 }
 
+// SetID set the ID of this message pack
+func (tst *TimeTickMsg) SetID(id UniqueID) {
+	tst.Base.MsgID = id
+}
+
 // Type returns the type of this message pack
 func (tst *TimeTickMsg) Type() MsgType {
 	return tst.Base.MsgType
@@ -452,6 +468,11 @@ var _ TsMsg = &CreateCollectionMsg{}
 // ID returns the ID of this message pack
 func (cc *CreateCollectionMsg) ID() UniqueID {
 	return cc.Base.MsgID
+}
+
+// SetID set the ID of this message pack
+func (cc *CreateCollectionMsg) SetID(id UniqueID) {
+	cc.Base.MsgID = id
 }
 
 // Type returns the type of this message pack
@@ -509,6 +530,11 @@ func (dc *DropCollectionMsg) ID() UniqueID {
 	return dc.Base.MsgID
 }
 
+// SetID set the ID of this message pack
+func (dc *DropCollectionMsg) SetID(id UniqueID) {
+	dc.Base.MsgID = id
+}
+
 // Type returns the type of this message pack
 func (dc *DropCollectionMsg) Type() MsgType {
 	return dc.Base.MsgType
@@ -562,6 +588,11 @@ var _ TsMsg = &CreatePartitionMsg{}
 // ID returns the ID of this message pack
 func (cp *CreatePartitionMsg) ID() UniqueID {
 	return cp.Base.MsgID
+}
+
+// SetID set the ID of this message pack
+func (cp *CreatePartitionMsg) SetID(id UniqueID) {
+	cp.Base.MsgID = id
 }
 
 // Type returns the type of this message pack
@@ -619,6 +650,11 @@ func (dp *DropPartitionMsg) ID() UniqueID {
 	return dp.Base.MsgID
 }
 
+// SetID set the ID of this message pack
+func (dp *DropPartitionMsg) SetID(id UniqueID) {
+	dp.Base.MsgID = id
+}
+
 // Type returns the type of this message pack
 func (dp *DropPartitionMsg) Type() MsgType {
 	return dp.Base.MsgType
@@ -672,6 +708,11 @@ var _ TsMsg = &DataNodeTtMsg{}
 // ID returns the ID of this message pack
 func (m *DataNodeTtMsg) ID() UniqueID {
 	return m.Base.MsgID
+}
+
+// SetID set the ID of this message pack
+func (m *DataNodeTtMsg) SetID(id UniqueID) {
+	m.Base.MsgID = id
 }
 
 // Type returns the type of this message pack

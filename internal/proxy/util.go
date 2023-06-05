@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -1033,7 +1034,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		if !primaryFieldSchema.AutoID {
 			primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 			if err != nil {
-				log.Error("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+				log.Info("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
 				return nil, err
 			}
 		} else {
@@ -1044,7 +1045,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 			// if autoID == true, currently only support autoID for int64 PrimaryField
 			primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 			if err != nil {
-				log.Error("generate primary field data failed when autoID == true", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+				log.Info("generate primary field data failed when autoID == true", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
 				return nil, err
 			}
 			// if autoID == true, set the primary field data
@@ -1070,11 +1071,25 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Error("parse primary field data to IDs failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+		log.Warn("parse primary field data to IDs failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
 		return nil, err
 	}
 
 	return ids, nil
+}
+
+func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
+	if len(insertMsg.GetPartitionName()) > 0 {
+		return nil, errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+
+	for _, fieldData := range insertMsg.GetFieldsData() {
+		if fieldData.GetFieldId() == fieldSchema.GetFieldID() {
+			return fieldData, nil
+		}
+	}
+
+	return nil, errors.New("partition key not specify when insert")
 }
 
 func getCollectionProgress(
@@ -1186,6 +1201,84 @@ func getPartitionProgress(
 	}
 
 	return
+}
+
+func isPartitionKeyMode(ctx context.Context, colName string) (bool, error) {
+	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, colName)
+	if err != nil {
+		return false, err
+	}
+
+	for _, fieldSchema := range colSchema.GetFields() {
+		if fieldSchema.IsPartitionKey {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// getDefaultPartitionNames only used in partition key mode
+func getDefaultPartitionNames(ctx context.Context, collectionName string) ([]string, error) {
+	partitions, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make sure the order of the partition names got every time is the same
+	partitionNames := make([]string, len(partitions))
+	for partitionName := range partitions {
+		splits := strings.Split(partitionName, "_")
+		if len(splits) < 2 {
+			err = fmt.Errorf("bad default partion name in partition ket mode: %s", partitionName)
+			return nil, err
+		}
+		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		partitionNames[index] = partitionName
+	}
+
+	return partitionNames, nil
+}
+
+func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
+	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
+
+	// groupedHashKeys represents the dmChannel index
+	channel2RowOffsets := make(map[string][]int) //   channelName to count
+	// assert len(it.hashValues) < maxInt
+	for offset, channelID := range insertMsg.HashValues {
+		channelName := channelNames[channelID]
+		if _, ok := channel2RowOffsets[channelName]; !ok {
+			channel2RowOffsets[channelName] = []int{}
+		}
+		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
+	}
+
+	return channel2RowOffsets
+}
+
+func assignPartitionKeys(ctx context.Context, collName string, keys []*planpb.GenericValue) ([]string, error) {
+	partitionNames, err := getDefaultPartitionNames(ctx, collName)
+	if err != nil {
+		return nil, err
+	}
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
+	if err != nil {
+		return nil, err
+	}
+
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	hashedPartitionNames, err := typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
+	return hashedPartitionNames, err
 }
 
 func memsetLoop[T any](v T, numRows int) []T {

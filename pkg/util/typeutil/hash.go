@@ -20,9 +20,10 @@ import (
 	"hash/crc32"
 	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/cockroachdb/errors"
 	"github.com/spaolacci/murmur3"
 
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -93,4 +94,35 @@ func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
 	}
 
 	return hashValues
+}
+
+// HashKey2Partitions hash partition keys to partitions
+func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]uint32, error) {
+	var hashValues []uint32
+	numPartitions := uint32(len(partitionNames))
+	switch keys.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := keys.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			longKeys := scalarField.GetLongData().Data
+			for _, key := range longKeys {
+				value, _ := Hash32Int64(key)
+				hashValues = append(hashValues, value%numPartitions)
+			}
+		case *schemapb.ScalarField_StringData:
+			stringKeys := scalarField.GetStringData().Data
+			for _, key := range stringKeys {
+				value := HashString2Uint32(key)
+				hashValues = append(hashValues, value%numPartitions)
+			}
+		default:
+			return nil, errors.New("currently only support DataType Int64 or VarChar as partition key Field")
+
+		}
+	default:
+		return nil, errors.New("currently not support vector field as partition keys")
+	}
+
+	return hashValues, nil
 }

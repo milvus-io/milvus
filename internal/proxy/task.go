@@ -158,6 +158,49 @@ func (cct *createCollectionTask) OnEnqueue() error {
 	return nil
 }
 
+func (cct *createCollectionTask) validatePartitionKey() error {
+	idx := -1
+	for i, field := range cct.schema.Fields {
+		if field.GetIsPartitionKey() {
+			if idx != -1 {
+				return fmt.Errorf("there are more than one partition key, field name = %s, %s", cct.schema.Fields[idx].Name, field.Name)
+			}
+
+			if field.GetIsPrimaryKey() {
+				return errors.New("the partition key field must not be primary field")
+			}
+
+			// The type of the partition key field can only be int64 and varchar
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
+				return errors.New("the data type of partition key should be Int64 or VarChar")
+			}
+
+			if cct.GetNumPartitions() < 0 {
+				return errors.New("the specified partitions should be greater than 0 if partition key is used")
+			}
+
+			// set default physical partitions num if enable partition key mode
+			if cct.GetNumPartitions() == 0 {
+				cct.NumPartitions = common.DefaultPartitionsWithPartitionKey
+			}
+
+			idx = i
+		}
+	}
+
+	if idx == -1 {
+		if cct.GetNumPartitions() != 0 {
+			return fmt.Errorf("num_partitions should only be specified with partition key field enabled")
+		}
+	} else {
+		log.Info("create collection with partition key mode",
+			zap.String("collectionName", cct.CollectionName),
+			zap.Int64("numDefaultPartitions", cct.GetNumPartitions()))
+	}
+
+	return nil
+}
+
 func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
 	cct.Base.SourceID = paramtable.GetNodeID()
@@ -204,6 +247,11 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate field type definition
 	if err := validateFieldType(cct.schema); err != nil {
+		return err
+	}
+
+	// validate partition key mode
+	if err := cct.validatePartitionKey(); err != nil {
 		return err
 	}
 
@@ -488,22 +536,24 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.ConsistencyLevel = result.ConsistencyLevel
 		dct.result.Aliases = result.Aliases
 		dct.result.Properties = result.Properties
+		dct.result.NumPartitions = result.NumPartitions
 		for _, field := range result.Schema.Fields {
 			if field.IsDynamic {
 				continue
 			}
 			if field.FieldID >= common.StartOfUserFieldID {
 				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
-					FieldID:      field.FieldID,
-					Name:         field.Name,
-					IsPrimaryKey: field.IsPrimaryKey,
-					AutoID:       field.AutoID,
-					Description:  field.Description,
-					DataType:     field.DataType,
-					TypeParams:   field.TypeParams,
-					IndexParams:  field.IndexParams,
-					IsDynamic:    field.IsDynamic,
-					DefaultValue: field.DefaultValue,
+					FieldID:        field.FieldID,
+					Name:           field.Name,
+					IsPrimaryKey:   field.IsPrimaryKey,
+					AutoID:         field.AutoID,
+					Description:    field.Description,
+					DataType:       field.DataType,
+					TypeParams:     field.TypeParams,
+					IndexParams:    field.IndexParams,
+					IsDynamic:      field.IsDynamic,
+					IsPartitionKey: field.IsPartitionKey,
+					DefaultValue:   field.DefaultValue,
 				})
 			}
 		}
@@ -793,6 +843,14 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode {
+		return errors.New("disable create partition if partition key mode is used")
+	}
+
 	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
@@ -869,6 +927,14 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 	if err := validateCollectionName(collName); err != nil {
 		return err
+	}
+
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode {
+		return errors.New("disable drop partition if partition key mode is used")
 	}
 
 	if err := validatePartitionTag(partitionTag, true); err != nil {
@@ -1546,6 +1612,14 @@ func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode {
+		return errors.New("disable load partitions if partition key mode is used")
+	}
+
 	return nil
 }
 
@@ -1674,6 +1748,14 @@ func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 	if err := validateCollectionName(collName); err != nil {
 		return err
+	}
+
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode {
+		return errors.New("disable release partitions if partition key mode is used")
 	}
 
 	return nil

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+
 	"math/rand"
 	"strconv"
 	"testing"
@@ -38,14 +39,17 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
 )
@@ -149,6 +153,17 @@ func constructCollectionSchemaEnableDynamicSchema(
 			fVec,
 		},
 	}
+}
+
+func ConstructCollectionSchemaWithPartitionKey(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, partitionKeyFieldName string, autoID bool) *schemapb.CollectionSchema {
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2DataType, primaryFieldName, autoID)
+	for _, field := range schema.Fields {
+		if field.Name == partitionKeyFieldName {
+			field.IsPartitionKey = true
+		}
+	}
+
+	return schema
 }
 
 func constructCollectionSchemaByDataType(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, autoID bool) *schemapb.CollectionSchema {
@@ -3028,4 +3043,494 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	err := task.Execute(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+}
+
+func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	ctx := context.Background()
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestCreateCollectionTaskWithPartitionKey"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	int64Field := &schemapb.FieldSchema{
+		Name:         "int64",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	varCharField := &schemapb.FieldSchema{
+		Name:     "varChar",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "max_length",
+				Value: strconv.Itoa(testMaxVarCharLength),
+			},
+		},
+	}
+	floatVecField := &schemapb.FieldSchema{
+		Name:     "fvec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: strconv.Itoa(testVecDim),
+			},
+		},
+	}
+	partitionKeyField := &schemapb.FieldSchema{
+		Name:           "partition_key",
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		Fields: []*schemapb.FieldSchema{int64Field, varCharField, partitionKeyField, floatVecField},
+	}
+
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	task := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		schema:    nil,
+	}
+
+	t.Run("PreExecute", func(t *testing.T) {
+		var err error
+
+		// test default num partitions
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, common.DefaultPartitionsWithPartitionKey, task.GetNumPartitions())
+
+		// test specify num partition without partition key field
+		partitionKeyField.IsPartitionKey = false
+		task.NumPartitions = common.DefaultPartitionsWithPartitionKey * 2
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		partitionKeyField.IsPartitionKey = true
+
+		// test multi partition key field
+		varCharField.IsPartitionKey = true
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		varCharField.IsPartitionKey = false
+
+		// test partitions < 0
+		task.NumPartitions = -2
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		task.NumPartitions = 1000
+
+		// test partition key type not in [int64, varChar]
+		partitionKeyField.DataType = schemapb.DataType_FloatVector
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		partitionKeyField.DataType = schemapb.DataType_Int64
+
+		// test partition key field not primary key field
+		primaryField, _ := typeutil.GetPrimaryFieldSchema(schema)
+		primaryField.IsPartitionKey = true
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		primaryField.IsPartitionKey = false
+
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Execute", func(t *testing.T) {
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+
+		// check default partitions
+		err = InitMetaCache(ctx, rc, nil, nil)
+		assert.NoError(t, err)
+		partitionNames, err := getDefaultPartitionNames(ctx, task.CollectionName)
+		assert.NoError(t, err)
+		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
+
+		createPartitionTask := &createPartitionTask{
+			Condition: NewTaskCondition(ctx),
+			CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  "new_partition",
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+		}
+		err = createPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
+
+		dropPartitionTask := &dropPartitionTask{
+			Condition: NewTaskCondition(ctx),
+			DropPartitionRequest: &milvuspb.DropPartitionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  "new_partition",
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+		}
+		err = dropPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
+
+		loadPartitionTask := &loadPartitionsTask{
+			Condition: NewTaskCondition(ctx),
+			LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionNames: []string{"_default_0"},
+			},
+			ctx: ctx,
+		}
+		err = loadPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
+
+		releasePartitionsTask := &releasePartitionsTask{
+			Condition: NewTaskCondition(ctx),
+			ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionNames: []string{"_default_0"},
+			},
+			ctx: ctx,
+		}
+		err = releasePartitionsTask.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+}
+
+func TestPartitionKey(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	qc := getQueryCoord()
+	qc.Start()
+	defer qc.Stop()
+
+	ctx := context.Background()
+
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rc, qc, mgr)
+	assert.NoError(t, err)
+
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestInsertTaskWithPartitionKey"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type["int64_field"] = schemapb.DataType_Int64
+	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+	partitionKeyField := &schemapb.FieldSchema{
+		Name:           "partition_key_field",
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
+	schema.Fields = append(schema.Fields, partitionKeyField)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	t.Run("create collection", func(t *testing.T) {
+		createCollectionTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+				NumPartitions:  common.DefaultPartitionsWithPartitionKey,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+		err = createCollectionTask.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = createCollectionTask.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	assert.NoError(t, err)
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
+	defer chMgr.removeAllDMLStream()
+
+	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	assert.NoError(t, err)
+	pchans, err := chMgr.getChannels(collectionID)
+	assert.NoError(t, err)
+
+	interval := time.Millisecond * 10
+	tso := newMockTsoAllocator()
+
+	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
+	_ = ticker.start()
+	defer ticker.close()
+
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	assert.NoError(t, err)
+	_ = idAllocator.Start()
+	defer idAllocator.Close()
+
+	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
+	assert.NoError(t, err)
+	segAllocator.Init()
+	_ = segAllocator.Start()
+	defer segAllocator.Close()
+
+	partitionNames, err := getDefaultPartitionNames(ctx, collectionName)
+	assert.NoError(t, err)
+	assert.Equal(t, common.DefaultPartitionsWithPartitionKey, int64(len(partitionNames)))
+
+	nb := 10
+	fieldID := common.StartOfUserFieldID
+	fieldDatas := make([]*schemapb.FieldData, 0)
+	for fieldName, dataType := range fieldName2Type {
+		fieldData := generateFieldData(dataType, fieldName, nb)
+		fieldData.FieldId = int64(fieldID)
+		fieldDatas = append(fieldDatas, generateFieldData(dataType, fieldName, nb))
+		fieldID++
+	}
+
+	t.Run("Insert", func(t *testing.T) {
+		it := &insertTask{
+			insertMsg: &BaseInsertTask{
+				BaseMsg: msgstream.BaseMsg{},
+				InsertRequest: msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Insert,
+						MsgID:    0,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					FieldsData:     fieldDatas,
+					NumRows:        uint64(nb),
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+
+			Condition: NewTaskCondition(ctx),
+			ctx:       ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			idAllocator:   idAllocator,
+			segIDAssigner: segAllocator,
+			chMgr:         chMgr,
+			chTicker:      ticker,
+			vChannels:     nil,
+			pChannels:     nil,
+			schema:        nil,
+		}
+
+		// don't support specify partition name if use partition key
+		it.insertMsg.PartitionName = partitionNames[0]
+		assert.Error(t, it.PreExecute(ctx))
+
+		it.insertMsg.PartitionName = ""
+		assert.NoError(t, it.OnEnqueue())
+		assert.NoError(t, it.PreExecute(ctx))
+		assert.NoError(t, it.Execute(ctx))
+		assert.NoError(t, it.PostExecute(ctx))
+	})
+
+	t.Run("Upsert", func(t *testing.T) {
+		hash := generateHashKeys(nb)
+		ut := &upsertTask{
+			ctx:       ctx,
+			Condition: NewTaskCondition(ctx),
+			baseMsg: msgstream.BaseMsg{
+				HashValues: hash,
+			},
+			req: &milvuspb.UpsertRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Upsert),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				CollectionName: collectionName,
+				FieldsData:     fieldDatas,
+				NumRows:        uint32(nb),
+			},
+
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			idAllocator:   idAllocator,
+			segIDAssigner: segAllocator,
+			chMgr:         chMgr,
+			chTicker:      ticker,
+		}
+
+		// don't support specify partition name if use partition key
+		ut.req.PartitionName = partitionNames[0]
+		assert.Error(t, ut.PreExecute(ctx))
+
+		ut.req.PartitionName = ""
+		assert.NoError(t, ut.OnEnqueue())
+		assert.NoError(t, ut.PreExecute(ctx))
+		assert.NoError(t, ut.Execute(ctx))
+		assert.NoError(t, ut.PostExecute(ctx))
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		dt := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			deleteMsg: &BaseDeleteTask{
+				BaseMsg: msgstream.BaseMsg{},
+				DeleteRequest: msgpb.DeleteRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Delete,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  paramtable.GetNodeID(),
+					},
+					CollectionName: collectionName,
+				},
+			},
+			deleteExpr: "int64_field in [0, 1]",
+			ctx:        ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			chTicker:    ticker,
+		}
+		// don't support specify partition name if use partition key
+		dt.deleteMsg.PartitionName = partitionNames[0]
+		assert.Error(t, dt.PreExecute(ctx))
+
+		dt.deleteMsg.PartitionName = ""
+		assert.NoError(t, dt.PreExecute(ctx))
+		assert.NoError(t, dt.Execute(ctx))
+		assert.NoError(t, dt.PostExecute(ctx))
+	})
+
+	t.Run("search", func(t *testing.T) {
+		searchTask := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				Nq:             1,
+			},
+			qc: qc,
+			tr: timerecord.NewTimeRecorder("test-search"),
+		}
+
+		// don't support specify partition name if use partition key
+		searchTask.request.PartitionNames = partitionNames
+		err = searchTask.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("query", func(t *testing.T) {
+		queryTask := &queryTask{
+			ctx: ctx,
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
+			request: &milvuspb.QueryRequest{
+				CollectionName: collectionName,
+			},
+			qc: qc,
+		}
+
+		// don't support specify partition name if use partition key
+		queryTask.request.PartitionNames = partitionNames
+		err = queryTask.PreExecute(ctx)
+		assert.Error(t, err)
+	})
 }

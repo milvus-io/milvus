@@ -63,7 +63,8 @@ type queryTask struct {
 	queryShardPolicy pickShardPolicy
 	shardMgr         *shardClientMgr
 
-	plan *planpb.PlanNode
+	plan             *planpb.PlanNode
+	partitionKeyMode bool
 }
 
 type queryParams struct {
@@ -225,9 +226,6 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Ctx(ctx).Debug("translate output fields",
-		zap.Strings("OutputFields", t.request.OutputFields),
-		zap.String("requestType", "query"))
 
 	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
 	if err != nil {
@@ -273,6 +271,15 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collID
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, collectionName)
+	if err != nil {
+		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID))
+		return err
+	}
+	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+
 	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			log.Warn("invalid partition name", zap.String("partition name", tag))
@@ -280,13 +287,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	log.Debug("Validate partition names.")
-
-	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
-	if err != nil {
-		log.Warn("failed to get partitions in collection.", zap.Error(err))
-		return err
-	}
-	log.Debug("Get partitions in collection.", zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
 	//fetch search_growing from query param
 	var ignoreGrowing bool
@@ -337,6 +337,25 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := t.createPlan(ctx); err != nil {
+		return err
+	}
+
+	partitionNames := t.request.GetPartitionNames()
+	if t.partitionKeyMode {
+		expr, err := ParseExprFromPlan(t.plan)
+		if err != nil {
+			return err
+		}
+		partitionKeys := ParsePartitionKeys(expr)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.CollectionName, partitionKeys)
+		if err != nil {
+			return err
+		}
+
+		partitionNames = append(partitionNames, hashedPartitionNames...)
+	}
+	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.CollectionName, partitionNames)
+	if err != nil {
 		return err
 	}
 

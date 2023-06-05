@@ -22,9 +22,9 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -188,10 +188,11 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 
 // SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
-	schema           *schemapb.CollectionSchema
-	nameOffset       map[string]int
-	idOffset         map[int64]int
-	primaryKeyOffset int
+	schema             *schemapb.CollectionSchema
+	nameOffset         map[string]int
+	idOffset           map[int64]int
+	primaryKeyOffset   int
+	partitionKeyOffset int
 }
 
 // CreateSchemaHelper returns a new SchemaHelper object
@@ -199,7 +200,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
-	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1}
+	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1, partitionKeyOffset: -1}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
@@ -215,6 +216,13 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 			}
 			schemaHelper.primaryKeyOffset = offset
 		}
+
+		if field.IsPartitionKey {
+			if schemaHelper.partitionKeyOffset != -1 {
+				return nil, errors.New("partition key is not unique")
+			}
+			schemaHelper.partitionKeyOffset = offset
+		}
 	}
 	return &schemaHelper, nil
 }
@@ -225,6 +233,14 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 		return nil, fmt.Errorf("failed to get primary key field: no primary in schema")
 	}
 	return helper.schema.Fields[helper.primaryKeyOffset], nil
+}
+
+// GetPartitionKeyField returns the schema of the partition key
+func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error) {
+	if helper.partitionKeyOffset == -1 {
+		return nil, fmt.Errorf("failed to get partition key field: no partition key in schema")
+	}
+	return helper.schema.Fields[helper.partitionKeyOffset], nil
 }
 
 // GetFieldFromName is used to find the schema by field name
@@ -708,6 +724,17 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	}
 
 	return nil, errors.New("primary field is not found")
+}
+
+// GetPartitionKeyFieldSchema get partition field schema from collection schema
+func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsPartitionKey {
+			return fieldSchema, nil
+		}
+	}
+
+	return nil, errors.New("partition key field is not found")
 }
 
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
