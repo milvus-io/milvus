@@ -25,11 +25,13 @@ package segments
 import "C"
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
 	"sync"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 
@@ -81,7 +83,7 @@ type Collection struct {
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
-	metricType    string
+	metricType    atomic.String
 	schema        *schemapb.CollectionSchema
 }
 
@@ -124,11 +126,11 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 }
 
 func (c *Collection) SetMetricType(metricType string) {
-	c.metricType = metricType
+	c.metricType.Store(metricType)
 }
 
 func (c *Collection) GetMetricType() string {
-	return c.metricType
+	return c.metricType.Load()
 }
 
 // newCollection returns a new Collection
