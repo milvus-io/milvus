@@ -50,7 +50,7 @@ function install_linux_deps() {
 
 function install_mac_deps() {
   sudo xcode-select --install > /dev/null 2>&1
-  brew install libomp ninja cmake llvm@15 ccache grep
+  brew install libomp ninja cmake llvm@15 ccache grep pkg-config
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 
@@ -59,7 +59,6 @@ function install_mac_deps() {
   if [[ $(arch) == 'arm64' ]]; then
     brew install openssl
     brew install librdkafka
-    brew install pkg-config
   fi
 }
 
