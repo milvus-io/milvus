@@ -3,7 +3,7 @@
 ## Environment
 
 ```
-OS: Ubuntu 18.04
+OS: Ubuntu 20.04
 go：1.18
 cmake: >=3.18
 gcc： 7.5
@@ -12,6 +12,7 @@ gcc： 7.5
 ## Install dependencies
 
 Install compile dependencies
+
 ```shell
 $ sudo apt install -y g++ gcc make libssl-dev zlib1g-dev libboost-regex-dev \
     libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
@@ -52,6 +53,7 @@ $ make milvus
 ## Install docker-compose
 
 refer: https://docs.docker.com/compose/install/
+
 ```shell
 $ sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 $ sudo chmod +x /usr/local/bin/docker-compose
@@ -62,12 +64,14 @@ $ docker-compose --version
 ## Start service
 
 Start third-party service:
+
 ```shell
 $ cd [milvus project path]/deployments/docker/cluster
 $ docker-compose up -d
 ```
 
 Start milvus cluster:
+
 ```shell
 $ cd [milvus project path]
 $ ./scripts/start_cluster.sh
@@ -76,16 +80,19 @@ $ ./scripts/start_cluster.sh
 ## Run unittest
 
 Run all unittest including go and cpp cases:
+
 ```shell
 $ make unittest
 ```
 
 You also can run go unittest only:
+
 ```shell
 $ make test-go
 ```
 
 Run cpp unittest only:
+
 ```shell
 $ make test-cpp
 ```
@@ -93,16 +100,19 @@ $ make test-cpp
 ## Run code coverage
 
 Run code coverage including go and cpp:
+
 ```shell
 $ make codecov
 ```
 
 You also can run go code coverage only:
+
 ```shell
 $ make codecov-go
 ```
 
 Run cpp code coverage only:
+
 ```shell
 $ make codecov-cpp
 ```
