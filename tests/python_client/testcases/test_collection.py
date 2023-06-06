@@ -1657,6 +1657,11 @@ class TestCollectionMultiCollections(TestcaseBase):
 
 
 class TestCreateCollection(TestcaseBase):
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_multithread(self):
         """
@@ -1684,6 +1689,30 @@ class TestCreateCollection(TestcaseBase):
 
         for item in collection_names:
             assert item in self.utility_wrap.list_collections()[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_using_default_value(self, auto_id):
+        """
+        target: test create collection with default_value
+        method: create a schema with all fields using default value
+        expected: collections are created
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_int8_field(default_value=numpy.int8(8)),
+            cf.gen_int16_field(default_value=numpy.int16(16)),
+            cf.gen_int32_field(default_value=numpy.int32(32)),
+            cf.gen_int64_field(default_value=numpy.int64(64)),
+            cf.gen_float_field(default_value=numpy.float32(3.14)),
+            cf.gen_double_field(default_value=numpy.double(3.1415)),
+            cf.gen_bool_field(default_value=False),
+            cf.gen_string_field(default_value="abc")
+        ]
+        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
+        self.init_collection_wrap(schema=schema,
+                                  check_task=CheckTasks.check_collection_property,
+                                  check_items={"schema": schema})
 
 
 class TestCreateCollectionInvalid(TestcaseBase):
@@ -1714,6 +1743,61 @@ class TestCreateCollectionInvalid(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "'maximum field\'s number should be limited to 64'"}
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields=field_schema_list)
         self.init_collection_wrap(name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", ["abc"])
+    @pytest.mark.skip(reason="issue #24634")
+    def test_create_collection_with_invalid_default_value_string(self, default_value):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_string_field(max_length=2, default_value=default_value)
+        ]
+        schema = cf.gen_collection_schema(fields)
+        self.init_collection_wrap(schema=schema,
+                                  check_task=CheckTasks.check_collection_property,
+                                  check_items={"schema": schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", ["abc", 9.09, 1, False])
+    def test_create_collection_with_invalid_default_value_float(self, default_value):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_float_field(default_value=default_value)
+        ]
+        schema = cf.gen_collection_schema(fields)
+        self.init_collection_wrap(schema=schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "default value type mismatches field schema type"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", ["abc", 9.09, 1, False])
+    def test_create_collection_with_invalid_default_value_int8(self, default_value):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: raise exception
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_int8_field(default_value=default_value)
+        ]
+        schema = cf.gen_collection_schema(fields)
+        self.init_collection_wrap(schema=schema, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "default value type mismatches field schema type"})
 
 
 class TestDropCollection(TestcaseBase):

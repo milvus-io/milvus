@@ -111,15 +111,15 @@ def gen_int64_field(name=ct.default_int64_field_name, description=ct.default_des
     return int64_field
 
 
-def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc):
+def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc, **kwargs):
     float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
-                                                               is_primary=is_primary)
+                                                               is_primary=is_primary, **kwargs)
     return float_field
 
 
-def gen_double_field(name=ct.default_double_field_name, is_primary=False, description=ct.default_desc):
-    double_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.DOUBLE,
-                                                                description=description, is_primary=is_primary)
+def gen_double_field(name=ct.default_double_field_name, is_primary=False, description=ct.default_desc, **kwargs):
+    double_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.DOUBLE,  description=description,
+                                                                is_primary=is_primary, **kwargs)
     return double_field
 
 
