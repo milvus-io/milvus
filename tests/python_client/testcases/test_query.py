@@ -2312,8 +2312,6 @@ class TestQueryCount(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: 2}]})
 
-    # TODO count(*) with page
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23368")
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_with_pagination_param(self):
         """
@@ -2324,23 +2322,22 @@ class TestQueryCount(TestcaseBase):
         # create -> insert -> index -> load
         collection_w = self.init_collection_general(insert_data=True)[0]
 
-        # count with offset
+        # only params offset is not considered pagination
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output], offset=10,
-                           check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "xxx"}
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: [{count: ct.default_nb}]}
                            )
         # count with limit
         collection_w.query(expr=default_expr, output_fields=[ct.default_count_output], limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "xxx"}
+                           check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"}
                            )
         # count with pagination params
-        collection_w.query(default_expr, output_fields=[ct.default_count_output], params={"offset": 10, "limit": 10},
+        collection_w.query(default_expr, output_fields=[ct.default_count_output], offset=10, limit=10,
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "xxx"})
+                           check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/23386")
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_count_alias_insert_delete_drop(self):
         """
         target: test count after alias insert and load
@@ -2359,14 +2356,20 @@ class TestQueryCount(TestcaseBase):
         collection_w_alias = self.init_collection_wrap(name=alias)
 
         # new insert partitions and count
-        p_name = "p_alias"
+        p_name = cf.gen_unique_str("p_alias")
         collection_w_alias.create_partition(p_name)
         collection_w_alias.insert(cf.gen_default_dataframe_data(start=ct.default_nb), partition_name=p_name)
         collection_w_alias.query(expr=default_expr, output_fields=[ct.default_count_output],
                                  check_task=CheckTasks.check_query_results,
                                  check_items={exp_res: [{count: ct.default_nb * 2}]})
 
-        # alias drop partition
+        # release collection and alias drop partition
+        collection_w_alias.drop_partition(p_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 1,
+                                                       ct.err_msg: "cannot drop the collection via alias"})
+        self.partition_wrap.init_partition(collection_w_alias.collection, p_name)
+        self.partition_wrap.release()
+
         collection_w_alias.drop_partition(p_name)
         res, _ = collection_w_alias.has_partition(p_name)
         assert res is False
@@ -2380,7 +2383,10 @@ class TestQueryCount(TestcaseBase):
                                  check_task=CheckTasks.check_query_results,
                                  check_items={exp_res: [{count: 0}]})
 
-        collection_w_alias.drop()
+        collection_w_alias.drop(check_task=CheckTasks.err_res,
+                                check_items={ct.err_code: 1,
+                                             ct.err_msg: "cannot drop the collection via alias"})
+        collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("is_growing", [True, False])
@@ -2436,7 +2442,7 @@ class TestQueryCount(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: ct.default_nb + 1}]})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_count_upsert_duplicate(self):
         """
         target: test count after upsert duplicate
