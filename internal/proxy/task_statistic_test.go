@@ -195,6 +195,7 @@ func TestStatisticTask_all(t *testing.T) {
 
 	task.statisticShardPolicy = RoundRobinPolicy
 	task.fromQueryNode = true
+	task.fromDataCoord = false
 	qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(nil, nil).Once()
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))

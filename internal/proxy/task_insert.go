@@ -36,6 +36,7 @@ type insertTask struct {
 	vChannels     []vChan
 	pChannels     []pChan
 	schema        *schemapb.CollectionSchema
+	partitionKeys *schemapb.FieldData
 }
 
 // TraceCtx returns insertTask context
@@ -108,13 +109,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.insertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
-	}
-
-	partitionTag := it.insertMsg.PartitionName
-	if err := validatePartitionTag(partitionTag, true); err != nil {
-		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+		log.Info("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -173,9 +168,36 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
-		log.Error("set fieldID to fieldData failed",
+		log.Info("set fieldID to fieldData failed",
 			zap.Error(err))
 		return err
+	}
+
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collectionName)
+	if err != nil {
+		log.Warn("check partition key mode failed", zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+	if partitionKeyMode {
+		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
+		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.insertMsg)
+		if err != nil {
+			log.Info("get partition keys from insert request failed", zap.String("collection name", collectionName), zap.Error(err))
+			return err
+		}
+	} else {
+		// set default partition name if not use partition key
+		// insert to _default partition
+		partitionTag := it.insertMsg.GetPartitionName()
+		if len(partitionTag) <= 0 {
+			partitionTag = Params.CommonCfg.DefaultPartitionName.GetValue()
+			it.insertMsg.PartitionName = partitionTag
+		}
+
+		if err := validatePartitionTag(partitionTag, true); err != nil {
+			log.Info("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			return err
+		}
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck()).
@@ -200,19 +222,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	it.insertMsg.CollectionID = collID
-	var partitionID UniqueID
-	if len(it.insertMsg.PartitionName) > 0 {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, it.insertMsg.PartitionName)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.CommonCfg.DefaultPartitionName.GetValue())
-		if err != nil {
-			return err
-		}
-	}
-	it.insertMsg.PartitionID = partitionID
+
 	getCacheDur := tr.RecordSpan()
 	stream, err := it.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
@@ -234,7 +244,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.String("collection", it.insertMsg.GetCollectionName()),
 		zap.String("partition", it.insertMsg.GetPartitionName()),
 		zap.Int64("collection_id", collID),
-		zap.Int64("partition_id", partitionID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", it.ID()),
 		zap.Duration("get cache duration", getCacheDur),
@@ -242,7 +251,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// assign segmentID for insert data and repack data by segmentID
 	var msgPack *msgstream.MsgPack
-	msgPack, err = assignSegmentID(it.TraceCtx(), it.insertMsg, it.result, channelNames, it.idAllocator, it.segIDAssigner)
+	if it.partitionKeys == nil {
+		msgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
+	} else {
+		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
+	}
 	if err != nil {
 		log.Error("assign segmentID and repack insert data failed",
 			zap.Int64("collectionID", collID),

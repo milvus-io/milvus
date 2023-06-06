@@ -229,10 +229,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.CollectionID = collID
 	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, collectionName)
 
-	// translate partition name to partition ids. Use regex-pattern to match partition name.
-	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collectionName)
 	if err != nil {
 		return err
+	}
+	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
 	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
@@ -274,6 +276,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
+	partitionNames := t.request.GetPartitionNames()
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil || len(annsField) == 0 {
@@ -303,6 +306,20 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 
+		if partitionKeyMode {
+			expr, err := ParseExprFromPlan(plan)
+			if err != nil {
+				return err
+			}
+			partitionKeys := ParsePartitionKeys(expr)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, collectionName, partitionKeys)
+			if err != nil {
+				return err
+			}
+
+			partitionNames = append(partitionNames, hashedPartitionNames...)
+		}
+
 		plan.OutputFieldIds = outputFieldIDs
 
 		t.SearchRequest.Topk = queryInfo.GetTopk()
@@ -326,6 +343,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.String("plan", plan.String())) // may be very large if large term passed.
+	}
+
+	// translate partition name to partition ids. Use regex-pattern to match partition name.
+	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
+	if err != nil {
+		return err
 	}
 
 	travelTimestamp := t.request.TravelTimestamp

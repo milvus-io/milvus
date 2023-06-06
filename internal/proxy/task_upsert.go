@@ -48,17 +48,19 @@ type upsertTask struct {
 
 	ctx context.Context
 
-	timestamps    []uint64
-	rowIDs        []int64
-	result        *milvuspb.MutationResult
-	idAllocator   *allocator.IDAllocator
-	segIDAssigner *segIDAssigner
-	collectionID  UniqueID
-	chMgr         channelsMgr
-	chTicker      channelsTimeTicker
-	vChannels     []vChan
-	pChannels     []pChan
-	schema        *schemapb.CollectionSchema
+	timestamps       []uint64
+	rowIDs           []int64
+	result           *milvuspb.MutationResult
+	idAllocator      *allocator.IDAllocator
+	segIDAssigner    *segIDAssigner
+	collectionID     UniqueID
+	chMgr            channelsMgr
+	chTicker         channelsTimeTicker
+	vChannels        []vChan
+	pChannels        []pChan
+	schema           *schemapb.CollectionSchema
+	partitionKeyMode bool
+	partitionKeys    *schemapb.FieldData
 }
 
 // TraceCtx returns upsertTask context
@@ -142,12 +144,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionTag := it.upsertMsg.InsertMsg.PartitionName
-	if err := validatePartitionTag(partitionTag, true); err != nil {
-		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
-		return err
-	}
-
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
@@ -194,6 +190,23 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if it.partitionKeyMode {
+		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
+		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.upsertMsg.InsertMsg)
+		if err != nil {
+			log.Info("get partition keys from insert request failed",
+				zap.String("collectionName", collectionName),
+				zap.Error(err))
+			return err
+		}
+	} else {
+		partitionTag := it.upsertMsg.InsertMsg.PartitionName
+		if err = validatePartitionTag(partitionTag, true); err != nil {
+			log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			return err
+		}
+	}
+
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
@@ -221,8 +234,13 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	it.upsertMsg.DeleteMsg.CollectionID = collID
 	it.collectionID = collID
 
-	// If partitionName is not empty, partitionID will be set.
-	if len(it.upsertMsg.DeleteMsg.PartitionName) > 0 {
+	if it.partitionKeyMode {
+		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
+		// if deleteMsg.partitionID = common.InvalidPartition,
+		// all segments with this pk under the collection will have the delete record
+		it.upsertMsg.DeleteMsg.PartitionID = common.InvalidPartitionID
+	} else {
+		// partition name could be defaultPartitionName or name specified by sdk
 		partName := it.upsertMsg.DeleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
 			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
@@ -234,8 +252,6 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 			return err
 		}
 		it.upsertMsg.DeleteMsg.PartitionID = partID
-	} else {
-		it.upsertMsg.DeleteMsg.PartitionID = common.InvalidPartitionID
 	}
 
 	it.upsertMsg.DeleteMsg.Timestamps = make([]uint64, it.upsertMsg.DeleteMsg.NumRows)
@@ -249,7 +265,9 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 func (it *upsertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
+
+	collectionName := it.req.CollectionName
+	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -261,12 +279,35 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.CollectionName)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
-		log.Info("Failed to get collection schema", zap.Error(err))
+		log.Info("Failed to get collection schema",
+			zap.String("collectionName", collectionName),
+			zap.Error(err))
 		return err
 	}
 	it.schema = schema
+
+	it.partitionKeyMode, err = isPartitionKeyMode(ctx, collectionName)
+	if err != nil {
+		log.Warn("check partition key mode failed",
+			zap.String("collectionName", collectionName),
+			zap.Error(err))
+		return err
+	}
+	if it.partitionKeyMode {
+		if len(it.req.GetPartitionName()) > 0 {
+			return errors.New("not support manually specifying the partition names if partition key mode is used")
+		}
+	} else {
+		// set default partition name if not use partition key
+		// insert to _default partition
+		partitionTag := it.req.GetPartitionName()
+		if len(partitionTag) <= 0 {
+			partitionTag = Params.CommonCfg.DefaultPartitionName.GetValue()
+			it.req.PartitionName = partitionTag
+		}
+	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
@@ -332,19 +373,6 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 	it.upsertMsg.InsertMsg.CollectionID = collID
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
-	var partitionID UniqueID
-	if len(it.upsertMsg.InsertMsg.PartitionName) > 0 {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, it.req.PartitionName)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.CommonCfg.DefaultPartitionName.GetValue())
-		if err != nil {
-			return err
-		}
-	}
-	it.upsertMsg.InsertMsg.PartitionID = partitionID
 	getCacheDur := tr.RecordSpan()
 
 	_, err = it.chMgr.getOrCreateDmlStream(collID)
@@ -365,14 +393,18 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		zap.String("collection", it.req.GetCollectionName()),
 		zap.String("partition", it.req.GetPartitionName()),
 		zap.Int64("collection_id", collID),
-		zap.Int64("partition_id", partitionID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", it.ID()),
 		zap.Duration("get cache duration", getCacheDur),
 		zap.Duration("get msgStream duration", getMsgStreamDur))
 
 	// assign segmentID for insert data and repack data by segmentID
-	insertMsgPack, err := assignSegmentID(it.TraceCtx(), it.upsertMsg.InsertMsg, it.result, channelNames, it.idAllocator, it.segIDAssigner)
+	var insertMsgPack *msgstream.MsgPack
+	if it.partitionKeys == nil {
+		insertMsgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner)
+	} else {
+		insertMsgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner)
+	}
 	if err != nil {
 		log.Error("assign segmentID and repack insert data failed when insertExecute",
 			zap.Error(err))

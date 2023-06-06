@@ -489,7 +489,6 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			Fields:               model.UnmarshalFieldModels(schema.GetFields()),
 			VirtualChannelNames:  channels.virtualChannels,
 			PhysicalChannelNames: channels.physicalChannels,
-			Partitions:           []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue()}},
 		}
 
 		meta := newMockMetaTable()
@@ -736,5 +735,60 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		time.Sleep(time.Second * 2) // wait for asynchronous step done.
 		// undo add channels.
 		assert.Zero(t, len(ticker.listDmlChannels()))
+	})
+}
+
+func Test_createCollectionTask_PartitionKey(t *testing.T) {
+	defer cleanTestEnv()
+
+	collectionName := funcutil.GenRandomStr()
+	field1 := funcutil.GenRandomStr()
+	ticker := newRocksMqTtSynchronizer()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+	partitionKeyField := &schemapb.FieldSchema{
+		Name:           field1,
+		DataType:       schemapb.DataType_Int64,
+		IsPartitionKey: true,
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "",
+		AutoID:      false,
+		Fields:      []*schemapb.FieldSchema{partitionKeyField},
+	}
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	task := createCollectionTask{
+		baseTask: newBaseTask(context.TODO(), core),
+		Req: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      common.DefaultShardsNum,
+		},
+	}
+
+	t.Run("without num partition", func(t *testing.T) {
+		task.Req.NumPartitions = 0
+		err = task.Prepare(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("num partition too large", func(t *testing.T) {
+		task.Req.NumPartitions = Params.RootCoordCfg.MaxPartitionNum.GetAsInt64() + 1
+		err = task.Prepare(context.Background())
+		assert.Error(t, err)
+	})
+
+	task.Req.NumPartitions = common.DefaultPartitionsWithPartitionKey
+
+	t.Run("normal case", func(t *testing.T) {
+		err = task.Prepare(context.Background())
+		assert.NoError(t, err)
 	})
 }

@@ -911,11 +911,11 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Debug(rpcReceived("CreatePartition"))
+	log.Debug(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
 		log.Warn(
-			rpcFailedToEnqueue("CreatePartition"),
+			rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
@@ -927,13 +927,13 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	log.Debug(
-		rpcEnqueued("CreatePartition"),
+		rpcEnqueued(method),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
 		zap.Uint64("EndTS", cpt.EndTs()))
 
 	if err := cpt.WaitToFinish(); err != nil {
 		log.Warn(
-			rpcFailedToWaitToFinish("CreatePartition"),
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", cpt.BeginTs()),
 			zap.Uint64("EndTS", cpt.EndTs()))
@@ -947,7 +947,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	log.Debug(
-		rpcDone("CreatePartition"),
+		rpcDone(method),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
 		zap.Uint64("EndTS", cpt.EndTs()))
 
@@ -2028,7 +2028,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexState")
 	defer sp.End()
 
 	dipt := &getIndexStateTask{
@@ -2143,10 +2143,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		segIDAssigner: node.segAssigner,
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
-	}
-
-	if len(it.insertMsg.PartitionName) <= 0 {
-		it.insertMsg.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2381,10 +2377,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		segIDAssigner: node.segAssigner,
 		chMgr:         node.chMgr,
 		chTicker:      node.chTicker,
-	}
-
-	if len(it.req.PartitionName) <= 0 {
-		it.req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
 
 	constructFailedResponse := func(err error, errCode commonpb.ErrorCode) *milvuspb.MutationResult {

@@ -175,6 +175,14 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.deleteMsg.CollectionID = collID
 	dt.collectionID = collID
 
+	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	if err != nil {
+		return err
+	}
+	if partitionKeyMode && len(dt.deleteMsg.PartitionName) != 0 {
+		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.deleteMsg.PartitionName) > 0 {
 		partName := dt.deleteMsg.PartitionName

@@ -1071,6 +1071,10 @@ func (t *MarshalFailTsMsg) ID() UniqueID {
 	return 0
 }
 
+func (t *MarshalFailTsMsg) SetID(id UniqueID) {
+	// do nothing
+}
+
 func (t *MarshalFailTsMsg) Type() MsgType {
 	return commonpb.MsgType_Undefined
 }

@@ -47,6 +47,9 @@ const (
 	// DefaultShardsNum defines the default number of shards when creating a collection
 	DefaultShardsNum = int32(1)
 
+	// DefaultPartitionsWithPartitionKey defines the default number of partitions when use partition key
+	DefaultPartitionsWithPartitionKey = int64(64)
+
 	// InvalidPartitionID indicates that the partition is not specified. It will be set when the partitionName is empty
 	InvalidPartitionID = int64(-1)
 

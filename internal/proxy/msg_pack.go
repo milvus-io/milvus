@@ -18,14 +18,16 @@ package proxy
 
 import (
 	"context"
+	"sync"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -33,76 +35,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result *milvuspb.MutationResult, channelNames []string, idAllocator *allocator.IDAllocator, segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
+func genInsertMsgsByPartition(ctx context.Context,
+	segmentID UniqueID,
+	partitionID UniqueID,
+	partitionName string,
+	rowOffsets []int,
+	channelName string,
+	insertMsg *msgstream.InsertMsg) ([]msgstream.TsMsg, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	log.Debug("assign segmentid", zap.Int("threshold", threshold))
-
-	msgPack := &msgstream.MsgPack{
-		BeginTs: insertMsg.BeginTs(),
-		EndTs:   insertMsg.EndTs(),
-	}
-
-	// generate hash value for every primary key
-	if len(insertMsg.HashValues) != 0 {
-		log.Warn("the hashvalues passed through client is not supported now, and will be overwritten")
-	}
-	insertMsg.HashValues = typeutil.HashPK2Channels(result.IDs, channelNames)
-	// groupedHashKeys represents the dmChannel index
-	channel2RowOffsets := make(map[string][]int)  //   channelName to count
-	channelMaxTSMap := make(map[string]Timestamp) //  channelName to max Timestamp
-
-	// assert len(it.hashValues) < maxInt
-	for offset, channelID := range insertMsg.HashValues {
-		channelName := channelNames[channelID]
-		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = []int{}
-		}
-		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
-
-		if _, ok := channelMaxTSMap[channelName]; !ok {
-			channelMaxTSMap[channelName] = typeutil.ZeroTimestamp
-		}
-		ts := insertMsg.Timestamps[offset]
-		if channelMaxTSMap[channelName] < ts {
-			channelMaxTSMap[channelName] = ts
-		}
-	}
-
-	// pre-alloc msg id by batch
-	var idBegin, idEnd int64
-	var err error
-
-	// fetch next id, if not id available, fetch next batch
-	// lazy fetch, get first batch after first getMsgID called
-	getMsgID := func() (int64, error) {
-		if idBegin == idEnd {
-			err = retry.Do(ctx, func() error {
-				idBegin, idEnd, err = idAllocator.Alloc(16)
-				return err
-			})
-			if err != nil {
-				log.Error("failed to allocate msg id", zap.Int64("base.MsgID", insertMsg.Base.MsgID), zap.Error(err))
-				return 0, err
-			}
-		}
-		result := idBegin
-		idBegin++
-		return result, nil
-	}
 
 	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string, msgID int64) *msgstream.InsertMsg {
+	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
 		insertReq := msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-				commonpbutil.WithMsgID(msgID),
 				commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp), // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
 				commonpbutil.WithSourceID(insertMsg.Base.SourceID),
 			),
 			CollectionID:   insertMsg.CollectionID,
-			PartitionID:    insertMsg.PartitionID,
+			PartitionID:    partitionID,
 			CollectionName: insertMsg.CollectionName,
-			PartitionName:  insertMsg.PartitionName,
+			PartitionName:  partitionName,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
 			Version:        msgpb.InsertDataVersion_ColumnBased,
@@ -119,66 +72,218 @@ func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result
 		return msg
 	}
 
-	// repack the row data corresponding to the offset to insertMsg
-	getInsertMsgsBySegmentID := func(segmentID UniqueID, rowOffsets []int, channelName string, maxMessageSize int) ([]msgstream.TsMsg, error) {
-		repackedMsgs := make([]msgstream.TsMsg, 0)
-		requestSize := 0
-		msgID, err := getMsgID()
+	repackedMsgs := make([]msgstream.TsMsg, 0)
+	requestSize := 0
+	msg := createInsertMsg(segmentID, channelName)
+	for _, offset := range rowOffsets {
+		curRowMessageSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), offset)
 		if err != nil {
 			return nil, err
 		}
-		msg := createInsertMsg(segmentID, channelName, msgID)
-		for _, offset := range rowOffsets {
-			curRowMessageSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), offset)
-			if err != nil {
-				return nil, err
-			}
 
-			// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
-			if requestSize+curRowMessageSize >= maxMessageSize {
-				repackedMsgs = append(repackedMsgs, msg)
-				msgID, err = getMsgID()
-				if err != nil {
-					return nil, err
-				}
-				msg = createInsertMsg(segmentID, channelName, msgID)
-				requestSize = 0
-			}
-
-			typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
-			msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
-			msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
-			msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-			msg.NumRows++
-			requestSize += curRowMessageSize
+		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
+		if requestSize+curRowMessageSize >= threshold {
+			repackedMsgs = append(repackedMsgs, msg)
+			msg = createInsertMsg(segmentID, channelName)
+			requestSize = 0
 		}
-		repackedMsgs = append(repackedMsgs, msg)
 
-		return repackedMsgs, nil
+		typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
+		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
+		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
+		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
+		msg.NumRows++
+		requestSize += curRowMessageSize
+	}
+	repackedMsgs = append(repackedMsgs, msg)
+
+	return repackedMsgs, nil
+}
+
+func repackInsertDataByPartition(ctx context.Context,
+	partitionName string,
+	rowOffsets []int,
+	channelName string,
+	insertMsg *msgstream.InsertMsg,
+	segIDAssigner *segIDAssigner) ([]msgstream.TsMsg, error) {
+	res := make([]msgstream.TsMsg, 0)
+
+	maxTs := Timestamp(0)
+	for _, offset := range rowOffsets {
+		ts := insertMsg.Timestamps[offset]
+		if maxTs < ts {
+			maxTs = ts
+		}
 	}
 
-	// get allocated segmentID info for every dmChannel and repack insertMsgs for every segmentID
-	for channelName, rowOffsets := range channel2RowOffsets {
-		assignedSegmentInfos, err := segIDAssigner.GetSegmentID(insertMsg.CollectionID, insertMsg.PartitionID, channelName, uint32(len(rowOffsets)), channelMaxTSMap[channelName])
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.CollectionName, partitionName)
+	if err != nil {
+		return nil, err
+	}
+	assignedSegmentInfos, err := segIDAssigner.GetSegmentID(insertMsg.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	if err != nil {
+		log.Error("allocate segmentID for insert data failed",
+			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("channel name", channelName),
+			zap.Int("allocate count", len(rowOffsets)),
+			zap.Error(err))
+		return nil, err
+	}
+
+	startPos := 0
+	for segmentID, count := range assignedSegmentInfos {
+		subRowOffsets := rowOffsets[startPos : startPos+int(count)]
+		msgs, err := genInsertMsgsByPartition(ctx, segmentID, partitionID, partitionName, subRowOffsets, channelName, insertMsg)
 		if err != nil {
-			log.Error("allocate segmentID for insert data failed", zap.Int64("collectionID", insertMsg.CollectionID), zap.String("channel name", channelName),
-				zap.Int("allocate count", len(rowOffsets)),
+			log.Warn("repack insert data to insert msgs failed",
+				zap.String("collection name", insertMsg.CollectionName),
+				zap.Int64("partitionID", partitionID),
+				zap.Error(err))
+			return nil, err
+		}
+		res = append(res, msgs...)
+		startPos += int(count)
+	}
+
+	return res, nil
+}
+
+func setMsgID(ctx context.Context,
+	msgs []msgstream.TsMsg,
+	idAllocator *allocator.IDAllocator) error {
+	var idBegin int64
+	var err error
+
+	err = retry.Do(ctx, func() error {
+		idBegin, _, err = idAllocator.Alloc(uint32(len(msgs)))
+		return err
+	})
+	if err != nil {
+		log.Error("failed to allocate msg id", zap.Error(err))
+		return err
+	}
+
+	for i, msg := range msgs {
+		msg.SetID(idBegin + UniqueID(i))
+	}
+
+	return nil
+}
+
+func repackInsertData(ctx context.Context,
+	channelNames []string,
+	insertMsg *msgstream.InsertMsg,
+	result *milvuspb.MutationResult,
+	idAllocator *allocator.IDAllocator,
+	segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
+	msgPack := &msgstream.MsgPack{
+		BeginTs: insertMsg.BeginTs(),
+		EndTs:   insertMsg.EndTs(),
+	}
+
+	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	for channel, rowOffsets := range channel2RowOffsets {
+		partitionName := insertMsg.PartitionName
+		msgs, err := repackInsertDataByPartition(ctx, partitionName, rowOffsets, channel, insertMsg, segIDAssigner)
+		if err != nil {
+			log.Warn("repack insert data to msg pack failed",
+				zap.String("collection name", insertMsg.CollectionName),
+				zap.String("partition name", partitionName),
 				zap.Error(err))
 			return nil, err
 		}
 
-		startPos := 0
-		for segmentID, count := range assignedSegmentInfos {
-			subRowOffsets := rowOffsets[startPos : startPos+int(count)]
-			insertMsgs, err := getInsertMsgsBySegmentID(segmentID, subRowOffsets, channelName, threshold)
-			if err != nil {
-				log.Error("repack insert data to insert msgs failed", zap.Int64("collectionID", insertMsg.CollectionID),
-					zap.Error(err))
-				return nil, err
+		msgPack.Msgs = append(msgPack.Msgs, msgs...)
+	}
+
+	err := setMsgID(ctx, msgPack.Msgs, idAllocator)
+	if err != nil {
+		log.Error("failed to set msgID when repack insert data",
+			zap.String("collection name", insertMsg.CollectionName),
+			zap.String("partition name", insertMsg.PartitionName),
+			zap.Error(err))
+		return nil, err
+	}
+
+	return msgPack, nil
+}
+
+func repackInsertDataWithPartitionKey(ctx context.Context,
+	channelNames []string,
+	partitionKeys *schemapb.FieldData,
+	insertMsg *msgstream.InsertMsg,
+	result *milvuspb.MutationResult,
+	idAllocator *allocator.IDAllocator,
+	segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
+	msgPack := &msgstream.MsgPack{
+		BeginTs: insertMsg.BeginTs(),
+		EndTs:   insertMsg.EndTs(),
+	}
+
+	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	partitionNames, err := getDefaultPartitionNames(ctx, insertMsg.CollectionName)
+	if err != nil {
+		log.Warn("get default partition names failed in partition key mode",
+			zap.String("collection name", insertMsg.CollectionName),
+			zap.Error(err))
+		return nil, err
+	}
+	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, partitionNames)
+	if err != nil {
+		log.Warn("has partition keys to partitions failed",
+			zap.String("collection name", insertMsg.CollectionName),
+			zap.Error(err))
+		return nil, err
+	}
+
+	for channel, rowOffsets := range channel2RowOffsets {
+		partition2RowOffsets := make(map[string][]int)
+		for _, idx := range rowOffsets {
+			partitionName := partitionNames[hashValues[idx]]
+			if _, ok := partition2RowOffsets[partitionName]; !ok {
+				partition2RowOffsets[partitionName] = []int{}
 			}
-			msgPack.Msgs = append(msgPack.Msgs, insertMsgs...)
-			startPos += int(count)
+			partition2RowOffsets[partitionName] = append(partition2RowOffsets[partitionName], idx)
 		}
+
+		errGroup, _ := errgroup.WithContext(ctx)
+		partition2Msgs := sync.Map{}
+		for partitionName, offsets := range partition2RowOffsets {
+			partitionName := partitionName
+			offsets := offsets
+			errGroup.Go(func() error {
+				msgs, err := repackInsertDataByPartition(ctx, partitionName, offsets, channel, insertMsg, segIDAssigner)
+				if err != nil {
+					return err
+				}
+
+				partition2Msgs.Store(partitionName, msgs)
+				return nil
+			})
+		}
+
+		err = errGroup.Wait()
+		if err != nil {
+			log.Warn("repack insert data into insert msg pack failed",
+				zap.String("collection name", insertMsg.CollectionName),
+				zap.String("channel name", channel),
+				zap.Error(err))
+			return nil, err
+		}
+
+		partition2Msgs.Range(func(k, v interface{}) bool {
+			msgs := v.([]msgstream.TsMsg)
+			msgPack.Msgs = append(msgPack.Msgs, msgs...)
+			return true
+		})
+	}
+
+	err = setMsgID(ctx, msgPack.Msgs, idAllocator)
+	if err != nil {
+		log.Error("failed to set msgID when repack insert data",
+			zap.String("collection name", insertMsg.CollectionName),
+			zap.Error(err))
+		return nil, err
 	}
 
 	return msgPack, nil

@@ -40,6 +40,10 @@ func (bm *MockMsg) ID() msgstream.UniqueID {
 	return 0
 }
 
+func (bm *MockMsg) SetID(id msgstream.UniqueID) {
+	// do nothing
+}
+
 func (bm *MockMsg) BeginTs() Timestamp {
 	return 0
 }

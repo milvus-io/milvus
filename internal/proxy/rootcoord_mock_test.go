@@ -372,6 +372,26 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 		partitionID2Meta: make(map[typeutil.UniqueID]partitionMeta),
 	}
 
+	idGenerator := uniquegenerator.GetUniqueIntGeneratorIns()
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
+	_, err = typeutil.GetPartitionKeyFieldSchema(&schema)
+	if err == nil {
+		partitionNums := req.GetNumPartitions()
+		for i := int64(0); i < partitionNums; i++ {
+			partitionName := fmt.Sprintf("%s_%d", defaultPartitionName, i)
+			id := UniqueID(idGenerator.GetInt())
+			coord.collID2Partitions[collID].partitionName2ID[partitionName] = id
+			coord.collID2Partitions[collID].partitionID2Name[id] = partitionName
+			coord.collID2Partitions[collID].partitionID2Meta[id] = partitionMeta{}
+		}
+	} else {
+
+		id := UniqueID(idGenerator.GetInt())
+		coord.collID2Partitions[collID].partitionName2ID[defaultPartitionName] = id
+		coord.collID2Partitions[collID].partitionID2Name[id] = defaultPartitionName
+		coord.collID2Partitions[collID].partitionID2Meta[id] = partitionMeta{}
+	}
+
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
