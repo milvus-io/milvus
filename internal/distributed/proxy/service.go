@@ -21,12 +21,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/management"
+	"github.com/soheilhy/cmux"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +78,7 @@ var (
 	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
 	// registerHTTPHandlerOnce avoid register http handler multiple times
 	registerHTTPHandlerOnce sync.Once
+	startHTTPHandlerOnce    sync.Once
 )
 
 const apiPathPrefix = "/api/v1"
@@ -84,6 +88,10 @@ type Server struct {
 	ctx                context.Context
 	wg                 sync.WaitGroup
 	proxy              types.ProxyComponent
+	tcpServer          cmux.CMux
+	httpListener       net.Listener
+	grpcListener       net.Listener
+	httpServer         *http.Server
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
 
@@ -112,6 +120,54 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
+func parserUsernamePassword(c *gin.Context) (string, string) {
+	username, password, ok := c.Request.BasicAuth()
+	if !ok {
+		auth := c.Request.Header.Get("Authorization")
+		if auth != "" {
+			token := strings.TrimPrefix(auth, "Bearer ")
+			if token != auth {
+				i := strings.IndexAny(token, ":")
+				if i != -1 {
+					username = token[:i]
+					password = token[i+1:]
+				}
+			}
+		}
+	} else {
+		c.Header("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+	}
+	return username, password
+}
+
+func authenticate(c *gin.Context) {
+	username, password := parserUsernamePassword(c)
+	if username != "" && password != "" {
+		if proxy.PasswordVerify(c, username, password) {
+			log.Debug("auth successful", zap.String("username", username))
+			c.Set("username", username)
+			return
+		}
+	}
+	c.JSON(http.StatusProxyAuthRequired, gin.H{"code": http.StatusProxyAuthRequired, "message": proxy.ErrUnauthenticated().Error()})
+	c.Abort()
+}
+
+const (
+	DefaultListenPort = "9093"
+	ListenPortEnvKey  = "RESTFUL_API_PORT"
+)
+
+func getHTTPAddr() string {
+	port := os.Getenv(ListenPortEnvKey)
+	_, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Sprintf(":%s", DefaultListenPort)
+	}
+
+	return fmt.Sprintf(":%s", port)
+}
+
 // registerHTTPServer register the http server, panic when failed
 func (s *Server) registerHTTPServer() {
 	// (Embedded Milvus Only) Discard gin logs if logging is disabled.
@@ -124,10 +180,29 @@ func (s *Server) registerHTTPServer() {
 	if !HTTPParams.DebugMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	ginHandler := gin.Default()
-	apiv1 := ginHandler.Group(apiPathPrefix)
+	metricsGinHandler := gin.Default()
+	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
-	http.Handle("/", ginHandler)
+	management.Register(&management.HTTPHandler{
+		Path:        "/",
+		HandlerFunc: nil,
+		Handler:     metricsGinHandler.Handler(),
+	})
+	ginHandler := gin.Default()
+	app := ginHandler.Group("/v1", authenticate)
+	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
+	s.httpServer = &http.Server{Handler: ginHandler}
+}
+
+func (s *Server) startHTTPServer() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
+			log.Warn("start Proxy http server to listen failed", zap.Error(err))
+			return
+		}
+	}()
 }
 
 func (s *Server) startInternalRPCServer(grpcInternalPort int, errChan chan error) {
@@ -151,15 +226,6 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-
-	log.Info("Proxy server listen on tcp", zap.Int("port", grpcPort))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
-	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
-		errChan <- err
-		return
-	}
-	log.Info("Proxy server already listen on tcp", zap.Int("port", grpcPort))
 
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
@@ -234,7 +300,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
-	if err := s.grpcExternalServer.Serve(lis); err != nil {
+	if err := s.grpcExternalServer.Serve(s.grpcListener); err != nil {
 		log.Error("failed to serve on Proxy's listener", zap.Error(err))
 		errChan <- err
 		return
@@ -304,6 +370,12 @@ func (s *Server) Run() error {
 	}
 	log.Info("start Proxy server done")
 
+	{
+		if err := s.tcpServer.Serve(); err != nil {
+			log.Warn("Proxy server for tcp port failed", zap.Error(err))
+			return err
+		}
+	}
 	return nil
 }
 
@@ -351,6 +423,18 @@ func (s *Server) init() error {
 		}
 	}
 	{
+		log.Info("Proxy server listen on tcp", zap.Int("port", Params.Port))
+		lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.Port))
+		if err != nil {
+			log.Error("Proxy server(grpc/http) failed to listen on", zap.Error(err), zap.Int("port", Params.Port))
+			return err
+		}
+		log.Info("Proxy server already listen on tcp", zap.Int("port", Params.Port))
+		s.tcpServer = cmux.New(lis)
+		s.grpcListener = s.tcpServer.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+		s.httpListener = s.tcpServer.Match(cmux.Any())
+	}
+	{
 		s.startExternalRPCServer(Params.Port, errChan)
 		if err := <-errChan; err != nil {
 			log.Error("failed to create external rpc server", zap.Error(err))
@@ -360,7 +444,7 @@ func (s *Server) init() error {
 
 	if HTTPParams.Enabled {
 		registerHTTPHandlerOnce.Do(func() {
-			log.Info("register http server of proxy")
+			log.Info("register Proxy http server")
 			s.registerHTTPServer()
 		})
 	}
@@ -499,6 +583,14 @@ func (s *Server) start() error {
 		return err
 	}
 
+	if s.httpServer != nil {
+		startHTTPHandlerOnce.Do(func() {
+			log.Info("start Proxy http server")
+			s.startHTTPServer()
+			log.Info("start Proxy http server done")
+		})
+	}
+
 	return nil
 }
 
@@ -528,6 +620,12 @@ func (s *Server) Stop() error {
 		if s.grpcExternalServer != nil {
 			log.Info("Graceful stop grpc external server...")
 			s.grpcExternalServer.GracefulStop()
+		}
+		if s.httpServer != nil {
+			log.Info("Graceful stop Proxy http server...")
+			if err := s.httpServer.Shutdown(context.Background()); err != nil {
+				log.Warn("Server forced to shutdown: ", zap.Error(err))
+			}
 		}
 	}()
 	gracefulWg.Wait()

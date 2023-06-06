@@ -840,6 +840,10 @@ func GetRole(username string) ([]string, error) {
 	return globalMetaCache.GetUserRole(username), nil
 }
 
+func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
+	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
+}
+
 // PasswordVerify verify password
 func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
