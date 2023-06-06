@@ -47,6 +47,17 @@ namespace milvus::storage {
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
 
+static void
+SwallowHandler(int signal) {
+    switch (signal) {
+        case SIGPIPE:
+            LOG_SERVER_WARNING_ << "SIGPIPE Swallowed" << std::endl;
+            break;
+        default:
+            LOG_SERVER_ERROR_ << "Unexpected signal in SIGPIPE handler: " << signal << std::endl;
+    }
+}
+
 /**
  * @brief convert std::string to Aws::String
  * because Aws has String type internally
@@ -75,7 +86,11 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
-        sdk_options_.httpOptions.installSigPipeHandler = true;
+        // sdk_options_.httpOptions.installSigPipeHandler = true;
+        struct sigaction psa;
+        psa.sa_handler = SwallowHandler;
+        psa.sa_flags = psa.sa_flags | SA_ONSTACK;
+        sigaction(SIGPIPE, &psa, 0);
 #ifdef BUILD_GCP
         if (type == RemoteStorageType::GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
