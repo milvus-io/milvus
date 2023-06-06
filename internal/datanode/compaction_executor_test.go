@@ -20,8 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestCompactionExecutor(t *testing.T) {
@@ -39,6 +40,20 @@ func TestCompactionExecutor(t *testing.T) {
 		mc := newMockCompactor(true)
 		ex.executeWithState(mc)
 		ex.stopTask(UniqueID(1))
+	})
+
+	t.Run("Test injectDone", func(t *testing.T) {
+		ex := newCompactionExecutor()
+		mc := newMockCompactor(true)
+		ex.completed.Store(UniqueID(1), &datapb.CompactionResult{})
+		ex.completedCompactor.Store(UniqueID(1), mc)
+
+		ex.injectDone(UniqueID(1), false)
+
+		_, ok := ex.completed.Load(UniqueID(1))
+		assert.False(t, ok)
+		_, ok = ex.completedCompactor.Load(UniqueID(1))
+		assert.False(t, ok)
 	})
 
 	t.Run("Test start", func(t *testing.T) {
@@ -153,7 +168,7 @@ func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
 	return nil, nil
 }
 
-func (mc *mockCompactor) injectDone() {
+func (mc *mockCompactor) injectDone(success bool) {
 
 }
 
