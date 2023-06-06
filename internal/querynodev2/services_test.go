@@ -32,12 +32,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -45,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ServiceSuite struct {
@@ -1477,8 +1480,45 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 
-	// collection not exist and schema is not nil
+	// no vec field in schema
+	req.Schema = &schemapb.CollectionSchema{}
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// no indexInfo
 	req.Schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// no metric type
+	vecField, err := typeutil.GetVectorFieldSchema(req.GetSchema())
+	suite.NoError(err)
+	req.IndexInfoList = []*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collectionID,
+			FieldID:      vecField.GetFieldID(),
+			IndexParams:  []*commonpb.KeyValuePair{},
+		},
+	}
+	status, err = suite.node.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+	// collection not exist and schema is not nil
+	req.IndexInfoList = []*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collectionID,
+			FieldID:      vecField.GetFieldID(),
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}
 	status, err = suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)

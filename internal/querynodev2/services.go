@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -410,6 +411,21 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
 	}
+	vecField, err := typeutil.GetVectorFieldSchema(req.GetSchema())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	indexInfo, ok := lo.Find(req.GetIndexInfoList(), func(info *indexpb.IndexInfo) bool {
+		return info.GetFieldID() == vecField.GetFieldID()
+	})
+	if !ok || indexInfo == nil {
+		err = fmt.Errorf("cannot find index info for %s field", vecField.GetName())
+		return merr.Status(err), nil
+	}
+	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.GetIndexParams())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
@@ -417,6 +433,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 		CollectionID: req.GetCollectionID(),
 		PartitionIDs: req.GetPartitionIDs(),
 		LoadType:     querypb.LoadType_LoadCollection, // TODO: dyh, remove loadType in querynode
+		MetricType:   metricType,
 	})
 
 	log.Info("load partitions done")
