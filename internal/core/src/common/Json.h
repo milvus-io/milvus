@@ -29,8 +29,11 @@
 #include "simdjson.h"
 #include "fmt/core.h"
 #include "simdjson/common_defs.h"
+#include "simdjson/dom/array.h"
+#include "simdjson/dom/document.h"
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
+#include "simdjson/padded_string.h"
 
 namespace milvus {
 using document = simdjson::ondemand::document;
@@ -108,6 +111,20 @@ class Json {
         return doc;
     }
 
+    value_result<simdjson::dom::element>
+    dom_doc() const {
+        thread_local simdjson::dom::parser parser;
+
+        // it's always safe to add the padding,
+        // as we have allocated the memory with this padding
+        auto doc = parser.parse(data_);
+        AssertInfo(doc.error() == simdjson::SUCCESS,
+                   fmt::format("failed to parse the json {}: {}",
+                               data_,
+                               simdjson::error_message(doc.error())));
+        return doc;
+    }
+
     bool
     exist(std::string_view pointer) const {
         return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
@@ -128,6 +145,15 @@ class Json {
     value_result<T>
     at(std::string_view pointer) const {
         return doc().at_pointer(pointer).get<T>();
+    }
+
+    // get dom array by JSON pointer,
+    // call `size()` to get array size,
+    // call `at()` to get array element by index,
+    // iterate through array elements by iterator.
+    value_result<simdjson::dom::array>
+    array_at(std::string_view pointer) const {
+        return dom_doc().at_pointer(pointer).get_array();
     }
 
     std::string_view
