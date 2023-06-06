@@ -271,11 +271,13 @@ func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.Se
 		}, 0)
 		// use shardNum * segments num in shard to estimate total segment number
 		estSegmentNum := sealedNum * int(channelNum)
+		withFilter := (plan.GetVectorAnns().GetPredicates() == nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
 		params := map[string]any{
 			common.TopKKey:        queryInfo.GetTopk(),
 			common.SearchParamKey: queryInfo.GetSearchParams(),
 			common.SegmentNumKey:  estSegmentNum,
+			common.WithFilterKey:  withFilter,
 		}
 		err := node.queryHook.Run(params)
 		if err != nil {
