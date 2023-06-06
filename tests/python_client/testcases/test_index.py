@@ -1904,3 +1904,17 @@ class TestAutoIndex(TestcaseBase):
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 1,
                                                "err_msg": "float vector is only supported"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_json(self):
+        """
+        target: test create index on json fields
+        method: 1.create collection, and create index
+        expected: create index raise an error
+        """
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      dim=ct.default_dim, is_index=False)[0:4]
+        collection_w.create_index(ct.default_json_field_name, index_params=ct.default_flat_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "create index on json field is not supported"})
