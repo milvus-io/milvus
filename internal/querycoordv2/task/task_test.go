@@ -358,6 +358,10 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	}
 }
 
+func (suite *TaskSuite) expectationsForLoadSegments() {
+
+}
+
 func (suite *TaskSuite) TestLoadSegmentTask() {
 	ctx := context.Background()
 	timeout := 10 * time.Second

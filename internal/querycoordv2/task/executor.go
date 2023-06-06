@@ -253,6 +253,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return err
 	}
+
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
 		"",
