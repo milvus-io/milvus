@@ -248,8 +248,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}, req.GetLoadMeta())
-	collection := node.manager.Collection.Get(req.GetCollectionID())
-	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
 		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
 	if err != nil {
