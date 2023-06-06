@@ -42,6 +42,10 @@ class TestQueryParams(TestcaseBase):
     query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
     """
 
+    @pytest.fixture(scope="function", params=[True, False])
+    def enable_dynamic_field(self, request):
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_invalid(self):
         """
@@ -55,18 +59,27 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query(self):
+    def test_query(self, enable_dynamic_field):
         """
         target: test query
         method: query with term expr
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             enable_dynamic_field=enable_dynamic_field)[0:2]
         pos = 5
+        if enable_dynamic_field:
+            int_values = []
+            for vector in vectors[0]:
+                vector = vector[ct.default_int64_field_name]
+                int_values.append(vector)
+            res = [{ct.default_int64_field_name: int_values[i]} for i in range(pos)]
+        else:
+            int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+            res = vectors[0].iloc[0:pos, :1].to_dict('records')
+
         term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        res = vectors[0].iloc[0:pos, :1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -337,7 +350,7 @@ class TestQueryParams(TestcaseBase):
         res = []
         # int8 range [-128, 127] so when nb=1200, there are many repeated int8 values equal to 0
         for i in range(0, ct.default_nb, 256):
-            res.extend(df.iloc[i:i + 1, :-1].to_dict('records'))
+            res.extend(df.iloc[i:i + 1, :-2].to_dict('records'))
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         self.collection_wrap.query(term_expr, output_fields=["float", "int64", "int8", "varchar"],
@@ -350,7 +363,7 @@ class TestQueryParams(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_with_expression(self, get_normal_expr):
+    def test_query_with_expression(self, get_normal_expr, enable_dynamic_field):
         """
         target: test query with different expr
         method: query with different boolean expr
@@ -358,7 +371,9 @@ class TestQueryParams(TestcaseBase):
         """
         # 1. initialize with data
         nb = 1000
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                             enable_dynamic_field=
+                                                                             enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -366,8 +381,12 @@ class TestQueryParams(TestcaseBase):
         expression = expr.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i, _id in enumerate(insert_ids):
-            int64 = _vectors.int64[i]
-            float = _vectors.float[i]
+            if enable_dynamic_field:
+                int64 = _vectors[i][ct.default_int64_field_name]
+                float = _vectors[i][ct.default_float_field_name]
+            else:
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
@@ -536,30 +555,34 @@ class TestQueryParams(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_output_field_none_or_empty(self):
+    def test_query_output_field_none_or_empty(self, enable_dynamic_field):
         """
         target: test query with none and empty output field
         method: query with output field=None, field=[]
         expected: return primary field
         """
-        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        collection_w = self.init_collection_general(prefix, insert_data=True,
+                                                    enable_dynamic_field=enable_dynamic_field)[0]
         for fields in [None, []]:
             res, _ = collection_w.query(default_term_expr, output_fields=fields)
             assert res[0].keys() == {ct.default_int64_field_name}
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_output_one_field(self):
+    def test_query_output_one_field(self, enable_dynamic_field):
         """
         target: test query with output one field
         method: query with output one field
         expected: return one field
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             enable_dynamic_field=
+                                                             enable_dynamic_field)[0:2]
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_float_field_name])
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_output_all_fields(self):
+    @pytest.mark.xfail(reason="issue 24637")
+    def test_query_output_all_fields(self, enable_dynamic_field):
         """
         target: test query with none output field
         method: query with output field=None
@@ -567,11 +590,18 @@ class TestQueryParams(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, df, _, insert_ids = self.init_collection_general(prefix, True, nb=10,
-                                                                       is_all_data_type=True)[0:4]
+                                                                       is_all_data_type=True,
+                                                                       enable_dynamic_field=
+                                                                       enable_dynamic_field)[0:4]
         all_fields = [ct.default_int64_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
                       ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
-                      ct.default_double_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
-        res = df[0].iloc[:2].to_dict('records')
+                      ct.default_double_field_name, ct.default_string_field_name, ct.default_json_field_name,
+                      ct.default_float_vec_field_name]
+        if enable_dynamic_field:
+            res = df[0][:2]
+        else:
+            res = df[0].iloc[:2].to_dict('records')
+        log.info(res)
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,
                                            check_task=CheckTasks.check_query_results,
@@ -736,6 +766,7 @@ class TestQueryParams(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue 24637")
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
@@ -754,6 +785,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res3, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 24637")
     def test_query_output_fields_part_scale_wildcard(self):
         """
         target: test query output_fields with part wildcard
@@ -1681,6 +1713,7 @@ class TestQueryString(TestcaseBase):
                            check_items={ct.err_code: 1, ct.err_msg: f' cannot parse expression:{expression}'})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 24637")
     def test_query_after_insert_multi_threading(self):
         """
         target: test data consistency after multi threading insert

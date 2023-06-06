@@ -81,6 +81,12 @@ def gen_string_field(name=ct.default_string_field_name, description=ct.default_d
     return string_field
 
 
+def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    json_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.JSON, description=description,
+                                                              is_primary=is_primary, **kwargs)
+    return json_field
+
+
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     int8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8, description=description,
                                                               is_primary=is_primary, **kwargs)
@@ -134,10 +140,24 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, dim=ct.default_dim):
-    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
+                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True):
+    if enable_dynamic_field:
+        if primary_field is ct.default_int64_field_name:
+            fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+        elif primary_field is ct.default_string_field_name:
+            fields = [gen_string_field(), gen_float_vec_field(dim=dim)]
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+    else:
+        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), 
+                  gen_float_vec_field(dim=dim)]
+        if with_json is False:
+            fields.remove(gen_json_field())
+
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field)
     return schema
 
 
@@ -154,7 +174,24 @@ def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_string_pk_default_collection_schema(description=ct.default_desc, primary_field=ct.default_string_field_name,
                                             auto_id=False, dim=ct.default_dim):
-    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id)
+    return schema
+
+
+def gen_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                       auto_id=False, dim=ct.default_dim):
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id)
+    return schema
+
+
+def gen_multiple_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                                auto_id=False, dim=ct.default_dim):
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(name="json1"),
+              gen_json_field(name="json2"), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
@@ -162,11 +199,19 @@ def gen_string_pk_default_collection_schema(description=ct.default_desc, primary
 
 def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim):
-    fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
-              gen_bool_field(), gen_float_field(), gen_double_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
+                                       auto_id=False, dim=ct.default_dim,
+                                       enable_dynamic_field=False, with_json=True):
+    if enable_dynamic_field:
+        fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+    else:    
+        fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
+                  gen_bool_field(), gen_float_field(), gen_double_field(), gen_string_field(),
+                  gen_json_field(), gen_float_vec_field(dim=dim)]
+        if with_json is False:
+            fields.remove(gen_json_field())
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field)
     return schema
 
 
@@ -227,29 +272,55 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
+    json_values = [{"number": i, "float": i*1.0, "string": str(i), "bool": bool(i),
+                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
         ct.default_float_field_name: float_values,
         ct.default_string_field_name: string_values,
+        ct.default_json_field_name: json_values,
         ct.default_float_vec_field_name: float_vec_values
     })
+    if with_json is False:
+        df.drop(ct.default_json_field_name, axis=1, inplace=True)
+
     return df
+
+
+def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
+    array = []
+    for i in range(start, start + nb):
+        dict = {ct.default_int64_field_name: i,
+                ct.default_float_field_name: i*1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
+                                             "list": [j for j in range(0, i)]},
+                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
+                }
+        if with_json is False:
+            dict.pop(ct.default_json_field_name, None)
+        array.append(dict)
+
+    return array
 
 
 def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
     float_values = pd.Series(data=[np.float32(i + size) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i + size) for i in range(start, start + nb)], dtype="string")
+    json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
         ct.default_float_field_name: float_values,
         ct.default_string_field_name: string_values,
+        ct.default_json_field_name: json_values,
         ct.default_float_vec_field_name: float_vec_values
     })
     return df, float_values
@@ -304,7 +375,7 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     return df
 
 
-def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
+def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
     int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
@@ -313,6 +384,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
+    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
+                   for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int64_values,
@@ -323,9 +396,36 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_float_field_name: float_values,
         ct.default_double_field_name: double_values,
         ct.default_string_field_name: string_values,
+        ct.default_json_field_name: json_values,
         ct.default_float_vec_field_name: float_vec_values
+
     })
+    if with_json is False:
+        df.drop(ct.default_json_field_name, axis=1, inplace=True)
+
     return df
+
+
+def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
+    array = []
+    for i in range(start, start + nb):
+        dict = {ct.default_int64_field_name: i,
+                ct.default_int32_field_name: i,
+                ct.default_int16_field_name: i,
+                ct.default_int8_field_name: i,
+                ct.default_bool_field_name: bool(i),
+                ct.default_float_field_name: i*1.0,
+                ct.default_double_field_name: i*1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
+                                             "list": [j for j in range(0, i)]},
+                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
+                }
+        if with_json is False:
+            dict.pop(ct.default_json_field_name, None)
+        array.append(dict)
+
+    return array
 
 
 def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
@@ -346,8 +446,10 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int_values = [i for i in range(start, start + nb)]
     float_values = [np.float32(i) for i in range(start, start + nb)]
     string_values = [str(i) for i in range(start, start + nb)]
+    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
+                   for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
-    data = [int_values, float_values, string_values, float_vec_values]
+    data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
 
 
@@ -421,8 +523,10 @@ def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = np.arange(nb, dtype='int64')
     float_values = np.arange(nb, dtype='float32')
     string_values = [np.str_(i) for i in range(nb)]
+    json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
-    data = [int_values, float_values, string_values, float_vec_values]
+    data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
 
 
@@ -768,7 +872,7 @@ def gen_partitions(collection_w, partition_num=1):
 
 
 def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim, insert_offset=0):
+                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -782,14 +886,23 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
     start = insert_offset
     log.info(f"inserted {nb} data into collection {collection_w.name}")
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
+        log.debug("Dynamic field is enabled: %s" % enable_dynamic_field)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json)
+        if enable_dynamic_field:
+            default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
+            if enable_dynamic_field:
+                default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
         if auto_id:
-            default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+            if enable_dynamic_field:
+                for data in default_data:
+                    data.pop(ct.default_int64_field_name, None)
+            else:
+                default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
