@@ -296,7 +296,8 @@ class ResponseChecker:
         primary_field = check_items.get("primary_field", None)
         if exp_res is not None:
             if isinstance(query_res, list):
-                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=primary_field, with_vec=with_vec)
+                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=primary_field, 
+                                              with_vec=with_vec)
                 return True
             else:
                 log.error(f"Query result {query_res} is not list")

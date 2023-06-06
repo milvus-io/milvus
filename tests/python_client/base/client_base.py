@@ -169,7 +169,7 @@ class TestcaseBase(Base):
         if is_all_data_type:
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
                                                                    primary_field=primary_field)
-        log.info("init_collection_general: collection creation")
+        log.info("insert_data_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         pre_entities = collection_w.num_entities
         if insert_data:
@@ -184,7 +184,8 @@ class TestcaseBase(Base):
     def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=True,
-                                primary_field=ct.default_int64_field_name, is_flush=True, name=None, **kwargs):
+                                primary_field=ct.default_int64_field_name, is_flush=True, name=None,
+                                enable_dynamic_field=False, with_json=True, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -204,13 +205,17 @@ class TestcaseBase(Base):
         insert_ids = []
         time_stamp = 0
         # 1 create collection
-        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
+        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field, 
+                                                          enable_dynamic_field=enable_dynamic_field, 
+                                                          with_json=with_json)
         if is_binary:
             default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
                                                                      primary_field=primary_field)
         if is_all_data_type:
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
-                                                                   primary_field=primary_field)
+                                                                   primary_field=primary_field,
+                                                                   enable_dynamic_field=enable_dynamic_field,
+                                                                   with_json=with_json)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         # 2 add extra partitions if specified (default is 1 partition named "_default")
@@ -219,7 +224,8 @@ class TestcaseBase(Base):
         # 3 insert data if specified
         if insert_data:
             collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, 
+                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb

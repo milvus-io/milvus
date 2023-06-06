@@ -478,7 +478,7 @@ class TestDeleteOperation(TestcaseBase):
         """
         # init collection with nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
-        entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
+        entity, _ = collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name])
         search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
@@ -994,7 +994,7 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [0, 3]].to_dict('records'), 'with_vec': True})
+                           check_items={'exp_res': df_new.iloc[[0], [0, 4]].to_dict('records'), 'with_vec': True})
 
         collection_w.delete(tmp_expr)
         if to_flush_delete:
@@ -1635,7 +1635,7 @@ class TestDeleteString(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [2, 3]].to_dict('records'),
+                           check_items={'exp_res': df_new.iloc[[0], [2, 4]].to_dict('records'),
                                         'primary_field': ct.default_string_field_name, 'with_vec': True})
 
         collection_w.delete(default_string_expr)
@@ -1800,6 +1800,7 @@ class TestDeleteString(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("to_query", [True, False])
+    # @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_insert_same_id_sealed_string(self, to_query):
         """
         target: test insert same id entity after delete from sealed data
@@ -1840,10 +1841,15 @@ class TestDeleteString(TestcaseBase):
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [2, 3]].to_dict('records')
+        res = df_new.iloc[[0], [2, 4]].to_dict('records')
+        log.info(res)
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'primary_field': ct.default_string_field_name, 'with_vec': True})
-        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': res,
+                                        'primary_field': ct.default_string_field_name,
+                                        'with_vec': True})
+        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
+                            anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
 
     @pytest.mark.tags(CaseLabel.L1)

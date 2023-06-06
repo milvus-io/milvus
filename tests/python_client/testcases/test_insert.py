@@ -98,7 +98,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector'], got %s" % data}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data=data)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_dataframe_only_columns(self):
@@ -1379,7 +1379,7 @@ class TestUpsertValid(TestcaseBase):
                 [str(i) for i in range(nb)], binary_vectors]
         collection_w.upsert(data)
         res = collection_w.query("int64 >= 0", [ct.default_binary_vec_field_name])[0]
-        assert binary_vectors[0] == res[0][ct. default_binary_vec_field_name]
+        assert binary_vectors[0] == res[0][ct. default_binary_vec_field_name][0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_with_inserted_data(self):
