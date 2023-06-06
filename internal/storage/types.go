@@ -31,7 +31,7 @@ const (
 )
 
 func (s StatsLogType) LogIdx() string {
-	return fmt.Sprintf("0%d", s)
+	return fmt.Sprintf("%d", s)
 }
 
 type FileReader interface {
