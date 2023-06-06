@@ -2,8 +2,8 @@
 
 This document will help to set up your Milvus development environment and to run tests. Please [file an issue](https://github.com/milvus-io/milvus/issues/new/choose) if there's a problem.
 
-Table of contents
-=================
+# Table of contents
+
 - [Development](#development)
 - [Table of contents](#table-of-contents)
   - [Building Milvus with Docker](#building-milvus-with-docker)
@@ -28,7 +28,6 @@ Table of contents
   - [GitHub Flow](#github-flow)
   - [FAQs](#faqs)
 
-
 ## Building Milvus with Docker
 
 Our official Milvus versions are releases as Docker images. To build Milvus Docker on your own, please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
@@ -52,13 +51,15 @@ All Linux distributions are available for Milvus development. However a majority
 
 Here's a list of verified OS types where Milvus can successfully build and run:
 
-* Debian/Ubuntu
-* CentOS
-* MacOS (x86_64)
-* MacOS (Apple Silicon)
+- Debian/Ubuntu
+- CentOS
+- MacOS (x86_64)
+- MacOS (Apple Silicon)
 
 #### Prerequisites
-Linux systems (Recommend Ubuntu 18.04 or later):
+
+Linux systems (Recommend Ubuntu 20.04 or later):
+
 ```bash
 go: >= 1.18
 cmake: >= 3.18
@@ -66,6 +67,7 @@ gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
+
 ```bash
 go: >= 1.18
 cmake: >= 3.18
@@ -73,22 +75,24 @@ llvm: >= 15
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
+
 ```bash
 go: >= 1.18 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
 ```
 
-
 #### Installing Dependencies
 
 In the Milvus repository root, simply run:
+
 ```bash
 $ ./scripts/install_deps.sh
 ```
 
 #### Caveats
-* [Google Test](https://github.com/google/googletest.git) is automatically cloned from GitHub, which in some case could conflict with your local google test library.
+
+- [Google Test](https://github.com/google/googletest.git) is automatically cloned from GitHub, which in some case could conflict with your local google test library.
 
 Once you have finished, confirm that `gcc` and `make` are installed:
 
@@ -106,15 +110,17 @@ Confirm that cmake is available:
 ```shell
 $ cmake --version
 ```
+
 Note: 3.25 or higher cmake version is required to build Milvus.
 
 Milvus uses Conan to manage third-party dependencies for c++.
 
-Install Conan 
+Install Conan
 
 ```shell
 pip install conan==1.58.0
 ```
+
 Note: Conan version 2.x is not currently supported, please use version 1.58.
 
 #### Go
@@ -126,14 +132,15 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
+
 Note: go >= 1.18 is required to build Milvus.
 
 #### Docker & Docker Compose
 
 Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
 
--   Docker: https://docs.docker.com/get-docker/
--   Docker Compose: https://docs.docker.com/compose/install/
+- Docker: https://docs.docker.com/get-docker/
+- Docker Compose: https://docs.docker.com/compose/install/
 
 ### Building Milvus
 
@@ -146,6 +153,7 @@ $ make
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
 
 If you want to update proto file before `make`, we can use the following command:
+
 ```shell
 $ make generated-proto-go
 ```
@@ -171,35 +179,43 @@ It is required that all pull request candidates should pass all Milvus unit test
 Beforce running unit tests, you need to first bring up the Milvus deployment environment.
 You may set up a local docker environment with our docker compose yaml file to start unit testing.
 For Apple Silicon users (Apple M1):
+
 ```shell
 $ cd deployments/docker/dev
 $ docker-compose -f docker-compose-apple-silicon.yml up -d
 $ cd ../../../
 $ make unittest
 ```
+
 For others:
+
 ```shell
 $ cd deployments/docker/dev
 $ docker-compose up -d
 $ cd ../../../
 $ make unittest
 ```
+
 To run only cpp test:
+
 ```shell
 $ make test-cpp
 ```
 
 To run only go test:
+
 ```shell
 $ make test-go
 ```
 
 To run a single test case (TestSearchTask in /internal/proxy directory, for example):
+
 ```shell
 $ source scripts/setenv.sh && go test -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 If using Mac with M1 chip
+
 ```
 $ source scripts/setenv.sh && go test -tags=dynamic -v ./internal/proxy/ -test.run TestSearchTask
 ```
@@ -209,18 +225,23 @@ $ source scripts/setenv.sh && go test -tags=dynamic -v ./internal/proxy/ -test.r
 Before submitting your pull request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
 
 Run unit test and generate code coverage report:
+
 ```shell
 $ make codecov
 ```
+
 This command will generate html report for Golang and C++ respectively.
 For Golang report, open the `go_coverage.html` under milvus project path.
 For C++ report, open the `cpp_coverage/index.html` under milvus project path.
 
 You also can generate Golang coverage report by:
+
 ```shell
 $ make codecov-go
 ```
+
 Or C++ coverage report by:
+
 ```shell
 $ make codecov-cpp
 ```
@@ -252,7 +273,9 @@ $ pytest --tags=L0 -n auto
 ```
 
 ### Test on local branch
+
 #### With Linux and MacOS
+
 After preparing deployment environment, we can start the cluster on your host machine
 
 ```shell
@@ -260,7 +283,9 @@ $ ./scripts/start_cluster.sh
 ```
 
 #### With docker
+
 start the cluster on your host machine
+
 ```shell
 $ ./build/builder.sh make install // build milvus
 $ ./build/build_image.sh // build milvus lastest docker image
@@ -270,33 +295,38 @@ milvusdb/milvus            latest                              63c62ff7c1b7   52
 $ install with docker compose
 ```
 
-
 ## GitHub Flow
 
 To check out code to work on, please refer to the [GitHub Flow](https://guides.github.com/introduction/flow/).
 
 ## FAQs
+
 Q: The go building phase fails on Apple Silicon (Mac M1) machines.
 
 A: Please double-check that you have [right Go version](https://go.dev/dl/) installed, i.e. with OS=macOS and Arch=ARM64.
 
 ---
-Q: "make" fails with "*ld: library not found for -lSystem*" on MacOS.
+
+Q: "make" fails with "_ld: library not found for -lSystem_" on MacOS.
 
 A: There are a couple of things you could try:
+
 1. Use **Software Update** (from **About this Mac** -> **Overview**) to install updates.
 2. Try the following commands:
+
 ```bash
 sudo rm -rf /Library/Developer/CommandLineTools
 sudo xcode-select --install
 ```
 
 ---
-Q: Rocksdb fails to compile with "*ld: warning: object file was built for newer macOS version (11.6) than being linked (11.0).*" on MacOS.
+
+Q: Rocksdb fails to compile with "_ld: warning: object file was built for newer macOS version (11.6) than being linked (11.0)._" on MacOS.
 
 A: Use **Software Update** (from **About this Mac** -> **Overview**) to install updates.
 
 ---
+
 Q: Some Go unit tests failed.
 
 A: We are aware that some tests can be flaky occasionally. If there's something you believe is abnormal (i.e. tests that fail every single time). You are more than welcome to [file an issue](https://github.com/milvus-io/milvus/issues/new/choose)!
