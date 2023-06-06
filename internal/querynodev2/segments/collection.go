@@ -25,11 +25,12 @@ package segments
 import "C"
 
 import (
+	"sync"
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
-	"sync"
-	"unsafe"
 
 	"github.com/golang/protobuf/proto"
 
@@ -70,6 +71,7 @@ func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionS
 	}
 
 	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
+	collection.metricType = loadMeta.GetMetricType()
 	collection.AddPartition(loadMeta.GetPartitionIDs()...)
 	m.collections[collectionID] = collection
 }
@@ -121,10 +123,6 @@ func (c *Collection) RemovePartition(partitionID int64) {
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
-}
-
-func (c *Collection) SetMetricType(metricType string) {
-	c.metricType = metricType
 }
 
 func (c *Collection) GetMetricType() string {
