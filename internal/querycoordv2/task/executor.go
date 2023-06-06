@@ -253,9 +253,16 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return err
 	}
+
+	metricType, err := getMetricType(ctx, task.CollectionID(), schema, ex.broker)
+	if err != nil {
+		log.Warn("failed to get metric type", zap.Error(err))
+		return err
+	}
+
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
-		"",
+		metricType,
 		task.CollectionID(),
 		partitions...,
 	)
