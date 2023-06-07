@@ -5519,10 +5519,11 @@ class TestSearchDiskann(TestcaseBase):
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
-        index_params_one = {}
-        collection_w.create_index("float", index_params_one, index_name="a")
-        index_param_two = {}
-        collection_w.create_index("varchar", index_param_two, index_name="b")
+        if not enable_dynamic_field:
+            index_params_one = {}
+            collection_w.create_index("float", index_params_one, index_name="a")
+            index_param_two = {}
+            collection_w.create_index("varchar", index_param_two, index_name="b")
         
         collection_w.load()
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
@@ -5534,7 +5535,7 @@ class TestSearchDiskann(TestcaseBase):
         assert del_res.delete_count == half_nb
 
         collection_w.delete(tmp_expr)
-        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
+        default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -6085,6 +6086,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. insert new data
         nb_new = 300
         _, _, _, insert_ids_new, time_stamp = cf.insert_data(collection_w, nb_new, dim=dim,
+                                                             enable_dynamic_field=enable_dynamic_field,
                                                              insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
         # 4. search for new data without load
