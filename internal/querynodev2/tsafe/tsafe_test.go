@@ -41,7 +41,7 @@ func (suite *TSafeTestSuite) SetupTest() {
 	suite.tSafeReplica = NewTSafeReplica()
 }
 
-//test Basic use of TSafeReplica
+// test Basic use of TSafeReplica
 func (suite *TSafeTestSuite) TestBasic() {
 	suite.tSafeReplica.Add(suite.channel, ZeroTimestamp)
 	t, err := suite.tSafeReplica.Get(suite.channel)

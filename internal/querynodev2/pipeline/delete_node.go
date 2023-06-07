@@ -38,7 +38,7 @@ type deleteNode struct {
 	delegator    delegator.ShardDelegator
 }
 
-//addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
+// addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
 func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
 	deleteData, ok := deleteDatas[msg.PartitionID]
 	if !ok {

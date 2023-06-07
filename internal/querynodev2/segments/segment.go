@@ -28,11 +28,12 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"sort"
 	"sync"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"

@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-//test of filter node
+// test of filter node
 type FilterNodeSuite struct {
 	suite.Suite
 	//datas
@@ -74,7 +74,7 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	}
 }
 
-//test filter node with collection load collection
+// test filter node with collection load collection
 func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	//data
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
@@ -109,7 +109,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	suite.Equal(suite.deleteSegmentSum, len(nodeMsg.deleteMsgs))
 }
 
-//test filter node with collection load partition
+// test filter node with collection load partition
 func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	//data
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}

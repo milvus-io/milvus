@@ -37,8 +37,8 @@ type MockSegment_AddIndex_Call struct {
 }
 
 // AddIndex is a helper method to define mock.On call
-//  - fieldID int64
-//  - index *IndexedFieldInfo
+//   - fieldID int64
+//   - index *IndexedFieldInfo
 func (_e *MockSegment_Expecter) AddIndex(fieldID interface{}, index interface{}) *MockSegment_AddIndex_Call {
 	return &MockSegment_AddIndex_Call{Call: _e.mock.On("AddIndex", fieldID, index)}
 }
@@ -111,8 +111,8 @@ type MockSegment_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//  - primaryKeys []storage.PrimaryKey
-//  - timestamps []uint64
+//   - primaryKeys []storage.PrimaryKey
+//   - timestamps []uint64
 func (_e *MockSegment_Expecter) Delete(primaryKeys interface{}, timestamps interface{}) *MockSegment_Delete_Call {
 	return &MockSegment_Delete_Call{Call: _e.mock.On("Delete", primaryKeys, timestamps)}
 }
@@ -149,7 +149,7 @@ type MockSegment_ExistIndex_Call struct {
 }
 
 // ExistIndex is a helper method to define mock.On call
-//  - fieldID int64
+//   - fieldID int64
 func (_e *MockSegment_Expecter) ExistIndex(fieldID interface{}) *MockSegment_ExistIndex_Call {
 	return &MockSegment_ExistIndex_Call{Call: _e.mock.On("ExistIndex", fieldID)}
 }
@@ -188,7 +188,7 @@ type MockSegment_GetIndex_Call struct {
 }
 
 // GetIndex is a helper method to define mock.On call
-//  - fieldID int64
+//   - fieldID int64
 func (_e *MockSegment_Expecter) GetIndex(fieldID interface{}) *MockSegment_GetIndex_Call {
 	return &MockSegment_GetIndex_Call{Call: _e.mock.On("GetIndex", fieldID)}
 }
@@ -299,9 +299,9 @@ type MockSegment_Insert_Call struct {
 }
 
 // Insert is a helper method to define mock.On call
-//  - rowIDs []int64
-//  - timestamps []uint64
-//  - record *segcorepb.InsertRecord
+//   - rowIDs []int64
+//   - timestamps []uint64
+//   - record *segcorepb.InsertRecord
 func (_e *MockSegment_Expecter) Insert(rowIDs interface{}, timestamps interface{}, record interface{}) *MockSegment_Insert_Call {
 	return &MockSegment_Insert_Call{Call: _e.mock.On("Insert", rowIDs, timestamps, record)}
 }
@@ -410,7 +410,7 @@ type MockSegment_MayPkExist_Call struct {
 }
 
 // MayPkExist is a helper method to define mock.On call
-//  - pk storage.PrimaryKey
+//   - pk storage.PrimaryKey
 func (_e *MockSegment_Expecter) MayPkExist(pk interface{}) *MockSegment_MayPkExist_Call {
 	return &MockSegment_MayPkExist_Call{Call: _e.mock.On("MayPkExist", pk)}
 }
@@ -656,7 +656,7 @@ type MockSegment_UpdateBloomFilter_Call struct {
 }
 
 // UpdateBloomFilter is a helper method to define mock.On call
-//  - pks []storage.PrimaryKey
+//   - pks []storage.PrimaryKey
 func (_e *MockSegment_Expecter) UpdateBloomFilter(pks interface{}) *MockSegment_UpdateBloomFilter_Call {
 	return &MockSegment_UpdateBloomFilter_Call{Call: _e.mock.On("UpdateBloomFilter", pks)}
 }
