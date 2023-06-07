@@ -131,13 +131,6 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
-
-			actualKeys, actualValues, versions, revision, err := etcdKV.LoadWithRevisionAndVersions(test.prefix)
-			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
-			assert.ElementsMatch(t, test.expectedValues, actualValues)
-			assert.NotZero(t, versions)
-			assert.NotZero(t, revision)
-			assert.Equal(t, test.expectedError, err)
 		}
 
 		removeTests := []struct {
@@ -281,52 +274,8 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV LoadWithRevision", func(t *testing.T) {
-		rootPath := "/etcd/test/root/LoadWithRevision"
-		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
-
-		prepareKV := []struct {
-			inKey   string
-			inValue string
-		}{
-			{"a", "a_version1"},
-			{"b", "b_version2"},
-			{"a", "a_version3"},
-			{"c", "c_version4"},
-			{"a/suba", "a_version5"},
-		}
-
-		for _, test := range prepareKV {
-			err = etcdKV.Save(test.inKey, test.inValue)
-			require.NoError(t, err)
-		}
-
-		loadWithRevisionTests := []struct {
-			inKey string
-
-			expectedKeyNo  int
-			expectedValues []string
-		}{
-			{"a", 2, []string{"a_version3", "a_version5"}},
-			{"b", 1, []string{"b_version2"}},
-			{"c", 1, []string{"c_version4"}},
-		}
-
-		for _, test := range loadWithRevisionTests {
-			keys, values, revision, err := etcdKV.LoadWithRevision(test.inKey)
-			assert.NoError(t, err)
-			assert.Equal(t, test.expectedKeyNo, len(keys))
-			assert.ElementsMatch(t, test.expectedValues, values)
-			assert.NotZero(t, revision)
-		}
-
-	})
-
 	te.Run("EtcdKV LoadBytesWithRevision", func(t *testing.T) {
-		rootPath := "/etcd/test/root/LoadWithRevision"
+		rootPath := "/etcd/test/root/LoadBytesWithRevision"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 
 		defer etcdKV.Close()
@@ -705,59 +654,6 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.True(t, resp.Created)
 	})
 
-	te.Run("Etcd Revision", func(t *testing.T) {
-		rootPath := "/etcd/test/root/revision"
-		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
-
-		revisionTests := []struct {
-			inKey       string
-			fistValue   string
-			secondValue string
-		}{
-			{"a", "v1", "v11"},
-			{"y", "v2", "v22"},
-			{"z", "v3", "v33"},
-		}
-
-		for _, test := range revisionTests {
-			err = etcdKV.Save(test.inKey, test.fistValue)
-			require.NoError(t, err)
-
-			_, _, revision, _ := etcdKV.LoadWithRevision(test.inKey)
-			ch := etcdKV.WatchWithRevision(test.inKey, revision+1)
-
-			err = etcdKV.Save(test.inKey, test.secondValue)
-			require.NoError(t, err)
-
-			resp := <-ch
-			assert.Equal(t, 1, len(resp.Events))
-			assert.Equal(t, test.secondValue, string(resp.Events[0].Kv.Value))
-			assert.Equal(t, revision+1, resp.Header.Revision)
-		}
-
-		success, err := etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
-		assert.NoError(t, err)
-		assert.True(t, success)
-
-		value, err := etcdKV.Load("a/b/c")
-		assert.NoError(t, err)
-		assert.Equal(t, value, "1")
-
-		success, err = etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
-		assert.NoError(t, err)
-		assert.False(t, success)
-
-		success, err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
-		assert.True(t, success)
-		assert.NoError(t, err)
-
-		success, err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
-		assert.NoError(t, err)
-		assert.False(t, success)
-	})
-
 	te.Run("Etcd Revision Bytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/revision_bytes"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -799,14 +695,6 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Equal(t, string(value), "1")
 
 		success, err = etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
-		assert.NoError(t, err)
-		assert.False(t, success)
-
-		success, err = etcdKV.CompareValueAndSwapBytes("a/b/c", []byte("1"), []byte("2"))
-		assert.True(t, success)
-		assert.NoError(t, err)
-
-		success, err = etcdKV.CompareValueAndSwapBytes("a/b/c", []byte("1"), []byte("2"))
 		assert.NoError(t, err)
 		assert.False(t, success)
 	})

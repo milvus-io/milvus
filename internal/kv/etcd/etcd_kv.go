@@ -140,28 +140,6 @@ func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	return keys, values, nil
 }
 
-func (kv *EtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, nil, 0, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	versions := make([]int64, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-		versions = append(versions, kv.Version)
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
-	return keys, values, versions, resp.Header.Revision, nil
-}
-
 // LoadBytesWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
 func (kv *EtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64, error) {
 	start := time.Now()
@@ -287,27 +265,6 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi load", zap.Strings("keys", keys))
 	return result, nil
-}
-
-// LoadWithRevision returns keys, values and revision with given key prefix.
-func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with revision", zap.Strings("keys", keys))
-	return keys, values, resp.Header.Revision, nil
 }
 
 // LoadBytesWithRevision returns keys, values and revision with given key prefix.
@@ -638,44 +595,6 @@ func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliv
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation keepAlive")
 	return ch, nil
-}
-
-// CompareValueAndSwap compares the existing value with compare, and if they are
-// equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			value)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
-	if err != nil {
-		return false, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap", zap.String("key", key))
-	return resp.Succeeded, nil
-}
-
-// CompareValueAndSwapBytes compares the existing value with compare, and if they are
-// equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) (bool, error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			string(value))).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
-	if err != nil {
-		return false, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap", zap.String("key", key))
-	return resp.Succeeded, nil
 }
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if

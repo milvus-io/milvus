@@ -67,14 +67,11 @@ type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
 	LoadWithPrefix(key string) ([]string, []string, error)
-	LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error)
-	LoadWithRevision(key string) ([]string, []string, int64, error)
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	WatchWithRevision(key string, revision int64) clientv3.WatchChan
 	Grant(ttl int64) (id clientv3.LeaseID, err error)
 	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
-	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error)
 	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
 	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
