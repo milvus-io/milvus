@@ -29,7 +29,7 @@ require (
 	github.com/nats-io/nats.go v1.24.0
 	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.14.0
-	github.com/quasilyte/go-ruleguard/dsl v0.3.21
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
 	github.com/sbinet/npyio v0.6.0
 	github.com/spf13/viper v1.8.1

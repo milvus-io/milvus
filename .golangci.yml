@@ -26,6 +26,10 @@ linters:
       #    - gocritic
 
 linters-settings:
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
   misspell:
     locale: US
   gocritic:
@@ -36,14 +40,19 @@ linters-settings:
         failOnError: true
         rules: 'rules.go'
   depguard:
-    list-type: denylist
-    include-go-root: true
-    packages:
-      - errors
-      - github.com/pkg/errors
-      - github.com/pingcap/errors
-      - golang.org/x/xerrors
-      - github.com/go-errors/errors
+    rules:
+      main:
+        deny:
+          - pkg: 'errors'
+            desc: not allowd, use github.com/cockroachdb/errors
+          - pkg: 'github.com/pkg/errors'
+            desc: not allowd, use github.com/cockroachdb/errors
+          - pkg: 'github.com/pingcap/errors'
+            desc: not allowd, use github.com/cockroachdb/errors
+          - pkg: 'golang.org/x/xerrors'
+            desc: not allowd, use github.com/cockroachdb/errors
+          - pkg: 'github.com/go-errors/errors'
+            desc: not allowd, use github.com/cockroachdb/errors
   forbidigo:
     forbid:
       - '^time\.Tick$'

@@ -51,8 +51,8 @@ type mockTimestampAllocator_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *rootcoordpb.AllocTimestampRequest
+//   - ctx context.Context
+//   - req *rootcoordpb.AllocTimestampRequest
 func (_e *mockTimestampAllocator_Expecter) AllocTimestamp(ctx interface{}, req interface{}) *mockTimestampAllocator_AllocTimestamp_Call {
 	return &mockTimestampAllocator_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, req)}
 }

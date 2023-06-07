@@ -24,7 +24,6 @@ var (
 
 // RoundRobinPolicy do the query with multiple dml channels
 // if request failed, it finds shard leader for failed dml channels
-//
 func RoundRobinPolicy(
 	ctx context.Context,
 	mgr *shardClientMgr,
