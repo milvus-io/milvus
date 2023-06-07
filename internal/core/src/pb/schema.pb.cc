@@ -639,9 +639,9 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\n\014BinaryVector\020d\022\017\n\013FloatVector\020e*V\n\nFie"
   "ldState\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreati"
   "ng\020\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDropped\020"
-  "\003Bf\n\016io.milvus.grpcB\013SchemaProtoP\001Z1gith"
-  "ub.com/milvus-io/milvus-proto/go-api/sch"
-  "emapb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "\003Bi\n\016io.milvus.grpcB\013SchemaProtoP\001Z4gith"
+  "ub.com/milvus-io/milvus-proto/go-api/v2/"
+  "schemapb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -667,7 +667,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 2753,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 2756,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 16, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 17, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,

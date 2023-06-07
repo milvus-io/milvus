@@ -29,7 +29,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"

@@ -19,7 +19,7 @@ package util
 import (
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // Meta Prefix consts

@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 // DatabaseInterceptor fill dbname into request based on kv pair <"dbname": "xx"> in header

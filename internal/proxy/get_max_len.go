@@ -7,7 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 // GetMaxLength get max length of field. Maybe also helpful outside.

@@ -21,7 +21,7 @@ package rootcoord
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )

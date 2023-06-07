@@ -19,8 +19,8 @@ package components
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"

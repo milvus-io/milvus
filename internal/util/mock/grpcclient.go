@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

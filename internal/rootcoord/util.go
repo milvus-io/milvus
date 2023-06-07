@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
