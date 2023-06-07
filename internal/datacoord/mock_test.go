@@ -808,6 +808,10 @@ func (m *mockRootCoordService) OperatePrivilege(ctx context.Context, req *milvus
 	panic("implement me")
 }
 
+func (m *mockRootCoordService) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	return &internalpb.ListPolicyResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
 }
