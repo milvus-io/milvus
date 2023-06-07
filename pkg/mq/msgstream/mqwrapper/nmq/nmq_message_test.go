@@ -14,36 +14,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package msgstream
+package nmq
 
 import (
-	"context"
-	"os"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func TestRmsFactory(t *testing.T) {
-	defer os.Unsetenv("ROCKSMQ_PATH")
-	paramtable.Init()
-
-	dir := t.TempDir()
-
-	rmsFactory := NewRocksmqFactory(dir)
-
-	ctx := context.Background()
-	_, err := rmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = rmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
-
-	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
+func TestNmqMessage_All(t *testing.T) {
+	topic := t.Name()
+	raw := nats.NewMsg(topic)
+	raw.Data = []byte(`test payload`)
+	raw.Header.Add("test", "test")
+	nm := nmqMessage{
+		meta: &nats.MsgMetadata{
+			Sequence: nats.SequencePair{
+				Stream: 12,
+			},
+		},
+		raw: raw,
+	}
+	payload := []byte("test payload")
+	assert.Equal(t, topic, nm.Topic())
+	assert.Equal(t, MessageIDType(12), nm.ID().(*nmqID).messageID)
+	assert.Equal(t, payload, nm.Payload())
+	assert.Equal(t, nm.Properties()["test"], "test")
 }

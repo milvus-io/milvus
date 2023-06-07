@@ -10,7 +10,7 @@ require (
 	github.com/containerd/cgroups v1.0.4
 	github.com/golang/protobuf v1.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/klauspost/compress v1.14.4
+	github.com/klauspost/compress v1.16.5
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230529034923-4579ee9d5723
 	github.com/panjf2000/ants/v2 v2.7.2
@@ -25,9 +25,9 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
 	go.uber.org/atomic v1.10.0
-	go.uber.org/automaxprocs v1.4.0
+	go.uber.org/automaxprocs v1.5.1
 	go.uber.org/zap v1.17.0
-	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
+	golang.org/x/crypto v0.8.0
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17
 	golang.org/x/sync v0.1.0
 	google.golang.org/grpc v1.52.3
@@ -104,10 +104,10 @@ require (
 	go.opentelemetry.io/otel/sdk v1.13.0
 	go.opentelemetry.io/otel/trace v1.13.0
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
-	golang.org/x/net v0.7.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
-	golang.org/x/term v0.5.0 // indirect
-	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba // indirect
+	golang.org/x/net v0.9.0 // indirect
+	golang.org/x/sys v0.7.0 // indirect
+	golang.org/x/term v0.7.0 // indirect
+	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20221118155620-16455021b5e6 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
@@ -120,6 +120,8 @@ require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b
 
 require (
 	github.com/cockroachdb/errors v1.9.1
+	github.com/nats-io/nats-server/v2 v2.9.17
+	github.com/nats-io/nats.go v1.24.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.opentelemetry.io/otel/exporters/jaeger v1.13.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.13.0
@@ -138,6 +140,10 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.7.0 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/minio/highwayhash v1.0.2 // indirect
+	github.com/nats-io/jwt/v2 v2.4.1 // indirect
+	github.com/nats-io/nkeys v0.4.4 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect
@@ -146,7 +152,7 @@ require (
 	go.opentelemetry.io/otel/metric v0.35.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20221014153046-6fdb5e3db783 // indirect
-	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/text v0.9.0 // indirect
 )
 
 replace (

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -99,7 +100,6 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 
 func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	auth, err := pulsar.NewAuthentication(f.PulsarAuthPlugin, f.PulsarAuthParams)
-
 	if err != nil {
 		log.Error("build authencation from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
@@ -187,4 +187,16 @@ func NewKmsFactory(config *paramtable.KafkaConfig) Factory {
 		config:            config,
 	}
 	return f
+}
+
+// NewNatsmqFactory create a new nats-mq factory.
+func NewNatsmqFactory() Factory {
+	paramtable.Init()
+	nmq.MustInitNatsMQ(nmq.ParseServerOption(paramtable.Get()))
+	return &CommonFactory{
+		Newer:             nmq.NewClientWithDefaultOptions,
+		DispatcherFactory: ProtoUDFactory{},
+		ReceiveBufSize:    1024,
+		MQBufSize:         1024,
+	}
 }

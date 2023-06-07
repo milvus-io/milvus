@@ -75,23 +75,28 @@ minio:
   # For more information, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
-  # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control 
+  # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
   useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun". 
+  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
-  # You can use "aliyun" for other cloud provider uses virtual host style bucket 
+  # You can use "aliyun" for other cloud provider uses virtual host style bucket
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: 
+  iamEndpoint:
 
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
-# There is a note about enabling priority if we config multiple mq in this file
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
+# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
+# You can change your mq by setting mq.type field.
+# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
+# 1. standalone(local) mode: rocksmq(default) > natsmq > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
+mq:
+  # Default value: "default"
+  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
+  type: default
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -104,9 +109,9 @@ pulsar:
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
-#   brokerList: 
-#   saslUsername: 
-#   saslPassword: 
+#   brokerList:
+#   saslUsername:
+#   saslPassword:
 #   saslMechanisms: PLAIN
 #   securityProtocol: SASL_SSL
 
@@ -119,6 +124,21 @@ rocksmq:
   retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+
+# natsmq configuration.
+natsmq:
+  server: # server side configuration for natsmq.
+    port: 4222 # 4222 by default, Port for nats server listening.
+    storeDir: /var/lib/milvus/nats # /var/lib/milvus/nats by default, directory to use for JetStream storage of nats.
+    maxFileStore: 17179869184 # (B) 16GB by default, Maximum size of the 'file' storage.
+    maxPayload: 8388608 # (B) 8MB by default, Maximum number of bytes in a message payload.
+    maxPending: 67108864 # (B) 64MB by default, Maximum number of bytes buffered for a connection Applies to client connections.
+    initializeTimeout: 4000 # (ms) 4s by default, waiting for initialization of natsmq finished.
+    monitor:
+      debug: false # false by default, If true enable debug log messages.
+      logTime: true # true by default, If set to false, log without timestamps.
+      logFile: # no log file by default, Log file path relative to.. .
+      logSizeLimit: 0 # (B) 0, unlimited by default, Size in bytes after the log file rolls over to a new one.
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -192,7 +212,7 @@ queryCoord:
     clientMaxRecvSize: 268435456
   taskMergeCap: 1
   taskExecutionCap: 256
-  enableActiveStandby: false  # Enable active-standby
+  enableActiveStandby: false # Enable active-standby
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
@@ -203,7 +223,7 @@ queryNode:
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
-    knowhereThreadPoolNumRatio: 4 
+    knowhereThreadPoolNumRatio: 4
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
@@ -288,7 +308,7 @@ dataCoord:
     compactableProportion: 0.5
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   enableCompaction: true # Enable data segment compaction
   compaction:
@@ -331,7 +351,7 @@ dataNode:
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
-    rootPath:  # root dir path to put logs, default "" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs
+    rootPath: # root dir path to put logs, default "" means no log file will print. please adjust in embedded Milvus: /tmp/milvus/logs
     maxSize: 300 # MB
     maxAge: 10 # Maximum time for log retention in day.
     maxBackups: 20
@@ -552,7 +572,7 @@ trace:
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
   jaeger:
-    url:  # when exporter is jaeger should set the jaeger's URL
+    url: # when exporter is jaeger should set the jaeger's URL
 
 autoIndex:
   params:
