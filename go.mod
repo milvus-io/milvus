@@ -9,19 +9,24 @@ require (
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/cockroachdb/errors v1.9.1
+	github.com/confluentinc/confluent-kafka-go v1.9.1
+	github.com/containerd/cgroups v1.1.0
 	github.com/gin-gonic/gin v1.9.0
 	github.com/gofrs/flock v0.8.1
 	github.com/golang/protobuf v1.5.3
 	github.com/klauspost/compress v1.16.5
+	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230531124827-410c849303a9
-	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/minio/minio-go/v7 v7.0.17
+	github.com/nats-io/nats-server/v2 v2.9.17
+	github.com/nats-io/nats.go v1.24.0
 	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
@@ -36,6 +41,7 @@ require (
 	go.opentelemetry.io/otel v1.13.0
 	go.opentelemetry.io/otel/trace v1.13.0
 	go.uber.org/atomic v1.10.0
+	go.uber.org/automaxprocs v1.5.2
 	go.uber.org/multierr v1.6.0
 	go.uber.org/zap v1.17.0
 	golang.org/x/crypto v0.8.0
@@ -52,24 +58,19 @@ require (
 require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/apache/thrift v0.15.0 // indirect
-	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/bytedance/sonic v1.8.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
-	github.com/confluentinc/confluent-kafka-go v1.9.1 // indirect
-	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect
 	github.com/nats-io/jwt/v2 v2.4.1 // indirect
-	github.com/nats-io/nats-server/v2 v2.9.17 // indirect
-	github.com/nats-io/nats.go v1.24.0 // indirect
 	github.com/nats-io/nkeys v0.4.4 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.6 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	go.uber.org/automaxprocs v1.5.1 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
+	google.golang.org/genproto v0.0.0-20230331144136-dcfb400f0633 // indirect
 )
 
 require (
@@ -157,27 +158,27 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_model v0.3.0 // indirect
-	github.com/prometheus/common v0.42.0 // indirect
+	github.com/prometheus/client_model v0.3.0
+	github.com/prometheus/common v0.42.0
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect
 	github.com/rs/xid v1.2.1 // indirect
-	github.com/shirou/gopsutil/v3 v3.22.9 // indirect
+	github.com/shirou/gopsutil/v3 v3.22.9
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
-	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/afero v1.6.0 // indirect
-	github.com/spf13/cast v1.3.1 // indirect
+	github.com/spf13/cast v1.3.1
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/streamnative/pulsarctl v0.5.0 // indirect
+	github.com/streamnative/pulsarctl v0.5.0
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/subosito/gotenv v1.2.0 // indirect
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/tklauser/go-sysconf v0.3.10 // indirect
 	github.com/tklauser/numcpus v0.4.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
-	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
+	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/ugorji/go/codec v1.2.9 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
@@ -187,13 +188,13 @@ require (
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/raft/v3 v3.5.5 // indirect
-	go.opentelemetry.io/otel/exporters/jaeger v1.13.0 // indirect
+	go.opentelemetry.io/otel/exporters/jaeger v1.13.0
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.13.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.13.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.13.0 // indirect
-	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.13.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.13.0
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.13.0
 	go.opentelemetry.io/otel/metric v0.35.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.13.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.13.0
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/net v0.9.0 // indirect
@@ -204,11 +205,10 @@ require (
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.9.3 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20230331144136-dcfb400f0633 // indirect
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
-	google.golang.org/protobuf v1.30.0 // indirect
+	google.golang.org/protobuf v1.30.0
 	gopkg.in/ini.v1 v1.62.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
@@ -218,7 +218,6 @@ replace (
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
-	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
