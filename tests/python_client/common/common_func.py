@@ -550,6 +550,23 @@ def gen_simple_index():
     return index_params
 
 
+def gen_autoindex_params():
+    index_params = [
+        {},
+        {"metric_type": "IP"},
+        {"metric_type": "L2"},
+        {"metric_type": "COSINE"},
+        {"index_type": "AUTOINDEX"},
+        {"index_type": "AUTOINDEX", "metric_type": "L2"},
+        {"index_type": "AUTOINDEX", "metric_type": "COSINE"},
+        {"index_type": "IVF_FLAT", "metric_type": "L2", "nlist": "1024", "m": "100"},
+        {"index_type": "DISKANN", "metric_type": "L2"},
+        {"index_type": "IVF_PQ", "nlist": "128", "m": "16", "nbits": "8", "metric_type": "IP"},
+        {"index_type": "IVF_SQ8", "nlist": "128", "metric_type": "COSINE"}
+    ]
+    return index_params
+
+
 def gen_invalid_field_types():
     field_types = [
         6,
@@ -624,6 +641,17 @@ def gen_search_param(index_type, metric_type="L2"):
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
+    return search_params
+
+
+def gen_autoindex_search_params():
+    search_params = [
+        {},
+        {"metric_type": "IP"},
+        {"nlist": "1024"},
+        {"efSearch": "100"},
+        {"search_k": "1000"}
+    ]
     return search_params
 
 

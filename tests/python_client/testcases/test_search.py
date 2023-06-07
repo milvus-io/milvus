@@ -2030,6 +2030,30 @@ class TestCollectionSearch(TestcaseBase):
                                              "ids": insert_ids,
                                              "limit": default_limit,
                                              "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("search_params", cf.gen_autoindex_search_params())
+    @pytest.mark.skip("issue #24533 #24555")
+    def test_search_default_search_params_fit_for_autoindex(self, search_params, auto_id, _async):
+        """
+        target: test search using autoindex
+        method: test search using autoindex and its corresponding search params
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, is_index=False)[0]
+        # 2. create index and load
+        collection_w.create_index("float_vector", {})
+        collection_w.load()
+        # 3. search
+        log.info("Searching with search params: {}".format(search_params))
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
             
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
