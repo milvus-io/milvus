@@ -3800,6 +3800,7 @@ class TestCollectionJSON(TestcaseBase):
                                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_collection_json_field_partition_key(self, primary_field):
         """
         target: test create collection with multiple JSON fields

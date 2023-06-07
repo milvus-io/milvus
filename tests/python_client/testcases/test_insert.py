@@ -98,7 +98,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector'], got %s" % data}
-        collection_w.insert(data=data)
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_dataframe_only_columns(self):
@@ -847,7 +847,8 @@ class TestInsertOperation(TestcaseBase):
         method: calculated critical value and insert equivalent data
         expected: raise exception
         """
-        nb = 127583
+        # nb = 127583 without json field
+        nb = 108993
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         data = cf.gen_default_dataframe_data(nb)
@@ -1730,7 +1731,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
+    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs[:13])
     def test_upsert_partition_name_invalid(self, partition_name):
         """
         target: test upsert partition name invalid

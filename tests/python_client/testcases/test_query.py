@@ -280,7 +280,7 @@ class TestQueryParams(TestcaseBase):
                              ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name]
 
         # exp res: first two rows and all fields expect last vec field
-        res = df.iloc[:2, :-1].to_dict('records')
+        res = df.iloc[:2, :].to_dict('records')
         for field in non_primary_field:
             filter_values = df[field].tolist()[:2]
             if field is not ct.default_string_field_name:
@@ -288,8 +288,10 @@ class TestQueryParams(TestcaseBase):
             else:
                 term_expr = f'{field} in {filter_values}'
                 term_expr = term_expr.replace("'", "\"")
+            log.info(res)
             self.collection_wrap.query(term_expr, output_fields=["*"],
-                                       check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+                                       check_task=CheckTasks.check_query_results,
+                                       check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_by_bool_field(self):
