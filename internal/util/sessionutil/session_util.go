@@ -794,7 +794,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					case mvccpb.PUT:
 						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 					case mvccpb.DELETE:
-						if s.retryKeepAlive.Load().(bool) {
+						if s.isRetryingKeepAlive() {
 							log.Info("session key is deleted during re register, ignore this DELETE event", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 							continue
 						}
@@ -871,6 +871,14 @@ func (s *Session) updateStandby(b bool) {
 
 func (s *Session) SetEnableRetryKeepAlive(enable bool) {
 	s.enableRetryKeepAlive = enable
+}
+
+func (s *Session) isRetryingKeepAlive() bool {
+	v, ok := s.retryKeepAlive.Load().(bool)
+	if !ok {
+		return false
+	}
+	return v
 }
 
 func (s *Session) safeCloseLiveCh() {

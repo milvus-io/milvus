@@ -797,6 +797,29 @@ func (s *SessionSuite) TestDisconnected() {
 	}
 }
 
+func (s *SessionSuite) TestRetryKeepAlive() {
+	st := &Session{}
+	st.retryKeepAlive.Store(true)
+	sf := &Session{}
+	sf.retryKeepAlive.Store(false)
+
+	cases := []struct {
+		tag    string
+		input  *Session
+		expect bool
+	}{
+		{"not_set", &Session{}, false},
+		{"set_true", st, true},
+		{"set_false", sf, false},
+	}
+
+	for _, c := range cases {
+		s.Run(c.tag, func() {
+			s.Equal(c.expect, c.input.isRetryingKeepAlive())
+		})
+	}
+}
+
 func (s *SessionSuite) TestGoingStop() {
 	ctx := context.Background()
 	sdisconnect := NewSession(ctx, s.metaRoot, s.client)
