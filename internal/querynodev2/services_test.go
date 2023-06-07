@@ -961,8 +961,29 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	}
 	suite.NoError(err)
 
-	// Delegator not found
+	// collection not exist
 	resp, err := suite.node.Search(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrCollectionNotFound.Error())
+
+	// metric type mismatch
+	LoadMeta := &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		MetricType:   "L2",
+	}
+	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
+	req.GetReq().MetricType = "IP"
+	resp, err = suite.node.Search(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrParameterInvalid.Error())
+	req.GetReq().MetricType = "L2"
+
+	// Delegator not found
+	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	suite.Contains(resp.GetStatus().GetReason(), "failed to get query shard delegator")
