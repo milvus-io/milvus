@@ -2075,6 +2075,7 @@ class TermExpr final :
   enum : int {
     kValuesFieldNumber = 2,
     kColumnInfoFieldNumber = 1,
+    kIsInFieldFieldNumber = 3,
   };
   // repeated .milvus.proto.plan.GenericValue values = 2;
   int values_size() const;
@@ -2112,6 +2113,15 @@ class TermExpr final :
       ::milvus::proto::plan::ColumnInfo* column_info);
   ::milvus::proto::plan::ColumnInfo* unsafe_arena_release_column_info();
 
+  // bool is_in_field = 3;
+  void clear_is_in_field();
+  bool is_in_field() const;
+  void set_is_in_field(bool value);
+  private:
+  bool _internal_is_in_field() const;
+  void _internal_set_is_in_field(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.TermExpr)
  private:
   class _Internal;
@@ -2122,6 +2132,7 @@ class TermExpr final :
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::plan::GenericValue > values_;
     ::milvus::proto::plan::ColumnInfo* column_info_;
+    bool is_in_field_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -5830,6 +5841,26 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::plan::G
 TermExpr::values() const {
   // @@protoc_insertion_point(field_list:milvus.proto.plan.TermExpr.values)
   return _impl_.values_;
+}
+
+// bool is_in_field = 3;
+inline void TermExpr::clear_is_in_field() {
+  _impl_.is_in_field_ = false;
+}
+inline bool TermExpr::_internal_is_in_field() const {
+  return _impl_.is_in_field_;
+}
+inline bool TermExpr::is_in_field() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.TermExpr.is_in_field)
+  return _internal_is_in_field();
+}
+inline void TermExpr::_internal_set_is_in_field(bool value) {
+  
+  _impl_.is_in_field_ = value;
+}
+inline void TermExpr::set_is_in_field(bool value) {
+  _internal_set_is_in_field(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.TermExpr.is_in_field)
 }
 
 // -------------------------------------------------------------------
