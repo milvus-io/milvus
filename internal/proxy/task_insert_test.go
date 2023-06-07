@@ -425,8 +425,12 @@ func TestAssignPartitionsByKey(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+
 	ctx := context.Background()
-	err := InitMetaCache(ctx, rc, nil, nil)
+	err := InitMetaCache(ctx, rc, qc, nil)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum

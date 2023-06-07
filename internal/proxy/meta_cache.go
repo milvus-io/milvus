@@ -313,13 +313,16 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 	}
 
 	if !collInfo.isLoaded {
+		m.mu.RLock()
+		collectionID := collInfo.collID
+		m.mu.RUnlock()
 		// check if collection was loaded
 		showResp, err := m.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 				commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
 			),
-			CollectionIDs: []int64{collInfo.collID},
+			CollectionIDs: []int64{collectionID},
 		})
 		if err != nil {
 			return nil, err
@@ -328,20 +331,22 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 			return nil, errors.New(showResp.Status.Reason)
 		}
 		log.Debug("QueryCoord show collections",
-			zap.Int64("collID", collInfo.collID),
+			zap.Int64("collID", collectionID),
 			zap.Int64s("collections", showResp.GetCollectionIDs()),
 			zap.Int64s("collectionsInMemoryPercentages", showResp.GetInMemoryPercentages()),
 		)
 		loaded := false
 		for index, collID := range showResp.CollectionIDs {
-			if collID == collInfo.collID && showResp.GetInMemoryPercentages()[index] >= int64(100) {
+			if collID == collectionID && showResp.GetInMemoryPercentages()[index] >= int64(100) {
 				loaded = true
 				break
 			}
 		}
 		if loaded {
 			m.mu.Lock()
-			m.collInfo[database][collectionName].isLoaded = true
+			if m.collInfo[database] != nil && m.collInfo[database][collectionName] != nil {
+				m.collInfo[database][collectionName].isLoaded = true
+			}
 			m.mu.Unlock()
 		}
 	}
@@ -414,31 +419,15 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName
 }
 
 func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error) {
-	_, err := m.GetCollectionID(ctx, database, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
-	}
-
-	m.mu.RLock()
-
-	var collInfo *collectionInfo
-	var ok bool
-
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	method := "GetPartitions"
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheMissLabel).Inc()
-		m.mu.RUnlock()
 
 		partitions, err := m.showPartitions(ctx, database, collectionName)
 		if err != nil {
@@ -462,11 +451,10 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 		return ret, nil
 
 	}
-	defer m.mu.RUnlock()
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheHitLabel).Inc()
 
 	ret := make(map[string]typeutil.UniqueID)
-	partInfo := m.collInfo[database][collectionName].partInfo
+	partInfo := collInfo.partInfo
 	for k, v := range partInfo {
 		ret[k] = v.partitionID
 	}
@@ -475,31 +463,13 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error) {
-	_, err := m.GetCollectionID(ctx, database, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	m.mu.RLock()
-
-	var collInfo *collectionInfo
-	var ok bool
-
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
-
-	var partInfo *partitionInfo
-	partInfo, ok = collInfo.partInfo[partitionName]
-	m.mu.RUnlock()
-
 	method := "GetPartitionInfo"
+	partInfo, ok := collInfo.partInfo[partitionName]
 	if !ok {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheMissLabel).Inc()
