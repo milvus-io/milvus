@@ -58,7 +58,6 @@ function install_mac_deps() {
 
   if [[ $(arch) == 'arm64' ]]; then
     brew install openssl
-    brew install librdkafka
   fi
 }
 

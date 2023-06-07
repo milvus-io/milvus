@@ -28,7 +28,7 @@ jobs:
   mac:
     name: Code Checker MacOS 12
     runs-on: macos-12
-    timeout-minutes: 300 
+    timeout-minutes: 300
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -72,11 +72,16 @@ jobs:
             mkdir -p /var/tmp/ccache
           fi
           ls -alh /var/tmp/ccache
-          brew install libomp ninja openblas ccache pkg-config
+          brew install openssl@3 libomp ninja openblas ccache pkg-config
+          brew info openssl@3
+          ls -alh /usr/local/opt/openssl@3/lib/pkgconfig
           pip3 install conan==1.58.0
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
+          export PKG_CONFIG_PATH="/usr/local/opt/openssl@3/lib/pkgconfig"
+          pkg-config --list-all
+          pkg-config --libs openssl
           make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
