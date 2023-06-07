@@ -79,10 +79,6 @@ func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.W
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
-	panic("implement me")
-}
-
 func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
 	panic("implement me")
 }
@@ -809,10 +805,6 @@ func (m *mockRootCoordService) SelectUser(ctx context.Context, req *milvuspb.Sel
 }
 
 func (m *mockRootCoordService) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
-func (m *mockRootCoordService) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
 	panic("implement me")
 }
 

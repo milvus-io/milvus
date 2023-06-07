@@ -577,14 +577,6 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 	return err
 }
 
-// Grant creates a new lease implemented in etcd grant interface.
-func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
-	start := time.Now()
-	resp, err := kv.client.Grant(context.Background(), ttl)
-	CheckElapseAndWarn(start, "Slow etcd operation grant")
-	return resp.ID, err
-}
-
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string, opts ...clientv3.OpOption) (bool, error) {
