@@ -138,19 +138,21 @@ func packSubChannelRequest(
 	schema *schemapb.CollectionSchema,
 	loadMeta *querypb.LoadMetaInfo,
 	channel *meta.DmChannel,
+	indexInfo []*indexpb.IndexInfo,
 ) *querypb.WatchDmChannelsRequest {
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		NodeID:       action.Node(),
-		CollectionID: task.CollectionID(),
-		Infos:        []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:       schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:     loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		ReplicaID:    task.ReplicaID(),
-		Version:      time.Now().UnixNano(),
+		NodeID:        action.Node(),
+		CollectionID:  task.CollectionID(),
+		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
+		Schema:        schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:      loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		ReplicaID:     task.ReplicaID(),
+		Version:       time.Now().UnixNano(),
+		IndexInfoList: indexInfo,
 	}
 }
 
@@ -201,11 +203,7 @@ func getShardLeader(replicaMgr *meta.ReplicaManager, distMgr *meta.DistributionM
 	return distMgr.GetShardLeader(replica, channel)
 }
 
-func getMetricType(ctx context.Context, collection int64, schema *schemapb.CollectionSchema, broker meta.Broker) (string, error) {
-	indexInfos, err := broker.DescribeIndex(ctx, collection)
-	if err != nil {
-		return "", err
-	}
+func getMetricType(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) (string, error) {
 	vecField, err := typeutil.GetVectorFieldSchema(schema)
 	if err != nil {
 		return "", err
