@@ -26,7 +26,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/maps"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -697,33 +696,6 @@ func TestEtcdKV_Load(te *testing.T) {
 		success, err = etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
 		assert.NoError(t, err)
 		assert.False(t, success)
-	})
-
-	te.Run("Etcd Lease Bytes", func(t *testing.T) {
-		rootPath := "/etcd/test/root/lease_bytes"
-		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
-
-		leaseID, err := etcdKV.Grant(10)
-		assert.NoError(t, err)
-
-		etcdKV.KeepAlive(leaseID)
-
-		tests := map[string][]byte{
-			"a/b":   []byte("v1"),
-			"a/b/c": []byte("v2"),
-			"x":     []byte("v3"),
-		}
-
-		for k, v := range tests {
-			err = etcdKV.SaveBytesWithLease(k, v, leaseID)
-			assert.NoError(t, err)
-
-			err = etcdKV.SaveBytesWithLease(k, v, clientv3.LeaseID(999))
-			assert.Error(t, err)
-		}
 	})
 }
 

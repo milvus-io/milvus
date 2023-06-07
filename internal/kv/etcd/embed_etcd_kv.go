@@ -503,16 +503,6 @@ func (kv *EmbedEtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	return resp.ID, err
 }
 
-// KeepAlive keeps the lease alive forever with leaseID.
-// Implemented in etcd interface.
-func (kv *EmbedEtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	ch, err := kv.client.KeepAlive(context.Background(), id)
-	if err != nil {
-		return nil, err
-	}
-	return ch, nil
-}
-
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
 func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {

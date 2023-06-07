@@ -83,10 +83,6 @@ func (mm *metaMemoryKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	panic("implement me")
-}
-
 func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
 	panic("implement me")
 }

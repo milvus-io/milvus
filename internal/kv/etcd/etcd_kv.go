@@ -585,18 +585,6 @@ func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	return resp.ID, err
 }
 
-// KeepAlive keeps the lease alive forever with leaseID.
-// Implemented in etcd interface.
-func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	start := time.Now()
-	ch, err := kv.client.KeepAlive(context.Background(), id)
-	if err != nil {
-		return nil, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation keepAlive")
-	return ch, nil
-}
-
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string, opts ...clientv3.OpOption) (bool, error) {
