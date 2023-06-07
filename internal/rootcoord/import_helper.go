@@ -19,21 +19,27 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
-type GetCollectionNameFunc func(collID, partitionID UniqueID) (string, string, error)
+type GetCollectionNameFunc func(dbName string, collID, partitionID UniqueID) (string, string, error)
+
 type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
+
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+
 type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+
 type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
+
 type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
+
 type UnsetIsImportingStateFunc func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 
 type ImportFactory interface {
@@ -83,8 +89,8 @@ func NewImportFactory(c *Core) ImportFactory {
 }
 
 func GetCollectionNameWithCore(c *Core) GetCollectionNameFunc {
-	return func(collID, partitionID UniqueID) (string, string, error) {
-		colInfo, err := c.meta.GetCollectionByID(c.ctx, collID, typeutil.MaxTimestamp, false)
+	return func(dbName string, collID, partitionID UniqueID) (string, string, error) {
+		colInfo, err := c.meta.GetCollectionByID(c.ctx, dbName, collID, typeutil.MaxTimestamp, false)
 		if err != nil {
 			log.Error("Core failed to get collection name by id", zap.Int64("ID", collID), zap.Error(err))
 			return "", "", err

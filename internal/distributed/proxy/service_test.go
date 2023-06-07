@@ -127,6 +127,18 @@ func (m *MockRootCoord) Register() error {
 	return m.regErr
 }
 
+func (m *MockRootCoord) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -523,6 +535,18 @@ func (m *MockProxy) ListClientInfos(ctx context.Context, request *proxypb.ListCl
 }
 
 func (m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 	return nil, nil
 }
 
@@ -1341,6 +1365,20 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("CreateDatabase", func(t *testing.T) {
+		_, err := server.CreateDatabase(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DropDatabase", func(t *testing.T) {
+		_, err := server.DropDatabase(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListDatabase", func(t *testing.T) {
+		_, err := server.ListDatabases(ctx, nil)
+		assert.Nil(t, err)
+	})
 	err = server.Stop()
 	assert.NoError(t, err)
 

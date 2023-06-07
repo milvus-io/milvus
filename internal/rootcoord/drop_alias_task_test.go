@@ -20,12 +20,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func Test_dropAliasTask_Prepare(t *testing.T) {
@@ -78,10 +79,14 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.DropAliasFunc = func(ctx context.Context, alias string, ts Timestamp) error {
-			return nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("DropAlias",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{

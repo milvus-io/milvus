@@ -49,6 +49,18 @@ func (m *mockProxyComponent) Dummy(ctx context.Context, request *milvuspb.DummyR
 var emptyBody = &gin.H{}
 var testStatus = &commonpb.Status{Reason: "ok"}
 
+func (m *mockProxyComponent) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
+func (m *mockProxyComponent) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
+func (m *mockProxyComponent) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return &milvuspb.ListDatabasesResponse{Status: testStatus}, nil
+}
+
 func (m *mockProxyComponent) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }

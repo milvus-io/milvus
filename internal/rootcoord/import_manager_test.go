@@ -934,7 +934,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	partID2 := int64(201)
 	partName1 := "p1"
 	partName2 := "p2"
-	getCollectionName := func(collID, partitionID typeutil.UniqueID) (string, string, error) {
+	getCollectionName := func(dbName string, collID, partitionID typeutil.UniqueID) (string, string, error) {
 		collectionName := "unknow"
 		if collID == colID1 {
 			collectionName = colName1
@@ -1073,7 +1073,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 
 func TestImportManager_setCollectionPartitionName(t *testing.T) {
 	mgr := &importManager{
-		getCollectionName: func(collID, partitionID typeutil.UniqueID) (string, string, error) {
+		getCollectionName: func(dbName string, collID, partitionID typeutil.UniqueID) (string, string, error) {
 			if collID == 1 && partitionID == 2 {
 				return "c1", "p1", nil
 			}
@@ -1088,12 +1088,12 @@ func TestImportManager_setCollectionPartitionName(t *testing.T) {
 		},
 		CreateTs: time.Now().Unix() - 100,
 	}
-	err := mgr.setCollectionPartitionName(1, 2, info)
+	err := mgr.setCollectionPartitionName("", 1, 2, info)
 	assert.NoError(t, err)
 	assert.Equal(t, "c1", info.GetCollectionName())
 	assert.Equal(t, "p1", info.GetPartitionName())
 
-	err = mgr.setCollectionPartitionName(0, 0, info)
+	err = mgr.setCollectionPartitionName("", 0, 0, info)
 	assert.Error(t, err)
 }
 

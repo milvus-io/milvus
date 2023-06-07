@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -31,42 +30,23 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
-	t.Run("failed to expire cache", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
-		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withInvalidProxyManager(),
-			withTtSynchronizer(ticker), withMeta(meta))
-		gc := newBgGarbageCollector(core)
-		gc.ReDropCollection(&model.Collection{}, 1000)
-	})
-
 	t.Run("failed to release collection", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
 		broker := newMockBroker()
 		broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 			return errors.New("error mock ReleaseCollection")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withMeta(meta), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager())
 		gc := newBgGarbageCollector(core)
 		gc.ReDropCollection(&model.Collection{}, 1000)
 	})
 
 	t.Run("failed to DropCollectionIndex", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
 		broker := newMockBroker()
 		releaseCollectionCalled := false
 		releaseCollectionChan := make(chan struct{}, 1)
@@ -79,7 +59,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return errors.New("error mock DropCollectionIndex")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withMeta(meta), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withValidProxyManager())
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropCollection(&model.Collection{}, 1000)
@@ -88,10 +68,6 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 	})
 
 	t.Run("failed to GcCollectionData", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
 		broker := newMockBroker()
 		releaseCollectionCalled := false
 		releaseCollectionChan := make(chan struct{}, 1)
@@ -112,8 +88,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator),
-			withMeta(meta), withValidProxyManager())
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withValidProxyManager())
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
@@ -145,9 +120,6 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 
 		dropMetaChan := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
 		meta.On("RemoveCollection",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("int64"),
@@ -194,9 +166,6 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return nil
 		}
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("ListAliasesByID",
-			mock.AnythingOfType("int64")).
-			Return([]string{"alias1"})
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
 		meta.On("RemoveCollection",
@@ -278,14 +247,18 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 			ticker.syncedTtHistogram.update(pchan, 101)
 		}
 
-		meta := newMockMetaTable()
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("RemoveCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 			removeCollectionCalled = true
 			removeCollectionChan <- struct{}{}
 			return fmt.Errorf("error mock RemoveCollection")
-		}
+		})
 
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta), withTsoAllocator(tsoAllocator))
 		gc := newBgGarbageCollector(core)
@@ -314,14 +287,18 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 			ticker.syncedTtHistogram.update(pchan, 101)
 		}
 
-		meta := newMockMetaTable()
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("RemoveCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 			removeCollectionCalled = true
 			removeCollectionChan <- struct{}{}
 			return nil
-		}
+		})
 
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta), withTsoAllocator(tsoAllocator))
 		gc := newBgGarbageCollector(core)
@@ -347,17 +324,29 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
 	})
 
 	t.Run("failed to RemovePartition", func(t *testing.T) {
 		ticker := newTickerWithMockNormalStream()
 		shardsNum := int(common.DefaultShardsNum)
 		pchans := ticker.getDmlChannelNames(shardsNum)
-		meta := newMockMetaTable()
-		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		removePartitionCalled := false
+		removePartitionChan := make(chan struct{}, 1)
+		meta.On("RemovePartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
+			removePartitionCalled = true
+			removePartitionChan <- struct{}{}
 			return errors.New("error mock RemovePartition")
-		}
+		})
+
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
@@ -366,21 +355,31 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
+		<-removePartitionChan
+		assert.True(t, removePartitionCalled)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
 		ticker := newTickerWithMockNormalStream()
 		shardsNum := int(common.DefaultShardsNum)
 		pchans := ticker.getDmlChannelNames(shardsNum)
-		meta := newMockMetaTable()
+
 		removePartitionCalled := false
 		removePartitionChan := make(chan struct{}, 1)
-		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("RemovePartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
 			removePartitionCalled = true
 			removePartitionChan <- struct{}{}
 			return nil
-		}
+		})
+
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
@@ -389,7 +388,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
-		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+		gc.ReDropPartition(0, pchans, &model.Partition{}, 100000)
 		<-removePartitionChan
 		assert.True(t, removePartitionCalled)
 	})
@@ -404,9 +403,9 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 
 		signal := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil).
-			Run(func(ctx context.Context, collectionID int64, partitionID int64, ts uint64) {
+			Run(func(ctx context.Context, dbID, collectionID int64, partitionID int64, ts uint64) {
 				signal <- struct{}{}
 			})
 
@@ -422,7 +421,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		core.garbageCollector = gc
 		core.broker = newServerBroker(core)
 
-		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		gc.RemoveCreatingPartition(0, &model.Partition{}, 0)
 		<-signal
 	})
 
@@ -451,7 +450,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		core.garbageCollector = gc
 		core.broker = newServerBroker(core)
 
-		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		gc.RemoveCreatingPartition(0, &model.Partition{}, 0)
 		<-signal
 	})
 
@@ -463,9 +462,9 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 
 		signal := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(fmt.Errorf("mock err")).
-			Run(func(ctx context.Context, collectionID int64, partitionID int64, ts uint64) {
+			Run(func(ctx context.Context, dbID, collectionID int64, partitionID int64, ts uint64) {
 				signal <- struct{}{}
 			})
 
@@ -481,7 +480,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		core.garbageCollector = gc
 		core.broker = newServerBroker(core)
 
-		gc.RemoveCreatingPartition(&model.Partition{}, 0)
+		gc.RemoveCreatingPartition(0, &model.Partition{}, 0)
 		<-signal
 	})
 }

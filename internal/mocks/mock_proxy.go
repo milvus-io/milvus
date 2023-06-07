@@ -61,8 +61,8 @@ type Proxy_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.AlterAliasRequest
+//   - ctx context.Context
+//   - request *milvuspb.AlterAliasRequest
 func (_e *Proxy_Expecter) AlterAlias(ctx interface{}, request interface{}) *Proxy_AlterAlias_Call {
 	return &Proxy_AlterAlias_Call{Call: _e.mock.On("AlterAlias", ctx, request)}
 }
@@ -108,8 +108,8 @@ type Proxy_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.AlterCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.AlterCollectionRequest
 func (_e *Proxy_Expecter) AlterCollection(ctx interface{}, request interface{}) *Proxy_AlterCollection_Call {
 	return &Proxy_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, request)}
 }
@@ -155,8 +155,8 @@ type Proxy_CalcDistance_Call struct {
 }
 
 // CalcDistance is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.CalcDistanceRequest
+//   - ctx context.Context
+//   - request *milvuspb.CalcDistanceRequest
 func (_e *Proxy_Expecter) CalcDistance(ctx interface{}, request interface{}) *Proxy_CalcDistance_Call {
 	return &Proxy_CalcDistance_Call{Call: _e.mock.On("CalcDistance", ctx, request)}
 }
@@ -202,8 +202,8 @@ type Proxy_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.CheckHealthRequest
+//   - ctx context.Context
+//   - req *milvuspb.CheckHealthRequest
 func (_e *Proxy_Expecter) CheckHealth(ctx interface{}, req interface{}) *Proxy_CheckHealth_Call {
 	return &Proxy_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
 }
@@ -249,8 +249,8 @@ type Proxy_Connect_Call struct {
 }
 
 // Connect is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ConnectRequest
+//   - ctx context.Context
+//   - req *milvuspb.ConnectRequest
 func (_e *Proxy_Expecter) Connect(ctx interface{}, req interface{}) *Proxy_Connect_Call {
 	return &Proxy_Connect_Call{Call: _e.mock.On("Connect", ctx, req)}
 }
@@ -296,8 +296,8 @@ type Proxy_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.CreateAliasRequest
+//   - ctx context.Context
+//   - request *milvuspb.CreateAliasRequest
 func (_e *Proxy_Expecter) CreateAlias(ctx interface{}, request interface{}) *Proxy_CreateAlias_Call {
 	return &Proxy_CreateAlias_Call{Call: _e.mock.On("CreateAlias", ctx, request)}
 }
@@ -343,8 +343,8 @@ type Proxy_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.CreateCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.CreateCollectionRequest
 func (_e *Proxy_Expecter) CreateCollection(ctx interface{}, request interface{}) *Proxy_CreateCollection_Call {
 	return &Proxy_CreateCollection_Call{Call: _e.mock.On("CreateCollection", ctx, request)}
 }
@@ -390,8 +390,8 @@ type Proxy_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.CreateCredentialRequest
+//   - ctx context.Context
+//   - req *milvuspb.CreateCredentialRequest
 func (_e *Proxy_Expecter) CreateCredential(ctx interface{}, req interface{}) *Proxy_CreateCredential_Call {
 	return &Proxy_CreateCredential_Call{Call: _e.mock.On("CreateCredential", ctx, req)}
 }
@@ -404,6 +404,53 @@ func (_c *Proxy_CreateCredential_Call) Run(run func(ctx context.Context, req *mi
 }
 
 func (_c *Proxy_CreateCredential_Call) Return(_a0 *commonpb.Status, _a1 error) *Proxy_CreateCredential_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// CreateDatabase provides a mock function with given fields: ctx, req
+func (_m *Proxy) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateDatabaseRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateDatabaseRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_CreateDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateDatabase'
+type Proxy_CreateDatabase_Call struct {
+	*mock.Call
+}
+
+// CreateDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.CreateDatabaseRequest
+func (_e *Proxy_Expecter) CreateDatabase(ctx interface{}, req interface{}) *Proxy_CreateDatabase_Call {
+	return &Proxy_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", ctx, req)}
+}
+
+func (_c *Proxy_CreateDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.CreateDatabaseRequest)) *Proxy_CreateDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateDatabaseRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_CreateDatabase_Call) Return(_a0 *commonpb.Status, _a1 error) *Proxy_CreateDatabase_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -437,8 +484,8 @@ type Proxy_CreateIndex_Call struct {
 }
 
 // CreateIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.CreateIndexRequest
+//   - ctx context.Context
+//   - request *milvuspb.CreateIndexRequest
 func (_e *Proxy_Expecter) CreateIndex(ctx interface{}, request interface{}) *Proxy_CreateIndex_Call {
 	return &Proxy_CreateIndex_Call{Call: _e.mock.On("CreateIndex", ctx, request)}
 }
@@ -484,8 +531,8 @@ type Proxy_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.CreatePartitionRequest
+//   - ctx context.Context
+//   - request *milvuspb.CreatePartitionRequest
 func (_e *Proxy_Expecter) CreatePartition(ctx interface{}, request interface{}) *Proxy_CreatePartition_Call {
 	return &Proxy_CreatePartition_Call{Call: _e.mock.On("CreatePartition", ctx, request)}
 }
@@ -531,8 +578,8 @@ type Proxy_CreateResourceGroup_Call struct {
 }
 
 // CreateResourceGroup is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.CreateResourceGroupRequest
+//   - ctx context.Context
+//   - req *milvuspb.CreateResourceGroupRequest
 func (_e *Proxy_Expecter) CreateResourceGroup(ctx interface{}, req interface{}) *Proxy_CreateResourceGroup_Call {
 	return &Proxy_CreateResourceGroup_Call{Call: _e.mock.On("CreateResourceGroup", ctx, req)}
 }
@@ -578,8 +625,8 @@ type Proxy_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.CreateRoleRequest
+//   - ctx context.Context
+//   - req *milvuspb.CreateRoleRequest
 func (_e *Proxy_Expecter) CreateRole(ctx interface{}, req interface{}) *Proxy_CreateRole_Call {
 	return &Proxy_CreateRole_Call{Call: _e.mock.On("CreateRole", ctx, req)}
 }
@@ -625,8 +672,8 @@ type Proxy_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DeleteRequest
+//   - ctx context.Context
+//   - request *milvuspb.DeleteRequest
 func (_e *Proxy_Expecter) Delete(ctx interface{}, request interface{}) *Proxy_Delete_Call {
 	return &Proxy_Delete_Call{Call: _e.mock.On("Delete", ctx, request)}
 }
@@ -672,8 +719,8 @@ type Proxy_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.DeleteCredentialRequest
+//   - ctx context.Context
+//   - req *milvuspb.DeleteCredentialRequest
 func (_e *Proxy_Expecter) DeleteCredential(ctx interface{}, req interface{}) *Proxy_DeleteCredential_Call {
 	return &Proxy_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", ctx, req)}
 }
@@ -719,8 +766,8 @@ type Proxy_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DescribeCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.DescribeCollectionRequest
 func (_e *Proxy_Expecter) DescribeCollection(ctx interface{}, request interface{}) *Proxy_DescribeCollection_Call {
 	return &Proxy_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", ctx, request)}
 }
@@ -766,8 +813,8 @@ type Proxy_DescribeIndex_Call struct {
 }
 
 // DescribeIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DescribeIndexRequest
+//   - ctx context.Context
+//   - request *milvuspb.DescribeIndexRequest
 func (_e *Proxy_Expecter) DescribeIndex(ctx interface{}, request interface{}) *Proxy_DescribeIndex_Call {
 	return &Proxy_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", ctx, request)}
 }
@@ -813,8 +860,8 @@ type Proxy_DescribeResourceGroup_Call struct {
 }
 
 // DescribeResourceGroup is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.DescribeResourceGroupRequest
+//   - ctx context.Context
+//   - req *milvuspb.DescribeResourceGroupRequest
 func (_e *Proxy_Expecter) DescribeResourceGroup(ctx interface{}, req interface{}) *Proxy_DescribeResourceGroup_Call {
 	return &Proxy_DescribeResourceGroup_Call{Call: _e.mock.On("DescribeResourceGroup", ctx, req)}
 }
@@ -860,8 +907,8 @@ type Proxy_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DropAliasRequest
+//   - ctx context.Context
+//   - request *milvuspb.DropAliasRequest
 func (_e *Proxy_Expecter) DropAlias(ctx interface{}, request interface{}) *Proxy_DropAlias_Call {
 	return &Proxy_DropAlias_Call{Call: _e.mock.On("DropAlias", ctx, request)}
 }
@@ -907,8 +954,8 @@ type Proxy_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DropCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.DropCollectionRequest
 func (_e *Proxy_Expecter) DropCollection(ctx interface{}, request interface{}) *Proxy_DropCollection_Call {
 	return &Proxy_DropCollection_Call{Call: _e.mock.On("DropCollection", ctx, request)}
 }
@@ -921,6 +968,53 @@ func (_c *Proxy_DropCollection_Call) Run(run func(ctx context.Context, request *
 }
 
 func (_c *Proxy_DropCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *Proxy_DropCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// DropDatabase provides a mock function with given fields: ctx, req
+func (_m *Proxy) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropDatabaseRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropDatabaseRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_DropDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDatabase'
+type Proxy_DropDatabase_Call struct {
+	*mock.Call
+}
+
+// DropDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.DropDatabaseRequest
+func (_e *Proxy_Expecter) DropDatabase(ctx interface{}, req interface{}) *Proxy_DropDatabase_Call {
+	return &Proxy_DropDatabase_Call{Call: _e.mock.On("DropDatabase", ctx, req)}
+}
+
+func (_c *Proxy_DropDatabase_Call) Run(run func(ctx context.Context, req *milvuspb.DropDatabaseRequest)) *Proxy_DropDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropDatabaseRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_DropDatabase_Call) Return(_a0 *commonpb.Status, _a1 error) *Proxy_DropDatabase_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -954,8 +1048,8 @@ type Proxy_DropIndex_Call struct {
 }
 
 // DropIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DropIndexRequest
+//   - ctx context.Context
+//   - request *milvuspb.DropIndexRequest
 func (_e *Proxy_Expecter) DropIndex(ctx interface{}, request interface{}) *Proxy_DropIndex_Call {
 	return &Proxy_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, request)}
 }
@@ -1001,8 +1095,8 @@ type Proxy_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DropPartitionRequest
+//   - ctx context.Context
+//   - request *milvuspb.DropPartitionRequest
 func (_e *Proxy_Expecter) DropPartition(ctx interface{}, request interface{}) *Proxy_DropPartition_Call {
 	return &Proxy_DropPartition_Call{Call: _e.mock.On("DropPartition", ctx, request)}
 }
@@ -1048,8 +1142,8 @@ type Proxy_DropResourceGroup_Call struct {
 }
 
 // DropResourceGroup is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.DropResourceGroupRequest
+//   - ctx context.Context
+//   - req *milvuspb.DropResourceGroupRequest
 func (_e *Proxy_Expecter) DropResourceGroup(ctx interface{}, req interface{}) *Proxy_DropResourceGroup_Call {
 	return &Proxy_DropResourceGroup_Call{Call: _e.mock.On("DropResourceGroup", ctx, req)}
 }
@@ -1095,8 +1189,8 @@ type Proxy_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.DropRoleRequest
+//   - ctx context.Context
+//   - req *milvuspb.DropRoleRequest
 func (_e *Proxy_Expecter) DropRole(ctx interface{}, req interface{}) *Proxy_DropRole_Call {
 	return &Proxy_DropRole_Call{Call: _e.mock.On("DropRole", ctx, req)}
 }
@@ -1142,8 +1236,8 @@ type Proxy_Dummy_Call struct {
 }
 
 // Dummy is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.DummyRequest
+//   - ctx context.Context
+//   - request *milvuspb.DummyRequest
 func (_e *Proxy_Expecter) Dummy(ctx interface{}, request interface{}) *Proxy_Dummy_Call {
 	return &Proxy_Dummy_Call{Call: _e.mock.On("Dummy", ctx, request)}
 }
@@ -1189,8 +1283,8 @@ type Proxy_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.FlushRequest
+//   - ctx context.Context
+//   - request *milvuspb.FlushRequest
 func (_e *Proxy_Expecter) Flush(ctx interface{}, request interface{}) *Proxy_Flush_Call {
 	return &Proxy_Flush_Call{Call: _e.mock.On("Flush", ctx, request)}
 }
@@ -1236,8 +1330,8 @@ type Proxy_FlushAll_Call struct {
 }
 
 // FlushAll is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.FlushAllRequest
+//   - ctx context.Context
+//   - request *milvuspb.FlushAllRequest
 func (_e *Proxy_Expecter) FlushAll(ctx interface{}, request interface{}) *Proxy_FlushAll_Call {
 	return &Proxy_FlushAll_Call{Call: _e.mock.On("FlushAll", ctx, request)}
 }
@@ -1319,8 +1413,8 @@ type Proxy_GetCollectionStatistics_Call struct {
 }
 
 // GetCollectionStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetCollectionStatisticsRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetCollectionStatisticsRequest
 func (_e *Proxy_Expecter) GetCollectionStatistics(ctx interface{}, request interface{}) *Proxy_GetCollectionStatistics_Call {
 	return &Proxy_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics", ctx, request)}
 }
@@ -1366,8 +1460,8 @@ type Proxy_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetCompactionStateRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetCompactionStateRequest
 func (_e *Proxy_Expecter) GetCompactionState(ctx interface{}, req interface{}) *Proxy_GetCompactionState_Call {
 	return &Proxy_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", ctx, req)}
 }
@@ -1413,8 +1507,8 @@ type Proxy_GetCompactionStateWithPlans_Call struct {
 }
 
 // GetCompactionStateWithPlans is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetCompactionPlansRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetCompactionPlansRequest
 func (_e *Proxy_Expecter) GetCompactionStateWithPlans(ctx interface{}, req interface{}) *Proxy_GetCompactionStateWithPlans_Call {
 	return &Proxy_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans", ctx, req)}
 }
@@ -1460,7 +1554,7 @@ type Proxy_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *Proxy_Expecter) GetComponentStates(ctx interface{}) *Proxy_GetComponentStates_Call {
 	return &Proxy_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
 }
@@ -1506,8 +1600,8 @@ type Proxy_GetDdChannel_Call struct {
 }
 
 // GetDdChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *internalpb.GetDdChannelRequest
+//   - ctx context.Context
+//   - request *internalpb.GetDdChannelRequest
 func (_e *Proxy_Expecter) GetDdChannel(ctx interface{}, request interface{}) *Proxy_GetDdChannel_Call {
 	return &Proxy_GetDdChannel_Call{Call: _e.mock.On("GetDdChannel", ctx, request)}
 }
@@ -1553,8 +1647,8 @@ type Proxy_GetFlushAllState_Call struct {
 }
 
 // GetFlushAllState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetFlushAllStateRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetFlushAllStateRequest
 func (_e *Proxy_Expecter) GetFlushAllState(ctx interface{}, req interface{}) *Proxy_GetFlushAllState_Call {
 	return &Proxy_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState", ctx, req)}
 }
@@ -1600,8 +1694,8 @@ type Proxy_GetFlushState_Call struct {
 }
 
 // GetFlushState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetFlushStateRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetFlushStateRequest
 func (_e *Proxy_Expecter) GetFlushState(ctx interface{}, req interface{}) *Proxy_GetFlushState_Call {
 	return &Proxy_GetFlushState_Call{Call: _e.mock.On("GetFlushState", ctx, req)}
 }
@@ -1647,8 +1741,8 @@ type Proxy_GetImportState_Call struct {
 }
 
 // GetImportState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetImportStateRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetImportStateRequest
 func (_e *Proxy_Expecter) GetImportState(ctx interface{}, req interface{}) *Proxy_GetImportState_Call {
 	return &Proxy_GetImportState_Call{Call: _e.mock.On("GetImportState", ctx, req)}
 }
@@ -1694,8 +1788,8 @@ type Proxy_GetIndexBuildProgress_Call struct {
 }
 
 // GetIndexBuildProgress is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetIndexBuildProgressRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetIndexBuildProgressRequest
 func (_e *Proxy_Expecter) GetIndexBuildProgress(ctx interface{}, request interface{}) *Proxy_GetIndexBuildProgress_Call {
 	return &Proxy_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress", ctx, request)}
 }
@@ -1741,8 +1835,8 @@ type Proxy_GetIndexState_Call struct {
 }
 
 // GetIndexState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetIndexStateRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetIndexStateRequest
 func (_e *Proxy_Expecter) GetIndexState(ctx interface{}, request interface{}) *Proxy_GetIndexState_Call {
 	return &Proxy_GetIndexState_Call{Call: _e.mock.On("GetIndexState", ctx, request)}
 }
@@ -1788,8 +1882,8 @@ type Proxy_GetIndexStatistics_Call struct {
 }
 
 // GetIndexStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetIndexStatisticsRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetIndexStatisticsRequest
 func (_e *Proxy_Expecter) GetIndexStatistics(ctx interface{}, request interface{}) *Proxy_GetIndexStatistics_Call {
 	return &Proxy_GetIndexStatistics_Call{Call: _e.mock.On("GetIndexStatistics", ctx, request)}
 }
@@ -1835,8 +1929,8 @@ type Proxy_GetLoadState_Call struct {
 }
 
 // GetLoadState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetLoadStateRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetLoadStateRequest
 func (_e *Proxy_Expecter) GetLoadState(ctx interface{}, request interface{}) *Proxy_GetLoadState_Call {
 	return &Proxy_GetLoadState_Call{Call: _e.mock.On("GetLoadState", ctx, request)}
 }
@@ -1882,8 +1976,8 @@ type Proxy_GetLoadingProgress_Call struct {
 }
 
 // GetLoadingProgress is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetLoadingProgressRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetLoadingProgressRequest
 func (_e *Proxy_Expecter) GetLoadingProgress(ctx interface{}, request interface{}) *Proxy_GetLoadingProgress_Call {
 	return &Proxy_GetLoadingProgress_Call{Call: _e.mock.On("GetLoadingProgress", ctx, request)}
 }
@@ -1929,8 +2023,8 @@ type Proxy_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetMetricsRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetMetricsRequest
 func (_e *Proxy_Expecter) GetMetrics(ctx interface{}, request interface{}) *Proxy_GetMetrics_Call {
 	return &Proxy_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, request)}
 }
@@ -1976,8 +2070,8 @@ type Proxy_GetPartitionStatistics_Call struct {
 }
 
 // GetPartitionStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetPartitionStatisticsRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetPartitionStatisticsRequest
 func (_e *Proxy_Expecter) GetPartitionStatistics(ctx interface{}, request interface{}) *Proxy_GetPartitionStatistics_Call {
 	return &Proxy_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics", ctx, request)}
 }
@@ -2023,8 +2117,8 @@ type Proxy_GetPersistentSegmentInfo_Call struct {
 }
 
 // GetPersistentSegmentInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetPersistentSegmentInfoRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetPersistentSegmentInfoRequest
 func (_e *Proxy_Expecter) GetPersistentSegmentInfo(ctx interface{}, request interface{}) *Proxy_GetPersistentSegmentInfo_Call {
 	return &Proxy_GetPersistentSegmentInfo_Call{Call: _e.mock.On("GetPersistentSegmentInfo", ctx, request)}
 }
@@ -2070,8 +2164,8 @@ type Proxy_GetProxyMetrics_Call struct {
 }
 
 // GetProxyMetrics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetMetricsRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetMetricsRequest
 func (_e *Proxy_Expecter) GetProxyMetrics(ctx interface{}, request interface{}) *Proxy_GetProxyMetrics_Call {
 	return &Proxy_GetProxyMetrics_Call{Call: _e.mock.On("GetProxyMetrics", ctx, request)}
 }
@@ -2117,8 +2211,8 @@ type Proxy_GetQuerySegmentInfo_Call struct {
 }
 
 // GetQuerySegmentInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.GetQuerySegmentInfoRequest
+//   - ctx context.Context
+//   - request *milvuspb.GetQuerySegmentInfoRequest
 func (_e *Proxy_Expecter) GetQuerySegmentInfo(ctx interface{}, request interface{}) *Proxy_GetQuerySegmentInfo_Call {
 	return &Proxy_GetQuerySegmentInfo_Call{Call: _e.mock.On("GetQuerySegmentInfo", ctx, request)}
 }
@@ -2209,8 +2303,8 @@ type Proxy_GetReplicas_Call struct {
 }
 
 // GetReplicas is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetReplicasRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetReplicasRequest
 func (_e *Proxy_Expecter) GetReplicas(ctx interface{}, req interface{}) *Proxy_GetReplicas_Call {
 	return &Proxy_GetReplicas_Call{Call: _e.mock.On("GetReplicas", ctx, req)}
 }
@@ -2256,7 +2350,7 @@ type Proxy_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *Proxy_Expecter) GetStatisticsChannel(ctx interface{}) *Proxy_GetStatisticsChannel_Call {
 	return &Proxy_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
 }
@@ -2302,8 +2396,8 @@ type Proxy_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.HasCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.HasCollectionRequest
 func (_e *Proxy_Expecter) HasCollection(ctx interface{}, request interface{}) *Proxy_HasCollection_Call {
 	return &Proxy_HasCollection_Call{Call: _e.mock.On("HasCollection", ctx, request)}
 }
@@ -2349,8 +2443,8 @@ type Proxy_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.HasPartitionRequest
+//   - ctx context.Context
+//   - request *milvuspb.HasPartitionRequest
 func (_e *Proxy_Expecter) HasPartition(ctx interface{}, request interface{}) *Proxy_HasPartition_Call {
 	return &Proxy_HasPartition_Call{Call: _e.mock.On("HasPartition", ctx, request)}
 }
@@ -2396,8 +2490,8 @@ type Proxy_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ImportRequest
+//   - ctx context.Context
+//   - req *milvuspb.ImportRequest
 func (_e *Proxy_Expecter) Import(ctx interface{}, req interface{}) *Proxy_Import_Call {
 	return &Proxy_Import_Call{Call: _e.mock.On("Import", ctx, req)}
 }
@@ -2479,8 +2573,8 @@ type Proxy_Insert_Call struct {
 }
 
 // Insert is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.InsertRequest
+//   - ctx context.Context
+//   - request *milvuspb.InsertRequest
 func (_e *Proxy_Expecter) Insert(ctx interface{}, request interface{}) *Proxy_Insert_Call {
 	return &Proxy_Insert_Call{Call: _e.mock.On("Insert", ctx, request)}
 }
@@ -2526,8 +2620,8 @@ type Proxy_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *proxypb.InvalidateCollMetaCacheRequest
+//   - ctx context.Context
+//   - request *proxypb.InvalidateCollMetaCacheRequest
 func (_e *Proxy_Expecter) InvalidateCollectionMetaCache(ctx interface{}, request interface{}) *Proxy_InvalidateCollectionMetaCache_Call {
 	return &Proxy_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", ctx, request)}
 }
@@ -2573,8 +2667,8 @@ type Proxy_InvalidateCredentialCache_Call struct {
 }
 
 // InvalidateCredentialCache is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *proxypb.InvalidateCredCacheRequest
+//   - ctx context.Context
+//   - request *proxypb.InvalidateCredCacheRequest
 func (_e *Proxy_Expecter) InvalidateCredentialCache(ctx interface{}, request interface{}) *Proxy_InvalidateCredentialCache_Call {
 	return &Proxy_InvalidateCredentialCache_Call{Call: _e.mock.On("InvalidateCredentialCache", ctx, request)}
 }
@@ -2620,8 +2714,8 @@ type Proxy_ListClientInfos_Call struct {
 }
 
 // ListClientInfos is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *proxypb.ListClientInfosRequest
+//   - ctx context.Context
+//   - req *proxypb.ListClientInfosRequest
 func (_e *Proxy_Expecter) ListClientInfos(ctx interface{}, req interface{}) *Proxy_ListClientInfos_Call {
 	return &Proxy_ListClientInfos_Call{Call: _e.mock.On("ListClientInfos", ctx, req)}
 }
@@ -2667,8 +2761,8 @@ type Proxy_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ListCredUsersRequest
+//   - ctx context.Context
+//   - req *milvuspb.ListCredUsersRequest
 func (_e *Proxy_Expecter) ListCredUsers(ctx interface{}, req interface{}) *Proxy_ListCredUsers_Call {
 	return &Proxy_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", ctx, req)}
 }
@@ -2681,6 +2775,53 @@ func (_c *Proxy_ListCredUsers_Call) Run(run func(ctx context.Context, req *milvu
 }
 
 func (_c *Proxy_ListCredUsers_Call) Return(_a0 *milvuspb.ListCredUsersResponse, _a1 error) *Proxy_ListCredUsers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// ListDatabases provides a mock function with given fields: ctx, req
+func (_m *Proxy) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ListDatabasesResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListDatabasesRequest) *milvuspb.ListDatabasesResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListDatabasesResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListDatabasesRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_ListDatabases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListDatabases'
+type Proxy_ListDatabases_Call struct {
+	*mock.Call
+}
+
+// ListDatabases is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.ListDatabasesRequest
+func (_e *Proxy_Expecter) ListDatabases(ctx interface{}, req interface{}) *Proxy_ListDatabases_Call {
+	return &Proxy_ListDatabases_Call{Call: _e.mock.On("ListDatabases", ctx, req)}
+}
+
+func (_c *Proxy_ListDatabases_Call) Run(run func(ctx context.Context, req *milvuspb.ListDatabasesRequest)) *Proxy_ListDatabases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListDatabasesRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_ListDatabases_Call) Return(_a0 *milvuspb.ListDatabasesResponse, _a1 error) *Proxy_ListDatabases_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -2714,8 +2855,8 @@ type Proxy_ListImportTasks_Call struct {
 }
 
 // ListImportTasks is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ListImportTasksRequest
+//   - ctx context.Context
+//   - req *milvuspb.ListImportTasksRequest
 func (_e *Proxy_Expecter) ListImportTasks(ctx interface{}, req interface{}) *Proxy_ListImportTasks_Call {
 	return &Proxy_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", ctx, req)}
 }
@@ -2761,8 +2902,8 @@ type Proxy_ListResourceGroups_Call struct {
 }
 
 // ListResourceGroups is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ListResourceGroupsRequest
+//   - ctx context.Context
+//   - req *milvuspb.ListResourceGroupsRequest
 func (_e *Proxy_Expecter) ListResourceGroups(ctx interface{}, req interface{}) *Proxy_ListResourceGroups_Call {
 	return &Proxy_ListResourceGroups_Call{Call: _e.mock.On("ListResourceGroups", ctx, req)}
 }
@@ -2808,8 +2949,8 @@ type Proxy_LoadBalance_Call struct {
 }
 
 // LoadBalance is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.LoadBalanceRequest
+//   - ctx context.Context
+//   - request *milvuspb.LoadBalanceRequest
 func (_e *Proxy_Expecter) LoadBalance(ctx interface{}, request interface{}) *Proxy_LoadBalance_Call {
 	return &Proxy_LoadBalance_Call{Call: _e.mock.On("LoadBalance", ctx, request)}
 }
@@ -2855,8 +2996,8 @@ type Proxy_LoadCollection_Call struct {
 }
 
 // LoadCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.LoadCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.LoadCollectionRequest
 func (_e *Proxy_Expecter) LoadCollection(ctx interface{}, request interface{}) *Proxy_LoadCollection_Call {
 	return &Proxy_LoadCollection_Call{Call: _e.mock.On("LoadCollection", ctx, request)}
 }
@@ -2902,8 +3043,8 @@ type Proxy_LoadPartitions_Call struct {
 }
 
 // LoadPartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.LoadPartitionsRequest
+//   - ctx context.Context
+//   - request *milvuspb.LoadPartitionsRequest
 func (_e *Proxy_Expecter) LoadPartitions(ctx interface{}, request interface{}) *Proxy_LoadPartitions_Call {
 	return &Proxy_LoadPartitions_Call{Call: _e.mock.On("LoadPartitions", ctx, request)}
 }
@@ -2949,8 +3090,8 @@ type Proxy_ManualCompaction_Call struct {
 }
 
 // ManualCompaction is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.ManualCompactionRequest
+//   - ctx context.Context
+//   - req *milvuspb.ManualCompactionRequest
 func (_e *Proxy_Expecter) ManualCompaction(ctx interface{}, req interface{}) *Proxy_ManualCompaction_Call {
 	return &Proxy_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction", ctx, req)}
 }
@@ -2996,8 +3137,8 @@ type Proxy_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.OperatePrivilegeRequest
+//   - ctx context.Context
+//   - req *milvuspb.OperatePrivilegeRequest
 func (_e *Proxy_Expecter) OperatePrivilege(ctx interface{}, req interface{}) *Proxy_OperatePrivilege_Call {
 	return &Proxy_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", ctx, req)}
 }
@@ -3043,8 +3184,8 @@ type Proxy_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.OperateUserRoleRequest
+//   - ctx context.Context
+//   - req *milvuspb.OperateUserRoleRequest
 func (_e *Proxy_Expecter) OperateUserRole(ctx interface{}, req interface{}) *Proxy_OperateUserRole_Call {
 	return &Proxy_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", ctx, req)}
 }
@@ -3090,8 +3231,8 @@ type Proxy_Query_Call struct {
 }
 
 // Query is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.QueryRequest
+//   - ctx context.Context
+//   - request *milvuspb.QueryRequest
 func (_e *Proxy_Expecter) Query(ctx interface{}, request interface{}) *Proxy_Query_Call {
 	return &Proxy_Query_Call{Call: _e.mock.On("Query", ctx, request)}
 }
@@ -3137,8 +3278,8 @@ type Proxy_RefreshPolicyInfoCache_Call struct {
 }
 
 // RefreshPolicyInfoCache is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *proxypb.RefreshPolicyInfoCacheRequest
+//   - ctx context.Context
+//   - req *proxypb.RefreshPolicyInfoCacheRequest
 func (_e *Proxy_Expecter) RefreshPolicyInfoCache(ctx interface{}, req interface{}) *Proxy_RefreshPolicyInfoCache_Call {
 	return &Proxy_RefreshPolicyInfoCache_Call{Call: _e.mock.On("RefreshPolicyInfoCache", ctx, req)}
 }
@@ -3220,8 +3361,8 @@ type Proxy_RegisterLink_Call struct {
 }
 
 // RegisterLink is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.RegisterLinkRequest
+//   - ctx context.Context
+//   - request *milvuspb.RegisterLinkRequest
 func (_e *Proxy_Expecter) RegisterLink(ctx interface{}, request interface{}) *Proxy_RegisterLink_Call {
 	return &Proxy_RegisterLink_Call{Call: _e.mock.On("RegisterLink", ctx, request)}
 }
@@ -3267,8 +3408,8 @@ type Proxy_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.ReleaseCollectionRequest
+//   - ctx context.Context
+//   - request *milvuspb.ReleaseCollectionRequest
 func (_e *Proxy_Expecter) ReleaseCollection(ctx interface{}, request interface{}) *Proxy_ReleaseCollection_Call {
 	return &Proxy_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", ctx, request)}
 }
@@ -3314,8 +3455,8 @@ type Proxy_ReleasePartitions_Call struct {
 }
 
 // ReleasePartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.ReleasePartitionsRequest
+//   - ctx context.Context
+//   - request *milvuspb.ReleasePartitionsRequest
 func (_e *Proxy_Expecter) ReleasePartitions(ctx interface{}, request interface{}) *Proxy_ReleasePartitions_Call {
 	return &Proxy_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", ctx, request)}
 }
@@ -3361,8 +3502,8 @@ type Proxy_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.RenameCollectionRequest
+//   - ctx context.Context
+//   - req *milvuspb.RenameCollectionRequest
 func (_e *Proxy_Expecter) RenameCollection(ctx interface{}, req interface{}) *Proxy_RenameCollection_Call {
 	return &Proxy_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, req)}
 }
@@ -3408,8 +3549,8 @@ type Proxy_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.SearchRequest
+//   - ctx context.Context
+//   - request *milvuspb.SearchRequest
 func (_e *Proxy_Expecter) Search(ctx interface{}, request interface{}) *Proxy_Search_Call {
 	return &Proxy_Search_Call{Call: _e.mock.On("Search", ctx, request)}
 }
@@ -3455,8 +3596,8 @@ type Proxy_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.SelectGrantRequest
+//   - ctx context.Context
+//   - req *milvuspb.SelectGrantRequest
 func (_e *Proxy_Expecter) SelectGrant(ctx interface{}, req interface{}) *Proxy_SelectGrant_Call {
 	return &Proxy_SelectGrant_Call{Call: _e.mock.On("SelectGrant", ctx, req)}
 }
@@ -3502,8 +3643,8 @@ type Proxy_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.SelectRoleRequest
+//   - ctx context.Context
+//   - req *milvuspb.SelectRoleRequest
 func (_e *Proxy_Expecter) SelectRole(ctx interface{}, req interface{}) *Proxy_SelectRole_Call {
 	return &Proxy_SelectRole_Call{Call: _e.mock.On("SelectRole", ctx, req)}
 }
@@ -3549,8 +3690,8 @@ type Proxy_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.SelectUserRequest
+//   - ctx context.Context
+//   - req *milvuspb.SelectUserRequest
 func (_e *Proxy_Expecter) SelectUser(ctx interface{}, req interface{}) *Proxy_SelectUser_Call {
 	return &Proxy_SelectUser_Call{Call: _e.mock.On("SelectUser", ctx, req)}
 }
@@ -3578,7 +3719,7 @@ type Proxy_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//  - address string
+//   - address string
 func (_e *Proxy_Expecter) SetAddress(address interface{}) *Proxy_SetAddress_Call {
 	return &Proxy_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -3606,7 +3747,7 @@ type Proxy_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//  - dataCoord types.DataCoord
+//   - dataCoord types.DataCoord
 func (_e *Proxy_Expecter) SetDataCoordClient(dataCoord interface{}) *Proxy_SetDataCoordClient_Call {
 	return &Proxy_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
@@ -3634,7 +3775,7 @@ type Proxy_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//  - etcdClient *clientv3.Client
+//   - etcdClient *clientv3.Client
 func (_e *Proxy_Expecter) SetEtcdClient(etcdClient interface{}) *Proxy_SetEtcdClient_Call {
 	return &Proxy_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -3662,7 +3803,7 @@ type Proxy_SetQueryCoordClient_Call struct {
 }
 
 // SetQueryCoordClient is a helper method to define mock.On call
-//  - queryCoord types.QueryCoord
+//   - queryCoord types.QueryCoord
 func (_e *Proxy_Expecter) SetQueryCoordClient(queryCoord interface{}) *Proxy_SetQueryCoordClient_Call {
 	return &Proxy_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
 }
@@ -3690,7 +3831,7 @@ type Proxy_SetQueryNodeCreator_Call struct {
 }
 
 // SetQueryNodeCreator is a helper method to define mock.On call
-//  - _a0 func(context.Context , string)(types.QueryNode , error)
+//   - _a0 func(context.Context , string)(types.QueryNode , error)
 func (_e *Proxy_Expecter) SetQueryNodeCreator(_a0 interface{}) *Proxy_SetQueryNodeCreator_Call {
 	return &Proxy_SetQueryNodeCreator_Call{Call: _e.mock.On("SetQueryNodeCreator", _a0)}
 }
@@ -3736,8 +3877,8 @@ type Proxy_SetRates_Call struct {
 }
 
 // SetRates is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *proxypb.SetRatesRequest
+//   - ctx context.Context
+//   - req *proxypb.SetRatesRequest
 func (_e *Proxy_Expecter) SetRates(ctx interface{}, req interface{}) *Proxy_SetRates_Call {
 	return &Proxy_SetRates_Call{Call: _e.mock.On("SetRates", ctx, req)}
 }
@@ -3765,7 +3906,7 @@ type Proxy_SetRootCoordClient_Call struct {
 }
 
 // SetRootCoordClient is a helper method to define mock.On call
-//  - rootCoord types.RootCoord
+//   - rootCoord types.RootCoord
 func (_e *Proxy_Expecter) SetRootCoordClient(rootCoord interface{}) *Proxy_SetRootCoordClient_Call {
 	return &Proxy_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
 }
@@ -3811,8 +3952,8 @@ type Proxy_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.ShowCollectionsRequest
+//   - ctx context.Context
+//   - request *milvuspb.ShowCollectionsRequest
 func (_e *Proxy_Expecter) ShowCollections(ctx interface{}, request interface{}) *Proxy_ShowCollections_Call {
 	return &Proxy_ShowCollections_Call{Call: _e.mock.On("ShowCollections", ctx, request)}
 }
@@ -3858,8 +3999,8 @@ type Proxy_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.ShowPartitionsRequest
+//   - ctx context.Context
+//   - request *milvuspb.ShowPartitionsRequest
 func (_e *Proxy_Expecter) ShowPartitions(ctx interface{}, request interface{}) *Proxy_ShowPartitions_Call {
 	return &Proxy_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, request)}
 }
@@ -3977,8 +4118,8 @@ type Proxy_TransferNode_Call struct {
 }
 
 // TransferNode is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.TransferNodeRequest
+//   - ctx context.Context
+//   - req *milvuspb.TransferNodeRequest
 func (_e *Proxy_Expecter) TransferNode(ctx interface{}, req interface{}) *Proxy_TransferNode_Call {
 	return &Proxy_TransferNode_Call{Call: _e.mock.On("TransferNode", ctx, req)}
 }
@@ -4024,8 +4165,8 @@ type Proxy_TransferReplica_Call struct {
 }
 
 // TransferReplica is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.TransferReplicaRequest
+//   - ctx context.Context
+//   - req *milvuspb.TransferReplicaRequest
 func (_e *Proxy_Expecter) TransferReplica(ctx interface{}, req interface{}) *Proxy_TransferReplica_Call {
 	return &Proxy_TransferReplica_Call{Call: _e.mock.On("TransferReplica", ctx, req)}
 }
@@ -4071,8 +4212,8 @@ type Proxy_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.UpdateCredentialRequest
+//   - ctx context.Context
+//   - req *milvuspb.UpdateCredentialRequest
 func (_e *Proxy_Expecter) UpdateCredential(ctx interface{}, req interface{}) *Proxy_UpdateCredential_Call {
 	return &Proxy_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", ctx, req)}
 }
@@ -4118,8 +4259,8 @@ type Proxy_UpdateCredentialCache_Call struct {
 }
 
 // UpdateCredentialCache is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *proxypb.UpdateCredCacheRequest
+//   - ctx context.Context
+//   - request *proxypb.UpdateCredCacheRequest
 func (_e *Proxy_Expecter) UpdateCredentialCache(ctx interface{}, request interface{}) *Proxy_UpdateCredentialCache_Call {
 	return &Proxy_UpdateCredentialCache_Call{Call: _e.mock.On("UpdateCredentialCache", ctx, request)}
 }
@@ -4147,7 +4288,7 @@ type Proxy_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//  - stateCode commonpb.StateCode
+//   - stateCode commonpb.StateCode
 func (_e *Proxy_Expecter) UpdateStateCode(stateCode interface{}) *Proxy_UpdateStateCode_Call {
 	return &Proxy_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", stateCode)}
 }
@@ -4193,8 +4334,8 @@ type Proxy_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
-//  - ctx context.Context
-//  - request *milvuspb.UpsertRequest
+//   - ctx context.Context
+//   - request *milvuspb.UpsertRequest
 func (_e *Proxy_Expecter) Upsert(ctx interface{}, request interface{}) *Proxy_Upsert_Call {
 	return &Proxy_Upsert_Call{Call: _e.mock.On("Upsert", ctx, request)}
 }

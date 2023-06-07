@@ -53,40 +53,50 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 func getRequestInfo(req interface{}) (int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DMLInsert, proto.Size(r), nil
 	case *milvuspb.DeleteRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DMLDelete, proto.Size(r), nil
 	case *milvuspb.ImportRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DMLBulkLoad, proto.Size(r), nil
 	case *milvuspb.SearchRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DQLSearch, int(r.GetNq()), nil
 	case *milvuspb.QueryRequest:
-		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetCollectionName())
-		return collectionID, internalpb.RateType_DQLQuery, 1, nil // we regard the nq of query as equivalent to 1.
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
 	case *milvuspb.CreateCollectionRequest:
-		return 0, internalpb.RateType_DDLCollection, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
-		return 0, internalpb.RateType_DDLCollection, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.LoadCollectionRequest:
-		return 0, internalpb.RateType_DDLCollection, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.ReleaseCollectionRequest:
-		return 0, internalpb.RateType_DDLCollection, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreatePartitionRequest:
-		return 0, internalpb.RateType_DDLPartition, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.DropPartitionRequest:
-		return 0, internalpb.RateType_DDLPartition, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.LoadPartitionsRequest:
-		return 0, internalpb.RateType_DDLPartition, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.ReleasePartitionsRequest:
-		return 0, internalpb.RateType_DDLPartition, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.CreateIndexRequest:
-		return 0, internalpb.RateType_DDLIndex, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.DropIndexRequest:
-		return 0, internalpb.RateType_DDLIndex, 1, nil
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
 		return 0, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:

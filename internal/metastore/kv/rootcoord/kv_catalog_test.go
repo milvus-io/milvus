@@ -25,6 +25,7 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -41,6 +42,10 @@ var (
 		IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
 		IsDeleted:    true,
 	}
+)
+
+const (
+	testDb = 1000
 )
 
 func TestCatalog_ListCollections(t *testing.T) {
@@ -70,6 +75,18 @@ func TestCatalog_ListCollections(t *testing.T) {
 				{},
 			},
 		},
+		State: pb.CollectionState_CollectionCreated,
+	}
+
+	coll3 := &pb.CollectionInfo{
+		ID: 3,
+		Schema: &schemapb.CollectionSchema{
+			Name: "c1",
+			Fields: []*schemapb.FieldSchema{
+				{},
+			},
+		},
+		State: pb.CollectionState_CollectionDropping,
 	}
 
 	targetErr := errors.New("fail")
@@ -81,7 +98,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return(nil, nil, targetErr)
 
 		kc := Catalog{Snapshot: kv}
-		ret, err := kc.ListCollections(ctx, ts)
+		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.ErrorIs(t, err, targetErr)
 		assert.Nil(t, ret)
 	})
@@ -93,7 +110,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
-			Return(nil, []string{string(bColl)}, nil)
+			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.On("LoadWithPrefix", mock.MatchedBy(
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
@@ -101,7 +118,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return(nil, nil, targetErr)
 		kc := Catalog{Snapshot: kv}
 
-		ret, err := kc.ListCollections(ctx, ts)
+		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.ErrorIs(t, err, targetErr)
 		assert.Nil(t, ret)
 	})
@@ -113,7 +130,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
-			Return(nil, []string{string(bColl)}, nil)
+			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
@@ -123,7 +140,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return(nil, []string{string(pm)}, nil)
+			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		kv.On("LoadWithPrefix", mock.MatchedBy(
 			func(prefix string) bool {
@@ -132,7 +149,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return(nil, nil, targetErr)
 		kc := Catalog{Snapshot: kv}
 
-		ret, err := kc.ListCollections(ctx, ts)
+		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.ErrorIs(t, err, targetErr)
 		assert.Nil(t, ret)
 	})
@@ -144,24 +161,23 @@ func TestCatalog_ListCollections(t *testing.T) {
 		bColl, err := proto.Marshal(coll1)
 		assert.NoError(t, err)
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
-			Return(nil, []string{string(bColl)}, nil)
+			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kc := Catalog{Snapshot: kv}
 
-		ret, err := kc.ListCollections(ctx, ts)
+		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ret))
-		modCol := ret["c1"]
-		assert.Equal(t, coll1.ID, modCol.CollectionID)
+		assert.Equal(t, coll1.ID, ret[0].CollectionID)
 	})
 
-	t.Run("list collection ok for the newest version", func(t *testing.T) {
+	t.Run("list collection with db", func(t *testing.T) {
 		kv := mocks.NewSnapShotKV(t)
 		ts := uint64(1)
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
-			Return(nil, []string{string(bColl)}, nil)
+		kv.On("LoadWithPrefix", BuildDatabasePrefixWithDBID(testDb), ts).
+			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
@@ -171,7 +187,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, PartitionMetaPrefix)
 			}), ts).
-			Return(nil, []string{string(pm)}, nil)
+			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
 		fm, err := proto.Marshal(fieldMeta)
@@ -181,13 +197,55 @@ func TestCatalog_ListCollections(t *testing.T) {
 			func(prefix string) bool {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
-			Return(nil, []string{string(fm)}, nil)
+			Return([]string{"key"}, []string{string(fm)}, nil)
 		kc := Catalog{Snapshot: kv}
 
-		ret, err := kc.ListCollections(ctx, ts)
+		ret, err := kc.ListCollections(ctx, testDb, ts)
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
 		assert.Equal(t, 1, len(ret))
+	})
+
+	t.Run("list collection ok for the newest version", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+
+		bColl, err := proto.Marshal(coll2)
+		assert.NoError(t, err)
+
+		aColl, err := proto.Marshal(coll3)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return([]string{"key", "key2"}, []string{string(bColl), string(aColl)}, nil)
+
+		partitionMeta := &pb.PartitionInfo{}
+		pm, err := proto.Marshal(partitionMeta)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, PartitionMetaPrefix)
+			}), ts).
+			Return([]string{"key"}, []string{string(pm)}, nil)
+
+		fieldMeta := &schemapb.FieldSchema{}
+		fm, err := proto.Marshal(fieldMeta)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FieldMetaPrefix)
+			}), ts).
+			Return([]string{"key"}, []string{string(fm)}, nil)
+		kc := Catalog{Snapshot: kv}
+
+		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+		assert.Equal(t, 2, len(ret))
+		assert.Equal(t, int64(2), ret[0].CollectionID)
+		assert.Equal(t, int64(3), ret[1].CollectionID)
 	})
 }
 
@@ -199,7 +257,7 @@ func TestCatalog_loadCollection(t *testing.T) {
 			return "", errors.New("mock")
 		}
 		kc := Catalog{Snapshot: snapshot}
-		_, err := kc.loadCollection(ctx, 1, 0)
+		_, err := kc.loadCollection(ctx, testDb, 1, 0)
 		assert.Error(t, err)
 	})
 
@@ -210,7 +268,7 @@ func TestCatalog_loadCollection(t *testing.T) {
 			return "not in pb format", nil
 		}
 		kc := Catalog{Snapshot: snapshot}
-		_, err := kc.loadCollection(ctx, 1, 0)
+		_, err := kc.loadCollection(ctx, testDb, 1, 0)
 		assert.Error(t, err)
 	})
 
@@ -224,7 +282,7 @@ func TestCatalog_loadCollection(t *testing.T) {
 			return string(value), nil
 		}
 		kc := Catalog{Snapshot: snapshot}
-		got, err := kc.loadCollection(ctx, 1, 0)
+		got, err := kc.loadCollection(ctx, 0, 1, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, got.GetID(), coll.GetID())
 	})
@@ -307,11 +365,11 @@ func TestCatalog_GetCollectionByID(t *testing.T) {
 		},
 	)
 
-	coll, err := c.GetCollectionByID(ctx, 1, 1)
+	coll, err := c.GetCollectionByID(ctx, 0, 1, 1)
 	assert.Error(t, err)
 	assert.Nil(t, coll)
 
-	coll, err = c.GetCollectionByID(ctx, 1, 10000)
+	coll, err = c.GetCollectionByID(ctx, 0, 10000, 1)
 	assert.NoError(t, err)
 	assert.NotNil(t, coll)
 }
@@ -324,7 +382,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 			return "", errors.New("mock")
 		}
 		kc := Catalog{Snapshot: snapshot}
-		err := kc.CreatePartition(ctx, &model.Partition{}, 0)
+		err := kc.CreatePartition(ctx, 0, &model.Partition{}, 0)
 		assert.Error(t, err)
 	})
 
@@ -345,13 +403,13 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.CreatePartition(ctx, &model.Partition{}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{}, 0)
 		assert.Error(t, err)
 
 		snapshot.SaveFunc = func(key string, value string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		err = kc.CreatePartition(ctx, &model.Partition{}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{}, 0)
 		assert.NoError(t, err)
 	})
 
@@ -370,7 +428,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.CreatePartition(ctx, &model.Partition{PartitionID: partID}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{PartitionID: partID}, 0)
 		assert.Error(t, err)
 	})
 
@@ -389,7 +447,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.CreatePartition(ctx, &model.Partition{PartitionName: partition}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{PartitionName: partition}, 0)
 		assert.Error(t, err)
 	})
 
@@ -414,13 +472,13 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.CreatePartition(ctx, &model.Partition{}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{}, 0)
 		assert.Error(t, err)
 
 		snapshot.SaveFunc = func(key string, value string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		err = kc.CreatePartition(ctx, &model.Partition{}, 0)
+		err = kc.CreatePartition(ctx, 0, &model.Partition{}, 0)
 		assert.NoError(t, err)
 	})
 }
@@ -613,7 +671,7 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err := kc.DropPartition(ctx, 100, 101, 0)
+		err := kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.Error(t, err)
 	})
 
@@ -634,13 +692,13 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.DropPartition(ctx, 100, 101, 0)
+		err = kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.Error(t, err)
 
 		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		err = kc.DropPartition(ctx, 100, 101, 0)
+		err = kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.NoError(t, err)
 	})
 
@@ -665,13 +723,13 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		err = kc.DropPartition(ctx, 100, 101, 0)
+		err = kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.Error(t, err)
 
 		snapshot.SaveFunc = func(key string, value string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		err = kc.DropPartition(ctx, 100, 102, 0)
+		err = kc.DropPartition(ctx, 0, 100, 102, 0)
 		assert.NoError(t, err)
 	})
 }
@@ -686,13 +744,13 @@ func TestCatalog_DropAliasV2(t *testing.T) {
 
 	kc := Catalog{Snapshot: snapshot}
 
-	err := kc.DropAlias(ctx, "alias", 0)
+	err := kc.DropAlias(ctx, testDb, "alias", 0)
 	assert.Error(t, err)
 
 	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return nil
 	}
-	err = kc.DropAlias(ctx, "alias", 0)
+	err = kc.DropAlias(ctx, testDb, "alias", 0)
 	assert.NoError(t, err)
 }
 
@@ -757,7 +815,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		_, err := kc.listAliasesAfter210(ctx, 0)
+		_, err := kc.listAliasesAfter210WithDb(ctx, testDb, 0)
 		assert.Error(t, err)
 	})
 
@@ -771,7 +829,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		_, err := kc.listAliasesAfter210(ctx, 0)
+		_, err := kc.listAliasesAfter210WithDb(ctx, testDb, 0)
 		assert.Error(t, err)
 	})
 
@@ -789,7 +847,7 @@ func TestCatalog_listAliasesAfter210(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		got, err := kc.listAliasesAfter210(ctx, 0)
+		got, err := kc.listAliasesAfter210WithDb(ctx, testDb, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(got))
 		assert.Equal(t, int64(100), got[0].CollectionID)
@@ -807,7 +865,7 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 
 		kc := Catalog{Snapshot: snapshot}
 
-		_, err := kc.ListAliases(ctx, 0)
+		_, err := kc.ListAliases(ctx, testDb, 0)
 		assert.Error(t, err)
 	})
 
@@ -823,21 +881,24 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 			if key == AliasMetaPrefix {
 				return nil, nil, errors.New("mock")
 			}
+
+			if strings.Contains(key, DatabaseMetaPrefix) {
+				return nil, nil, errors.New("mock")
+			}
 			return []string{"key"}, []string{string(value)}, nil
 		}
 
 		kc := Catalog{Snapshot: snapshot}
 
-		_, err = kc.ListAliases(ctx, 0)
+		_, err = kc.ListAliases(ctx, util.NonDBID, 0)
+		assert.Error(t, err)
+
+		_, err = kc.ListAliases(ctx, testDb, 0)
 		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
 		ctx := context.Background()
-
-		coll := &pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Name: "alias1"}, ID: 100, ShardsNum: 50}
-		value, err := proto.Marshal(coll)
-		assert.NoError(t, err)
 
 		alias := &pb.AliasInfo{CollectionId: 101, AliasName: "alias2"}
 		value2, err := proto.Marshal(alias)
@@ -845,19 +906,19 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 
 		snapshot := kv.NewMockSnapshotKV()
 		snapshot.LoadWithPrefixFunc = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
-			if key == AliasMetaPrefix {
+			dbStr := fmt.Sprintf("%d", testDb)
+			if strings.Contains(key, dbStr) && strings.Contains(key, Aliases) {
 				return []string{"key1"}, []string{string(value2)}, nil
 			}
-			return []string{"key"}, []string{string(value)}, nil
+			return []string{}, []string{}, nil
 		}
 
 		kc := Catalog{Snapshot: snapshot}
 
-		got, err := kc.ListAliases(ctx, 0)
+		got, err := kc.ListAliases(ctx, testDb, 0)
 		assert.NoError(t, err)
-		assert.Equal(t, 2, len(got))
-		assert.Equal(t, "alias1", got[0].Name)
-		assert.Equal(t, "alias2", got[1].Name)
+		assert.Equal(t, 1, len(got))
+		assert.Equal(t, "alias2", got[0].Name)
 	})
 }
 
@@ -928,7 +989,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
 		assert.NoError(t, err)
-		key := BuildCollectionKey(collectionID)
+		key := BuildCollectionKey(0, collectionID)
 		value, ok := kvs[key]
 		assert.True(t, ok)
 		var collPb pb.CollectionInfo
@@ -953,14 +1014,14 @@ func TestCatalog_AlterPartition(t *testing.T) {
 	t.Run("add", func(t *testing.T) {
 		kc := &Catalog{}
 		ctx := context.Background()
-		err := kc.AlterPartition(ctx, nil, nil, metastore.ADD, 0)
+		err := kc.AlterPartition(ctx, testDb, nil, nil, metastore.ADD, 0)
 		assert.Error(t, err)
 	})
 
 	t.Run("delete", func(t *testing.T) {
 		kc := &Catalog{}
 		ctx := context.Background()
-		err := kc.AlterPartition(ctx, nil, nil, metastore.DELETE, 0)
+		err := kc.AlterPartition(ctx, testDb, nil, nil, metastore.DELETE, 0)
 		assert.Error(t, err)
 	})
 
@@ -977,7 +1038,7 @@ func TestCatalog_AlterPartition(t *testing.T) {
 		var partitionID int64 = 2
 		oldP := &model.Partition{PartitionID: partitionID, CollectionID: collectionID, State: pb.PartitionState_PartitionCreating}
 		newP := &model.Partition{PartitionID: partitionID, CollectionID: collectionID, State: pb.PartitionState_PartitionCreated}
-		err := kc.AlterPartition(ctx, oldP, newP, metastore.MODIFY, 0)
+		err := kc.AlterPartition(ctx, testDb, oldP, newP, metastore.MODIFY, 0)
 		assert.NoError(t, err)
 		key := BuildPartitionKey(collectionID, partitionID)
 		value, ok := kvs[key]
@@ -995,7 +1056,7 @@ func TestCatalog_AlterPartition(t *testing.T) {
 		var collectionID int64 = 1
 		oldP := &model.Partition{PartitionID: 1, CollectionID: collectionID, State: pb.PartitionState_PartitionCreating}
 		newP := &model.Partition{PartitionID: 2, CollectionID: collectionID, State: pb.PartitionState_PartitionCreated}
-		err := kc.AlterPartition(ctx, oldP, newP, metastore.MODIFY, 0)
+		err := kc.AlterPartition(ctx, testDb, oldP, newP, metastore.MODIFY, 0)
 		assert.Error(t, err)
 	})
 }
@@ -1929,6 +1990,7 @@ func TestRBAC_Grant(t *testing.T) {
 		validRole       = "role1"
 		invalidRole     = "role2"
 		keyNotExistRole = "role3"
+		errorSaveRole   = "role100"
 
 		validUser   = "user1"
 		invalidUser = "user2"
@@ -1948,9 +2010,14 @@ func TestRBAC_Grant(t *testing.T) {
 		validRoleValue := crypto.MD5(validRoleKey)
 
 		invalidRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", invalidRole, object, objName))
+		invalidRoleKeyWithDb := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName)))
 
 		keyNotExistRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", keyNotExistRole, object, objName))
-		keyNotExistRoleValue := crypto.MD5(keyNotExistRoleKey)
+		keyNotExistRoleKeyWithDb := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName)))
+		keyNotExistRoleValueWithDb := crypto.MD5(keyNotExistRoleKeyWithDb)
+
+		errorSaveRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", errorSaveRole, object, objName))
+		errorSaveRoleKeyWithDb := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", errorSaveRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName)))
 
 		// Mock return in kv_catalog.go:AlterGrant:L815
 		kvmock.EXPECT().Load(validRoleKey).Call.
@@ -1960,16 +2027,33 @@ func TestRBAC_Grant(t *testing.T) {
 			Return("", func(key string) error {
 				return fmt.Errorf("mock load error, key=%s", key)
 			})
+		kvmock.EXPECT().Load(invalidRoleKeyWithDb).Call.
+			Return("", func(key string) error {
+				return fmt.Errorf("mock load error, key=%s", key)
+			})
 		kvmock.EXPECT().Load(keyNotExistRoleKey).Call.
 			Return("", func(key string) error {
 				return common.NewKeyNotExistError(key)
 			})
-		kvmock.EXPECT().Save(keyNotExistRoleKey, mock.Anything).Return(nil)
+		kvmock.EXPECT().Load(keyNotExistRoleKeyWithDb).Call.
+			Return("", func(key string) error {
+				return common.NewKeyNotExistError(key)
+			})
+		kvmock.EXPECT().Load(errorSaveRoleKey).Call.
+			Return("", func(key string) error {
+				return common.NewKeyNotExistError(key)
+			})
+		kvmock.EXPECT().Load(errorSaveRoleKeyWithDb).Call.
+			Return("", func(key string) error {
+				return common.NewKeyNotExistError(key)
+			})
+		kvmock.EXPECT().Save(keyNotExistRoleKeyWithDb, mock.Anything).Return(nil)
+		kvmock.EXPECT().Save(errorSaveRoleKeyWithDb, mock.Anything).Return(errors.New("mock save error role"))
 
 		validPrivilegeKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", validRoleValue, validPrivilege))
 		invalidPrivilegeKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", validRoleValue, invalidPrivilege))
 		keyNotExistPrivilegeKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", validRoleValue, keyNotExistPrivilege))
-		keyNotExistPrivilegeKey2 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", keyNotExistRoleValue, keyNotExistPrivilege2))
+		keyNotExistPrivilegeKey2WithDb := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", keyNotExistRoleValueWithDb, keyNotExistPrivilege2))
 
 		// Mock return in kv_catalog.go:AlterGrant:L838
 		kvmock.EXPECT().Load(validPrivilegeKey).Call.Return("", nil)
@@ -1981,7 +2065,7 @@ func TestRBAC_Grant(t *testing.T) {
 			Return("", func(key string) error {
 				return common.NewKeyNotExistError(key)
 			})
-		kvmock.EXPECT().Load(keyNotExistPrivilegeKey2).Call.
+		kvmock.EXPECT().Load(keyNotExistPrivilegeKey2WithDb).Call.
 			Return("", func(key string) error {
 				return common.NewKeyNotExistError(key)
 			})
@@ -2010,9 +2094,10 @@ func TestRBAC_Grant(t *testing.T) {
 				{false, validUser, invalidRole, invalidPrivilege, false, "grant invalid role with invalid privilege"},
 				{false, validUser, invalidRole, validPrivilege, false, "grant invalid role with valid privilege"},
 				{false, validUser, invalidRole, keyNotExistPrivilege, false, "grant invalid role with not exist privilege"},
+				{false, validUser, errorSaveRole, keyNotExistPrivilege, false, "grant error role with not exist privilege"},
 				// not exist role
 				{false, validUser, keyNotExistRole, validPrivilege, true, "grant not exist role with exist privilege"},
-				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, false, "grant not exist role with exist privilege"},
+				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, false, "grant not exist role with not exist privilege"},
 			}
 
 			for _, test := range tests {
@@ -2021,6 +2106,7 @@ func TestRBAC_Grant(t *testing.T) {
 						Role:       &milvuspb.RoleEntity{Name: test.roleName},
 						Object:     &milvuspb.ObjectEntity{Name: object},
 						ObjectName: objName,
+						DbName:     util.DefaultDBName,
 						Grantor: &milvuspb.GrantorEntity{
 							User:      &milvuspb.UserEntity{Name: test.userName},
 							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName}},
@@ -2077,6 +2163,7 @@ func TestRBAC_Grant(t *testing.T) {
 						Role:       &milvuspb.RoleEntity{Name: test.roleName},
 						Object:     &milvuspb.ObjectEntity{Name: object},
 						ObjectName: objName,
+						DbName:     util.DefaultDBName,
 						Grantor: &milvuspb.GrantorEntity{
 							User:      &milvuspb.UserEntity{Name: test.userName},
 							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName}},
@@ -2141,6 +2228,10 @@ func TestRBAC_Grant(t *testing.T) {
 			fmt.Sprintf("%s/%s/%s", "role1", "obj1", "obj_name1"))
 		kvmock.EXPECT().Load(validGranteeKey).Call.
 			Return(func(key string) string { return crypto.MD5(key) }, nil)
+		validGranteeKey2 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+			fmt.Sprintf("%s/%s/%s", "role1", "obj1", "foo.obj_name2"))
+		kvmock.EXPECT().Load(validGranteeKey2).Call.
+			Return(func(key string) string { return crypto.MD5(key) }, nil)
 		kvmock.EXPECT().Load(mock.Anything).Call.
 			Return("", errors.New("mock Load error"))
 
@@ -2191,10 +2282,23 @@ func TestRBAC_Grant(t *testing.T) {
 				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
 				ObjectName: "obj_name1",
 				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role with valid entity"},
+			{true, &milvuspb.GrantEntity{
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name2",
+				DbName:     "foo",
+				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and dbName with valid entity"},
+			{false, &milvuspb.GrantEntity{
+				Object:     &milvuspb.ObjectEntity{Name: "obj1"},
+				ObjectName: "obj_name2",
+				DbName:     "foo2",
+				Role:       &milvuspb.RoleEntity{Name: "role1"}}, "valid role and invalid dbName with valid entity"},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
+				if test.entity.DbName == "" {
+					test.entity.DbName = util.DefaultDBName
+				}
 				grants, err := c.ListGrant(ctx, tenant, test.entity)
 				if test.isValid {
 					assert.NoError(t, err)
@@ -2290,10 +2394,10 @@ func TestRBAC_Grant(t *testing.T) {
 					assert.NoError(t, err)
 					assert.Equal(t, 4, len(policy))
 					ps := []string{
-						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeLoad"),
-						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeRelease"),
-						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeLoad"),
-						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeRelease"),
+						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeLoad", "default"),
+						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeRelease", "default"),
+						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeLoad", "default"),
+						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeRelease", "default"),
 					}
 					assert.ElementsMatch(t, ps, policy)
 				} else {

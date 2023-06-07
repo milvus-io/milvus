@@ -83,6 +83,15 @@ var (
 			Help:      "timestamp saved in meta storage",
 		})
 
+	// RootCoordNumOfDatabases counts the number of database.
+	RootCoordNumOfDatabases = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "database_num",
+			Help:      "number of database",
+		})
+
 	// RootCoordNumOfCollections counts the number of collections.
 	RootCoordNumOfCollections = prometheus.NewGauge(
 		prometheus.GaugeOpts{

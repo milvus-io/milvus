@@ -22,17 +22,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func Test_dropCollectionTask_Prepare(t *testing.T) {
@@ -48,10 +46,13 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 
 	t.Run("drop via alias", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
-		meta := newMockMetaTable()
-		meta.IsAliasFunc = func(name string) bool {
-			return true
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+		).Return(true)
+
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
 			baseTask: baseTask{core: core},
@@ -66,10 +67,13 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
-		meta := newMockMetaTable()
-		meta.IsAliasFunc = func(name string) bool {
-			return false
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("IsAlias",
+			mock.Anything,
+			mock.Anything,
+		).Return(false)
+
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
 			baseTask: baseTask{core: core},
@@ -91,7 +95,8 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything, // context.Context.
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, func(ctx context.Context, name string, ts Timestamp) error {
+			mock.Anything,
+		).Return(nil, func(ctx context.Context, dbName string, name string, ts Timestamp) error {
 			if collectionName == name {
 				return common.NewCollectionNotExistError("collection not exist")
 			}
@@ -121,6 +126,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(coll.Clone(), nil)
 		meta.On("ListAliasesByID",
 			mock.AnythingOfType("int64"),
@@ -141,16 +147,24 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to change collection state", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll.Clone(), nil
-		}
-		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {
-			return errors.New("error mock ChangeCollectionState")
-		}
-		meta.ListAliasesByIDFunc = func(collID UniqueID) []string {
-			return []string{}
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll.Clone(), nil)
+		meta.On("ChangeCollectionState",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("error mock ChangeCollectionState"))
+		meta.On("ListAliasesByID",
+			mock.Anything,
+		).Return([]string{})
+
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
 			baseTask: baseTask{core: core},
@@ -177,23 +191,34 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		ticker.addDmlChannels(pchans...)
 
 		coll := &model.Collection{Name: collectionName, ShardsNum: int32(shardNum), PhysicalChannelNames: pchans}
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll.Clone(), nil
-		}
-		meta.ChangeCollectionStateFunc = func(ctx context.Context, collectionID UniqueID, state etcdpb.CollectionState, ts Timestamp) error {
-			return nil
-		}
-		meta.ListAliasesByIDFunc = func(collID UniqueID) []string {
-			return []string{}
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll.Clone(), nil)
+		meta.On("ChangeCollectionState",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+		).Return([]string{})
 		removeCollectionMetaCalled := false
 		removeCollectionMetaChan := make(chan struct{}, 1)
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+		meta.On("RemoveCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, collID UniqueID, ts Timestamp) error {
 			removeCollectionMetaCalled = true
 			removeCollectionMetaChan <- struct{}{}
 			return nil
-		}
+		})
 
 		broker := newMockBroker()
 		releaseCollectionCalled := false

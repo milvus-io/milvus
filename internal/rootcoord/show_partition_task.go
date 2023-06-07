@@ -47,9 +47,9 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 	var err error
 	t.Rsp.Status = succStatus()
 	if t.Req.GetCollectionName() == "" {
-		coll, err = t.core.meta.GetCollectionByID(ctx, t.Req.GetCollectionID(), typeutil.MaxTimestamp, t.allowUnavailable)
+		coll, err = t.core.meta.GetCollectionByID(ctx, t.Req.GetDbName(), t.Req.GetCollectionID(), typeutil.MaxTimestamp, t.allowUnavailable)
 	} else {
-		coll, err = t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+		coll, err = t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	}
 	if err != nil {
 		t.Rsp.Status = failStatus(commonpb.ErrorCode_CollectionNotExists, err.Error())

@@ -124,7 +124,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	s.NoError(createColT.Execute(ctx))
 	s.NoError(createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, s.collection)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collection)
 	s.NoError(err)
 
 	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{

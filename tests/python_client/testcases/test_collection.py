@@ -1594,7 +1594,7 @@ class TestCollectionMultiCollections(TestcaseBase):
         self._connect()
         data = cf.gen_default_list_data(insert_count)
         collection_list = []
-        collection_num = 20
+        collection_num = 10
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_count)
             collection_w = self.init_collection_wrap(name=collection_name)

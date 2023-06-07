@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"plugin"
+	"strconv"
+	"strings"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -86,6 +90,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 			log.Info("hook mock", zap.String("user", getCurrentUser(ctx)),
 				zap.String("full method", fullMethod), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
+			updateProxyFunctionCallMetric(fullMethod)
 			return mockResp, err
 		}
 
@@ -93,6 +98,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 			log.Warn("hook before error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
 				zap.Any("request", req), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
+			updateProxyFunctionCallMetric(fullMethod)
 			return nil, err
 		}
 		realResp, realErr = handler(newCtx, req)
@@ -100,10 +106,20 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 			log.Warn("hook after error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
 				zap.Any("request", req), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
+			updateProxyFunctionCallMetric(fullMethod)
 			return nil, err
 		}
 		return realResp, realErr
 	}
+}
+
+func updateProxyFunctionCallMetric(fullMethod string) {
+	if fullMethod == "" {
+		return
+	}
+	method := strings.Split(fullMethod, "/")[0]
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 }
 
 func getCurrentUser(ctx context.Context) string {

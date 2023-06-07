@@ -2,16 +2,16 @@ package funcutil
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/golang/protobuf/descriptor"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/reflect/protoreflect"
-
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func GetVersion(m proto.GeneratedMessage) (string, error) {
@@ -90,10 +90,25 @@ func GetObjectNames(m proto.GeneratedMessage, index int32) []string {
 	return res
 }
 
-func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string) string {
-	return fmt.Sprintf(`{"PType":"p","V0":"%s","V1":"%s","V2":"%s"}`, roleName, PolicyForResource(objectType, objectName), privilege)
+func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string, dbName string) string {
+	return fmt.Sprintf(`{"PType":"p","V0":"%s","V1":"%s","V2":"%s"}`, roleName, PolicyForResource(dbName, objectType, objectName), privilege)
 }
 
-func PolicyForResource(objectType string, objectName string) string {
-	return fmt.Sprintf("%s-%s", objectType, objectName)
+func PolicyForResource(dbName string, objectType string, objectName string) string {
+	return fmt.Sprintf("%s-%s", objectType, CombineObjectName(dbName, objectName))
+}
+
+func CombineObjectName(dbName string, objectName string) string {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	return fmt.Sprintf("%s.%s", dbName, objectName)
+}
+
+func SplitObjectName(objectName string) (string, string) {
+	if !strings.Contains(objectName, ".") {
+		return util.DefaultDBName, objectName
+	}
+	names := strings.Split(objectName, ".")
+	return names[0], names[1]
 }

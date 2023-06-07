@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-
 	"math/rand"
 	"strconv"
 	"testing"
@@ -932,7 +931,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.Equal(t, false, task.result.Value)
 	// createCollection in RootCood and fill GlobalMetaCache
 	rc.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, collectionName)
+	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	// success to drop collection
 	err = task.Execute(ctx)
@@ -1051,7 +1050,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	}
 
 	rc.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, collectionName)
+	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	//CreateCollection
 	task := &describeCollectionTask{
@@ -1115,7 +1114,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	}
 
 	rc.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, collectionName)
+	globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 
 	//CreateCollection
 	task := &describeCollectionTask{
@@ -1178,7 +1177,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	}
 
 	rc.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, collectionName)
+	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	//CreateCollection
 	task := &describeCollectionTask{
@@ -1276,10 +1275,25 @@ func TestDropPartitionTask(t *testing.T) {
 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil)
-	mockCache := newMockCache()
-	mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-		return 1, nil
-	})
+
+	mockCache := NewMockCache(t)
+	mockCache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(UniqueID(1), nil)
+	mockCache.On("GetPartitionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(UniqueID(1), nil)
+	mockCache.On("GetCollectionSchema",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(&schemapb.CollectionSchema{}, nil)
 	globalMetaCache = mockCache
 
 	task := &dropPartitionTask{
@@ -1319,13 +1333,18 @@ func TestDropPartitionTask(t *testing.T) {
 	assert.Error(t, err)
 
 	t.Run("get collectionID error", func(t *testing.T) {
-		mockCache := newMockCache()
-		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 1, nil
-		})
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("error")
-		})
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), errors.New("error"))
+		mockCache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{}, nil)
 		globalMetaCache = mockCache
 		task.PartitionName = "partition1"
 		err = task.PreExecute(ctx)
@@ -1335,13 +1354,24 @@ func TestDropPartitionTask(t *testing.T) {
 	t.Run("partition not exist", func(t *testing.T) {
 		task.PartitionName = "partition2"
 
-		mockCache := newMockCache()
-		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 0, merr.WrapErrPartitionNotFound(partitionName)
-		})
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 1, nil
-		})
+		mockCache := NewMockCache(t)
+		mockCache.On("GetPartitionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), merr.WrapErrPartitionNotFound(partitionName))
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), nil)
+		mockCache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{}, nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -1350,13 +1380,24 @@ func TestDropPartitionTask(t *testing.T) {
 	t.Run("get partition error", func(t *testing.T) {
 		task.PartitionName = "partition3"
 
-		mockCache := newMockCache()
-		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("error")
-		})
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 1, nil
-		})
+		mockCache := NewMockCache(t)
+		mockCache.On("GetPartitionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), errors.New("error"))
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(1), nil)
+		mockCache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{}, nil)
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -1536,7 +1577,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		})
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
@@ -1790,7 +1831,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		})
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
@@ -2194,27 +2235,30 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-			return &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      100,
-						Name:         fieldName,
-						IsPrimaryKey: false,
-						DataType:     schemapb.DataType_FloatVector,
-						TypeParams:   nil,
-						IndexParams: []*commonpb.KeyValuePair{
-							{
-								Key:   common.DimKey,
-								Value: "128",
-							},
+		cache := NewMockCache(t)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         fieldName,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
 						},
-						AutoID: false,
 					},
+					AutoID: false,
 				},
-			}, nil
-		})
+			},
+		}, nil)
+
 		globalMetaCache = cache
 		field, err := cit.getIndexedField(context.Background())
 		assert.NoError(t, err)
@@ -2222,45 +2266,51 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 	})
 
 	t.Run("schema not found", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-			return nil, errors.New("mock")
-		})
+		cache := NewMockCache(t)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(nil, errors.New("mock"))
 		globalMetaCache = cache
 		_, err := cit.getIndexedField(context.Background())
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid schema", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-			return &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name: fieldName,
-					},
-					{
-						Name: fieldName, // duplicate
-					},
+		cache := NewMockCache(t)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name: fieldName,
 				},
-			}, nil
-		})
+				{
+					Name: fieldName, // duplicate
+				},
+			},
+		}, nil)
 		globalMetaCache = cache
 		_, err := cit.getIndexedField(context.Background())
 		assert.Error(t, err)
 	})
 
 	t.Run("field not found", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-			return &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name: fieldName + fieldName,
-					},
+		cache := NewMockCache(t)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name: fieldName + fieldName,
 				},
-			}, nil
-		})
+			},
+		}, nil)
 		globalMetaCache = cache
 		_, err := cit.getIndexedField(context.Background())
 		assert.Error(t, err)
@@ -2392,30 +2442,34 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 100, nil
-		})
-		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-			return &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      100,
-						Name:         fieldName,
-						IsPrimaryKey: false,
-						DataType:     schemapb.DataType_FloatVector,
-						TypeParams:   nil,
-						IndexParams: []*commonpb.KeyValuePair{
-							{
-								Key:   common.DimKey,
-								Value: "128",
-							},
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         fieldName,
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
 						},
-						AutoID: false,
 					},
+					AutoID: false,
 				},
-			}, nil
-		})
+			},
+		}, nil)
 		globalMetaCache = cache
 		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
@@ -2435,19 +2489,23 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 	})
 
 	t.Run("collection not found", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("mock")
-		})
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), errors.New("mock"))
 		globalMetaCache = cache
 		assert.Error(t, cit.PreExecute(context.Background()))
 	})
 
 	t.Run("index name length exceed 255", func(t *testing.T) {
-		cache := newMockCache()
-		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 100, nil
-		})
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
 		globalMetaCache = cache
 
 		for i := 0; i < 256; i++ {
@@ -2871,7 +2929,7 @@ func TestTransferReplicaTask(t *testing.T) {
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 
 	req := &milvuspb.TransferReplicaRequest{
 		Base: &commonpb.MsgBase{
@@ -2966,8 +3024,8 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
-	globalMetaCache.GetCollectionSchema(context.Background(), "collection2")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
 
 	req := &milvuspb.DescribeResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3014,8 +3072,8 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
-	globalMetaCache.GetCollectionSchema(context.Background(), "collection2")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
 
 	req := &milvuspb.DescribeResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3180,7 +3238,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// check default partitions
 		err = InitMetaCache(ctx, rc, nil, nil)
 		assert.NoError(t, err)
-		partitionNames, err := getDefaultPartitionNames(ctx, task.CollectionName)
+		partitionNames, err := getDefaultPartitionNames(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
@@ -3310,7 +3368,7 @@ func TestPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
@@ -3341,7 +3399,7 @@ func TestPartitionKey(t *testing.T) {
 	_ = segAllocator.Start()
 	defer segAllocator.Close()
 
-	partitionNames, err := getDefaultPartitionNames(ctx, collectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 	assert.Equal(t, common.DefaultPartitionsWithPartitionKey, int64(len(partitionNames)))
 

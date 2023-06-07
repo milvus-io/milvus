@@ -75,7 +75,7 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 		}
 	}
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -213,16 +213,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
 
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
-	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := ParsePartitionKeys(expr)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, collectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), collectionName, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -352,7 +352,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName)
 	if err2 != nil {
 		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
 			zap.Any("collectionName", collectionName), zap.Error(err2))
@@ -404,6 +404,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
+		db:         t.request.GetDbName(),
 		collection: t.collectionName,
 		nq:         t.Nq,
 		exec:       t.searchShard,

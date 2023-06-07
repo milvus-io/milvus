@@ -82,6 +82,10 @@ const (
 	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
 
+	CreateDatabaseTaskName = "CreateCollectionTask"
+	DropDatabaseTaskName   = "DropDatabaseTaskName"
+	ListDatabaseTaskName   = "ListDatabaseTaskName"
+
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
 )
@@ -513,6 +517,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		VirtualChannelNames:  nil,
 		PhysicalChannelNames: nil,
 		CollectionName:       dct.GetCollectionName(),
+		DbName:               dct.GetDbName(),
 	}
 
 	result, err := dct.rootCoord.DescribeCollection(ctx, dct.DescribeCollectionRequest)
@@ -537,6 +542,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.ConsistencyLevel = result.ConsistencyLevel
 		dct.result.Aliases = result.Aliases
 		dct.result.Properties = result.Properties
+		dct.result.DbName = result.GetDbName()
 		dct.result.NumPartitions = result.NumPartitions
 		for _, field := range result.Schema.Fields {
 			if field.IsDynamic {
@@ -649,7 +655,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 		collectionIDs := make([]UniqueID, 0)
 		for _, collectionName := range sct.CollectionNames {
-			collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, sct.GetDbName(), collectionName)
 			if err != nil {
 				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
@@ -703,7 +709,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				continue
 			}
-			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, sct.GetDbName(), collectionName)
 			if err != nil {
 				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
@@ -844,7 +850,7 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, cpt.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
@@ -930,7 +936,7 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, dpt.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
@@ -942,11 +948,11 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, dpt.GetCollectionName())
+	collID, err := globalMetaCache.GetCollectionID(ctx, dpt.GetDbName(), dpt.GetCollectionName())
 	if err != nil {
 		return err
 	}
-	partID, err := globalMetaCache.GetPartitionID(ctx, dpt.GetCollectionName(), dpt.GetPartitionName())
+	partID, err := globalMetaCache.GetPartitionID(ctx, dpt.GetDbName(), dpt.GetCollectionName(), dpt.GetPartitionName())
 	if err != nil {
 		if errors.Is(merr.ErrPartitionNotFound, err) {
 			return nil
@@ -1143,7 +1149,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
 		collectionName := spt.CollectionName
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, spt.GetDbName(), collectionName)
 		if err != nil {
 			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
 				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
@@ -1156,7 +1162,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		}
 		partitionIDs := make([]UniqueID, 0)
 		for _, partitionName := range spt.PartitionNames {
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+			partitionID, err := globalMetaCache.GetPartitionID(ctx, spt.GetDbName(), collectionName, partitionName)
 			if err != nil {
 				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
@@ -1202,7 +1208,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
-			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, collectionName, partitionName)
+			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, spt.GetDbName(), collectionName, partitionName)
 			if err != nil {
 				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
@@ -1281,7 +1287,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 	flushColl2Segments := make(map[string]*schemapb.LongArray)
 	coll2SealTimes := make(map[string]int64)
 	for _, collName := range ft.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
+		collID, err := globalMetaCache.GetCollectionID(ctx, ft.GetDbName(), collName)
 		if err != nil {
 			return err
 		}
@@ -1290,7 +1296,6 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 				ft.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			),
-			DbID:         0,
 			CollectionID: collID,
 			IsImport:     false,
 		}
@@ -1310,7 +1315,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		DbName:          "",
+		DbName:          ft.GetDbName(),
 		CollSegIDs:      coll2Segments,
 		FlushCollSegIDs: flushColl2Segments,
 		CollSealTimes:   coll2SealTimes,
@@ -1391,7 +1396,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
-	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, lct.GetDbName(), lct.CollectionName)
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -1403,7 +1408,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 
 	lct.collectionID = collID
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lct.CollectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lct.GetDbName(), lct.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -1457,7 +1462,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (lct *loadCollectionTask) PostExecute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, lct.GetDbName(), lct.CollectionName)
 	log.Ctx(ctx).Debug("loadCollectionTask PostExecute",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("collectionID", collID))
@@ -1529,7 +1534,7 @@ func (rct *releaseCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
-	collID, err := globalMetaCache.GetCollectionID(ctx, rct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, rct.GetDbName(), rct.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -1545,13 +1550,13 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 
 	rct.result, err = rct.queryCoord.ReleaseCollection(ctx, request)
 
-	globalMetaCache.RemoveCollection(ctx, rct.CollectionName)
+	globalMetaCache.RemoveCollection(ctx, rct.GetDbName(), rct.CollectionName)
 
 	return err
 }
 
 func (rct *releaseCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(rct.CollectionName)
+	globalMetaCache.DeprecateShardCache(rct.GetDbName(), rct.CollectionName)
 	return nil
 }
 
@@ -1613,7 +1618,7 @@ func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, lpt.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
@@ -1626,12 +1631,12 @@ func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 	var partitionIDs []int64
-	collID, err := globalMetaCache.GetCollectionID(ctx, lpt.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, lpt.GetDbName(), lpt.CollectionName)
 	if err != nil {
 		return err
 	}
 	lpt.collectionID = collID
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lpt.CollectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lpt.GetDbName(), lpt.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -1663,7 +1668,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		return errors.New(errMsg)
 	}
 	for _, partitionName := range lpt.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, lpt.CollectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, lpt.GetDbName(), lpt.CollectionName, partitionName)
 		if err != nil {
 			return err
 		}
@@ -1751,7 +1756,7 @@ func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, rpt.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
@@ -1764,13 +1769,13 @@ func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 	var partitionIDs []int64
-	collID, err := globalMetaCache.GetCollectionID(ctx, rpt.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, rpt.GetDbName(), rpt.CollectionName)
 	if err != nil {
 		return err
 	}
 	rpt.collectionID = collID
 	for _, partitionName := range rpt.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, rpt.CollectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, rpt.GetDbName(), rpt.CollectionName, partitionName)
 		if err != nil {
 			return err
 		}
@@ -1790,7 +1795,7 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 }
 
 func (rpt *releasePartitionsTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.DeprecateShardCache(rpt.CollectionName)
+	globalMetaCache.DeprecateShardCache(rpt.GetDbName(), rpt.CollectionName)
 	return nil
 }
 
@@ -2210,7 +2215,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 	}
 
 	getCollectionNameFunc := func(value int32, key int64) string {
-		name, err := globalMetaCache.GetCollectionName(ctx, key)
+		_, name, err := globalMetaCache.GetDatabaseAndCollectionName(ctx, key)
 		if err != nil {
 			// unreachable logic path
 			return "unavailable_collection"
@@ -2365,7 +2370,7 @@ func (t *TransferReplicaTask) PreExecute(ctx context.Context) error {
 
 func (t *TransferReplicaTask) Execute(ctx context.Context) error {
 	var err error
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}

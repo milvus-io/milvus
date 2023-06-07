@@ -22,6 +22,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -47,8 +48,14 @@ func TestRepackInsertData(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 
-	err := InitMetaCache(ctx, rc, nil, nil)
-	assert.NoError(t, err)
+	cache := NewMockCache(t)
+	cache.On("GetPartitionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(int64(1), nil)
+	globalMetaCache = cache
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -139,10 +146,10 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	nb := 10
 	hash := generateHashKeys(nb)
 	prefix := "TestRepackInsertData"
-	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
 	ctx := context.Background()
+	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
 	rc := NewRootCoordMock()
 	rc.Start()

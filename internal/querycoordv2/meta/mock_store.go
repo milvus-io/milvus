@@ -220,7 +220,7 @@ type MockStore_ReleaseCollection_Call struct {
 }
 
 // ReleaseCollection is a helper method to define mock.On call
-//   - collection int64
+//  - collection int64
 func (_e *MockStore_Expecter) ReleaseCollection(collection interface{}) *MockStore_ReleaseCollection_Call {
 	return &MockStore_ReleaseCollection_Call{Call: _e.mock.On("ReleaseCollection", collection)}
 }
@@ -264,8 +264,8 @@ type MockStore_ReleasePartition_Call struct {
 }
 
 // ReleasePartition is a helper method to define mock.On call
-//   - collection int64
-//   - partitions ...int64
+//  - collection int64
+//  - partitions ...int64
 func (_e *MockStore_Expecter) ReleasePartition(collection interface{}, partitions ...interface{}) *MockStore_ReleasePartition_Call {
 	return &MockStore_ReleasePartition_Call{Call: _e.mock.On("ReleasePartition",
 		append([]interface{}{collection}, partitions...)...)}
@@ -309,8 +309,8 @@ type MockStore_ReleaseReplica_Call struct {
 }
 
 // ReleaseReplica is a helper method to define mock.On call
-//   - collection int64
-//   - replica int64
+//  - collection int64
+//  - replica int64
 func (_e *MockStore_Expecter) ReleaseReplica(collection interface{}, replica interface{}) *MockStore_ReleaseReplica_Call {
 	return &MockStore_ReleaseReplica_Call{Call: _e.mock.On("ReleaseReplica", collection, replica)}
 }
@@ -347,7 +347,7 @@ type MockStore_ReleaseReplicas_Call struct {
 }
 
 // ReleaseReplicas is a helper method to define mock.On call
-//   - collectionID int64
+//  - collectionID int64
 func (_e *MockStore_Expecter) ReleaseReplicas(collectionID interface{}) *MockStore_ReleaseReplicas_Call {
 	return &MockStore_ReleaseReplicas_Call{Call: _e.mock.On("ReleaseReplicas", collectionID)}
 }
@@ -384,7 +384,7 @@ type MockStore_RemoveResourceGroup_Call struct {
 }
 
 // RemoveResourceGroup is a helper method to define mock.On call
-//   - rgName string
+//  - rgName string
 func (_e *MockStore_Expecter) RemoveResourceGroup(rgName interface{}) *MockStore_RemoveResourceGroup_Call {
 	return &MockStore_RemoveResourceGroup_Call{Call: _e.mock.On("RemoveResourceGroup", rgName)}
 }
@@ -428,8 +428,8 @@ type MockStore_SaveCollection_Call struct {
 }
 
 // SaveCollection is a helper method to define mock.On call
-//   - collection *querypb.CollectionLoadInfo
-//   - partitions ...*querypb.PartitionLoadInfo
+//  - collection *querypb.CollectionLoadInfo
+//  - partitions ...*querypb.PartitionLoadInfo
 func (_e *MockStore_Expecter) SaveCollection(collection interface{}, partitions ...interface{}) *MockStore_SaveCollection_Call {
 	return &MockStore_SaveCollection_Call{Call: _e.mock.On("SaveCollection",
 		append([]interface{}{collection}, partitions...)...)}
@@ -479,7 +479,7 @@ type MockStore_SavePartition_Call struct {
 }
 
 // SavePartition is a helper method to define mock.On call
-//   - info ...*querypb.PartitionLoadInfo
+//  - info ...*querypb.PartitionLoadInfo
 func (_e *MockStore_Expecter) SavePartition(info ...interface{}) *MockStore_SavePartition_Call {
 	return &MockStore_SavePartition_Call{Call: _e.mock.On("SavePartition",
 		append([]interface{}{}, info...)...)}
@@ -523,7 +523,7 @@ type MockStore_SaveReplica_Call struct {
 }
 
 // SaveReplica is a helper method to define mock.On call
-//   - replica *querypb.Replica
+//  - replica *querypb.Replica
 func (_e *MockStore_Expecter) SaveReplica(replica interface{}) *MockStore_SaveReplica_Call {
 	return &MockStore_SaveReplica_Call{Call: _e.mock.On("SaveReplica", replica)}
 }
@@ -566,7 +566,7 @@ type MockStore_SaveResourceGroup_Call struct {
 }
 
 // SaveResourceGroup is a helper method to define mock.On call
-//   - rgs ...*querypb.ResourceGroup
+//  - rgs ...*querypb.ResourceGroup
 func (_e *MockStore_Expecter) SaveResourceGroup(rgs ...interface{}) *MockStore_SaveResourceGroup_Call {
 	return &MockStore_SaveResourceGroup_Call{Call: _e.mock.On("SaveResourceGroup",
 		append([]interface{}{}, rgs...)...)}

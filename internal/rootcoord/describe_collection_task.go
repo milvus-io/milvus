@@ -46,5 +46,6 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	aliases := t.core.meta.ListAliasesByID(coll.CollectionID)
 	t.Rsp = convertModelToDesc(coll, aliases)
+	t.Rsp.DbName = t.Req.GetDbName()
 	return nil
 }

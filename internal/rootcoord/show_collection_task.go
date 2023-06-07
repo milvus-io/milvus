@@ -46,7 +46,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 	if ts == 0 {
 		ts = typeutil.MaxTimestamp
 	}
-	colls, err := t.core.meta.ListCollections(ctx, ts)
+	colls, err := t.core.meta.ListCollections(ctx, t.Req.GetDbName(), ts, true)
 	if err != nil {
 		t.Rsp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
 		return err

@@ -3,21 +3,22 @@ package meta
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/cmd/tools/migration/legacy"
-	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/cmd/tools/migration/legacy"
+	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type FieldIndexesWithSchema struct {
 	indexes []*pb.FieldIndexInfo
 	schema  *schemapb.CollectionSchema
 }
+
 type FieldIndexes210 map[UniqueID]*FieldIndexesWithSchema // coll_id -> field indexes.
 
 type TtCollectionsMeta210 map[UniqueID]map[Timestamp]*pb.CollectionInfo // coll_id -> ts -> coll
@@ -163,7 +164,7 @@ func (meta *TtCollectionsMeta210) GenerateSaves() map[string]string {
 	var err error
 	for collection := range *meta {
 		for ts := range (*meta)[collection] {
-			k := rootcoord.ComposeSnapshotKey(rootcoord.SnapshotPrefix, rootcoord.BuildCollectionKey(collection), rootcoord.SnapshotsSep, ts)
+			k := rootcoord.ComposeSnapshotKey(rootcoord.SnapshotPrefix, rootcoord.BuildCollectionKey(util.NonDBID, collection), rootcoord.SnapshotsSep, ts)
 			record := (*meta)[collection][ts]
 			if record == nil {
 				v = rootcoord.ConstructTombstone()
@@ -189,7 +190,7 @@ func (meta *CollectionsMeta210) GenerateSaves() map[string]string {
 	var err error
 	for collection := range *meta {
 		record := (*meta)[collection]
-		k := rootcoord.BuildCollectionKey(collection)
+		k := rootcoord.BuildCollectionKey(util.NonDBID, collection)
 		if record == nil {
 			v = rootcoord.ConstructTombstone()
 		} else {

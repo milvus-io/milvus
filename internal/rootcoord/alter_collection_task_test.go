@@ -21,15 +21,14 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -80,13 +79,19 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("alter step failed", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return &model.Collection{CollectionID: int64(1)}, nil
-		}
-		meta.AlterCollectionFunc = func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
-			return errors.New("err")
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("err"))
 
 		core := newTestCore(withMeta(meta))
 		task := &alterCollectionTask{
@@ -103,13 +108,19 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("broadcast step failed", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return &model.Collection{CollectionID: int64(1)}, nil
-		}
-		meta.AlterCollectionFunc = func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
-			return nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
 
 		broker := newMockBroker()
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
@@ -131,13 +142,19 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("alter successfully", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return &model.Collection{CollectionID: int64(1)}, nil
-		}
-		meta.AlterCollectionFunc = func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
-			return nil
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
 
 		broker := newMockBroker()
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {

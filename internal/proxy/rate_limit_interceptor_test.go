@@ -22,6 +22,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -48,7 +49,13 @@ func (l *limiterMock) Check(collection int64, rt internalpb.RateType, n int) com
 
 func TestRateLimitInterceptor(t *testing.T) {
 	t.Run("test getRequestInfo", func(t *testing.T) {
-		globalMetaCache = newMockCache()
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(0), nil)
+		globalMetaCache = mockCache
 		collection, rt, size, err := getRequestInfo(&milvuspb.InsertRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
@@ -173,6 +180,14 @@ func TestRateLimitInterceptor(t *testing.T) {
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(0), nil)
+		globalMetaCache = mockCache
+
 		limiter := limiterMock{rate: 100}
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 			return &milvuspb.MutationResult{

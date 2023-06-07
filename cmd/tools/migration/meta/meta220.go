@@ -3,12 +3,14 @@ package meta
 import (
 	"github.com/blang/semver/v4"
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type TtCollectionsMeta220 map[UniqueID]map[Timestamp]*model.Collection // coll_id -> ts -> coll
@@ -40,7 +42,7 @@ func (meta *TtCollectionsMeta220) GenerateSaves(sourceVersion semver.Version) (m
 
 	for collectionID := range *meta {
 		for ts := range (*meta)[collectionID] {
-			ckey := rootcoord.BuildCollectionKey(collectionID)
+			ckey := rootcoord.BuildCollectionKey(util.NonDBID, collectionID)
 			key := rootcoord.ComposeSnapshotKey(rootcoord.SnapshotPrefix, ckey, rootcoord.SnapshotsSep, ts)
 			collection := (*meta)[collectionID][ts]
 			var value string
@@ -87,7 +89,7 @@ func (meta *CollectionsMeta220) GenerateSaves(sourceVersion semver.Version) (map
 	}
 
 	for collectionID := range *meta {
-		ckey := rootcoord.BuildCollectionKey(collectionID)
+		ckey := rootcoord.BuildCollectionKey(util.NonDBID, collectionID)
 		collection := (*meta)[collectionID]
 		var value string
 		if collection == nil {
