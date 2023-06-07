@@ -2959,3 +2959,82 @@ class TestCollectionString(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
         self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
+
+class TestCollectionJSON(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test about string
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_collection_json_field_as_primary_key(self, auto_id):
+        """
+        target: test create collection with JSON field as primary key
+        method: 1. create collection with one JSON field, and vector field
+                2. set json field is_primary=true
+                3. set auto_id as true
+        expected: Raise exception (not supported)
+        """
+        self._connect()
+        int_field = cf.gen_int64_field()
+        vec_field = cf.gen_float_vec_field()
+        string_field = cf.gen_string_field()
+        # 1. create json field as primary key through field schema api
+        error = {ct.err_code: 1, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
+        json_field = cf.gen_json_field(is_primary=True, auto_id=auto_id)
+        fields = [int_field, string_field, json_field, vec_field]
+        self.collection_schema_wrap.init_collection_schema(fields=fields,
+                                                           check_task=CheckTasks.err_res, check_items=error)
+        # 2. create json field as primary key through collection schema api
+        json_field = cf.gen_json_field()
+        fields = [int_field, string_field, json_field, vec_field]
+        self.collection_schema_wrap.init_collection_schema(fields=fields, primary_field=ct.default_json_field_name,
+                                                           check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_json_field_partition_key(self, primary_field):
+        """
+        target: test create collection with multiple JSON fields
+        method: 1. create collection with multiple JSON fields, primary key field and vector field
+                2. set json field is_primary=false
+        expected: Raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_json_default_collection_schema(primary_field=primary_field, is_partition_key=True)
+        error = {ct.err_code: 1, ct.err_msg: "Partition key field type must be DataType.INT64 or DataType.VARCHAR."}
+        self.collection_wrap.init_collection(name=c_name, schema=schema, partition_key_field=ct.default_json_field_name,
+                                             check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_collection_json_field_supported_primary_key(self, primary_field):
+        """
+        target: test create collection with one JSON field
+        method: 1. create collection with one JSON field, primary key field and vector field
+                2. set json field is_primary=false
+        expected: Create collection successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_json_default_collection_schema(primary_field=primary_field)
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_collection_multiple_json_fields_supported_primary_key(self, primary_field):
+        """
+        target: test create collection with multiple JSON fields
+        method: 1. create collection with multiple JSON fields, primary key field and vector field
+                2. set json field is_primary=false
+        expected: Create collection successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_multiple_json_default_collection_schema(primary_field=primary_field)
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})

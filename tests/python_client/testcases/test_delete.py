@@ -962,7 +962,7 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [0, 3]].to_dict('records'), 'with_vec': True})
+                           check_items={'exp_res': df_new.iloc[[0], [0, 4]].to_dict('records'), 'with_vec': True})
 
         collection_w.delete(tmp_expr)
         if to_flush_delete:
@@ -1601,7 +1601,7 @@ class TestDeleteString(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [2, 3]].to_dict('records'),
+                           check_items={'exp_res': df_new.iloc[[0], [2, 4]].to_dict('records'),
                                         'primary_field': ct.default_string_field_name, 'with_vec': True})
 
         collection_w.delete(default_string_expr)
@@ -1806,10 +1806,14 @@ class TestDeleteString(TestcaseBase):
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [2, 3]].to_dict('records')
+        res = df_new.iloc[[0], [2, 4]].to_dict('records')
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'primary_field': ct.default_string_field_name, 'with_vec': True})
-        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': res,
+                                        'primary_field': ct.default_string_field_name,
+                                        'with_vec': True})
+        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
+                            anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
 
     @pytest.mark.tags(CaseLabel.L1)
