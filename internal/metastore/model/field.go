@@ -62,7 +62,7 @@ func (f Field) Equal(other Field) bool {
 		f.IsPrimaryKey == other.IsPrimaryKey &&
 		f.Description == other.Description &&
 		f.DataType == other.DataType &&
-		checkParamsEqual(f.TypeParams, f.TypeParams) &&
+		checkParamsEqual(f.TypeParams, other.TypeParams) &&
 		checkParamsEqual(f.IndexParams, other.IndexParams) &&
 		f.AutoID == other.AutoID &&
 		f.IsPartitionKey == other.IsPartitionKey &&
