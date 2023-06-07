@@ -1749,3 +1749,19 @@ func Test_ParseGuaranteeTsFromConsistency(t *testing.T) {
 	assert.Equal(t, tsNow, parseGuaranteeTsFromConsistency(tsNow, tsMax, customized))
 	assert.Equal(t, tsEventually, parseGuaranteeTsFromConsistency(tsDefault, tsMax, eventually))
 }
+
+func Test_NQLimit(t *testing.T) {
+	paramtable.Init()
+	assert.Nil(t, validateNQLimit(16384))
+	assert.Nil(t, validateNQLimit(1))
+	assert.Error(t, validateNQLimit(16385))
+	assert.Error(t, validateNQLimit(0))
+}
+
+func Test_TopKLimit(t *testing.T) {
+	paramtable.Init()
+	assert.Nil(t, validateTopKLimit(16384))
+	assert.Nil(t, validateTopKLimit(1))
+	assert.Error(t, validateTopKLimit(16385))
+	assert.Error(t, validateTopKLimit(0))
+}

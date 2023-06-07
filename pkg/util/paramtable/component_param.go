@@ -34,11 +34,11 @@ const (
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize        = 16
-	DefaultGracefulTime          = 5000 //ms
+	DefaultGracefulTime          = 5000 // ms
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 20 //s
+	DefaultSessionTTL        = 20 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -199,7 +199,6 @@ type commonConfig struct {
 	GracefulTime             ParamItem `refreshable:"true"`
 	GracefulStopTimeout      ParamItem `refreshable:"true"`
 
-	TopKLimit   ParamItem `refreshable:"true"`
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
@@ -520,17 +519,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.LoadNumThreadRatio.Init(base.mgr)
-
-	p.TopKLimit = ParamItem{
-		Key:          "common.topKLimit",
-		Version:      "2.2.1",
-		DefaultValue: "16384",
-		Doc: `Search limit, which applies on:
-maximum # of results to return (topK), and
-maximum # of search requests (nq).
-Check https://milvus.io/docs/limitations.md for more details.`,
-	}
-	p.TopKLimit.Init(base.mgr)
 
 	p.BeamWidthRatio = ParamItem{
 		Key:          "common.DiskIndex.BeamWidthRatio",
@@ -860,7 +848,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
-
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1110,9 +1097,9 @@ please adjust in embedded Milvus: false`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
-	//Deprecated: Since 2.2.0
+	// Deprecated: Since 2.2.0
 	RetryNum ParamItem `refreshable:"true"`
-	//Deprecated: Since 2.2.0
+	// Deprecated: Since 2.2.0
 	RetryInterval    ParamItem `refreshable:"true"`
 	TaskMergeCap     ParamItem `refreshable:"false"`
 	TaskExecutionCap ParamItem `refreshable:"true"`
@@ -1136,7 +1123,7 @@ type queryCoordConfig struct {
 	DistPullInterval                    ParamItem `refreshable:"false"`
 	HeartbeatAvailableInterval          ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds                  ParamItem `refreshable:"true"`
-	//Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
+	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
 
@@ -1413,7 +1400,7 @@ type queryNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	// stats
-	//Deprecated: Never used
+	// Deprecated: Never used
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
@@ -1786,7 +1773,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 // /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
-
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`

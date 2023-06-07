@@ -89,6 +89,8 @@ type quotaConfig struct {
 	// limits
 	MaxCollectionNum      ParamItem `refreshable:"true"`
 	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
+	TopKLimit             ParamItem `refreshable:"true"`
+	NQLimit               ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                     ParamItem `refreshable:"true"`
@@ -294,7 +296,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			if !p.DMLLimitEnabled.GetAsBool() {
 				return max
 			}
-			var rate = getAsFloat(v)
+			rate := getAsFloat(v)
 			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
 				rate = megaBytes2Bytes(rate)
 			}
@@ -338,7 +340,7 @@ The maximum rate will not be greater than ` + "max" + `.`,
 			if !p.DMLLimitEnabled.GetAsBool() {
 				return max
 			}
-			var rate = getAsFloat(v)
+			rate := getAsFloat(v)
 			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
 				rate = megaBytes2Bytes(rate)
 			}
@@ -546,7 +548,6 @@ The maximum rate will not be greater than ` + "max" + `.`,
 				return min
 			}
 			return fmt.Sprintf("%f", rate)
-
 		},
 	}
 	p.DMLMinBulkLoadRatePerCollection.Init(base.mgr)
@@ -736,6 +737,30 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		DefaultValue: "64",
 	}
 	p.MaxCollectionNumPerDB.Init(base.mgr)
+
+	p.TopKLimit = ParamItem{
+		Key:          "quotaAndLimits.limits.topK",
+		Version:      "2.2.1",
+		DefaultValue: "16384",
+		FallbackKeys: []string{
+			"common.topKLimit",
+		},
+		Doc: `Search limit, which applies on:
+maximum # of results to return (topK).
+Check https://milvus.io/docs/limitations.md for more details.`,
+	}
+	p.TopKLimit.Init(base.mgr)
+
+	p.NQLimit = ParamItem{
+		Key:          "quotaAndLimits.limits.nq",
+		Version:      "2.3.0",
+		DefaultValue: "16384",
+		FallbackKeys: []string{},
+		Doc: `Search limit, which applies on:
+maximum # of search requests (nq).
+Check https://milvus.io/docs/limitations.md for more details.`,
+	}
+	p.NQLimit.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{
@@ -1100,7 +1125,6 @@ MB/s, default no limit`,
 		Export: true,
 	}
 	p.CoolOffSpeed.Init(base.mgr)
-
 }
 
 func megaBytes2Bytes(f float64) float64 {

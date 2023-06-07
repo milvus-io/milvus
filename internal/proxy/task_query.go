@@ -147,7 +147,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
 	}
 	if limit != 0 {
-		if err := validateLimit(limit); err != nil {
+		if err := validateTopKLimit(limit); err != nil {
 			return nil, fmt.Errorf("%s [%d] is invalid, %w", LimitKey, limit, err)
 		}
 	}
@@ -161,13 +161,13 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 
 		if offset != 0 {
-			if err := validateLimit(offset); err != nil {
+			if err := validateTopKLimit(offset); err != nil {
 				return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 			}
 		}
 	}
 
-	if err = validateLimit(limit + offset); err != nil {
+	if err = validateTopKLimit(limit + offset); err != nil {
 		return nil, fmt.Errorf("invalid limit[%d] + offset[%d], %w", limit, offset, err)
 	}
 

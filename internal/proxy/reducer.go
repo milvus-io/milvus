@@ -18,8 +18,8 @@ func createMilvusReducer(ctx context.Context, params *queryParams, req *internal
 		return &cntReducer{}
 	} else if req.GetIterationExtensionReduceRate() > 0 {
 		params.limit = params.limit * req.GetIterationExtensionReduceRate()
-		if params.limit > Params.CommonCfg.TopKLimit.GetAsInt64() {
-			params.limit = Params.CommonCfg.TopKLimit.GetAsInt64()
+		if params.limit > Params.QuotaConfig.TopKLimit.GetAsInt64() {
+			params.limit = Params.QuotaConfig.TopKLimit.GetAsInt64()
 		}
 	}
 	return newDefaultLimitReducer(ctx, params, req, schema, collectionName)

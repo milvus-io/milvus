@@ -81,9 +81,18 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func validateLimit(limit int64) error {
-	if limit <= 0 || limit > Params.CommonCfg.TopKLimit.GetAsInt64() {
-		return fmt.Errorf("should be in range [1, %d], but got %d", Params.CommonCfg.TopKLimit.GetAsInt64(), limit)
+func validateTopKLimit(limit int64) error {
+	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
+	if limit <= 0 || limit > topKLimit {
+		return fmt.Errorf("should be in range [1, %d], but got %d", topKLimit, limit)
+	}
+	return nil
+}
+
+func validateNQLimit(limit int64) error {
+	nqLimit := Params.QuotaConfig.NQLimit.GetAsInt64()
+	if limit <= 0 || limit > nqLimit {
+		return fmt.Errorf("nq (number of search vector per search request) should be in range [1, %d], but got %d", nqLimit, limit)
 	}
 	return nil
 }
@@ -302,7 +311,7 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 
 // ValidateFieldAutoID call after validatePrimaryKey
 func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
-	var idx = -1
+	idx := -1
 	for i, field := range coll.Fields {
 		if field.AutoID {
 			if idx != -1 {
@@ -863,7 +872,6 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 					return nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
-
 		}
 	}
 
@@ -957,7 +965,7 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	neededFieldsNum := 0
 	isPrimaryKeyNum := 0
 
-	var dataNameSet = typeutil.NewSet[string]()
+	dataNameSet := typeutil.NewSet[string]()
 	for _, data := range insertMsg.FieldsData {
 		fieldName := data.GetFieldName()
 		if dataNameSet.Contain(fieldName) {
