@@ -3,7 +3,7 @@ package typeutil
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 type kvPairsHelper[K comparable, V any] struct {

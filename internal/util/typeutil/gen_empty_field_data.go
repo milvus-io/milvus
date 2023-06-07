@@ -3,7 +3,7 @@ package typeutil
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func fieldDataEmpty(data *schemapb.FieldData) bool {

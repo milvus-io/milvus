@@ -8,7 +8,7 @@ import (
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
-	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	typeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 )

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 )

@@ -6,7 +6,7 @@ package planpb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	math "math"
 )
 

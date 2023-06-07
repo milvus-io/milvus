@@ -25,7 +25,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/stretchr/testify/assert"

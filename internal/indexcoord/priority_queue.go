@@ -20,7 +20,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // PQItem is something we manage in a priority queue.

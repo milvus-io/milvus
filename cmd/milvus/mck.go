@@ -22,7 +22,7 @@ import (
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 
 	"github.com/golang/protobuf/proto"

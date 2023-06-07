@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )

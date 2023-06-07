@@ -19,7 +19,7 @@ package indexnode
 import (
 	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {

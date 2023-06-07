@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/hook"
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"go.uber.org/zap"
