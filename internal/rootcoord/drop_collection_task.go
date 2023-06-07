@@ -89,7 +89,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		ts:           ts,
 	})
 
-	redoTask.AddAsyncStep(&releaseCollectionStep{
+	redoTask.AddSyncStep(&releaseCollectionStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: collMeta.CollectionID,
 	})

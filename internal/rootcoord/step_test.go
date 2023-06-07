@@ -18,10 +18,14 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func Test_waitForTsSyncedStep_Execute(t *testing.T) {
@@ -92,6 +96,50 @@ func Test_confirmGCStep_Execute(t *testing.T) {
 		time.Sleep(confirmGCInterval)
 
 		_, err := s.Execute(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("test release collection step", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
+		broker := NewMockBroker(t)
+		core := &Core{
+			queryCoord: qc,
+			broker:     broker,
+		}
+
+		releaseCollectionStep := &releaseCollectionStep{
+			baseStep:     baseStep{core: core},
+			collectionID: 1,
+		}
+
+		// test release failed, but get components success, expected error
+		broker.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(errors.New("fake error"))
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{}, nil)
+		_, err := releaseCollectionStep.Execute(context.TODO())
+		assert.Error(t, err)
+
+		// test release failed, and get components failed, expected nil
+		qc.ExpectedCalls = nil
+		broker.ExpectedCalls = nil
+		broker.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(errors.New("fake error"))
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(nil, errors.New("fake error"))
+		_, err = releaseCollectionStep.Execute(context.TODO())
+		assert.NoError(t, err)
+
+		// test release failed, but retry success, expected nil
+		qc.ExpectedCalls = nil
+		broker.ExpectedCalls = nil
+		broker.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(errors.New("fake error")).Times(3)
+		broker.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(nil)
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{}, nil)
+		_, err = releaseCollectionStep.Execute(context.TODO())
+		assert.NoError(t, err)
+
+		// test release succeed expected nil
+		qc.ExpectedCalls = nil
+		broker.ExpectedCalls = nil
+		broker.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(nil)
+		_, err = releaseCollectionStep.Execute(context.TODO())
 		assert.NoError(t, err)
 	})
 }

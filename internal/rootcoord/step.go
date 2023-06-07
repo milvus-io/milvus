@@ -22,8 +22,11 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/zap"
 )
 
 type stepPriority int
@@ -260,7 +263,27 @@ type releaseCollectionStep struct {
 }
 
 func (s *releaseCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.ReleaseCollection(ctx, s.collectionID)
+	err := retry.Do(ctx, func() error {
+		err := s.core.broker.ReleaseCollection(ctx, s.collectionID)
+		if err != nil {
+			// todo: if we make sure that drop collection should fail when qc is unavailable, remove this condition
+			ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			defer cancel()
+			_, stateErr := s.core.queryCoord.GetComponentStates(ctx)
+			if stateErr != nil {
+				// if qc is unavailable, when qc recovered, the dropped collection will be released, so just skip release collection here.
+				log.Warn("query coord is unavailable, skipping release collection",
+					zap.Int64("collectionID", s.collectionID),
+					zap.Error(err))
+				return nil
+			}
+
+			return err
+		}
+
+		return err
+	}, retry.Attempts(10))
+
 	return nil, err
 }
 
