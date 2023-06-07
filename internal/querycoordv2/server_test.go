@@ -101,8 +101,7 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	var err error
-
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.Require().NoError(err)
 	suite.hackServer()
 	err = suite.server.Start()
@@ -139,7 +138,7 @@ func (suite *ServerSuite) TestRecover() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.hackServer()
 	err = suite.server.Start()
@@ -154,7 +153,7 @@ func (suite *ServerSuite) TestRecoverFailed() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 
 	broker := meta.NewMockBroker(suite.T())
@@ -273,7 +272,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Initializing, suite.server.State())
 	suite.hackServer()
@@ -294,7 +293,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	mockRootCoord := coordMocks.NewRootCoord(suite.T())
 	mockDataCoord := coordMocks.NewDataCoord(suite.T())
@@ -310,7 +309,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 			),
 			CollectionID: collection,
 		}
-		mockRootCoord.EXPECT().ShowPartitionsInternal(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
 			Status:       merr.Status(nil),
 			PartitionIDs: suite.partitions[collection],
 		}, nil).Maybe()
@@ -530,7 +529,33 @@ func (suite *ServerSuite) hackServer() {
 	log.Debug("server hacked")
 }
 
-func newQueryCoord() (*Server, error) {
+func (suite *ServerSuite) hackBroker(server *Server) {
+	mockRootCoord := coordMocks.NewRootCoord(suite.T())
+	mockDataCoord := coordMocks.NewDataCoord(suite.T())
+
+	for _, collection := range suite.collections {
+		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(nil),
+			Schema: &schemapb.CollectionSchema{},
+		}, nil).Maybe()
+		req := &milvuspb.ShowPartitionsRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+			),
+			CollectionID: collection,
+		}
+		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+			Status:       merr.Status(nil),
+			PartitionIDs: suite.partitions[collection],
+		}, nil).Maybe()
+	}
+	err := server.SetRootCoord(mockRootCoord)
+	suite.NoError(err)
+	err = server.SetDataCoord(mockDataCoord)
+	suite.NoError(err)
+}
+
+func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	server, err := NewQueryCoord(context.Background())
 	if err != nil {
 		return nil, err
@@ -549,6 +574,7 @@ func newQueryCoord() (*Server, error) {
 	}
 	server.SetEtcdClient(etcdCli)
 	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
+	suite.hackBroker(server)
 	err = server.Init()
 	return server, err
 }

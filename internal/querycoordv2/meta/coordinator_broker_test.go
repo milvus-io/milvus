@@ -29,15 +29,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
-	t.Run("got error on DescribeCollectionInternal", func(t *testing.T) {
+	t.Run("got error on DescribeCollection", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, errors.New("error mock DescribeCollectionInternal"))
+		).Return(nil, errors.New("error mock DescribeCollection"))
 		ctx := context.Background()
 		broker := &CoordinatorBroker{rootCoord: rootCoord}
 		_, err := broker.GetCollectionSchema(ctx, 100)
@@ -46,7 +47,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("non-success code", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{
@@ -60,7 +61,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{
@@ -112,5 +113,39 @@ func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 
 		_, _, err := broker.GetRecoveryInfoV2(ctx, 1)
 		assert.Error(t, err)
+	})
+}
+
+func TestCoordinatorBroker_GetPartitions(t *testing.T) {
+	collection := int64(100)
+	partitions := []int64{10, 11, 12}
+
+	t.Run("normal case", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status:       &commonpb.Status{},
+			PartitionIDs: partitions,
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{rootCoord: rc}
+
+		retPartitions, err := broker.GetPartitions(ctx, collection)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, partitions, retPartitions)
+	})
+
+	t.Run("collection not exist", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{rootCoord: rc}
+		_, err := broker.GetPartitions(ctx, collection)
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 }
