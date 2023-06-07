@@ -67,10 +67,6 @@ func (mm *metaMemoryKV) GetPath(key string) string {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
-	panic("implement me")
-}
-
 func (mm *metaMemoryKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
 	panic("implement me")
 }
@@ -88,14 +84,6 @@ func (mm *metaMemoryKV) WatchWithPrefix(key string) clientv3.WatchChan {
 }
 
 func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
-	panic("implement me")
-}
-
-func (mm *metaMemoryKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
-	panic("implement me")
-}
-
-func (mm *metaMemoryKV) SaveWithIgnoreLease(key, value string) error {
 	panic("implement me")
 }
 

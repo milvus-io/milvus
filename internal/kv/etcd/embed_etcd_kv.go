@@ -159,28 +159,6 @@ func (kv *EmbedEtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, erro
 	return keys, values, nil
 }
 
-// LoadWithPrefix2 returns all the keys and values with versions by the given key prefix
-func (kv *EmbedEtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
-	key = path.Join(kv.rootPath, key)
-	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	versions := make([]int64, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-		versions = append(versions, kv.Version)
-	}
-	return keys, values, versions, nil
-}
-
 func (kv *EmbedEtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
@@ -383,26 +361,6 @@ func (kv *EmbedEtcdKV) SaveBytes(key string, value []byte) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx, key, string(value))
-	return err
-}
-
-// SaveWithLease is a function to put value in etcd with etcd lease options.
-func (kv *EmbedEtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
-	log.Debug("Embedded Etcd saving with lease", zap.String("etcd_key", key))
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
-	return err
-}
-
-// SaveWithIgnoreLease updates the key without changing its current lease.
-func (kv *EmbedEtcdKV) SaveWithIgnoreLease(key, value string) error {
-	log.Debug("Embedded Etcd saving with ignore lease", zap.String("etcd_key", key))
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithIgnoreLease())
 	return err
 }
 

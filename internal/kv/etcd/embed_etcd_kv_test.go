@@ -20,12 +20,10 @@ import (
 	"fmt"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/maps"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -121,12 +119,6 @@ func TestEmbedEtcd(te *testing.T) {
 			actualKeys, actualValues, err := metaKv.LoadWithPrefix(test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
-			assert.Equal(t, test.expectedError, err)
-
-			actualKeys, actualValues, versions, err := metaKv.LoadWithPrefix2(test.prefix)
-			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
-			assert.ElementsMatch(t, test.expectedValues, actualValues)
-			assert.NotZero(t, versions)
 			assert.Equal(t, test.expectedError, err)
 
 			actualKeys, actualValues, versions, revision, err := metaKv.LoadWithRevisionAndVersions(test.prefix)
@@ -886,77 +878,6 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, success)
 
-	})
-
-	te.Run("Etcd Lease", func(t *testing.T) {
-		rootPath := "/etcd/test/root/lease"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		assert.Nil(t, err)
-
-		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
-
-		leaseID, err := metaKv.Grant(10)
-		assert.NoError(t, err)
-
-		metaKv.KeepAlive(leaseID)
-
-		tests := map[string]string{
-			"a/b":   "v1",
-			"a/b/c": "v2",
-			"x":     "v3",
-		}
-
-		for k, v := range tests {
-			// SaveWithIgnoreLease must be used when the key already exists.
-			err = metaKv.SaveWithIgnoreLease(k, v)
-			assert.Error(t, err)
-
-			err = metaKv.SaveWithLease(k, v, leaseID)
-			assert.NoError(t, err)
-
-			err = metaKv.SaveWithLease(k, v, clientv3.LeaseID(999))
-			assert.Error(t, err)
-		}
-
-	})
-
-	te.Run("Etcd Lease Ignore", func(t *testing.T) {
-		rootPath := "/etcd/test/root/lease_ignore"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		assert.Nil(t, err)
-
-		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
-
-		tests := map[string]string{
-			"a/b":   "v1",
-			"a/b/c": "v2",
-			"x":     "v3",
-		}
-
-		for k, v := range tests {
-			leaseID, err := metaKv.Grant(1)
-			assert.NoError(t, err)
-
-			err = metaKv.SaveWithLease(k, v, leaseID)
-			assert.NoError(t, err)
-
-			err = metaKv.SaveWithIgnoreLease(k, "updated_"+v)
-			assert.NoError(t, err)
-
-			// Record should be updated correctly.
-			value, err := metaKv.Load(k)
-			assert.NoError(t, err)
-			assert.Equal(t, "updated_"+v, value)
-
-			// Let the lease expire. 3 seconds should be pretty safe.
-			time.Sleep(3 * time.Second)
-
-			// Updated record should still expire with lease.
-			_, err = metaKv.Load(k)
-			assert.Error(t, err)
-		}
 	})
 
 	te.Run("Etcd WalkWithPagination", func(t *testing.T) {

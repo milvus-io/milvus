@@ -38,6 +38,7 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -105,7 +106,7 @@ type Server struct {
 
 	etcdCli          *clientv3.Client
 	address          string
-	kvClient         *etcdkv.EtcdKV
+	kvClient         kv.MetaKv
 	meta             *meta
 	segmentManager   Manager
 	allocator        allocator

@@ -140,29 +140,6 @@ func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	return keys, values, nil
 }
 
-// LoadWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
-func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	versions := make([]int64, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-		versions = append(versions, kv.Version)
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
-	return keys, values, versions, nil
-}
-
 func (kv *EtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -375,32 +352,6 @@ func (kv *EtcdKV) SaveBytes(key string, value []byte) error {
 	CheckValueSizeAndWarn(key, value)
 	_, err := kv.client.Put(ctx, key, string(value))
 	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
-	return err
-}
-
-// SaveWithLease is a function to put value in etcd with etcd lease options.
-func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
-	log.Debug("Etcd saving with lease", zap.String("etcd_key", key))
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
-	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
-	return err
-}
-
-// SaveWithIgnoreLease updates the key without changing its current lease. Must be used when key already exists.
-func (kv *EtcdKV) SaveWithIgnoreLease(key, value string) error {
-	log.Debug("Etcd saving with ignore lease", zap.String("etcd_key", key))
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithIgnoreLease())
-	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
 
