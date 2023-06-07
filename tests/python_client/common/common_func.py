@@ -124,23 +124,23 @@ def gen_double_field(name=ct.default_double_field_name, is_primary=False, descri
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                        description=ct.default_desc):
+                        description=ct.default_desc, **kwargs):
     float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT_VECTOR,
                                                                    description=description, dim=dim,
-                                                                   is_primary=is_primary)
+                                                                   is_primary=is_primary, **kwargs)
     return float_vec_field
 
 
 def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
-                         description=ct.default_desc):
+                         description=ct.default_desc, **kwargs):
     binary_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BINARY_VECTOR,
                                                                     description=description, dim=dim,
-                                                                    is_primary=is_primary)
+                                                                    is_primary=is_primary, **kwargs)
     return binary_vec_field
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True):
+                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True, **kwargs):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
             fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
@@ -157,50 +157,50 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field)
+                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
     return schema
 
 
 def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, is_binary=False, dim=ct.default_dim):
+                                  auto_id=False, is_binary=False, dim=ct.default_dim, **kwargs):
     if is_binary:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_binary_vec_field(dim=dim)]
     else:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
     return schema
 
 
 def gen_string_pk_default_collection_schema(description=ct.default_desc, primary_field=ct.default_string_field_name,
-                                            auto_id=False, dim=ct.default_dim):
+                                            auto_id=False, dim=ct.default_dim, **kwargs):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
     return schema
 
 
 def gen_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim):
+                                       auto_id=False, dim=ct.default_dim, **kwargs):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
     return schema
 
 
 def gen_multiple_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                                auto_id=False, dim=ct.default_dim):
+                                                auto_id=False, dim=ct.default_dim, **kwargs):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(name="json1"),
               gen_json_field(name="json2"), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
     return schema
 
 
 def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim,
-                                       enable_dynamic_field=False, with_json=True):
+                                       enable_dynamic_field=False, with_json=True, **kwargs):
     if enable_dynamic_field:
         fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
     else:    
@@ -211,22 +211,22 @@ def gen_collection_schema_all_datatype(description=ct.default_desc,
             fields.remove(gen_json_field())
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field)
+                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
     return schema
 
 
-def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False):
+def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False, **kwargs):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
-                                                                    description=description, auto_id=auto_id)
+                                                                    description=description, auto_id=auto_id, **kwargs)
     return schema
 
 
 def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                         auto_id=False, dim=ct.default_dim):
+                                         auto_id=False, dim=ct.default_dim, **kwargs):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_binary_vec_field(dim=dim)]
     binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                            primary_field=primary_field,
-                                                                           auto_id=auto_id)
+                                                                           auto_id=auto_id, **kwargs)
     return binary_schema
 
 

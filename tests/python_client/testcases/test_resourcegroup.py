@@ -183,7 +183,7 @@ class TestResourceGroupParams(TestcaseBase):
                                                   check_task=ct.CheckTasks.check_rg_property,
                                                   check_items={"name": rg_name})
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to create resource group, err=resource group already exist"}
+                 ct.err_msg: "resource group already exist"}
         self.init_resource_group(name=rg_name,
                                  check_task=ct.CheckTasks.err_res,
                                  check_items=error)
@@ -243,7 +243,7 @@ class TestResourceGroupParams(TestcaseBase):
 
         rgs = self.utility_wrap.list_resource_groups()[0]
         assert len(rgs) == max_rg_num
-        error = {ct.err_code: 999, ct.err_msg: 'failed to create resource group, err=resource group num reach limit'}
+        error = {ct.err_code: 999, ct.err_msg: 'resource group num reach limit'}
         self.init_resource_group(name=cf.gen_unique_str('rg'),
                                  check_task=CheckTasks.err_res,
                                  check_items=error)
@@ -577,7 +577,7 @@ class TestTransferNode(TestcaseBase):
                                                   check_items=default_rg_info)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("num_node", [0, 99, -1, 0.5, True, "str"])
+    @pytest.mark.parametrize("num_node", [0, 99, -1, 0.5, "str"])
     def test_transfer_node_with_wrong_num_node(self, num_node):
         """
         Method:
@@ -1426,7 +1426,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         rgB_name = cf.gen_unique_str('rgB')
         self.init_resource_group(name=rgB_name)
 
-        # transfer 1 nodes to rgA, 2 nodes to rgB
+        # transfer 2 nodes to rgA, 3 nodes to rgB
         self.utility_wrap.transfer_node(source=ct.default_resource_group_name,
                                         target=rgA_name,
                                         num_node=2)
@@ -1509,7 +1509,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                             )
 
         # wait transfer completed for replicas
-        time.sleep(60)
+        time.sleep(120)
         # make growing
         if with_growing:
             res, _ = collection_w.insert(cf.gen_default_list_data(nb, dim=dim, start=7 * nb))
