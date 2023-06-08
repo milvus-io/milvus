@@ -117,3 +117,288 @@ func TestCollection_GetPartitionNum(t *testing.T) {
 	assert.Equal(t, 3, coll.GetPartitionNum(true))
 	assert.Equal(t, 6, coll.GetPartitionNum(false))
 }
+
+func TestCollection_Equal(t *testing.T) {
+	equal := func(a, b Collection) bool {
+		return a.Equal(b)
+	}
+
+	type args struct {
+		a, b Collection
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{
+				a: Collection{TenantID: "aaa"},
+				b: Collection{TenantID: "bbb"},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:   "aaa",
+					Partitions: []*Partition{{PartitionName: "default"}},
+				},
+				b: Collection{
+					TenantID: "aaa",
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:   "aaa",
+					Partitions: []*Partition{{PartitionName: "default"}},
+					Name:       "aaa",
+				},
+				b: Collection{
+					TenantID:   "aaa",
+					Partitions: []*Partition{{PartitionName: "default"}},
+					Name:       "bbb",
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "bbb",
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      true,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "256"},
+					}}},
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum: 1,
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum: 2,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "200"},
+					},
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "100"},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "200"},
+					},
+					EnableDynamicField: false,
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "200"},
+					},
+					EnableDynamicField: true,
+				},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "200"},
+					},
+					EnableDynamicField: false,
+				},
+				b: Collection{
+					TenantID:    "aaa",
+					Partitions:  []*Partition{{PartitionName: "default"}},
+					Name:        "aaa",
+					Description: "aaa",
+					AutoID:      false,
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					ShardsNum:        1,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties: []*commonpb.KeyValuePair{
+						{Key: "ttl", Value: "200"},
+					},
+					EnableDynamicField: false,
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := equal(tt.args.a, tt.args.b); got != tt.want {
+				t.Errorf("equal() = %v, want %v, collection a: %v, collection b: %v", got, tt.want, tt.args.a, tt.args.b)
+			}
+		})
+	}
+}
