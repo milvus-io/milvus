@@ -8,7 +8,7 @@ import (
 	etcdpb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 

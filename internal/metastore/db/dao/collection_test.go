@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"

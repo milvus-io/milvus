@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"

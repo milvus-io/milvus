@@ -22,13 +22,13 @@ import (
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 type createPartitionTask struct {

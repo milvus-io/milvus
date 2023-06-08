@@ -3,7 +3,7 @@
 package segments
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
 	mock "github.com/stretchr/testify/mock"

@@ -23,7 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
