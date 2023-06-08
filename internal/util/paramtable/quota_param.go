@@ -91,6 +91,9 @@ type quotaConfig struct {
 	// limits
 	MaxCollectionNum      int
 	MaxCollectionNumPerDB int
+	// Query limit, which applies on:
+	// maximum of offset + limit
+	MaxResultWindow int64
 	// Search limit, which applies on:
 	// maximum # of results to return (topK), and
 	// maximum # of search requests (nq).
@@ -171,6 +174,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 	// limits
 	p.initMaxCollectionNum()
 	p.initMaxCollectionNumPerDB()
+	p.initMaxResultWindow()
 	p.initTopKLimit()
 	p.initNQLimit()
 
@@ -620,6 +624,10 @@ func (p *quotaConfig) initMaxCollectionNum() {
 
 func (p *quotaConfig) initMaxCollectionNumPerDB() {
 	p.MaxCollectionNumPerDB = p.Base.ParseIntWithDefault("quotaAndLimits.limits.maxCollectionNumPerDB", 65536)
+}
+
+func (p *quotaConfig) initMaxResultWindow() {
+	p.MaxResultWindow = p.Base.ParseInt64WithDefault("quotaAndLimits.limits.maxResultWindow", 16384)
 }
 
 func (p *quotaConfig) initTopKLimit() {

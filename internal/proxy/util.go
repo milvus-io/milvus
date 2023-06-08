@@ -82,9 +82,17 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func validateTopKLimit(limit int64) error {
-	if limit <= 0 || limit > Params.QuotaConfig.TopKLimit {
-		return fmt.Errorf("should be in range [1, %d], but got %d", Params.QuotaConfig.TopKLimit, limit)
+func validateMaxResultWindow(offset int64, limit int64) error {
+	depth := offset + limit
+	if depth <= 0 || depth > Params.QuotaConfig.MaxResultWindow {
+		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", Params.QuotaConfig.MaxResultWindow, depth)
+	}
+	return nil
+}
+
+func validateTopKLimit(topK int64) error {
+	if topK <= 0 || topK > Params.QuotaConfig.TopKLimit {
+		return fmt.Errorf("top k should be in range [1, %d], but got %d", Params.QuotaConfig.TopKLimit, topK)
 	}
 	return nil
 }

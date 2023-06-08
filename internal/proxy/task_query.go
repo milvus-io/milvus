@@ -130,21 +130,6 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		err    error
 	)
 
-	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
-	// if limit is not provided
-	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited}, nil
-	}
-	limit, err = strconv.ParseInt(limitStr, 0, 64)
-	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
-	}
-	if limit != 0 {
-		if err := validateTopKLimit(limit); err != nil {
-			return nil, fmt.Errorf("%s [%d] is invalid, %w", LimitKey, limit, err)
-		}
-	}
-
 	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair)
 	// if offset is provided
 	if err == nil {
@@ -152,16 +137,28 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		if err != nil {
 			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
 		}
-
-		if offset != 0 {
-			if err := validateTopKLimit(offset); err != nil {
-				return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
-			}
+		if offset < 0 {
+			return nil, fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
 		}
 	}
 
-	if err = validateTopKLimit(limit + offset); err != nil {
-		return nil, fmt.Errorf("invalid limit[%d] + offset[%d], %w", limit, offset, err)
+	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
+	// if limit is not provided
+	if err != nil {
+		limit = typeutil.Unlimited
+	} else {
+		limit, err = strconv.ParseInt(limitStr, 0, 64)
+		if err != nil {
+			return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+		}
+		if limit < 0 {
+			return nil, fmt.Errorf("%s [%d] is invalid, should be gte than 0", LimitKey, limit)
+		}
+	}
+
+	// validate max result window.
+	if err = validateMaxResultWindow(offset, limit); err != nil {
+		return nil, fmt.Errorf("invalid max result window, %w", err)
 	}
 
 	return &queryParams{

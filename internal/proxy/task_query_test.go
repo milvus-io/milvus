@@ -391,7 +391,7 @@ func TestTaskQuery_functions(t *testing.T) {
 			{"empty input", []string{}, []string{}, false, typeutil.Unlimited, 0},
 			{"valid limit=1", []string{LimitKey}, []string{"1"}, false, 1, 0},
 			{"valid limit=1, offset=2", []string{LimitKey, OffsetKey}, []string{"1", "2"}, false, 1, 2},
-			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 0},
+			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 2},
 			{"invalid limit str", []string{LimitKey}, []string{"a"}, true, 0, 0},
 			{"invalid limit zero", []string{LimitKey}, []string{"0"}, true, 0, 0},
 			{"invalid limit negative", []string{LimitKey}, []string{"-1"}, true, 0, 0},
@@ -409,7 +409,6 @@ func TestTaskQuery_functions(t *testing.T) {
 						Key:   test.inKey[i],
 						Value: test.inValue[i],
 					})
-
 				}
 				ret, err := parseQueryParams(inParams)
 				if test.expectErr {
@@ -504,7 +503,8 @@ func TestTaskQuery_functions(t *testing.T) {
 				1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 				1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+				11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
+			}
 
 			t.Run("test limited", func(t *testing.T) {
 				tests := []struct {
@@ -526,7 +526,6 @@ func TestTaskQuery_functions(t *testing.T) {
 						assert.NoError(t, err)
 					})
 				}
-
 			})
 
 			t.Run("test offset", func(t *testing.T) {
