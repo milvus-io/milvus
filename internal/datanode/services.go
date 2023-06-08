@@ -642,6 +642,9 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return 0, "", fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
 		}
+		if len(resp.SegIDAssignments) == 0 || resp.SegIDAssignments[0] == nil {
+			return 0, "", fmt.Errorf("syncSegmentID Failed: the collection was dropped")
+		}
 		segmentID := resp.SegIDAssignments[0].SegID
 		log.Info("new segment assigned",
 			zap.Int64("task ID", importTaskID),

@@ -452,6 +452,11 @@ func (s *DataNodeServicesSuite) TestImport() {
 		s.Assert().NoError(err)
 		s.node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = false
 
+		s.node.dataCoord.(*DataCoordFactory).AddSegmentEmpty = true
+		_, err = s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
+		s.Assert().NoError(err)
+		s.node.dataCoord.(*DataCoordFactory).AddSegmentEmpty = false
+
 		stat, err := s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(stat))
