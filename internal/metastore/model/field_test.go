@@ -89,6 +89,28 @@ func TestCheckFieldsEqual(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			args: args{
+				fieldsA: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				}}},
+				fieldsB: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "256"},
+				}}},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				fieldsA: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "65536"},
+				}}},
+				fieldsB: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "32768"},
+				}}},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
