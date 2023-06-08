@@ -127,16 +127,19 @@ func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
 // VisitString translates expr to GenericValue.
 func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 	literal := ctx.StringLiteral().GetText()
-	if (strings.HasPrefix(literal, "\"") && strings.HasSuffix(literal, "\"")) ||
-		(strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'")) {
-		literal = literal[1 : len(literal)-1]
+	if strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'") {
+		literal = "\"" + literal[1:len(literal)-1] + "\""
+	}
+	pattern, err := strconv.Unquote(literal)
+	if err != nil {
+		return err
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_VarChar,
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
 				ValueExpr: &planpb.ValueExpr{
-					Value: NewString(literal),
+					Value: NewString(pattern),
 				},
 			},
 		},
@@ -420,10 +423,13 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return fmt.Errorf("like operation on complicated expr is unsupported")
 	}
 
-	pattern := ctx.StringLiteral().GetText()
-	if (strings.HasPrefix(pattern, "\"") && strings.HasSuffix(pattern, "\"")) ||
-		(strings.HasPrefix(pattern, "'") && strings.HasSuffix(pattern, "'")) {
-		pattern = pattern[1 : len(pattern)-1]
+	literal := ctx.StringLiteral().GetText()
+	if strings.HasPrefix(literal, "'") && strings.HasSuffix(literal, "'") {
+		literal = "\"" + literal[1:len(literal)-1] + "\""
+	}
+	pattern, err := strconv.Unquote(literal)
+	if err != nil {
+		return err
 	}
 
 	op, operand, err := translatePatternMatch(pattern)
