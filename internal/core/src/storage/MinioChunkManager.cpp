@@ -14,8 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/MinioChunkManager.h"
-
+#include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
@@ -28,12 +27,12 @@
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include <fstream>
-
+#include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
+#include "signal.h"
 
 #define THROWS3ERROR(FUNCTION)                                            \
     do {                                                                  \
@@ -49,6 +48,19 @@ namespace milvus::storage {
 
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
+
+static void
+SwallowHandler(int signal) {
+    switch (signal) {
+        case SIGPIPE:
+            LOG_SERVER_WARNING_ << "SIGPIPE Swallowed" << std::endl;
+            break;
+        default:
+            LOG_SERVER_ERROR_
+                << "Unexpected signal in SIGPIPE handler: " << signal
+                << std::endl;
+    }
+}
 
 /**
  * @brief convert std::string to Aws::String
@@ -78,7 +90,11 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
-        sdk_options_.httpOptions.installSigPipeHandler = true;
+        // sdk_options_.httpOptions.installSigPipeHandler = true;
+        struct sigaction psa;
+        psa.sa_handler = SwallowHandler;
+        psa.sa_flags = psa.sa_flags | SA_ONSTACK;
+        sigaction(SIGPIPE, &psa, 0);
         if (type == RemoteStorageType::GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
                 // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
