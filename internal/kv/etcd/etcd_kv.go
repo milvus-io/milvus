@@ -140,51 +140,6 @@ func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	return keys, values, nil
 }
 
-// LoadWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
-func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	versions := make([]int64, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-		versions = append(versions, kv.Version)
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
-	return keys, values, versions, nil
-}
-
-func (kv *EtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, nil, 0, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	versions := make([]int64, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-		versions = append(versions, kv.Version)
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with prefix2", zap.Strings("keys", keys))
-	return keys, values, versions, resp.Header.Revision, nil
-}
-
 // LoadBytesWithPrefix2 returns all the the keys,values and key versions with the given key prefix.
 func (kv *EtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64, error) {
 	start := time.Now()
@@ -312,27 +267,6 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	return result, nil
 }
 
-// LoadWithRevision returns keys, values and revision with given key prefix.
-func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortAscend))
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	keys := make([]string, 0, resp.Count)
-	values := make([]string, 0, resp.Count)
-	for _, kv := range resp.Kvs {
-		keys = append(keys, string(kv.Key))
-		values = append(values, string(kv.Value))
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation load with revision", zap.Strings("keys", keys))
-	return keys, values, resp.Header.Revision, nil
-}
-
 // LoadBytesWithRevision returns keys, values and revision with given key prefix.
 func (kv *EtcdKV) LoadBytesWithRevision(key string) ([]string, [][]byte, int64, error) {
 	start := time.Now()
@@ -375,32 +309,6 @@ func (kv *EtcdKV) SaveBytes(key string, value []byte) error {
 	CheckValueSizeAndWarn(key, value)
 	_, err := kv.client.Put(ctx, key, string(value))
 	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
-	return err
-}
-
-// SaveWithLease is a function to put value in etcd with etcd lease options.
-func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
-	log.Debug("Etcd saving with lease", zap.String("etcd_key", key))
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
-	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
-	return err
-}
-
-// SaveWithIgnoreLease updates the key without changing its current lease. Must be used when key already exists.
-func (kv *EtcdKV) SaveWithIgnoreLease(key, value string) error {
-	log.Debug("Etcd saving with ignore lease", zap.String("etcd_key", key))
-	start := time.Now()
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithIgnoreLease())
-	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
 
@@ -667,64 +575,6 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
 	return err
-}
-
-// Grant creates a new lease implemented in etcd grant interface.
-func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
-	start := time.Now()
-	resp, err := kv.client.Grant(context.Background(), ttl)
-	CheckElapseAndWarn(start, "Slow etcd operation grant")
-	return resp.ID, err
-}
-
-// KeepAlive keeps the lease alive forever with leaseID.
-// Implemented in etcd interface.
-func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	start := time.Now()
-	ch, err := kv.client.KeepAlive(context.Background(), id)
-	if err != nil {
-		return nil, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation keepAlive")
-	return ch, nil
-}
-
-// CompareValueAndSwap compares the existing value with compare, and if they are
-// equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			value)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
-	if err != nil {
-		return false, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap", zap.String("key", key))
-	return resp.Succeeded, nil
-}
-
-// CompareValueAndSwapBytes compares the existing value with compare, and if they are
-// equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) (bool, error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			string(value))).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
-	if err != nil {
-		return false, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap", zap.String("key", key))
-	return resp.Succeeded, nil
 }
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if

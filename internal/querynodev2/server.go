@@ -45,7 +45,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
@@ -118,7 +117,6 @@ type QueryNode struct {
 
 	cacheChunkManager storage.ChunkManager
 	vectorStorage     storage.ChunkManager
-	etcdKV            *etcdkv.EtcdKV
 
 	/*
 		// Pool for search/query
@@ -274,7 +272,6 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
-		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
 		node.scheduler = tasks.NewScheduler()

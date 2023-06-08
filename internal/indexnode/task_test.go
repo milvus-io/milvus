@@ -134,10 +134,6 @@ package indexnode
 // 	loadWithPrefix2 func(key string) ([]string, []string, []int64, error)
 // }
 
-// func (mk *mockETCDKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
-// 	return mk.loadWithPrefix2(key)
-// }
-
 // func TestIndexBuildTask_loadIndexMeta(t *testing.T) {
 // 	t.Run("load empty meta", func(t *testing.T) {
 // 		indexTask := &IndexBuildTask{
