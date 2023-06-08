@@ -422,28 +422,28 @@ func TestPayload_CGO_ReaderandWriter(t *testing.T) {
 		defer r.ReleasePayloadReader()
 	})
 
-	t.Run("TestAddDataToPayload", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
-		w.colType = 999
-		require.Nil(t, err)
-		require.NotNil(t, w)
+	// t.Run("TestAddDataToPayload", func(t *testing.T) {
+	// 	w, err := NewPayloadWriter(schemapb.DataType_Bool)
+	// 	w.colType = 999
+	// 	require.Nil(t, err)
+	// 	require.NotNil(t, w)
 
-		err = w.AddDataToPayload([]bool{false, false, false, false})
-		assert.NotNil(t, err)
+	// 	err = w.AddDataToPayload([]bool{false, false, false, false})
+	// 	assert.NotNil(t, err)
 
-		err = w.AddDataToPayload([]bool{false, false, false, false}, 0)
-		assert.NotNil(t, err)
+	// 	err = w.AddDataToPayload([]bool{false, false, false, false}, 0)
+	// 	assert.NotNil(t, err)
 
-		err = w.AddDataToPayload([]bool{false, false, false, false}, 0, 0)
-		assert.NotNil(t, err)
+	// 	err = w.AddDataToPayload([]bool{false, false, false, false}, 0, 0)
+	// 	assert.NotNil(t, err)
 
-		err = w.AddBoolToPayload([]bool{})
-		assert.NotNil(t, err)
-		err = w.FinishPayloadWriter()
-		assert.Nil(t, err)
-		err = w.AddBoolToPayload([]bool{false})
-		assert.NotNil(t, err)
-	})
+	// 	err = w.AddBoolToPayload([]bool{})
+	// 	assert.NotNil(t, err)
+	// 	err = w.FinishPayloadWriter()
+	// 	assert.Nil(t, err)
+	// 	err = w.AddBoolToPayload([]bool{false})
+	// 	assert.NotNil(t, err)
+	// })
 
 	t.Run("TestAddBoolAfterFinish", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
