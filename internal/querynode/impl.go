@@ -747,12 +747,26 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 	}
 
+	collection, err := node.metaReplica.getCollectionByID(req.GetReq().GetCollectionID())
+	if err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
+	// Check if the metric type specified in search params matches the metric type in the index info.
+	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() != "" {
+		if req.GetReq().GetMetricType() != collection.getMetricType() {
+			failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			failRet.Status.Reason = fmt.Sprintf("collection:%d, metric type not match: expected=%s, actual=%s: invalid parameter",
+				collection.ID(), collection.getMetricType(), req.GetReq().GetMetricType())
+			return failRet, nil
+		}
+	}
+
 	// Define the metric type when it has not been explicitly assigned by the user.
 	if !req.GetFromShardLeader() && req.GetReq().GetMetricType() == "" {
-		collection, err := node.metaReplica.getCollectionByID(req.GetReq().GetCollectionID())
-		if err == nil {
-			req.Req.MetricType = collection.getMetricType()
-		}
+		req.Req.MetricType = collection.getMetricType()
 	}
 
 	toReduceResults := make([]*internalpb.SearchResults, 0)

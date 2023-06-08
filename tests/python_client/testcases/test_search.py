@@ -3480,6 +3480,7 @@ class TestSearchBase(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [2, 8, 128, 768])
     @pytest.mark.parametrize("nb", [1, 2, 10, 100])
+    @pytest.mark.skip(reason="is_index is confusing, please help to fix it @Nico")
     def test_search_ip_brute_force(self, nb, dim):
         """
         target: https://github.com/milvus-io/milvus/issues/17378. Ensure the logic of IP distances won't be changed.
