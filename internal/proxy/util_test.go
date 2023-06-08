@@ -1058,3 +1058,12 @@ func Test_TopKLimit(t *testing.T) {
 	assert.Error(t, validateTopKLimit(16385))
 	assert.Error(t, validateTopKLimit(0))
 }
+
+func Test_MaxQueryResultWindow(t *testing.T) {
+	Params.InitOnce()
+	assert.Nil(t, validateMaxQueryResultWindow(0, 16384))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 1))
+	assert.Error(t, validateMaxQueryResultWindow(0, 16385))
+	assert.Error(t, validateMaxQueryResultWindow(0, 0))
+	assert.Error(t, validateMaxQueryResultWindow(1, 0))
+}
