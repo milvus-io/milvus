@@ -328,8 +328,9 @@ class IndexChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name)
         self.index_name = cf.gen_unique_str('index_')
-        self.c_wrap.insert(data=cf.gen_default_list_data(nb=5 * constants.ENTITIES_FOR_SEARCH),
-                           timeout=timeout, enable_traceback=enable_traceback)
+        for i in range(5):
+            self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
+                               timeout=timeout, enable_traceback=enable_traceback)
         # do as a flush before indexing
         log.debug(f"Index ready entities: {self.c_wrap.num_entities}")
 
