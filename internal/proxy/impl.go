@@ -5128,3 +5128,26 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 		ClientInfos: clients,
 	}, nil
 }
+
+func (node *Proxy) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "TODO: implement me @jaime",
+	}, nil
+}
+
+func (node *Proxy) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "TODO: implement me @jaime",
+	}, nil
+}
+
+func (node *Proxy) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return &milvuspb.ListDatabasesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me @jaime",
+		},
+	}, nil
+}

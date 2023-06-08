@@ -522,7 +522,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flushing\020\005\022\013"
   "\n\007Dropped\020\006\022\r\n\tImporting\020\007*>\n\017Placeholde"
   "rType\022\010\n\004None\020\000\022\020\n\014BinaryVector\020d\022\017\n\013Flo"
-  "atVector\020e*\343\017\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n"
+  "atVector\020e*\237\020\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n"
   "\020CreateCollection\020d\022\022\n\016DropCollection\020e\022"
   "\021\n\rHasCollection\020f\022\026\n\022DescribeCollection"
   "\020g\022\023\n\017ShowCollections\020h\022\024\n\020GetSystemConf"
@@ -572,57 +572,62 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "olicy\020\311\014\022\030\n\023CreateResourceGroup\020\244\r\022\026\n\021Dr"
   "opResourceGroup\020\245\r\022\027\n\022ListResourceGroups"
   "\020\246\r\022\032\n\025DescribeResourceGroup\020\247\r\022\021\n\014Trans"
-  "ferNode\020\250\r\022\024\n\017TransferReplica\020\251\r*\"\n\007DslT"
-  "ype\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001*B\n\017Compacti"
-  "onState\022\021\n\rUndefiedState\020\000\022\r\n\tExecuting\020"
-  "\001\022\r\n\tCompleted\020\002*X\n\020ConsistencyLevel\022\n\n\006"
-  "Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bounded\020\002\022\016\n\nEv"
-  "entually\020\003\022\016\n\nCustomized\020\004*\236\001\n\013ImportSta"
-  "te\022\021\n\rImportPending\020\000\022\020\n\014ImportFailed\020\001\022"
-  "\021\n\rImportStarted\020\002\022\023\n\017ImportPersisted\020\005\022"
-  "\021\n\rImportFlushed\020\010\022\023\n\017ImportCompleted\020\006\022"
-  "\032\n\026ImportFailedAndCleaned\020\007*2\n\nObjectTyp"
-  "e\022\016\n\nCollection\020\000\022\n\n\006Global\020\001\022\010\n\004User\020\002*"
-  "\227\007\n\017ObjectPrivilege\022\020\n\014PrivilegeAll\020\000\022\035\n"
-  "\031PrivilegeCreateCollection\020\001\022\033\n\027Privileg"
-  "eDropCollection\020\002\022\037\n\033PrivilegeDescribeCo"
-  "llection\020\003\022\034\n\030PrivilegeShowCollections\020\004"
-  "\022\021\n\rPrivilegeLoad\020\005\022\024\n\020PrivilegeRelease\020"
-  "\006\022\027\n\023PrivilegeCompaction\020\007\022\023\n\017PrivilegeI"
-  "nsert\020\010\022\023\n\017PrivilegeDelete\020\t\022\032\n\026Privileg"
-  "eGetStatistics\020\n\022\030\n\024PrivilegeCreateIndex"
-  "\020\013\022\030\n\024PrivilegeIndexDetail\020\014\022\026\n\022Privileg"
-  "eDropIndex\020\r\022\023\n\017PrivilegeSearch\020\016\022\022\n\016Pri"
-  "vilegeFlush\020\017\022\022\n\016PrivilegeQuery\020\020\022\030\n\024Pri"
-  "vilegeLoadBalance\020\021\022\023\n\017PrivilegeImport\020\022"
-  "\022\034\n\030PrivilegeCreateOwnership\020\023\022\027\n\023Privil"
-  "egeUpdateUser\020\024\022\032\n\026PrivilegeDropOwnershi"
-  "p\020\025\022\034\n\030PrivilegeSelectOwnership\020\026\022\034\n\030Pri"
-  "vilegeManageOwnership\020\027\022\027\n\023PrivilegeSele"
-  "ctUser\020\030\022\023\n\017PrivilegeUpsert\020\031\022 \n\034Privile"
-  "geCreateResourceGroup\020\032\022\036\n\032PrivilegeDrop"
-  "ResourceGroup\020\033\022\"\n\036PrivilegeDescribeReso"
-  "urceGroup\020\034\022\037\n\033PrivilegeListResourceGrou"
-  "ps\020\035\022\031\n\025PrivilegeTransferNode\020\036\022\034\n\030Privi"
-  "legeTransferReplica\020\037\022\037\n\033PrivilegeGetLoa"
-  "dingProgress\020 \022\031\n\025PrivilegeGetLoadState\020"
-  "!*S\n\tStateCode\022\020\n\014Initializing\020\000\022\013\n\007Heal"
-  "thy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003\022\014\n\010Stop"
-  "ping\020\004*c\n\tLoadState\022\025\n\021LoadStateNotExist"
-  "\020\000\022\024\n\020LoadStateNotLoad\020\001\022\024\n\020LoadStateLoa"
-  "ding\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021privilege"
-  "_ext_obj\022\037.google.protobuf.MessageOption"
-  "s\030\351\007 \001(\0132!.milvus.proto.common.Privilege"
-  "ExtBf\n\016io.milvus.grpcB\013CommonProtoP\001Z1gi"
-  "thub.com/milvus-io/milvus-proto/go-api/c"
-  "ommonpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "ferNode\020\250\r\022\024\n\017TransferReplica\020\251\r\022\023\n\016Crea"
+  "teDatabase\020\211\016\022\021\n\014DropDatabase\020\212\016\022\022\n\rList"
+  "Databases\020\213\016*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBool"
+  "ExprV1\020\001*B\n\017CompactionState\022\021\n\rUndefiedS"
+  "tate\020\000\022\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002*X\n\020"
+  "ConsistencyLevel\022\n\n\006Strong\020\000\022\013\n\007Session\020"
+  "\001\022\013\n\007Bounded\020\002\022\016\n\nEventually\020\003\022\016\n\nCustom"
+  "ized\020\004*\236\001\n\013ImportState\022\021\n\rImportPending\020"
+  "\000\022\020\n\014ImportFailed\020\001\022\021\n\rImportStarted\020\002\022\023"
+  "\n\017ImportPersisted\020\005\022\021\n\rImportFlushed\020\010\022\023"
+  "\n\017ImportCompleted\020\006\022\032\n\026ImportFailedAndCl"
+  "eaned\020\007*2\n\nObjectType\022\016\n\nCollection\020\000\022\n\n"
+  "\006Global\020\001\022\010\n\004User\020\002*\241\010\n\017ObjectPrivilege\022"
+  "\020\n\014PrivilegeAll\020\000\022\035\n\031PrivilegeCreateColl"
+  "ection\020\001\022\033\n\027PrivilegeDropCollection\020\002\022\037\n"
+  "\033PrivilegeDescribeCollection\020\003\022\034\n\030Privil"
+  "egeShowCollections\020\004\022\021\n\rPrivilegeLoad\020\005\022"
+  "\024\n\020PrivilegeRelease\020\006\022\027\n\023PrivilegeCompac"
+  "tion\020\007\022\023\n\017PrivilegeInsert\020\010\022\023\n\017Privilege"
+  "Delete\020\t\022\032\n\026PrivilegeGetStatistics\020\n\022\030\n\024"
+  "PrivilegeCreateIndex\020\013\022\030\n\024PrivilegeIndex"
+  "Detail\020\014\022\026\n\022PrivilegeDropIndex\020\r\022\023\n\017Priv"
+  "ilegeSearch\020\016\022\022\n\016PrivilegeFlush\020\017\022\022\n\016Pri"
+  "vilegeQuery\020\020\022\030\n\024PrivilegeLoadBalance\020\021\022"
+  "\023\n\017PrivilegeImport\020\022\022\034\n\030PrivilegeCreateO"
+  "wnership\020\023\022\027\n\023PrivilegeUpdateUser\020\024\022\032\n\026P"
+  "rivilegeDropOwnership\020\025\022\034\n\030PrivilegeSele"
+  "ctOwnership\020\026\022\034\n\030PrivilegeManageOwnershi"
+  "p\020\027\022\027\n\023PrivilegeSelectUser\020\030\022\023\n\017Privileg"
+  "eUpsert\020\031\022 \n\034PrivilegeCreateResourceGrou"
+  "p\020\032\022\036\n\032PrivilegeDropResourceGroup\020\033\022\"\n\036P"
+  "rivilegeDescribeResourceGroup\020\034\022\037\n\033Privi"
+  "legeListResourceGroups\020\035\022\031\n\025PrivilegeTra"
+  "nsferNode\020\036\022\034\n\030PrivilegeTransferReplica\020"
+  "\037\022\037\n\033PrivilegeGetLoadingProgress\020 \022\031\n\025Pr"
+  "ivilegeGetLoadState\020!\022\035\n\031PrivilegeRename"
+  "Collection\020\"\022\033\n\027PrivilegeCreateDatabase\020"
+  "#\022\031\n\025PrivilegeDropDatabase\020$\022\032\n\026Privileg"
+  "eListDatabases\020%\022\025\n\021PrivilegeFlushAll\020&*"
+  "S\n\tStateCode\022\020\n\014Initializing\020\000\022\013\n\007Health"
+  "y\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003\022\014\n\010Stoppi"
+  "ng\020\004*c\n\tLoadState\022\025\n\021LoadStateNotExist\020\000"
+  "\022\024\n\020LoadStateNotLoad\020\001\022\024\n\020LoadStateLoadi"
+  "ng\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021privilege_e"
+  "xt_obj\022\037.google.protobuf.MessageOptions\030"
+  "\351\007 \001(\0132!.milvus.proto.common.PrivilegeEx"
+  "tBf\n\016io.milvus.grpcB\013CommonProtoP\001Z1gith"
+  "ub.com/milvus-io/milvus-proto/go-api/com"
+  "monpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_common_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_common_2eproto = {
-    false, false, 6835, descriptor_table_protodef_common_2eproto,
+    false, false, 7033, descriptor_table_protodef_common_2eproto,
     "common.proto",
     &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_deps, 1, 16,
     schemas, file_default_instances, TableStruct_common_2eproto::offsets,
@@ -864,6 +869,9 @@ bool MsgType_IsValid(int value) {
     case 1703:
     case 1704:
     case 1705:
+    case 1801:
+    case 1802:
+    case 1803:
       return true;
     default:
       return false;
@@ -990,6 +998,11 @@ bool ObjectPrivilege_IsValid(int value) {
     case 31:
     case 32:
     case 33:
+    case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
       return true;
     default:
       return false;
