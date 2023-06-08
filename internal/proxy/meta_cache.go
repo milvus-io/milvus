@@ -350,23 +350,14 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 }
 
 func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error) {
-	_, err := m.GetCollectionID(ctx, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return nil, err
-	}
-
-	m.mu.RLock()
-
-	collInfo, ok := m.collInfo[collectionName]
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetPartitions", metrics.CacheMissLabel).Inc()
-		m.mu.RUnlock()
 
 		partitions, err := m.showPartitions(ctx, collectionName)
 		if err != nil {
@@ -390,7 +381,6 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		return ret, nil
 
 	}
-	defer m.mu.RUnlock()
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetPartitions", metrics.CacheHitLabel).Inc()
 
 	ret := make(map[string]typeutil.UniqueID)
@@ -403,23 +393,12 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error) {
-	_, err := m.GetCollectionID(ctx, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	m.mu.RLock()
-
-	collInfo, ok := m.collInfo[collectionName]
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
-
-	var partInfo *partitionInfo
-	partInfo, ok = collInfo.partInfo[partitionName]
-	m.mu.RUnlock()
-
+	partInfo, ok := collInfo.partInfo[partitionName]
 	if !ok {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetPartitionInfo", metrics.CacheMissLabel).Inc()
