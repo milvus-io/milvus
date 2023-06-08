@@ -170,7 +170,6 @@ func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, err
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
 
-	NewRocksIterator(kv.DB, option)
 	iter := NewRocksIteratorWithUpperBound(kv.DB, typeutil.AddOne(prefix), option)
 	defer iter.Close()
 
