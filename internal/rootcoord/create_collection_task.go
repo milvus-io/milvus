@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -79,7 +80,7 @@ func (t *createCollectionTask) validate() error {
 	return nil
 }
 
-func defaultValueTypeMatch(schema *schemapb.CollectionSchema) error {
+func checkDefaultValue(schema *schemapb.CollectionSchema) error {
 	for _, fieldSchema := range schema.Fields {
 		if fieldSchema.GetDefaultValue() != nil {
 			switch fieldSchema.GetDefaultValue().Data.(type) {
@@ -120,6 +121,15 @@ func defaultValueTypeMatch(schema *schemapb.CollectionSchema) error {
 				if fieldSchema.GetDataType() != schemapb.DataType_VarChar {
 					return merr.WrapErrParameterInvalid("DataType_VarChar", "not match", "default value type mismatches field schema type")
 				}
+				maxLength, err := parameterutil.GetMaxLength(fieldSchema)
+				if err != nil {
+					return err
+				}
+				defaultValueLength := len(fieldSchema.GetDefaultValue().GetStringData())
+				if int64(defaultValueLength) > maxLength {
+					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
+					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+				}
 			default:
 				panic("default value unsupport data type")
 			}
@@ -146,9 +156,9 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
 
-	err := defaultValueTypeMatch(schema)
+	err := checkDefaultValue(schema)
 	if err != nil {
-		log.Error("default value type mismatch field schema type")
+		log.Error("has invalid default value")
 		return err
 	}
 

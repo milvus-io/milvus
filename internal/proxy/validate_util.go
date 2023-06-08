@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
@@ -51,15 +52,6 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		return err
 	}
 
-	err = v.fillWithDefaultValue(data, helper, numRows)
-	if err != nil {
-		return err
-	}
-
-	if err := v.checkAligned(data, helper, numRows); err != nil {
-		return err
-	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -89,6 +81,15 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		default:
 		}
+	}
+
+	err = v.fillWithDefaultValue(data, helper, numRows)
+	if err != nil {
+		return err
+	}
+
+	if err := v.checkAligned(data, helper, numRows); err != nil {
+		return err
 	}
 
 	return nil
@@ -255,13 +256,13 @@ func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fie
 
 func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
-	if strArr == nil {
+	if strArr == nil && fieldSchema.GetDefaultValue() == nil {
 		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
 
 	if v.checkMaxLen {
-		maxLength, err := GetMaxLength(fieldSchema)
+		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
 		if err != nil {
 			return err
 		}
@@ -291,7 +292,7 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 	}
 
 	data := field.GetScalars().GetIntData().GetData()
-	if data == nil {
+	if data == nil && fieldSchema.GetDefaultValue() == nil {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need int array", "got nil", msg)
 	}

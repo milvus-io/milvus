@@ -266,6 +266,37 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.ErrorIs(t, err8, merr.ErrParameterInvalid)
 	})
 
+	t.Run("default value length exceeds", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "2",
+						},
+					},
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "abc",
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
