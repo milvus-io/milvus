@@ -44,10 +44,11 @@ type NativePayloadWriter struct {
 	finished    bool
 	flushedRows int
 	output      *bytes.Buffer
+	resultBuf   []byte
 	releaseOnce sync.Once
 }
 
-func NewPurePayloadWriter(colType schemapb.DataType, dim ...int) (*NativePayloadWriter, error) {
+func NewNativePayloadWriter(colType schemapb.DataType, buf *bytes.Buffer, dim ...int) (*NativePayloadWriter, error) {
 	var arrowType arrow.DataType
 	if typeutil.IsVectorType(colType) {
 		if len(dim) != 1 {
@@ -66,7 +67,7 @@ func NewPurePayloadWriter(colType schemapb.DataType, dim ...int) (*NativePayload
 		builder:     builder,
 		finished:    false,
 		flushedRows: 0,
-		output:      new(bytes.Buffer),
+		output:      buf,
 	}, nil
 }
 
@@ -440,27 +441,35 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 		parquet.WithCompression(compress.Codecs.Zstd),
 		parquet.WithCompressionLevel(3),
 	)
-	return pqarrow.WriteTable(table,
+
+	start := w.output.Len()
+	err := pqarrow.WriteTable(table,
 		w.output,
 		1024*1024*1024,
 		props,
 		pqarrow.DefaultWriterProps(),
 	)
-}
-
-func (w *NativePayloadWriter) GetPayloadBufferFromWriter() ([]byte, error) {
-	data := w.output.Bytes()
-
-	// The cpp version of payload writer handles the empty buffer as error
-	if len(data) == 0 {
-		return nil, errors.New("empty buffer")
+	if err != nil {
+		return err
 	}
+	w.resultBuf = w.output.Bytes()[start:]
 
-	return data, nil
+	return nil
 }
 
-func (w *NativePayloadWriter) GetPayloadLengthFromWriter() (int, error) {
-	return w.flushedRows + w.builder.Len(), nil
+func (w *NativePayloadWriter) Buffer() []byte {
+	if len(w.resultBuf) == 0 {
+		panic("empty result buffer")
+	}
+	return w.resultBuf
+}
+
+func (w *NativePayloadWriter) BufMemSize() int {
+	return len(w.resultBuf)
+}
+
+func (w *NativePayloadWriter) Length() (int, error) {
+	return w.flushedRows, nil
 }
 
 func (w *NativePayloadWriter) ReleasePayloadWriter() {

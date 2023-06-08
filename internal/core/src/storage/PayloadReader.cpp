@@ -47,7 +47,7 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
 
     parquet::arrow::FileReaderBuilder reader_builder;
     auto st = reader_builder.Open(input, reader_properties);
-    AssertInfo(st.ok(), "file to read file");
+    AssertInfo(st.ok(), st.message());
     reader_builder.memory_pool(pool);
     reader_builder.properties(arrow_reader_props);
 

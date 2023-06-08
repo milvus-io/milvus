@@ -24,6 +24,7 @@ package storage
 */
 import "C"
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"unsafe"
@@ -48,9 +49,10 @@ type PayloadWriterInterface interface {
 	AddOneJSONToPayload(msg []byte) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
+	BufMemSize() int
 	FinishPayloadWriter() error
-	GetPayloadBufferFromWriter() ([]byte, error)
-	GetPayloadLengthFromWriter() (int, error)
+	Buffer() []byte
+	Length() (int, error)
 	ReleasePayloadWriter()
 	Close()
 }
@@ -83,8 +85,8 @@ type PayloadWriter struct {
 }
 
 // NewPayloadWriter is constructor of PayloadWriter
-func NewPayloadWriter(colType schemapb.DataType, dim ...int) (PayloadWriterInterface, error) {
-	return NewPurePayloadWriter(colType, dim...)
+func NewPayloadWriter(colType schemapb.DataType, buf *bytes.Buffer, dim ...int) (PayloadWriterInterface, error) {
+	return NewNativePayloadWriter(colType, buf, dim...)
 }
 
 // AddDataToPayload adds @msgs into payload, if @msgs is vector, dimension should be specified by @dim
@@ -375,7 +377,7 @@ func (w *PayloadWriter) GetPayloadBufferFromWriter() ([]byte, error) {
 	return data, nil
 }
 
-func (w *PayloadWriter) GetPayloadLengthFromWriter() (int, error) {
+func (w *PayloadWriter) Length() (int, error) {
 	length := C.GetPayloadLengthFromWriter(w.payloadWriterPtr)
 	return int(length), nil
 }

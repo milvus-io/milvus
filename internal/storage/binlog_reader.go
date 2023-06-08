@@ -24,6 +24,8 @@ import (
 	"io"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -117,6 +119,8 @@ func NewBinlogReader(data []byte) (*BinlogReader, error) {
 		buffer:  bytes.NewBuffer(data),
 		isClose: false,
 	}
+
+	log.Info("yah01: binlog reader", zap.Int("size", reader.buffer.Len()))
 
 	if _, err := reader.readMagicNumber(); err != nil {
 		return nil, err

@@ -177,7 +177,7 @@ func TestInsertEvent(t *testing.T) {
 	}
 
 	t.Run("insert_bool", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Bool)
+		w, err := newInsertEventWriter(schemapb.DataType_Bool, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Bool, w,
 			func(w *insertEventWriter) error {
@@ -193,7 +193,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int8", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int8)
+		w, err := newInsertEventWriter(schemapb.DataType_Int8, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Int8, w,
 			func(w *insertEventWriter) error {
@@ -209,7 +209,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int16", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int16)
+		w, err := newInsertEventWriter(schemapb.DataType_Int16, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Int16, w,
 			func(w *insertEventWriter) error {
@@ -225,7 +225,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int32)
+		w, err := newInsertEventWriter(schemapb.DataType_Int32, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Int32, w,
 			func(w *insertEventWriter) error {
@@ -241,7 +241,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int64)
+		w, err := newInsertEventWriter(schemapb.DataType_Int64, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Int64, w,
 			func(w *insertEventWriter) error {
@@ -257,7 +257,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Float)
+		w, err := newInsertEventWriter(schemapb.DataType_Float, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Float, w,
 			func(w *insertEventWriter) error {
@@ -273,7 +273,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Double)
+		w, err := newInsertEventWriter(schemapb.DataType_Double, new(bytes.Buffer))
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_Double, w,
 			func(w *insertEventWriter) error {
@@ -289,7 +289,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_binary_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, 16)
+		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, new(bytes.Buffer), 16)
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
@@ -305,7 +305,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, 2)
+		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, new(bytes.Buffer), 2)
 		assert.Nil(t, err)
 		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
@@ -321,7 +321,7 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_string", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_String)
+		w, err := newInsertEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -375,7 +375,7 @@ func TestInsertEvent(t *testing.T) {
 // delete data will always be saved as string(pk + ts) to binlog
 func TestDeleteEvent(t *testing.T) {
 	t.Run("delete_string", func(t *testing.T) {
-		w, err := newDeleteEventWriter(schemapb.DataType_String)
+		w, err := newDeleteEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -429,13 +429,13 @@ func TestDeleteEvent(t *testing.T) {
 /* #nosec G103 */
 func TestCreateCollectionEvent(t *testing.T) {
 	t.Run("create_event", func(t *testing.T) {
-		w, err := newCreateCollectionEventWriter(schemapb.DataType_Float)
+		w, err := newCreateCollectionEventWriter(schemapb.DataType_Float, new(bytes.Buffer))
 		assert.NotNil(t, err)
 		assert.Nil(t, w)
 	})
 
 	t.Run("create_collection_timestamp", func(t *testing.T) {
-		w, err := newCreateCollectionEventWriter(schemapb.DataType_Int64)
+		w, err := newCreateCollectionEventWriter(schemapb.DataType_Int64, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
@@ -477,7 +477,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 	})
 
 	t.Run("create_collection_string", func(t *testing.T) {
-		w, err := newCreateCollectionEventWriter(schemapb.DataType_String)
+		w, err := newCreateCollectionEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -531,13 +531,13 @@ func TestCreateCollectionEvent(t *testing.T) {
 /* #nosec G103 */
 func TestDropCollectionEvent(t *testing.T) {
 	t.Run("drop_event", func(t *testing.T) {
-		w, err := newDropCollectionEventWriter(schemapb.DataType_Float)
+		w, err := newDropCollectionEventWriter(schemapb.DataType_Float, new(bytes.Buffer))
 		assert.NotNil(t, err)
 		assert.Nil(t, w)
 	})
 
 	t.Run("drop_collection_timestamp", func(t *testing.T) {
-		w, err := newDropCollectionEventWriter(schemapb.DataType_Int64)
+		w, err := newDropCollectionEventWriter(schemapb.DataType_Int64, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
@@ -579,7 +579,7 @@ func TestDropCollectionEvent(t *testing.T) {
 	})
 
 	t.Run("drop_collection_string", func(t *testing.T) {
-		w, err := newDropCollectionEventWriter(schemapb.DataType_String)
+		w, err := newDropCollectionEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -633,13 +633,13 @@ func TestDropCollectionEvent(t *testing.T) {
 /* #nosec G103 */
 func TestCreatePartitionEvent(t *testing.T) {
 	t.Run("create_event", func(t *testing.T) {
-		w, err := newCreatePartitionEventWriter(schemapb.DataType_Float)
+		w, err := newCreatePartitionEventWriter(schemapb.DataType_Float, new(bytes.Buffer))
 		assert.NotNil(t, err)
 		assert.Nil(t, w)
 	})
 
 	t.Run("create_partition_timestamp", func(t *testing.T) {
-		w, err := newCreatePartitionEventWriter(schemapb.DataType_Int64)
+		w, err := newCreatePartitionEventWriter(schemapb.DataType_Int64, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
@@ -681,7 +681,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 	})
 
 	t.Run("create_partition_string", func(t *testing.T) {
-		w, err := newCreatePartitionEventWriter(schemapb.DataType_String)
+		w, err := newCreatePartitionEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -735,13 +735,13 @@ func TestCreatePartitionEvent(t *testing.T) {
 /* #nosec G103 */
 func TestDropPartitionEvent(t *testing.T) {
 	t.Run("drop_event", func(t *testing.T) {
-		w, err := newDropPartitionEventWriter(schemapb.DataType_Float)
+		w, err := newDropPartitionEventWriter(schemapb.DataType_Float, new(bytes.Buffer))
 		assert.NotNil(t, err)
 		assert.Nil(t, w)
 	})
 
 	t.Run("drop_partition_timestamp", func(t *testing.T) {
-		w, err := newDropPartitionEventWriter(schemapb.DataType_Int64)
+		w, err := newDropPartitionEventWriter(schemapb.DataType_Int64, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
@@ -783,7 +783,7 @@ func TestDropPartitionEvent(t *testing.T) {
 	})
 
 	t.Run("drop_partition_string", func(t *testing.T) {
-		w, err := newDropPartitionEventWriter(schemapb.DataType_String)
+		w, err := newDropPartitionEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
@@ -838,7 +838,7 @@ func TestDropPartitionEvent(t *testing.T) {
 /* #nosec G103 */
 func TestIndexFileEvent(t *testing.T) {
 	t.Run("index_file_string", func(t *testing.T) {
-		w, err := newIndexFileEventWriter(schemapb.DataType_String)
+		w, err := newIndexFileEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
@@ -875,7 +875,7 @@ func TestIndexFileEvent(t *testing.T) {
 	})
 
 	t.Run("index_file_int8", func(t *testing.T) {
-		w, err := newIndexFileEventWriter(schemapb.DataType_Int8)
+		w, err := newIndexFileEventWriter(schemapb.DataType_Int8, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
@@ -909,7 +909,7 @@ func TestIndexFileEvent(t *testing.T) {
 	})
 
 	t.Run("index_file_int8_large", func(t *testing.T) {
-		w, err := newIndexFileEventWriter(schemapb.DataType_Int8)
+		w, err := newIndexFileEventWriter(schemapb.DataType_Int8, new(bytes.Buffer))
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
@@ -1085,7 +1085,7 @@ func TestEventReaderError(t *testing.T) {
 }
 
 func TestEventClose(t *testing.T) {
-	w, err := newInsertEventWriter(schemapb.DataType_String)
+	w, err := newInsertEventWriter(schemapb.DataType_String, new(bytes.Buffer))
 	assert.Nil(t, err)
 	w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 	err = w.AddDataToPayload("1234")

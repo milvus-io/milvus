@@ -1482,7 +1482,7 @@ func (e *testEvent) GetMemoryUsageInBytes() (int32, error) {
 	}
 	return 0, nil
 }
-func (e *testEvent) GetPayloadLengthFromWriter() (int, error) {
+func (e *testEvent) Length() (int, error) {
 	if e.getPayloadLengthError {
 		return -1, fmt.Errorf("getPayloadLength error")
 	}
