@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/parameterutil.go"
 )
 
 type validateUtil struct {
@@ -48,10 +49,6 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		return err
 	}
 
-	if err := v.checkAligned(data, helper, numRows); err != nil {
-		return err
-	}
-
 	for _, field := range data {
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -81,6 +78,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		default:
 		}
+	}
+
+	if err := v.checkAligned(data, helper, numRows); err != nil {
+		return err
 	}
 
 	return nil
@@ -177,7 +178,7 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 	}
 
 	if v.checkMaxLen {
-		maxLength, err := GetMaxLength(fieldSchema)
+		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
 		if err != nil {
 			return err
 		}
