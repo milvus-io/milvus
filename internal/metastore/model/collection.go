@@ -74,6 +74,7 @@ func (c Collection) Equal(other Collection) bool {
 		CheckFieldsEqual(c.Fields, other.Fields) &&
 		c.ShardsNum == other.ShardsNum &&
 		c.ConsistencyLevel == other.ConsistencyLevel &&
+		checkParamsEqual(c.Properties, other.Properties) &&
 		c.EnableDynamicField == other.EnableDynamicField
 }
 
