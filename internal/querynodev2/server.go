@@ -236,9 +236,9 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			log.Error("QueryNode init hook failed", zap.Error(err))
 			// auto index cannot work if hook init failed
 			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+				log.Error("QueryNode init hook failed", zap.Error(err))
 				initError = err
 				return
 			}
