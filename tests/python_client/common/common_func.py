@@ -442,14 +442,17 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
     return df, binary_raw_values
 
 
-def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
     int_values = [i for i in range(start, start + nb)]
     float_values = [np.float32(i) for i in range(start, start + nb)]
     string_values = [str(i) for i in range(start, start + nb)]
     json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
                    for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
-    data = [int_values, float_values, string_values, json_values, float_vec_values]
+    if with_json is False:
+        data = [int_values, float_values, string_values, float_vec_values]
+    else:
+        data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
 
 
@@ -742,7 +745,7 @@ def gen_normal_string_expressions(field):
     return expressions
 
 
-def gen_invaild_string_expressions():
+def gen_invalid_string_expressions():
     expressions = [
         "varchar in [0,  \"1\"]",
         "varchar not in [\"0\", 1, 2]"
