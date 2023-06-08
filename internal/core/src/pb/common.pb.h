@@ -589,12 +589,13 @@ enum ObjectPrivilege : int {
   PrivilegeCreateDatabase = 35,
   PrivilegeDropDatabase = 36,
   PrivilegeListDatabases = 37,
+  PrivilegeFlushAll = 38,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeListDatabases;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeFlushAll;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();
