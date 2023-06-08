@@ -185,8 +185,8 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	var err error
 	queryNode.queryHook, err = initHook()
 	if err != nil {
-		log.Error("load queryhook failed", zap.Error(err))
 		if Params.AutoIndexConfig.Enable {
+			log.Error("load queryhook failed", zap.Error(err))
 			panic(err)
 		}
 	}
