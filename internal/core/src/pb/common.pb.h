@@ -390,12 +390,15 @@ enum MsgType : int {
   DescribeResourceGroup = 1703,
   TransferNode = 1704,
   TransferReplica = 1705,
+  CreateDatabase = 1801,
+  DropDatabase = 1802,
+  ListDatabases = 1803,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool MsgType_IsValid(int value);
 constexpr MsgType MsgType_MIN = Undefined;
-constexpr MsgType MsgType_MAX = TransferReplica;
+constexpr MsgType MsgType_MAX = ListDatabases;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();
@@ -582,12 +585,17 @@ enum ObjectPrivilege : int {
   PrivilegeTransferReplica = 31,
   PrivilegeGetLoadingProgress = 32,
   PrivilegeGetLoadState = 33,
+  PrivilegeRenameCollection = 34,
+  PrivilegeCreateDatabase = 35,
+  PrivilegeDropDatabase = 36,
+  PrivilegeListDatabases = 37,
+  PrivilegeFlushAll = 38,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeGetLoadState;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeFlushAll;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();

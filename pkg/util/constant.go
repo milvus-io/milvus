@@ -107,6 +107,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferReplica.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferNode.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeFlushAll.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),

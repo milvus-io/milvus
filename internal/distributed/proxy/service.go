@@ -942,3 +942,26 @@ func (s *Server) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*mi
 func (s *Server) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
 	return s.proxy.ListClientInfos(ctx, req)
 }
+
+func (s *Server) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "TODO: implement me @jaime",
+	}, nil
+}
+
+func (s *Server) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "TODO: implement me @jaime",
+	}, nil
+}
+
+func (s *Server) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return &milvuspb.ListDatabasesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "TODO: implement me @jaime",
+		},
+	}, nil
+}
