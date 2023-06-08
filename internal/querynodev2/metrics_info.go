@@ -54,16 +54,13 @@ func getSearchNQInQueue() (metricsinfo.ReadInfoInQueue, error) {
 	if err != nil {
 		return metricsinfo.ReadInfoInQueue{}, err
 	}
+	defer collector.Average.Reset(metricsinfo.SearchQueueMetric)
 
-	unsolvedQueueLabel := collector.ConstructLabel(metricsinfo.UnsolvedQueueType, metricsinfo.SearchQueueMetric)
 	readyQueueLabel := collector.ConstructLabel(metricsinfo.ReadyQueueType, metricsinfo.SearchQueueMetric)
-	receiveQueueLabel := collector.ConstructLabel(metricsinfo.ReceiveQueueType, metricsinfo.SearchQueueMetric)
 	executeQueueLabel := collector.ConstructLabel(metricsinfo.ExecuteQueueType, metricsinfo.SearchQueueMetric)
 
 	return metricsinfo.ReadInfoInQueue{
-		UnsolvedQueue:    collector.Counter.Get(unsolvedQueueLabel),
 		ReadyQueue:       collector.Counter.Get(readyQueueLabel),
-		ReceiveChan:      collector.Counter.Get(receiveQueueLabel),
 		ExecuteChan:      collector.Counter.Get(executeQueueLabel),
 		AvgQueueDuration: time.Duration(int64(average)),
 	}, nil
@@ -74,16 +71,13 @@ func getQueryTasksInQueue() (metricsinfo.ReadInfoInQueue, error) {
 	if err != nil {
 		return metricsinfo.ReadInfoInQueue{}, err
 	}
+	defer collector.Average.Reset(metricsinfo.QueryQueueMetric)
 
-	unsolvedQueueLabel := collector.ConstructLabel(metricsinfo.UnsolvedQueueType, metricsinfo.QueryQueueMetric)
 	readyQueueLabel := collector.ConstructLabel(metricsinfo.ReadyQueueType, metricsinfo.QueryQueueMetric)
-	receiveQueueLabel := collector.ConstructLabel(metricsinfo.ReceiveQueueType, metricsinfo.QueryQueueMetric)
 	executeQueueLabel := collector.ConstructLabel(metricsinfo.ExecuteQueueType, metricsinfo.QueryQueueMetric)
 
 	return metricsinfo.ReadInfoInQueue{
-		UnsolvedQueue:    collector.Counter.Get(unsolvedQueueLabel),
 		ReadyQueue:       collector.Counter.Get(readyQueueLabel),
-		ReceiveChan:      collector.Counter.Get(receiveQueueLabel),
 		ExecuteChan:      collector.Counter.Get(executeQueueLabel),
 		AvgQueueDuration: time.Duration(int64(average)),
 	}, nil

@@ -363,10 +363,9 @@ func (q *QuotaCenter) calculateReadRates() {
 			return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
 		}
 		for _, metric := range q.queryNodeMetrics {
-			searchNQSum := sum(metric.SearchQueue)
-			queryTasksSum := sum(metric.QueryQueue)
-			nqInQueue := searchNQSum + queryTasksSum // We think of the NQ of query request as 1.
-			if nqInQueue >= nqInQueueThreshold {
+			// We think of the NQ of query request as 1.
+			// search use same queue length counter with query
+			if sum(metric.SearchQueue) >= nqInQueueThreshold {
 				limitCollectionSet.Insert(metric.Effect.CollectionIDs...)
 			}
 		}

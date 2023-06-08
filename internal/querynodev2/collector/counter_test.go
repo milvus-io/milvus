@@ -43,7 +43,17 @@ func (suite *CounterTestSuite) TestBasic() {
 	value = suite.counter.Get(suite.label)
 	suite.Equal(int64(3), value)
 
-	//remote
+	//remove
+	suite.counter.Remove(suite.label)
+	value = suite.counter.Get(suite.label)
+	suite.Equal(int64(0), value)
+
+	//get after dec
+	suite.counter.Dec(suite.label, 3)
+	value = suite.counter.Get(suite.label)
+	suite.Equal(int64(-3), value)
+
+	//remove
 	suite.counter.Remove(suite.label)
 	value = suite.counter.Get(suite.label)
 	suite.Equal(int64(0), value)

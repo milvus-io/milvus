@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/atomic"
-
+	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -16,7 +16,6 @@ const (
 )
 
 type Scheduler struct {
-	searchProcessNum   *atomic.Int32
 	searchWaitQueue    chan *SearchTask
 	mergingSearchTasks []*SearchTask
 	mergedSearchTasks  chan *SearchTask
@@ -31,7 +30,6 @@ func NewScheduler() *Scheduler {
 	maxWaitTaskNum := paramtable.Get().QueryNodeCfg.MaxReceiveChanSize.GetAsInt()
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	return &Scheduler{
-		searchProcessNum:   atomic.NewInt32(0),
 		searchWaitQueue:    make(chan *SearchTask, maxWaitTaskNum),
 		mergingSearchTasks: make([]*SearchTask, 0),
 		mergedSearchTasks:  make(chan *SearchTask),
@@ -47,6 +45,7 @@ func (s *Scheduler) Add(task Task) bool {
 		t.tr.RecordSpan()
 		select {
 		case s.searchWaitQueue <- t:
+			collector.Counter.Inc(metricsinfo.ReadyQueueType, 1)
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 		default:
 			return false
@@ -70,6 +69,7 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 				return
 
 			case task = <-s.searchWaitQueue:
+				collector.Counter.Dec(metricsinfo.ReadyQueueType, 1)
 				s.schedule(task)
 
 			case s.mergedSearchTasks <- task:
@@ -81,6 +81,7 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 				return
 
 			case task := <-s.searchWaitQueue:
+				collector.Counter.Dec(metricsinfo.ReadyQueueType, 1)
 				s.schedule(task)
 			}
 		}
@@ -88,6 +89,7 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 }
 
 func (s *Scheduler) schedule(task Task) {
+	collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
 	// add this task
 	if err := task.Canceled(); err != nil {
 		task.Done(err)
@@ -152,8 +154,12 @@ func (s *Scheduler) processAll(ctx context.Context) {
 func (s *Scheduler) process(t Task) {
 	s.pool.Submit(func() (any, error) {
 		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+		err := t.PreExecute()
+		if err != nil {
+			return nil, err
+		}
 
-		err := t.Execute()
+		err = t.Execute()
 		t.Done(err)
 
 		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
