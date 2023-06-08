@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // WrapStatus wraps status with given error code, message and errors

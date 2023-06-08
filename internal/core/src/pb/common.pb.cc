@@ -618,16 +618,16 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ng\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021privilege_e"
   "xt_obj\022\037.google.protobuf.MessageOptions\030"
   "\351\007 \001(\0132!.milvus.proto.common.PrivilegeEx"
-  "tBf\n\016io.milvus.grpcB\013CommonProtoP\001Z1gith"
-  "ub.com/milvus-io/milvus-proto/go-api/com"
-  "monpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "tBi\n\016io.milvus.grpcB\013CommonProtoP\001Z4gith"
+  "ub.com/milvus-io/milvus-proto/go-api/v2/"
+  "commonpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_common_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_common_2eproto = {
-    false, false, 7033, descriptor_table_protodef_common_2eproto,
+    false, false, 7036, descriptor_table_protodef_common_2eproto,
     "common.proto",
     &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_deps, 1, 16,
     schemas, file_default_instances, TableStruct_common_2eproto::offsets,

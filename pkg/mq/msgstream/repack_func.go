@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 // InsertRepackFunc is used to repack messages after hash by primary key

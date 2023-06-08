@@ -5,12 +5,12 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 

@@ -5,7 +5,7 @@ package segments
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 

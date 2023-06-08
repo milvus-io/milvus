@@ -140,7 +140,7 @@ print-gpu-build-info:
 
 update-milvus-api: download-milvus-proto
 	@echo "Update milvus/api version ..."
-	@(env bash $(PWD)/scripts/update-api-version.sh)
+	@(env bash $(PWD)/scripts/update-api-version.sh $(PROTO_API_VERSION))
 
 download-milvus-proto:
 	@echo "Download milvus-proto repo ..."
