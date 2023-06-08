@@ -41,7 +41,7 @@ func TestConversion(t *testing.T) {
 		comp := func(i int64) {
 			ib := Int64ToBytes(i)
 			i1, err := BytesToInt64(ib)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, i, i1)
 		}
 		comp(int64(314))
@@ -51,14 +51,14 @@ func TestConversion(t *testing.T) {
 		comp(int64(math.MinInt64))
 
 		_, err := BytesToInt64([]byte("ab"))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("TestConvertUint64", func(t *testing.T) {
 		comp := func(u uint64) {
 			ub := Uint64ToBytes(u)
 			u1, err := BytesToUint64(ub)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, u, u1)
 		}
 		comp(uint64(314))
@@ -67,14 +67,14 @@ func TestConversion(t *testing.T) {
 		comp(uint64(math.MaxUint64))
 
 		_, err := BytesToUint64([]byte("ab"))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("TestConvertUint64BigEndian", func(t *testing.T) {
 		comp := func(u uint64) {
 			ub := Uint64ToBytesBigEndian(u)
 			u1, err := BigEndianBytesToUint64(ub)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, u, u1)
 		}
 		comp(uint64(314))
@@ -83,7 +83,7 @@ func TestConversion(t *testing.T) {
 		comp(uint64(math.MaxUint64))
 
 		_, err := BytesToUint64([]byte("ab"))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("TestSliceRemoveDuplicate", func(t *testing.T) {

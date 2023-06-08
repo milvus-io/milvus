@@ -1089,7 +1089,7 @@ func TestImportManager_setCollectionPartitionName(t *testing.T) {
 		CreateTs: time.Now().Unix() - 100,
 	}
 	err := mgr.setCollectionPartitionName(1, 2, info)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "c1", info.GetCollectionName())
 	assert.Equal(t, "p1", info.GetPartitionName())
 
@@ -1120,21 +1120,21 @@ func TestImportManager_isRowbased(t *testing.T) {
 
 	files := []string{"1.json"}
 	rb, err := mgr.isRowbased(files)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.json", "2.json"}
 	rb, err = mgr.isRowbased(files)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.json", "2.npy"}
 	rb, err = mgr.isRowbased(files)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.True(t, rb)
 
 	files = []string{"1.npy", "2.npy"}
 	rb, err = mgr.isRowbased(files)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.False(t, rb)
 }

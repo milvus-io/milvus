@@ -19,7 +19,7 @@ func TestInitHook(t *testing.T) {
 
 	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "/a/b/hook.so")
 	err := initHook()
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "")
 }
 

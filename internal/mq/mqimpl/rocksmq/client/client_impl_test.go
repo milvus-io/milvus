@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func TestClient(t *testing.T) {
 	client, err := NewClient(Options{})
 	assert.NotNil(t, client)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestClient_CreateProducer(t *testing.T) {
@@ -192,7 +192,7 @@ func TestClient_SeekLatest(t *testing.T) {
 		Properties: map[string]string{},
 	}
 	id, err := producer.Send(msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	msgChan := consumer1.Chan()
 	msgRead, ok := <-msgChan
@@ -224,7 +224,7 @@ func TestClient_SeekLatest(t *testing.T) {
 				Payload: make([]byte, 8),
 			}
 			_, err = producer.Send(msg)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		}
 	}
 
@@ -265,7 +265,7 @@ func TestClient_consume(t *testing.T) {
 		Payload: make([]byte, 10),
 	}
 	id, err := producer.Send(msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	msgChan := consumer.Chan()
 	msgConsume, ok := <-msgChan

@@ -62,7 +62,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	getIDFunc := func() {
 		s.checkIDExist()
 		id, err := s.getServerID()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		muList.Lock()
 		res = append(res, id)
 		muList.Unlock()
@@ -101,7 +101,7 @@ func TestInit(t *testing.T) {
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
 	sessions, _, err := s.GetSessions("inittest")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
 
@@ -127,7 +127,7 @@ func TestUpdateSessions(t *testing.T) {
 	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
 	sessions, rev, err := s.GetSessions("test")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(sessions), 0)
 	eventCh := s.WatchServices("test", rev, nil)
 

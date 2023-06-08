@@ -36,7 +36,7 @@ func TestAllConfigFromManager(t *testing.T) {
 func TestAllDupliateSource(t *testing.T) {
 	mgr, _ := Init()
 	err := mgr.AddSource(NewEnvSource(formatKey))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = mgr.AddSource(NewEnvSource(formatKey))
 	assert.Error(t, err)
 

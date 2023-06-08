@@ -35,12 +35,12 @@ func TestPulsarProducer(t *testing.T) {
 
 	topic := "TEST"
 	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	pulsarProd := producer.(*pulsarProducer)
 	fullTopicName, err := GetFullTopicName(DefaultPulsarTenant, DefaultPulsarNamespace, topic)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, pulsarProd.Topic(), fullTopicName)
 
 	msg := &mqwrapper.ProducerMessage{
@@ -48,7 +48,7 @@ func TestPulsarProducer(t *testing.T) {
 		Properties: map[string]string{},
 	}
 	_, err = producer.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	pulsarProd.Close()
 }

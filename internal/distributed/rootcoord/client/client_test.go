@@ -69,26 +69,26 @@ func Test_NewClient(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	err = client.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Register()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 			} else {
 				assert.Nil(t, ret)
-				assert.NotNil(t, err)
+				assert.Error(t, err)
 			}
 		}
 
@@ -292,7 +292,7 @@ func Test_NewClient(t *testing.T) {
 
 	retCheck := func(ret interface{}, err error) {
 		assert.Nil(t, ret)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	}
 	{
 		rTimeout, err := client.GetComponentStates(shortCtx)
@@ -452,5 +452,5 @@ func Test_NewClient(t *testing.T) {
 	}
 	// clean up
 	err = client.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

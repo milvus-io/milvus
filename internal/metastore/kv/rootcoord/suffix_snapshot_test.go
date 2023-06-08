@@ -302,7 +302,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	}
 
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ss)
 	defer ss.Close()
 
@@ -310,22 +310,22 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
 		err = ss.Save("key", fmt.Sprintf("value-%d", i), ts)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load("key", typeutil.Timestamp(100+i*5+2))
 		t.Log("ts:", typeutil.Timestamp(100+i*5+2), i, val)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 	}
 	val, err := ss.Load("key", 0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "value-19", val)
 
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load("key", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, val, fmt.Sprintf("value-%d", i))
 	}
 
@@ -358,7 +358,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	}
 
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ss)
 	defer ss.Close()
 
@@ -367,13 +367,13 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
 		err = ss.MultiSave(saves, ts)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 0; i < 20; i++ {
 		keys, vals, err := ss.LoadWithPrefix("k", typeutil.Timestamp(100+i*5+2))
 		t.Log(i, keys, vals)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(keys), len(vals))
 		assert.Equal(t, len(keys), 2)
 		assert.Equal(t, keys[0], "k1")
@@ -382,7 +382,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		assert.Equal(t, vals[1], fmt.Sprintf("v2-%d", i))
 	}
 	keys, vals, err := ss.LoadWithPrefix("k", 0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
 	assert.Equal(t, keys[0], "k1")
@@ -392,7 +392,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 
 	for i := 0; i < 20; i++ {
 		keys, vals, err := ss.LoadWithPrefix("k", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(keys), len(vals))
 		assert.Equal(t, len(keys), 2)
 		assert.ElementsMatch(t, keys, []string{"k1", "k2"})
@@ -400,9 +400,9 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	}
 	// mix non ts k-v
 	err = ss.Save("kextra", "extra-value", 0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	keys, vals, err = ss.LoadWithPrefix("k", typeutil.Timestamp(300))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
 	assert.ElementsMatch(t, keys, []string{"k1", "k2"})
@@ -615,7 +615,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	}
 
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ss)
 	defer ss.Close()
 
@@ -623,7 +623,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
 		err = ss.Save(fmt.Sprintf("kd-%04d", i), fmt.Sprintf("value-%d", i), ts)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 20; i < 40; i++ {
@@ -632,49 +632,49 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts := ftso()
 		err = ss.MultiSaveAndRemoveWithPrefix(sm, dm, ts)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, i+1, len(vals))
 	}
 	for i := 20; i < 40; i++ {
 		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 39-i, len(vals))
 	}
 
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, i+1, len(vals))
 	}
 	for i := 20; i < 40; i++ {
 		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 39-i, len(vals))
 	}
 	// try to load
 	_, err = ss.Load("kd-0000", 500)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	_, err = ss.Load("kd-0000", 0)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	_, err = ss.Load("kd-0000", 1)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// cleanup
 	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)

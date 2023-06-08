@@ -107,7 +107,7 @@ func TestLocalCM(t *testing.T) {
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
 				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(localPath, testLoadRoot, test.prefix))
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
@@ -132,7 +132,7 @@ func TestLocalCM(t *testing.T) {
 				}
 				if test.isvalid {
 					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.Nil(t, err)
+					assert.NoError(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				} else {
 					got, err := testCM.MultiRead(ctx, test.multiKeys)
@@ -151,17 +151,17 @@ func TestLocalCM(t *testing.T) {
 
 		key1 := path.Join(localPath, testMultiSaveRoot, "key_1")
 		err := testCM.Write(ctx, key1, []byte("111"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		key2 := path.Join(localPath, testMultiSaveRoot, "key_2")
 		err = testCM.Write(ctx, key2, []byte("222"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		val, err := testCM.Read(ctx, key1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, []byte("111"), val)
 
 		val, err = testCM.Read(ctx, key2)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, []byte("222"), val)
 
 		// localPath/testMultiSaveRoot/key_1 is a file already exist, use its path as directory is not allowed
@@ -177,7 +177,7 @@ func TestLocalCM(t *testing.T) {
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		err := testCM.Write(ctx, path.Join(localPath, testMultiSaveRoot, "key_1"), []byte("111"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		kvs := map[string][]byte{
 			path.Join(localPath, testMultiSaveRoot, "key_1"): []byte("123"),
@@ -185,10 +185,10 @@ func TestLocalCM(t *testing.T) {
 		}
 
 		err = testCM.MultiWrite(ctx, kvs)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		val, err := testCM.Read(ctx, path.Join(localPath, testMultiSaveRoot, "key_1"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, []byte("123"), val)
 
 		kvs = map[string][]byte{
@@ -272,7 +272,7 @@ func TestLocalCM(t *testing.T) {
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.MultiRemove(ctx, multiRemoveTest)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		for _, k := range multiRemoveTest {
 			v, err := testCM.Read(ctx, k)
@@ -496,7 +496,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/bcd
 		testPrefix1 := path.Join(localPath, testPrefix)
 		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix1+"/", false)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key1))
@@ -510,7 +510,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abd
 		//   localPath/testPrefix/bcd
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1+"/", true)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 4, len(dirs))
 		assert.Equal(t, 4, len(mods))
 		assert.Contains(t, dirs, key1)
@@ -524,7 +524,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abd
 		testPrefix2 := path.Join(localPath, testPrefix, "a")
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 2, len(dirs))
 		assert.Equal(t, 2, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key1))
@@ -536,7 +536,7 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc/deg
 		//   localPath/testPrefix/abd
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 		assert.Contains(t, dirs, key1)
@@ -552,7 +552,7 @@ func TestLocalCM(t *testing.T) {
 		// return:
 		//   localPath/testPrefix
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, false)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key4))
@@ -570,7 +570,7 @@ func TestLocalCM(t *testing.T) {
 		// return:
 		//   localPath/testPrefix/abc
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(dirs))
 		assert.Equal(t, 1, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key1))
@@ -578,7 +578,7 @@ func TestLocalCM(t *testing.T) {
 		// recursive find localPath/testPrefix/a*
 		// no file returned
 		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 0, len(dirs))
 		assert.Equal(t, 0, len(mods))
 

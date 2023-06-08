@@ -100,7 +100,7 @@ func TestBaseTable_Remove(t *testing.T) {
 
 func TestBaseTable_Get(t *testing.T) {
 	err := baseParams.Save("key", "10")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	v := baseParams.Get("key")
 	assert.Equal(t, "10", v)

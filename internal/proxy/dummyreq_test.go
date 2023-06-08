@@ -32,7 +32,7 @@ func Test_parseDummyRequestType(t *testing.T) {
 	// not in json format
 	notInJSONFormatStr := "not in json format string"
 	_, err = parseDummyRequestType(notInJSONFormatStr)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// only contain other field, in json format
 	otherField := "other_field"
@@ -40,11 +40,11 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m1 := make(map[string]string)
 	m1[otherField] = otherFieldValue
 	bs1, err := json.Marshal(m1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	log.Info("Test_parseDummyRequestType",
 		zap.String("json", string(bs1)))
 	ret1, err := parseDummyRequestType(string(bs1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret1.RequestType))
 
 	// normal case
@@ -53,11 +53,11 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m2 := make(map[string]string)
 	m2[key] = value
 	bs2, err := json.Marshal(m2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	log.Info("Test_parseDummyRequestType",
 		zap.String("json", string(bs2)))
 	ret2, err := parseDummyRequestType(string(bs2))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, value, ret2.RequestType)
 
 	// contain other field and request_type
@@ -65,11 +65,11 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m3[key] = value
 	m3[otherField] = otherFieldValue
 	bs3, err := json.Marshal(m3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	log.Info("Test_parseDummyRequestType",
 		zap.String("json", string(bs3)))
 	ret3, err := parseDummyRequestType(string(bs3))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, value, ret3.RequestType)
 }
 
@@ -79,7 +79,7 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	// not in json format
 	notInJSONFormatStr := "not in json format string"
 	_, err = parseDummyQueryRequest(notInJSONFormatStr)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// only contain other field, in json format
 	otherField := "other_field"
@@ -89,9 +89,9 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	bs1, err := json.Marshal(m1)
 	log.Info("Test_parseDummyQueryRequest",
 		zap.String("json", string(bs1)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	ret1, err := parseDummyQueryRequest(string(bs1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret1.RequestType))
 	assert.Equal(t, 0, len(ret1.DbName))
 	assert.Equal(t, 0, len(ret1.CollectionName))
@@ -123,9 +123,9 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	bs2, err := json.Marshal(m2)
 	log.Info("Test_parseDummyQueryRequest",
 		zap.String("json", string(bs2)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	ret2, err := parseDummyQueryRequest(string(bs2))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, requestTypeValue, ret2.RequestType)
 	assert.Equal(t, dbNameValue, ret2.DbName)
 	assert.Equal(t, collectionNameValue, ret2.CollectionName)
@@ -145,9 +145,9 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	bs3, err := json.Marshal(m3)
 	log.Info("Test_parseDummyQueryRequest",
 		zap.String("json", string(bs3)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	ret3, err := parseDummyQueryRequest(string(bs3))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, requestTypeValue, ret3.RequestType)
 	assert.Equal(t, dbNameValue, ret3.DbName)
 	assert.Equal(t, collectionNameValue, ret3.CollectionName)
@@ -162,9 +162,9 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	bs4, err := json.Marshal(m4)
 	log.Info("Test_parseDummyQueryRequest",
 		zap.String("json", string(bs4)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	ret4, err := parseDummyQueryRequest(string(bs4))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, requestTypeValue, ret4.RequestType)
 	assert.Equal(t, dbNameValue, ret4.DbName)
 	assert.Equal(t, collectionNameValue, ret2.CollectionName)
@@ -180,9 +180,9 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	bs5, err := json.Marshal(m5)
 	log.Info("Test_parseDummyQueryRequest",
 		zap.String("json", string(bs5)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	ret5, err := parseDummyQueryRequest(string(bs5))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, requestTypeValue, ret5.RequestType)
 	assert.Equal(t, dbNameValue, ret5.DbName)
 	assert.Equal(t, collectionNameValue, ret2.CollectionName)
@@ -194,11 +194,11 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 // func TestParseDummyQueryRequest(t *testing.T) {
 // 	invalidStr := `{"request_type":"query"`
 // 	_, err := parseDummyQueryRequest(invalidStr)
-// 	assert.NotNil(t, err)
+// 	assert.Error(t, err)
 
 // 	onlytypeStr := `{"request_type":"query"}`
 // 	drr, err := parseDummyQueryRequest(onlytypeStr)
-// 	assert.Nil(t, err)
+// 	assert.NoError(t, err)
 // 	assert.Equal(t, drr.RequestType, "query")
 // 	assert.Equal(t, len(drr.DbName), 0)
 
@@ -211,7 +211,7 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 // 	"output_fields": ["_id", "age"]
 // 	}`
 // 	drr2, err := parseDummyQueryRequest(fulltypeStr)
-// 	assert.Nil(t, err)
+// 	assert.NoError(t, err)
 // 	assert.Equal(t, drr2.RequestType, "retrieve")
 // 	assert.Equal(t, len(drr2.DbName), 0)
 // 	assert.Equal(t, drr2.CollectionName, "test")

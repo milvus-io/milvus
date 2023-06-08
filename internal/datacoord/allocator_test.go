@@ -44,7 +44,7 @@ func TestAllocator_Basic(t *testing.T) {
 		ms := newMockRootCoordService()
 		allocator := newRootCoordAllocator(ms)
 		err := ms.Stop()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = allocator.allocTimestamp(ctx)
 		assert.Error(t, err)

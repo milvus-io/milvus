@@ -65,17 +65,17 @@ import (
 //	outputStream := getKafkaTtOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
 //
 //	err := inputStream.Broadcast(&msgPack0)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	err = inputStream.Produce(&msgPack1)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	err = inputStream.Broadcast(&msgPack2)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	err = inputStream.Produce(&msgPack3)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	err = inputStream.Broadcast(&msgPack4)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	err = inputStream.Broadcast(&msgPack5)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //
 //	o1 := consumer(ctx, outputStream)
 //	o2 := consumer(ctx, outputStream)
@@ -124,7 +124,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 
 	// produce test data
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// pick a seekPosition
 	var seekPosition *msgpb.MsgPosition
@@ -143,10 +143,10 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	outputStream2 := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
 	lastMsgID, err := outputStream2.GetLatestMsgID(c)
 	defer outputStream2.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = outputStream2.Seek([]*msgpb.MsgPosition{seekPosition})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	cnt := 0
 	var value int64 = 6
@@ -167,7 +167,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 				cnt++
 
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				if ret {
 					hasMore = false
 					break
@@ -220,21 +220,21 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 	outputStream := getKafkaTtOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
 
 	_, err := inputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack5)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack6)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack7)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(receivedMsg.Msgs), 2)

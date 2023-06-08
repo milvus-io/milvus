@@ -26,10 +26,10 @@ import (
 func TestParseTimestamp(t *testing.T) {
 	ts, err := ParseTimestamp(Int64ToBytes(1000))
 	t.Log(ts.String())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = ParseTimestamp([]byte("ab"))
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestSubTimeByWallClock(t *testing.T) {

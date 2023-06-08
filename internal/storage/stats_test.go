@@ -39,7 +39,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	sr := &StatsReader{}
 	sr.SetBuffer(b)
 	stats, err := sr.GetPrimaryKeyStats()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	maxPk := &Int64PrimaryKey{
 		Value: 9,
 	}
@@ -58,7 +58,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 		Data: []int64{},
 	}
 	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestStatsWriter_BF(t *testing.T) {
@@ -102,7 +102,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	sr := &StatsReader{}
 	sr.SetBuffer(b)
 	stats, err := sr.GetPrimaryKeyStats()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	maxPk := NewVarCharPrimaryKey("milvus")
 	minPk := NewVarCharPrimaryKey("abd")
 	assert.Equal(t, true, stats.MaxPk.EQ(maxPk))
@@ -115,7 +115,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 		Data: []int64{},
 	}
 	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
@@ -136,11 +136,11 @@ func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		stats.BF.Add(b)
 	}
 	blob, err := json.Marshal(stats)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	sr := &StatsReader{}
 	sr.SetBuffer(blob)
 	unmarshaledStats, err := sr.GetPrimaryKeyStats()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	maxPk := &Int64PrimaryKey{
 		Value: 9,
 	}

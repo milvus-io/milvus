@@ -35,7 +35,7 @@ func TestCollectionAlias_Insert(t *testing.T) {
 
 	// actual
 	err := aliasTestDb.Insert(collAliases)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestCollectionAlias_Insert_Error(t *testing.T) {
@@ -75,7 +75,7 @@ func TestCollectionAlias_GetCollectionIDByName(t *testing.T) {
 
 	// actual
 	res, err := aliasTestDb.GetCollectionIDByAlias(tenantID, alias, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collID1, res)
 }
 
@@ -129,7 +129,7 @@ func TestCollectionAlias_ListCidTs(t *testing.T) {
 
 	// actual
 	res, err := aliasTestDb.ListCollectionIDTs(tenantID, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collAliases, res)
 }
 
@@ -177,7 +177,7 @@ func TestCollectionAlias_List(t *testing.T) {
 
 	// actual
 	res, err := aliasTestDb.List(tenantID, cidTsPairs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, out, res)
 }
 

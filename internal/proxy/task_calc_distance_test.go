@@ -42,7 +42,7 @@ func TestCalcDistanceTask_arrangeVectorsByStrID(t *testing.T) {
 	}
 
 	result, err := task.arrangeVectorsByStrID(inputIds, sequence, retrievedVectors)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	floatResult := result.GetFloatVector().GetData()
 	for i := 0; i < 3; i++ {
@@ -64,7 +64,7 @@ func TestCalcDistanceTask_arrangeVectorsByStrID(t *testing.T) {
 	}
 
 	result, err = task.arrangeVectorsByStrID(inputIds, sequence, retrievedVectors)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	binaryResult := result.GetBinaryVector()
 	numBytes := dim / 8
@@ -105,7 +105,7 @@ func TestCalcDistanceTask_arrangeVectorsByIntID(t *testing.T) {
 	}
 
 	result, err := task.arrangeVectorsByIntID(inputIds, sequence, retrievedVectors)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	floatResult := result.GetFloatVector().GetData()
 	for i := 0; i < 3; i++ {
@@ -127,7 +127,7 @@ func TestCalcDistanceTask_arrangeVectorsByIntID(t *testing.T) {
 	}
 
 	result, err = task.arrangeVectorsByIntID(inputIds, sequence, retrievedVectors)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	binaryResult := result.GetBinaryVector()
 	numBytes := dim / 8
@@ -159,7 +159,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// left-op empty
 	calcResult, err := task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	request = &milvuspb.CalcDistanceRequest{
@@ -176,7 +176,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// left-op query error
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	fieldIds := make([]int64, 0)
@@ -235,7 +235,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	task.queryFunc = queryFunc
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	idArray := &milvuspb.VectorsArray{
@@ -262,13 +262,13 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// success
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, calcResult.Status.ErrorCode)
 
 	// right-op query error
 	request.OpRight = nil
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	request.OpRight = &milvuspb.VectorsArray{
@@ -288,7 +288,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// right-op arrange error
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	request.OpRight = &milvuspb.VectorsArray{
@@ -301,7 +301,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// different dimension
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	request.OpRight = &milvuspb.VectorsArray{
@@ -319,7 +319,7 @@ func TestCalcDistanceTask_ExecuteFloat(t *testing.T) {
 
 	// calcdistance return error
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 }
 
@@ -407,7 +407,7 @@ func TestCalcDistanceTask_ExecuteBinary(t *testing.T) {
 
 	// success
 	calcResult, err := task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, calcResult.Status.ErrorCode)
 
 	floatArray := &milvuspb.VectorsArray{
@@ -438,7 +438,7 @@ func TestCalcDistanceTask_ExecuteBinary(t *testing.T) {
 
 	// float vs binary
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 
 	request = &milvuspb.CalcDistanceRequest{
@@ -451,7 +451,7 @@ func TestCalcDistanceTask_ExecuteBinary(t *testing.T) {
 
 	// hamming
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, calcResult.Status.ErrorCode)
 
 	request = &milvuspb.CalcDistanceRequest{
@@ -464,7 +464,7 @@ func TestCalcDistanceTask_ExecuteBinary(t *testing.T) {
 
 	// tanimoto
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, calcResult.Status.ErrorCode)
 
 	request = &milvuspb.CalcDistanceRequest{
@@ -486,6 +486,6 @@ func TestCalcDistanceTask_ExecuteBinary(t *testing.T) {
 
 	// hamming error
 	calcResult, err = task.Execute(ctx, request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, calcResult.Status.ErrorCode)
 }

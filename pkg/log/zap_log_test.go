@@ -137,7 +137,7 @@ func TestTimeEncoder(t *testing.T) {
 	sec := int64(1547192741)
 	nsec := int64(165279177)
 	as, err := time.LoadLocation("Asia/Shanghai")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tt := time.Unix(sec, nsec).In(as)
 	conf := &Config{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
@@ -147,7 +147,7 @@ func TestTimeEncoder(t *testing.T) {
 
 	enc.buf.Reset()
 	utc, err := time.LoadLocation("UTC")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	utcTime := tt.In(utc)
 	DefaultTimeEncoder(utcTime, enc)
@@ -215,7 +215,7 @@ func TestRotateLog(t *testing.T) {
 				},
 			}
 			logger, _, err := InitLogger(conf)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			var data []byte
 			for i := 1; i <= c.writeSize; i++ {

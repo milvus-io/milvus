@@ -79,7 +79,7 @@ func BytesToInt(b []byte) int {
 
 func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, arr []int) {
 	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
@@ -90,7 +90,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 			Properties: map[string]string{},
 		}
 		_, err = producer.Send(ctx, msg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		log.Info("Pub", zap.Any("SND", v))
 	}
 
@@ -116,7 +116,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -153,12 +153,12 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
 	err = consumer.Seek(msgID, true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// skip the last received message
 	mm := <-consumer.Chan()
@@ -187,7 +187,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -264,7 +264,7 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -302,12 +302,12 @@ func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
 	err = consumer.Seek(msgID.(*pulsarID).messageID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// skip the last received message
 	mm := <-consumer.Chan()
@@ -337,7 +337,7 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -421,7 +421,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 
 	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
@@ -437,7 +437,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 		}
 		id, err := producer.Send(ctx, msg)
 		ids = append(ids, id)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	log.Info("Produced")
@@ -448,7 +448,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 	seekID := ids[2].(*pulsarID).messageID
@@ -499,7 +499,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 
 	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	log.Info("Produce start")
@@ -511,7 +511,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 			Properties: map[string]string{},
 		}
 		_, err = producer.Send(ctx, msg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	log.Info("Produced")
@@ -522,7 +522,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -545,7 +545,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 				Properties: map[string]string{},
 			}
 			_, err = producer.Send(ctx, msg)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		}
 	}
 }
@@ -568,13 +568,13 @@ func TestPulsarClient_StringToMsgID(t *testing.T) {
 	str := msgIDToString(mid)
 
 	res, err := client.StringToMsgID(str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 
 	str = "X"
 	res, err = client.StringToMsgID(str)
 	assert.Nil(t, res)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestPulsarClient_BytesToMsgID(t *testing.T) {
@@ -586,13 +586,13 @@ func TestPulsarClient_BytesToMsgID(t *testing.T) {
 	binary := SerializePulsarMsgID(mid)
 
 	res, err := client.BytesToMsgID(binary)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 
 	invalidBin := []byte{0}
 	res, err = client.BytesToMsgID(invalidBin)
 	assert.Nil(t, res)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 type mPulsarError struct {
@@ -681,14 +681,14 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(tenant, namespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	fullTopicName, err := GetFullTopicName(tenant, namespace, topic)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, fullTopicName, producer.(*pulsarProducer).Topic())
 
 	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
@@ -698,7 +698,7 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	defer consumer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 }
 
@@ -708,14 +708,14 @@ func TestPulsarCtl(t *testing.T) {
 
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -737,7 +737,7 @@ func TestPulsarCtl(t *testing.T) {
 	assert.Error(t, err)
 
 	fullTopicName, err := GetFullTopicName(DefaultPulsarTenant, DefaultPulsarNamespace, topic)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	topicName, err := utils.GetTopicName(fullTopicName)
 	assert.NoError(t, err)
 
@@ -765,7 +765,7 @@ func TestPulsarCtl(t *testing.T) {
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	defer consumer2.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer2)
 }
 
@@ -787,6 +787,6 @@ func TestPulsarClient_GetFullTopicName(t *testing.T) {
 	assert.Empty(t, fullTopicName)
 
 	fullTopicName, err = GetFullTopicName("tenant", "namespace", "topic")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "tenant/namespace/topic", fullTopicName)
 }

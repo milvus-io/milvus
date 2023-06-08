@@ -29,24 +29,24 @@ func TestConsumer_newConsumer(t *testing.T) {
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, consumer)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	consumer, err = newConsumer(newMockClient(), ConsumerOptions{})
 	assert.Nil(t, consumer)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	consumer, err = getExistedConsumer(newMockClient(), ConsumerOptions{}, nil)
 	assert.Nil(t, consumer)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	consumer, err = newConsumer(newMockClient(), ConsumerOptions{
 		Topic: newTopicName(),
 	})
 	assert.Nil(t, consumer)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	/////////////////////////////////////////////////
@@ -116,7 +116,7 @@ func TestConsumer_Subscription(t *testing.T) {
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, consumer)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	//assert.Equal(t, consumerName, consumer.Subscription())
 }
 
@@ -143,5 +143,5 @@ func TestConsumer_Seek(t *testing.T) {
 	assert.NotNil(t, consumer)
 
 	err = consumer.Seek(0)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }

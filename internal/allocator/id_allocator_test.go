@@ -49,21 +49,21 @@ func TestIDAllocator(t *testing.T) {
 	mockIDAllocator := newMockIDAllocator()
 
 	idAllocator, err := NewIDAllocator(ctx, mockIDAllocator, int64(1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = idAllocator.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	idStart, idEnd, err := idAllocator.Alloc(20000)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, idStart, int64(1))
 	assert.Equal(t, idEnd, int64(20001))
 
 	id, err := idAllocator.AllocOne()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, id, int64(20001))
 
 	id, err = idAllocator.AllocOne()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, id, int64(20002))
 }
 

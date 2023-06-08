@@ -110,7 +110,7 @@ func TestMain(m *testing.M) {
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	mdc := &MockDataCoord{
@@ -132,7 +132,7 @@ func Test_NewServer(t *testing.T) {
 		server.rootCoord = mrc
 
 		err = server.Run()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
@@ -147,7 +147,7 @@ func Test_NewServer(t *testing.T) {
 
 		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
@@ -159,7 +159,7 @@ func Test_NewServer(t *testing.T) {
 			}, nil,
 		)
 		resp, err := server.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -171,7 +171,7 @@ func Test_NewServer(t *testing.T) {
 			}, nil,
 		)
 		resp, err := server.GetTimeTickChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -182,7 +182,7 @@ func Test_NewServer(t *testing.T) {
 			}, nil,
 		)
 		resp, err := server.ShowCollections(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -190,48 +190,48 @@ func Test_NewServer(t *testing.T) {
 	t.Run("LoadCollection", func(t *testing.T) {
 		mqc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.LoadCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
 		mqc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.ReleaseCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ShowPartitions", func(t *testing.T) {
 		mqc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: successStatus}, nil)
 		resp, err := server.ShowPartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 	t.Run("GetPartitionStates", func(t *testing.T) {
 		mqc.EXPECT().GetPartitionStates(mock.Anything, mock.Anything).Return(&querypb.GetPartitionStatesResponse{Status: successStatus}, nil)
 		resp, err := server.GetPartitionStates(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("LoadPartitions", func(t *testing.T) {
 		mqc.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.LoadPartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
 		mqc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.ReleasePartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		mqc.EXPECT().GetTimeTickChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: successStatus}, nil)
 		resp, err := server.GetTimeTickChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -239,7 +239,7 @@ func Test_NewServer(t *testing.T) {
 		req := &querypb.GetSegmentInfoRequest{}
 		mqc.EXPECT().GetSegmentInfo(mock.Anything, req).Return(&querypb.GetSegmentInfoResponse{Status: successStatus}, nil)
 		resp, err := server.GetSegmentInfo(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -247,7 +247,7 @@ func Test_NewServer(t *testing.T) {
 		req := &querypb.LoadBalanceRequest{}
 		mqc.EXPECT().LoadBalance(mock.Anything, req).Return(successStatus, nil)
 		resp, err := server.LoadBalance(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -257,7 +257,7 @@ func Test_NewServer(t *testing.T) {
 		}
 		mqc.EXPECT().GetMetrics(mock.Anything, req).Return(&milvuspb.GetMetricsResponse{Status: successStatus}, nil)
 		resp, err := server.GetMetrics(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -265,35 +265,35 @@ func Test_NewServer(t *testing.T) {
 		mqc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(
 			&milvuspb.CheckHealthResponse{Status: successStatus, IsHealthy: true}, nil)
 		ret, err := server.CheckHealth(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
 	t.Run("CreateResourceGroup", func(t *testing.T) {
 		mqc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.CreateResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("DropResourceGroup", func(t *testing.T) {
 		mqc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.DropResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("TransferNode", func(t *testing.T) {
 		mqc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.TransferNode(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("TransferReplica", func(t *testing.T) {
 		mqc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.TransferReplica(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -301,19 +301,19 @@ func Test_NewServer(t *testing.T) {
 		req := &milvuspb.ListResourceGroupsRequest{}
 		mqc.EXPECT().ListResourceGroups(mock.Anything, req).Return(&milvuspb.ListResourceGroupsResponse{Status: successStatus}, nil)
 		resp, err := server.ListResourceGroups(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("DescribeResourceGroup", func(t *testing.T) {
 		mqc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{Status: successStatus}, nil)
 		resp, err := server.DescribeResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 // This test will no longer return error immediately.
@@ -321,7 +321,7 @@ func TestServer_Run1(t *testing.T) {
 	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	mqc := getQueryCoord()
@@ -331,13 +331,13 @@ func TestServer_Run1(t *testing.T) {
 	assert.Error(t, err)
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServer_Run2(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.queryCoord = getQueryCoord()
@@ -346,7 +346,7 @@ func TestServer_Run2(t *testing.T) {
 	}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func getQueryCoord() *types.MockQueryCoord {
@@ -367,7 +367,7 @@ func getQueryCoord() *types.MockQueryCoord {
 func TestServer_Run3(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 	server.queryCoord = getQueryCoord()
 	server.rootCoord = &MockRootCoord{
@@ -375,14 +375,14 @@ func TestServer_Run3(t *testing.T) {
 	}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 }
 
 func TestServer_Run4(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.queryCoord = getQueryCoord()
@@ -392,13 +392,13 @@ func TestServer_Run4(t *testing.T) {
 	}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServer_Run5(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.queryCoord = getQueryCoord()
@@ -408,5 +408,5 @@ func TestServer_Run5(t *testing.T) {
 	}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

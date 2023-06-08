@@ -30,7 +30,7 @@ func Test_insertRepackFunc(t *testing.T) {
 
 	// tsMsgs is empty
 	ret1, err := insertRepackFunc(nil, [][]int32{{1, 2}})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret1))
 
 	// hashKeys is empty
@@ -39,17 +39,17 @@ func Test_insertRepackFunc(t *testing.T) {
 		&msgstream.InsertMsg{}, // not important
 	}
 	ret2, err := insertRepackFunc(tsMsgs2, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret2)
 
 	// len(hashKeys) < len(tsMsgs), 1 < 2
 	ret2, err = insertRepackFunc(tsMsgs2, [][]int32{{1, 2}})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret2)
 
 	// both tsMsgs & hashKeys are empty
 	ret3, err := insertRepackFunc(nil, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret3))
 
 	num := rand.Int()%100 + 1
@@ -63,7 +63,7 @@ func Test_insertRepackFunc(t *testing.T) {
 	// len(hashKeys) = len(tsMsgs), but no hash key
 	hashKeys1 := make([][]int32, num)
 	ret4, err := insertRepackFunc(tsMsgs4, hashKeys1)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret4)
 
 	// all messages are shuffled to same bucket
@@ -73,7 +73,7 @@ func Test_insertRepackFunc(t *testing.T) {
 		hashKeys2[i] = []int32{key}
 	}
 	ret5, err := insertRepackFunc(tsMsgs4, hashKeys2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(ret5))
 	assert.Equal(t, num, len(ret5[key].Msgs))
 
@@ -83,7 +83,7 @@ func Test_insertRepackFunc(t *testing.T) {
 		hashKeys3[i] = []int32{int32(i)}
 	}
 	ret6, err := insertRepackFunc(tsMsgs4, hashKeys3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, num, len(ret6))
 	for key := range ret6 {
 		assert.Equal(t, 1, len(ret6[key].Msgs))
@@ -103,7 +103,7 @@ func Test_insertRepackFunc(t *testing.T) {
 		}
 	}
 	ret7, err := insertRepackFunc(tsMsgs4, hashKeys4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(histogram), len(ret7))
 	for key := range ret7 {
 		assert.Equal(t, histogram[key], len(ret7[key].Msgs))
@@ -115,7 +115,7 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 
 	// tsMsgs is empty
 	ret1, err := defaultInsertRepackFunc(nil, [][]int32{{1, 2}})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret1))
 
 	// hashKeys is empty
@@ -124,17 +124,17 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 		&msgstream.InsertMsg{}, // not important
 	}
 	ret2, err := defaultInsertRepackFunc(tsMsgs2, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret2)
 
 	// len(hashKeys) < len(tsMsgs), 1 < 2
 	ret2, err = defaultInsertRepackFunc(tsMsgs2, [][]int32{{1, 2}})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret2)
 
 	// both tsMsgs & hashKeys are empty
 	ret3, err := defaultInsertRepackFunc(nil, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret3))
 
 	num := rand.Int()%100 + 1
@@ -148,7 +148,7 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 	// len(hashKeys) = len(tsMsgs), but no hash key
 	hashKeys1 := make([][]int32, num)
 	ret4, err := defaultInsertRepackFunc(tsMsgs4, hashKeys1)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, ret4)
 
 	// all messages are shuffled to same bucket
@@ -158,7 +158,7 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 		hashKeys2[i] = []int32{key}
 	}
 	ret5, err := defaultInsertRepackFunc(tsMsgs4, hashKeys2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(ret5))
 	assert.Equal(t, num, len(ret5[key].Msgs))
 
@@ -168,7 +168,7 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 		hashKeys3[i] = []int32{int32(i)}
 	}
 	ret6, err := defaultInsertRepackFunc(tsMsgs4, hashKeys3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, num, len(ret6))
 	for key := range ret6 {
 		assert.Equal(t, 1, len(ret6[key].Msgs))
@@ -188,7 +188,7 @@ func Test_defaultInsertRepackFunc(t *testing.T) {
 		}
 	}
 	ret7, err := defaultInsertRepackFunc(tsMsgs4, hashKeys4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(histogram), len(ret7))
 	for key := range ret7 {
 		assert.Equal(t, histogram[key], len(ret7[key].Msgs))

@@ -95,13 +95,13 @@ func TestDataNode(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = node.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Empty(t, node.GetAddress())
 	node.SetAddress("address")
 	assert.Equal(t, "address", node.GetAddress())
@@ -201,7 +201,7 @@ func TestDataNode(t *testing.T) {
 
 		for _, test := range testDataSyncs {
 			err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			vchanNameCh <- test.dmChannelName
 		}
 
@@ -228,16 +228,16 @@ func TestWatchChannel(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = node.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer node.Stop()
 	err = node.Register()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	defer cancel()
 
@@ -261,9 +261,9 @@ func TestWatchChannel(t *testing.T) {
 			Vchan: vchan,
 		}
 		val, err := proto.Marshal(info)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = kv.Save(path, string(val))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		assert.Eventually(t, func() bool {
 			exist := node.flowgraphManager.exist(ch)
@@ -283,7 +283,7 @@ func TestWatchChannel(t *testing.T) {
 		}, 3*time.Second, 100*time.Millisecond)
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		assert.Eventually(t, func() bool {
 			exist := node.flowgraphManager.exist(ch)
@@ -331,9 +331,9 @@ func TestWatchChannel(t *testing.T) {
 			Vchan: vchan,
 		}
 		val, err := proto.Marshal(info)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = kv.Save(path, string(val))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// wait for check goroutine received 2 events
 		<-c
@@ -341,7 +341,7 @@ func TestWatchChannel(t *testing.T) {
 		assert.False(t, exist)
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
 

@@ -213,7 +213,7 @@ func Test_NewServer(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoord, error) {
@@ -227,7 +227,7 @@ func Test_NewServer(t *testing.T) {
 	t.Run("Run", func(t *testing.T) {
 		server.datanode = &MockDataNode{}
 		err = server.Run()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
@@ -235,7 +235,7 @@ func Test_NewServer(t *testing.T) {
 			states: &milvuspb.ComponentStates{},
 		}
 		states, err := server.GetComponentStates(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, states)
 	})
 
@@ -244,7 +244,7 @@ func Test_NewServer(t *testing.T) {
 			strResp: &milvuspb.StringResponse{},
 		}
 		states, err := server.GetStatisticsChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, states)
 	})
 
@@ -253,7 +253,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		states, err := server.WatchDmChannels(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, states)
 	})
 
@@ -262,7 +262,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		states, err := server.FlushSegments(ctx, nil)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotNil(t, states)
 	})
 
@@ -271,7 +271,7 @@ func Test_NewServer(t *testing.T) {
 			configResp: &internalpb.ShowConfigurationsResponse{},
 		}
 		resp, err := server.ShowConfigurations(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -280,7 +280,7 @@ func Test_NewServer(t *testing.T) {
 			metricResp: &milvuspb.GetMetricsResponse{},
 		}
 		resp, err := server.GetMetrics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -289,7 +289,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		resp, err := server.Compaction(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -298,7 +298,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		resp, err := server.Import(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -307,7 +307,7 @@ func Test_NewServer(t *testing.T) {
 			resendResp: &datapb.ResendSegmentStatsResponse{},
 		}
 		resp, err := server.ResendSegmentStats(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -321,18 +321,18 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.AddImportSegment(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_Run(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.datanode = &MockDataNode{

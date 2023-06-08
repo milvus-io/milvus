@@ -356,7 +356,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 			NodeID: randID,
 		}}, nil
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
 }
 
@@ -418,6 +418,6 @@ func TestClientBase_Compression(t *testing.T) {
 			NodeID: randID,
 		}}, nil
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
 }

@@ -43,7 +43,7 @@ func TestSegmentIndex_Insert(t *testing.T) {
 
 	// actual
 	err := segIndexTestDb.Insert(segIndexes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSegmentIndex_Insert_Error(t *testing.T) {
@@ -113,7 +113,7 @@ func TestSegmentIndex_Update(t *testing.T) {
 
 	// actual
 	err := segIndexTestDb.Update(segIndexes[0])
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSegmentIndex_Upsert_Error(t *testing.T) {
@@ -172,7 +172,7 @@ func TestSegmentIndex_MarkDeleted(t *testing.T) {
 
 	// actual
 	err := segIndexTestDb.MarkDeleted(tenantID, segIndexes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSegmentIndex_MarkDeleted_Error(t *testing.T) {
@@ -205,7 +205,7 @@ func TestSegmentIndex_MarkDeletedByCollID(t *testing.T) {
 
 	// actual
 	err := segIndexTestDb.MarkDeletedByCollectionID(tenantID, collID1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSegmentIndex_MarkDeletedByCollID_Error(t *testing.T) {
@@ -231,7 +231,7 @@ func TestSegmentIndex_MarkDeletedByBuildID(t *testing.T) {
 
 	// actual
 	err := segIndexTestDb.MarkDeletedByBuildID(tenantID, indexBuildID1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestSegmentIndex_MarkDeletedByIdxID_Error(t *testing.T) {

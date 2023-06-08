@@ -34,7 +34,7 @@ func TestNatsMQProducer(t *testing.T) {
 
 	// Check Topic()
 	p, err := c.CreateProducer(pOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
 
 	// Check Send()
@@ -43,5 +43,5 @@ func TestNatsMQProducer(t *testing.T) {
 		Properties: map[string]string{},
 	}
 	_, err = p.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

@@ -95,7 +95,7 @@ func Test_NewMqMsgStream(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			_, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		}(parameters[i].client)
 	}
 }
@@ -110,7 +110,7 @@ func TestMqMsgStream_AsProducer(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// empty channel name
 			m.AsProducer([]string{""})
@@ -128,7 +128,7 @@ func TestMqMsgStream_AsConsumer(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// repeat calling AsConsumer
 			m.AsConsumer([]string{"a"}, "b", mqwrapper.SubscriptionPositionUnknown)
@@ -146,7 +146,7 @@ func TestMqMsgStream_ComputeProduceChannelIndexes(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// empty parameters
 			reBucketValues := m.ComputeProduceChannelIndexes([]msgstream.TsMsg{})
@@ -190,7 +190,7 @@ func TestMqMsgStream_GetProduceChannels(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// empty if not called AsProducer yet
 			chs := m.GetProduceChannels()
@@ -213,7 +213,7 @@ func TestMqMsgStream_Produce(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// Produce before called AsProducer
 			insertMsg := &msgstream.InsertMsg{
@@ -242,7 +242,7 @@ func TestMqMsgStream_Produce(t *testing.T) {
 				Msgs: []msgstream.TsMsg{insertMsg},
 			}
 			err = m.Produce(msgPack)
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}(parameters[i].client)
 	}
 }
@@ -256,11 +256,11 @@ func TestMqMsgStream_Broadcast(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// Broadcast nil pointer
 			_, err = m.Broadcast(nil)
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}(parameters[i].client)
 	}
 }
@@ -277,7 +277,7 @@ func TestMqMsgStream_Consume(t *testing.T) {
 			var wg sync.WaitGroup
 			ctx, cancel := context.WithCancel(context.Background())
 			m, err := msgstream.NewMqMsgStream(ctx, 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			wg.Add(1)
 			go func() {
@@ -315,7 +315,7 @@ func TestMqMsgStream_Chan(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			ch := m.Chan()
 			assert.NotNil(t, ch)
@@ -332,7 +332,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 	for i := range parameters {
 		func(client mqwrapper.Client) {
 			m, err := msgstream.NewMqMsgStream(context.Background(), 100, 100, client, factory.NewUnmarshalDispatcher())
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			// seek in not subscribed channel
 			p := []*msgpb.MsgPosition{
@@ -341,7 +341,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 				},
 			}
 			err = m.Seek(p)
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}(parameters[i].client)
 	}
 }
@@ -521,13 +521,13 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
 	_, err := inputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(receivedMsg.Msgs), 3)
@@ -593,21 +593,21 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
 	_, err := inputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack5)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack6)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack7)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(receivedMsg.Msgs), 2)
@@ -681,7 +681,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	}
 
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
@@ -708,14 +708,14 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	}
 
 	err = outputStream2.Seek(p)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 	err = inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	result := consumer(ctx, outputStream2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))

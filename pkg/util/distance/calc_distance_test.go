@@ -37,14 +37,14 @@ func TestValidateMetricType(t *testing.T) {
 	validMetric := []string{"L2", "ip", "Hamming", "Tanimoto"}
 	for _, str := range validMetric {
 		metric, err := ValidateMetricType(str)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, metric == L2 || metric == IP || metric == HAMMING || metric == TANIMOTO)
 	}
 }
 
 func TestValidateFloatArrayLength(t *testing.T) {
 	err := ValidateFloatArrayLength(3, 12)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = ValidateFloatArrayLength(5, 11)
 	assert.Error(t, err)
@@ -141,7 +141,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 	assert.Error(t, err)
 
 	distances, err := CalcFloatDistance(dim, left, right, "L2")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// Verify the L2 distance algorithm is correct
 	invalid := CreateFloatArray(rightNum, 10)
@@ -159,7 +159,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 
 	// Verify the IP distance algorithm is correct
 	distances, err = CalcFloatDistance(dim, left, right, "IP")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	for i := int64(0); i < leftNum; i++ {
 		for j := int64(0); j < rightNum; j++ {
@@ -205,7 +205,7 @@ func Test_VectorCount(t *testing.T) {
 
 func Test_ValidateBinaryArrayLength(t *testing.T) {
 	err := ValidateBinaryArrayLength(21, 12)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = ValidateBinaryArrayLength(21, 11)
 	assert.Error(t, err)
@@ -248,7 +248,7 @@ func Test_CalcHamminDistance(t *testing.T) {
 	assert.Error(t, e)
 
 	distances, err := CalcHammingDistance(dim, left, left)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	n := CalcHamming(dim, left, 0, left, 0)
 	assert.Equal(t, n, int32(0))
@@ -279,7 +279,7 @@ func Test_CalcTanimotoCoefficient(t *testing.T) {
 
 	for i := 0; i < len(hamming); i++ {
 		realTanimoto := float64(int32(dim)-hamming[i]) / (float64(dim)*2.0 - float64(int32(dim)-hamming[i]))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Less(t, math.Abs(float64(tanimoto[i])-realTanimoto), float64(PRECISION))
 	}
 

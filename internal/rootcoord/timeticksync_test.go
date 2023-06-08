@@ -78,7 +78,7 @@ func TestTimetickSync(t *testing.T) {
 		}
 
 		err := ttSync.updateTimeTick(msg, "1")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		msg.ChannelNames = append(msg.ChannelNames, "a")
 		err = ttSync.updateTimeTick(msg, "1")
@@ -90,11 +90,11 @@ func TestTimetickSync(t *testing.T) {
 		ttSync.sess2ChanTsMap[msg.Base.SourceID] = cttMsg
 
 		err = ttSync.updateTimeTick(msg, "1")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		ttSync.sourceID = int64(1)
 		err = ttSync.updateTimeTick(msg, "1")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -145,7 +145,7 @@ func TestMultiTimetickSync(t *testing.T) {
 		}
 
 		err := ttSync.updateTimeTick(msg, "1")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		msg2 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -155,7 +155,7 @@ func TestMultiTimetickSync(t *testing.T) {
 			DefaultTimestamp: 102,
 		}
 		err = ttSync.updateTimeTick(msg2, "2")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// make sure result works
 		result := <-ttSync.sendChan

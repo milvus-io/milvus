@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	mockQN := types.NewMockQueryNode(t)
@@ -96,7 +96,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		err = server.Run()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
@@ -106,7 +106,7 @@ func Test_NewServer(t *testing.T) {
 			}}, nil)
 		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
@@ -114,7 +114,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().GetStatisticsChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -122,7 +122,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().GetTimeTickChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &internalpb.GetTimeTickChannelRequest{}
 		resp, err := server.GetTimeTickChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -130,7 +130,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().WatchDmChannels(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.WatchDmChannelsRequest{}
 		resp, err := server.WatchDmChannels(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -138,7 +138,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().LoadSegments(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.LoadSegmentsRequest{}
 		resp, err := server.LoadSegments(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -146,7 +146,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.ReleaseCollectionRequest{}
 		resp, err := server.ReleaseCollection(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -154,7 +154,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.LoadPartitionsRequest{}
 		resp, err := server.LoadPartitions(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -162,7 +162,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.ReleasePartitionsRequest{}
 		resp, err := server.ReleasePartitions(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -170,7 +170,7 @@ func Test_NewServer(t *testing.T) {
 		mockQN.EXPECT().ReleaseSegments(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 		req := &querypb.ReleaseSegmentsRequest{}
 		resp, err := server.ReleaseSegments(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -179,7 +179,7 @@ func Test_NewServer(t *testing.T) {
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &querypb.GetSegmentInfoRequest{}
 		resp, err := server.GetSegmentInfo(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -190,7 +190,7 @@ func Test_NewServer(t *testing.T) {
 			Request: "",
 		}
 		resp, err := server.GetMetrics(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -251,13 +251,13 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_Run(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	mockQN := types.NewMockQueryNode(t)

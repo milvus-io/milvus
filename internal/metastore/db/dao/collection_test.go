@@ -121,7 +121,7 @@ func TestCollection_GetCidTs_Ts0(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.GetCollectionIDTs(tenantID, collID1, noTs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collection, res)
 }
 
@@ -141,7 +141,7 @@ func TestCollection_GetCidTs_TsNot0(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.GetCollectionIDTs(tenantID, collID1, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collection, res)
 }
 
@@ -191,7 +191,7 @@ func TestCollection_ListCidTs_TsNot0(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.ListCollectionIDTs(tenantID, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collection, res)
 }
 
@@ -229,7 +229,7 @@ func TestCollection_ListCidTs_Ts0(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.ListCollectionIDTs(tenantID, noTs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collection, res)
 }
 
@@ -255,7 +255,7 @@ func TestCollection_Get(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.Get(tenantID, collID1, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collection, res)
 }
 
@@ -319,7 +319,7 @@ func TestCollection_GetCollectionIDByName(t *testing.T) {
 
 	// actual
 	res, err := collTestDb.GetCollectionIDByName(tenantID, collectionName, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collID1, res)
 }
 
@@ -377,7 +377,7 @@ func TestCollection_Insert(t *testing.T) {
 
 	// actual
 	err := collTestDb.Insert(collection)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestCollection_Insert_Error(t *testing.T) {
@@ -462,7 +462,7 @@ func Test_collectionDb_Update(t *testing.T) {
 
 		// actual
 		err := collTestDb.Update(collection)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("error", func(t *testing.T) {

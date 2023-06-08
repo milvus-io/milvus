@@ -54,7 +54,7 @@ func TestIndexNodeSimple(t *testing.T) {
 	defer in.Stop()
 	ctx := context.TODO()
 	state, err := in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
@@ -107,7 +107,7 @@ func TestIndexNodeSimple(t *testing.T) {
 			StorageConfig:   genStorageConfig(),
 		}
 		status, err := in.CreateJob(ctx, createReq)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
@@ -127,7 +127,7 @@ func TestIndexNodeSimple(t *testing.T) {
 			default:
 				time.Sleep(1 * time.Millisecond)
 				resp, err := in.QueryJobs(ctx, queryJob)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
 				assert.Equal(t, resp.ClusterID, clusterID)
 
@@ -153,7 +153,7 @@ func TestIndexNodeSimple(t *testing.T) {
 		}
 
 		jobNumRet, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, jobNumRet.Status.GetErrorCode(), commonpb.ErrorCode_Success)
 		assert.Equal(t, jobNumRet.TotalJobNum, int64(0))
 		assert.Equal(t, jobNumRet.InProgressJobNum, int64(0))
@@ -173,7 +173,7 @@ func TestIndexNodeSimple(t *testing.T) {
 			ClusterID: clusterID,
 			BuildIDs:  []int64{100001},
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 }
@@ -234,7 +234,7 @@ func TestIndexNodeComplex(t *testing.T) {
 	defer in.Stop()
 	ctx := context.TODO()
 	state, err := in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
@@ -286,7 +286,7 @@ func TestIndexNodeComplex(t *testing.T) {
 		go func() {
 			defer testwg.Done()
 			status, err := in.CreateJob(ctx, req)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 		}()
 
@@ -298,7 +298,7 @@ func TestIndexNodeComplex(t *testing.T) {
 					ClusterID: clusterID,
 					BuildIDs:  []int64{tasks[idx].buildID},
 				})
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 			}
 		}(i)
@@ -313,7 +313,7 @@ Loop:
 			t.Fatal("timeout testing")
 		default:
 			jobNumRet, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, jobNumRet.Status.ErrorCode, commonpb.ErrorCode_Success)
 			if jobNumRet.TotalJobNum == 0 {
 				break Loop
@@ -329,7 +329,7 @@ Loop:
 		ClusterID: clusterID,
 		BuildIDs:  buildIDs,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, jobresp.Status.ErrorCode, jobresp.Status.ErrorCode)
 
 	for _, job := range jobresp.IndexInfos {
@@ -357,31 +357,31 @@ Loop:
 
 func TestAbnormalIndexNode(t *testing.T) {
 	in, err := NewMockIndexNodeComponent(context.TODO())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, in.Stop())
 	ctx := context.TODO()
 	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, qresp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, jobNumRsp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, metricsResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, configurationResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 }
 
@@ -391,10 +391,10 @@ func TestGetMetrics(t *testing.T) {
 		metricReq, _ = metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	)
 	in, err := NewMockIndexNodeComponent(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer in.Stop()
 	resp, err := in.GetMetrics(ctx, metricReq)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	t.Logf("Component: %s, Metrics: %s", resp.ComponentName, resp.Response)
 }
@@ -405,20 +405,20 @@ func TestGetMetricsError(t *testing.T) {
 	)
 
 	in, err := NewMockIndexNodeComponent(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer in.Stop()
 	errReq := &milvuspb.GetMetricsRequest{
 		Request: `{"metric_typ": "system_info"}`,
 	}
 	resp, err := in.GetMetrics(ctx, errReq)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 	unsupportedReq := &milvuspb.GetMetricsRequest{
 		Request: `{"metric_type": "application_info"}`,
 	}
 	resp, err = in.GetMetrics(ctx, unsupportedReq)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 	assert.Equal(t, resp.Status.Reason, metricsinfo.MsgUnimplementedMetric)
 }

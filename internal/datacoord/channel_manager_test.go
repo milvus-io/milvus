@@ -913,7 +913,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		defer cancel()
 
 		cm, err := NewChannelManager(metakv, newMockHandler())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, cm.AddNode(1))
 		assert.Nil(t, cm.AddNode(2))
 		cm.store = &ChannelStore{
@@ -934,7 +934,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		require.NoError(t, err)
 
 		cm2, err := NewChannelManager(metakv, newMockHandler())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, cm2.Startup(ctx, []int64{3}))
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, 3, "channel1", 1)

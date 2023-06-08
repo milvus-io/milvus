@@ -29,16 +29,16 @@ func TestPmsFactory(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := pmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = pmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestPmsFactoryWithAuth(t *testing.T) {
@@ -53,13 +53,13 @@ func TestPmsFactoryWithAuth(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := pmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = pmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = pmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	Params.Save(Params.PulsarCfg.AuthParams.Key, "")
 	pmsFactory = NewPmsFactory(config)
@@ -81,14 +81,14 @@ func TestKafkaFactory(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := kmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = kmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = kmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// err = kmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	// assert.Nil(t, err)
+	// assert.NoError(t, err)
 }

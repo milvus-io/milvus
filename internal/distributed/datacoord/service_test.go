@@ -296,7 +296,7 @@ func Test_NewServer(t *testing.T) {
 		//server.indexCoord = indexCoord
 
 		err := server.Run()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
@@ -304,7 +304,7 @@ func Test_NewServer(t *testing.T) {
 			states: &milvuspb.ComponentStates{},
 		}
 		states, err := server.GetComponentStates(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, states)
 	})
 
@@ -313,7 +313,7 @@ func Test_NewServer(t *testing.T) {
 			strResp: &milvuspb.StringResponse{},
 		}
 		resp, err := server.GetTimeTickChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -322,7 +322,7 @@ func Test_NewServer(t *testing.T) {
 			strResp: &milvuspb.StringResponse{},
 		}
 		resp, err := server.GetStatisticsChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -331,7 +331,7 @@ func Test_NewServer(t *testing.T) {
 			infoResp: &datapb.GetSegmentInfoResponse{},
 		}
 		resp, err := server.GetSegmentInfo(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -340,7 +340,7 @@ func Test_NewServer(t *testing.T) {
 			flushResp: &datapb.FlushResponse{},
 		}
 		resp, err := server.Flush(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -349,7 +349,7 @@ func Test_NewServer(t *testing.T) {
 			assignResp: &datapb.AssignSegmentIDResponse{},
 		}
 		resp, err := server.AssignSegmentID(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -358,7 +358,7 @@ func Test_NewServer(t *testing.T) {
 			segStateResp: &datapb.GetSegmentStatesResponse{},
 		}
 		resp, err := server.GetSegmentStates(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -367,7 +367,7 @@ func Test_NewServer(t *testing.T) {
 			binResp: &datapb.GetInsertBinlogPathsResponse{},
 		}
 		resp, err := server.GetInsertBinlogPaths(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -376,7 +376,7 @@ func Test_NewServer(t *testing.T) {
 			colStatResp: &datapb.GetCollectionStatisticsResponse{},
 		}
 		resp, err := server.GetCollectionStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -385,7 +385,7 @@ func Test_NewServer(t *testing.T) {
 			partStatResp: &datapb.GetPartitionStatisticsResponse{},
 		}
 		resp, err := server.GetPartitionStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -394,7 +394,7 @@ func Test_NewServer(t *testing.T) {
 			strResp: &milvuspb.StringResponse{},
 		}
 		resp, err := server.GetSegmentInfoChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -403,7 +403,7 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		resp, err := server.SaveBinlogPaths(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -412,7 +412,7 @@ func Test_NewServer(t *testing.T) {
 			recoverResp: &datapb.GetRecoveryInfoResponse{},
 		}
 		resp, err := server.GetRecoveryInfo(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -421,7 +421,7 @@ func Test_NewServer(t *testing.T) {
 			flushSegResp: &datapb.GetFlushedSegmentsResponse{},
 		}
 		resp, err := server.GetFlushedSegments(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -430,7 +430,7 @@ func Test_NewServer(t *testing.T) {
 			configResp: &internalpb.ShowConfigurationsResponse{},
 		}
 		resp, err := server.ShowConfigurations(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -439,7 +439,7 @@ func Test_NewServer(t *testing.T) {
 			metricResp: &milvuspb.GetMetricsResponse{},
 		}
 		resp, err := server.GetMetrics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -448,7 +448,7 @@ func Test_NewServer(t *testing.T) {
 			watchChannelsResp: &datapb.WatchChannelsResponse{},
 		}
 		resp, err := server.WatchChannels(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -457,7 +457,7 @@ func Test_NewServer(t *testing.T) {
 			getFlushStateResp: &milvuspb.GetFlushStateResponse{},
 		}
 		resp, err := server.GetFlushState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -466,7 +466,7 @@ func Test_NewServer(t *testing.T) {
 			getFlushAllStateResp: &milvuspb.GetFlushAllStateResponse{},
 		}
 		resp, err := server.GetFlushAllState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -475,7 +475,7 @@ func Test_NewServer(t *testing.T) {
 			dropVChanResp: &datapb.DropVirtualChannelResponse{},
 		}
 		resp, err := server.DropVirtualChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -484,7 +484,7 @@ func Test_NewServer(t *testing.T) {
 			manualCompactionResp: &milvuspb.ManualCompactionResponse{},
 		}
 		resp, err := server.ManualCompaction(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -493,7 +493,7 @@ func Test_NewServer(t *testing.T) {
 			compactionStateResp: &milvuspb.GetCompactionStateResponse{},
 		}
 		resp, err := server.GetCompactionState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -502,7 +502,7 @@ func Test_NewServer(t *testing.T) {
 			compactionPlansResp: &milvuspb.GetCompactionPlansResponse{},
 		}
 		resp, err := server.GetCompactionStateWithPlans(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -511,7 +511,7 @@ func Test_NewServer(t *testing.T) {
 			setSegmentStateResp: &datapb.SetSegmentStateResponse{},
 		}
 		resp, err := server.SetSegmentState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -522,7 +522,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.Import(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -533,7 +533,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.UpdateSegmentStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -544,7 +544,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.UpdateChannelCheckpoint(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -555,7 +555,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.SaveImportSegment(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -566,7 +566,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.UnsetIsImportingState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -577,7 +577,7 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.MarkSegmentsDropped(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
@@ -586,14 +586,14 @@ func Test_NewServer(t *testing.T) {
 			broadCastResp: &commonpb.Status{},
 		}
 		resp, err := server.BroadcastAlteredCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("CheckHealth", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
 		ret, err := server.CheckHealth(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
@@ -670,7 +670,7 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	err := server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_Run(t *testing.T) {

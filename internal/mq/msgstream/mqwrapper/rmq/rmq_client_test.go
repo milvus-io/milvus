@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 func Test_NewRmqClient(t *testing.T) {
 	client, err := createRmqClient()
 	defer client.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 }
 
@@ -58,7 +58,7 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	opts := rocksmqimplclient.Options{}
 	client, err := NewClient(opts)
 	defer client.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	topic := "TestRmqClient_CreateProducer"
@@ -66,7 +66,7 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	producer, err := client.CreateProducer(proOpts)
 
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	rmqProducer := producer.(*rmqProducer)
@@ -78,7 +78,7 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 		Properties: nil,
 	}
 	_, err = rmqProducer.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	invalidOpts := mqwrapper.ProducerOptions{Topic: ""}
 	producer, e := client.CreateProducer(invalidOpts)
@@ -88,13 +88,13 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 
 func TestRmqClient_GetLatestMsg(t *testing.T) {
 	client, err := createRmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer client.Close()
 
 	topic := fmt.Sprintf("t2GetLatestMsg-%d", rand.Int())
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer producer.Close()
 
 	for i := 0; i < 10; i++ {
@@ -103,7 +103,7 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 			Properties: nil,
 		}
 		_, err = producer.Send(context.TODO(), msg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	subName := "subName"
@@ -115,10 +115,10 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 	}
 
 	consumer, err := client.Subscribe(consumerOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	expectLastMsg, err := consumer.GetLatestMsgID()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	var actualLastMsg mqwrapper.Message
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -135,21 +135,21 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 	}
 	require.NotNil(t, actualLastMsg)
 	ret, err := expectLastMsg.LessOrEqualThan(actualLastMsg.ID().Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, ret)
 }
 
 func TestRmqClient_Subscribe(t *testing.T) {
 	client, err := createRmqClient()
 	defer client.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	topic := "TestRmqClient_Subscribe"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	subName := "subName"
@@ -160,7 +160,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		BufSize:                     0,
 	}
 	consumer, err := client.Subscribe(consumerOpts)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	consumerOpts = mqwrapper.ConsumerOptions{
@@ -171,13 +171,13 @@ func TestRmqClient_Subscribe(t *testing.T) {
 	}
 
 	consumer, err = client.Subscribe(consumerOpts)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	consumerOpts.Topic = topic
 	consumer, err = client.Subscribe(consumerOpts)
 	defer consumer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	assert.Equal(t, consumer.Subscription(), subName)
 
@@ -186,7 +186,7 @@ func TestRmqClient_Subscribe(t *testing.T) {
 		Properties: nil,
 	}
 	_, err = producer.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -222,13 +222,13 @@ func TestRmqClient_StringToMsgID(t *testing.T) {
 
 	str := "5"
 	res, err := client.StringToMsgID(str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 
 	str = "X"
 	res, err = client.StringToMsgID(str)
 	assert.Nil(t, res)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestRmqClient_BytesToMsgID(t *testing.T) {
@@ -239,7 +239,7 @@ func TestRmqClient_BytesToMsgID(t *testing.T) {
 	binary := pulsarwrapper.SerializePulsarMsgID(mid)
 
 	res, err := client.BytesToMsgID(binary)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 }
 

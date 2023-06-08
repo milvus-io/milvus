@@ -62,7 +62,7 @@ func TestQuotaCenter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	core, err := NewCore(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	core.tsoAllocator = newMockTsoAllocator()
 
 	pcm := newProxyClientManager(core.proxyCreator)

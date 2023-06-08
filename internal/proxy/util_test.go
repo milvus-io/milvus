@@ -727,25 +727,25 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 
 func TestGetCurUserFromContext(t *testing.T) {
 	_, err := GetCurUserFromContext(context.Background())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	_, err = GetCurUserFromContext(metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{})))
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	_, err = GetCurUserFromContext(GetContext(context.Background(), "123456"))
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	root := "root"
 	password := "123456"
 	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "root", username)
 }
 
 func TestGetRole(t *testing.T) {
 	globalMetaCache = nil
 	_, err := GetRole("foo")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	globalMetaCache = &mockCache{
 		getUserRoleFunc: func(username string) []string {
 			if username == "root" {
@@ -755,11 +755,11 @@ func TestGetRole(t *testing.T) {
 		},
 	}
 	roles, err := GetRole("root")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 3, len(roles))
 
 	roles, err = GetRole("foo")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(roles))
 }
 
@@ -789,7 +789,7 @@ func TestPasswordVerify(t *testing.T) {
 
 	// Sha256Password has not been filled into cache during establish connection firstly
 	encryptedPwd, err := crypto.PasswordEncrypt(password)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	credCache[username] = &internalpb.CredentialInfo{
 		Username:          username,
 		EncryptedPassword: encryptedPwd,

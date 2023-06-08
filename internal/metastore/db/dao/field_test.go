@@ -38,7 +38,7 @@ func TestField_GetByCollID(t *testing.T) {
 
 	// actual
 	res, err := fieldTestDb.GetByCollectionID(tenantID, collID1, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, fields, res)
 }
 
@@ -83,7 +83,7 @@ func TestField_Insert(t *testing.T) {
 
 	// actual
 	err := fieldTestDb.Insert(fields)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestField_Insert_Error(t *testing.T) {

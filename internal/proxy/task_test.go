@@ -928,7 +928,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, false, task.result.Value)
 	// createCollection in RootCood and fill GlobalMetaCache
 	rc.CreateCollection(ctx, createColReq)
@@ -936,20 +936,20 @@ func TestHasCollectionTask(t *testing.T) {
 
 	// success to drop collection
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, task.result.Value)
 
 	// illegal name
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	rc.updateState(commonpb.StateCode_Abnormal)
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 }
 
@@ -992,12 +992,12 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// illegal name
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// describe collection with id
 	task.CollectionID = 1
@@ -1009,9 +1009,9 @@ func TestDescribeCollectionTask(t *testing.T) {
 	task.CollectionID = 0
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
 }
 
@@ -1070,10 +1070,10 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 		result:    nil,
 	}
 	err = task.PreExecute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
@@ -1134,10 +1134,10 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 		result:    nil,
 	}
 	err = task.PreExecute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
@@ -1200,10 +1200,10 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 
 	// missing collectionID in globalMetaCache
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
@@ -1244,16 +1244,16 @@ func TestCreatePartitionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = collectionName
 	task.PartitionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestDropPartitionTask(t *testing.T) {
@@ -1307,16 +1307,16 @@ func TestDropPartitionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = collectionName
 	task.PartitionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	t.Run("get collectionID error", func(t *testing.T) {
 		mockCache := newMockCache()
@@ -1397,16 +1397,16 @@ func TestHasPartitionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = collectionName
 	task.PartitionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestShowPartitionsTask(t *testing.T) {
@@ -1444,23 +1444,23 @@ func TestShowPartitionsTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = collectionName
 	task.ShowPartitionsRequest.Type = milvuspb.ShowType_InMemory
 	task.PartitionNames = []string{"#0xc0de"}
 	err = task.PreExecute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	task.CollectionName = collectionName
 	task.PartitionNames = []string{partitionName}
 	task.ShowPartitionsRequest.Type = milvuspb.ShowType_InMemory
 	err = task.Execute(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 }
 
@@ -2775,7 +2775,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
 
@@ -2815,7 +2815,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
 
@@ -2857,7 +2857,7 @@ func TestTransferNodeTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
 
@@ -2900,7 +2900,7 @@ func TestTransferReplicaTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
 
@@ -2940,7 +2940,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	groups := task.result.GetResourceGroups()
 	assert.Contains(t, groups, meta.DefaultResourceGroupName)
@@ -2993,7 +2993,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	groupInfo := task.result.GetResourceGroup()
 	outgoingNodeNum := groupInfo.GetNumOutgoingNode()
@@ -3041,7 +3041,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
 	err := task.Execute(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
 }
 

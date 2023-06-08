@@ -303,11 +303,11 @@ func Test_parseFloat(t *testing.T) {
 
 	value, err = parseFloat("3.14159", 32, "")
 	assert.True(t, math.Abs(value-3.14159) < 0.000001)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	value, err = parseFloat("2.718281828459045", 64, "")
 	assert.True(t, math.Abs(value-2.718281828459045) < 0.0000000000000001)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	value, err = parseFloat("Inf", 32, "")
 	assert.Zero(t, value)
@@ -321,12 +321,12 @@ func Test_parseFloat(t *testing.T) {
 func Test_InitValidators(t *testing.T) {
 	validators := make(map[storage.FieldID]*Validator)
 	err := initValidators(nil, validators)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	schema := sampleSchema()
 	// success case
 	err = initValidators(schema, validators)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(schema.Fields), len(validators))
 	for _, field := range schema.Fields {
 		fieldID := field.GetFieldID()
@@ -356,12 +356,12 @@ func Test_InitValidators(t *testing.T) {
 		fieldData := fields[id]
 		preNum := fieldData.RowNum()
 		err = v.convertFunc(validVal, fieldData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		postNum := fieldData.RowNum()
 		assert.Equal(t, 1, postNum-preNum)
 
 		err = v.convertFunc(invalidVal, fieldData)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	}
 
 	t.Run("check convert functions", func(t *testing.T) {
@@ -440,7 +440,7 @@ func Test_InitValidators(t *testing.T) {
 
 		validators = make(map[storage.FieldID]*Validator)
 		err = initValidators(schema, validators)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		schema.Fields = make([]*schemapb.FieldSchema, 0)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -454,7 +454,7 @@ func Test_InitValidators(t *testing.T) {
 		})
 
 		err = initValidators(schema, validators)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		// unsupported data type
 		schema.Fields = make([]*schemapb.FieldSchema, 0)
@@ -466,7 +466,7 @@ func Test_InitValidators(t *testing.T) {
 		})
 
 		err = initValidators(schema, validators)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("json field", func(t *testing.T) {
@@ -485,7 +485,7 @@ func Test_InitValidators(t *testing.T) {
 
 		validators = make(map[storage.FieldID]*Validator)
 		err = initValidators(schema, validators)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		v, ok := validators[102]
 		assert.True(t, ok)
@@ -495,11 +495,11 @@ func Test_InitValidators(t *testing.T) {
 		fieldData := fields[102]
 
 		err = v.convertFunc("{\"x\": 1, \"y\": 5}", fieldData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, fieldData.RowNum())
 
 		err = v.convertFunc("{}", fieldData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 2, fieldData.RowNum())
 
 		err = v.convertFunc("", fieldData)
@@ -528,19 +528,19 @@ func Test_GetFieldDimension(t *testing.T) {
 	}
 
 	dim, err := getFieldDimension(schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 4, dim)
 
 	schema.TypeParams = []*commonpb.KeyValuePair{
 		{Key: common.DimKey, Value: "abc"},
 	}
 	dim, err = getFieldDimension(schema)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 0, dim)
 
 	schema.TypeParams = []*commonpb.KeyValuePair{}
 	dim, err = getFieldDimension(schema)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 0, dim)
 }
 
@@ -665,13 +665,13 @@ func Test_TryFlushBlocks(t *testing.T) {
 	// non-force flush
 	segmentsData := createSegmentsData(fieldsData, shardNum)
 	err := tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, flushCounter)
 	assert.Equal(t, 0, flushRowCount)
 
 	// force flush
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, int(shardNum), flushCounter)
 	assert.Equal(t, rowCount*int(shardNum), flushRowCount)
 
@@ -679,7 +679,7 @@ func Test_TryFlushBlocks(t *testing.T) {
 	flushCounter = 0
 	flushRowCount = 0
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, flushCounter)
 	assert.Equal(t, 0, flushRowCount)
 
@@ -687,14 +687,14 @@ func Test_TryFlushBlocks(t *testing.T) {
 	segmentsData = createSegmentsData(fieldsData, shardNum)
 	blockSize = 100 // blockSize is 100 bytes, less than the 10 rows size
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, int(shardNum), flushCounter)
 	assert.Equal(t, rowCount*int(shardNum), flushRowCount)
 
 	flushCounter = 0
 	flushRowCount = 0
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, true) // no data left
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, flushCounter)
 	assert.Equal(t, 0, flushRowCount)
 
@@ -703,14 +703,14 @@ func Test_TryFlushBlocks(t *testing.T) {
 	blockSize = 4096   // blockSize is 4096 bytes, larger than the 10 rows size
 	maxTotalSize = 100 // maxTotalSize is 100 bytes, less than the 30 rows size
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, flushCounter) // only the max segment is flushed
 	assert.Equal(t, 10, flushRowCount)
 
 	flushCounter = 0
 	flushRowCount = 0
 	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, true) // two segments left
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 2, flushCounter)
 	assert.Equal(t, 20, flushRowCount)
 

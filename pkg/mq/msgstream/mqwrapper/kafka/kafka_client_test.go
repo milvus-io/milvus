@@ -68,7 +68,7 @@ func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -107,12 +107,12 @@ func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
 	err = consumer.Seek(msgID, true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	mm := <-consumer.Chan()
 	consumer.Ack(mm)
@@ -143,7 +143,7 @@ func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -231,7 +231,7 @@ func TestKafkaClient_SeekPosition(t *testing.T) {
 	defer consumer.Close()
 
 	err := consumer.Seek(ids[2], true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	select {
 	case msg := <-consumer.Chan():
@@ -349,13 +349,13 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	assert.Equal(t, "dc", client.consumerConfig["client.id"])
 	newConsumerConfig := client.newConsumerConfig("test", 0)
 	clientID, err := newConsumerConfig.Get("client.id", "")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "dc", clientID)
 
 	assert.Equal(t, "dc1", client.producerConfig["client.id"])
 	newProducerConfig := client.newProducerConfig()
 	pClientID, err := newProducerConfig.Get("client.id", "")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, pClientID, "dc1")
 }
 
@@ -377,13 +377,13 @@ func createConsumer(t *testing.T,
 		BufSize:                     1024,
 		SubscriptionInitialPosition: initPosition,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	return consumer
 }
 
 func createProducer(t *testing.T, kc *kafkaClient, topic string) mqwrapper.Producer {
 	producer, err := kc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	return producer
 }
@@ -399,7 +399,7 @@ func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer,
 		}
 		msgID, err := producer.Send(ctx, msg)
 		msgIDs = append(msgIDs, msgID)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	producer.(*kafkaProducer).p.Flush(500)

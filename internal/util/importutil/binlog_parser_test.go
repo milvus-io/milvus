@@ -35,17 +35,17 @@ func Test_NewBinlogParser(t *testing.T) {
 	// nil schema
 	parser, err := NewBinlogParser(ctx, nil, 2, 1024, nil, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// nil chunkmanager
 	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, nil, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// nil flushfunc
 	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// succeed
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
@@ -53,12 +53,12 @@ func Test_NewBinlogParser(t *testing.T) {
 	}
 	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// tsStartPoint larger than tsEndPoint
 	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 2, 1)
 	assert.Nil(t, parser)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_BinlogParserConstructHolders(t *testing.T) {
@@ -130,10 +130,10 @@ func Test_BinlogParserConstructHolders(t *testing.T) {
 
 	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	holders, err := parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 2, len(holders))
 
 	// verify the first segment
@@ -190,14 +190,14 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 
 	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	insertPath := "insertPath"
 	deltaPath := "deltaPath"
 
 	// chunkManager return error
 	holders, err := parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, holders)
 
 	// parse field id error(insert log)
@@ -206,7 +206,7 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/illegal/435978159903735811",
 	}
 	holders, err = parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, holders)
 
 	// parse segment id error(insert log)
@@ -214,7 +214,7 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/illegal/0/435978159903735811",
 	}
 	holders, err = parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, holders)
 
 	// parse segment id error(delta log)
@@ -223,7 +223,7 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/illegal/434574382554415105",
 	}
 	holders, err = parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, holders)
 }
 
@@ -236,14 +236,14 @@ func Test_BinlogParserParseFilesFailed(t *testing.T) {
 
 	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = parser.parseSegmentFiles(nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	parser.collectionSchema = nil
 	err = parser.parseSegmentFiles(&SegmentFilesHolder{})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_BinlogParserParse(t *testing.T) {
@@ -274,23 +274,23 @@ func Test_BinlogParserParse(t *testing.T) {
 	}
 	parser, err := NewBinlogParser(ctx, schema, 2, 1024, chunkManager, flushFunc, updateProgress, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// zero paths
 	err = parser.Parse(nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// one empty path
 	paths := []string{
 		"insertPath",
 	}
 	err = parser.Parse(paths)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// two empty paths
 	paths = append(paths, "deltaPath")
 	err = parser.Parse(paths)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// wrong path
 	chunkManager.listResult = make(map[string][]string)
@@ -298,7 +298,7 @@ func Test_BinlogParserParse(t *testing.T) {
 		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/illegal/101/435978159903735811",
 	}
 	err = parser.Parse(paths)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// file not found
 	chunkManager.listResult["insertPath"] = []string{
@@ -307,7 +307,7 @@ func Test_BinlogParserParse(t *testing.T) {
 		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735811",
 	}
 	err = parser.Parse(paths)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_BinlogParserSkipFlagFile(t *testing.T) {
@@ -324,14 +324,14 @@ func Test_BinlogParserSkipFlagFile(t *testing.T) {
 
 	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	insertPath := "insertPath"
 	deltaPath := "deltaPath"
 
 	// chunkManager return error
 	holders, err := parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, holders)
 
 	// parse field id error(insert log)

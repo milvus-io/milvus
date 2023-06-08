@@ -87,7 +87,7 @@ func TestUpperLimitCalBySchema(t *testing.T) {
 	for _, c := range testCases {
 		result, err := calBySchemaPolicy(c.schema)
 		if c.expectErr {
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		} else {
 			assert.Equal(t, c.expected, result)
 		}

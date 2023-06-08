@@ -39,7 +39,7 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		err := nm.AddNode(1, "indexnode-1")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {

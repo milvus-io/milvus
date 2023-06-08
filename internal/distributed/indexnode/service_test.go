@@ -40,7 +40,7 @@ func TestIndexNodeServer(t *testing.T) {
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	server, err := NewServer(ctx, factory)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	inm := indexnode.NewIndexNodeMock()
@@ -56,22 +56,22 @@ func TestIndexNodeServer(t *testing.T) {
 	assert.NoError(t, err)
 	inm.SetEtcdClient(etcdCli)
 	err = server.SetClient(inm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = server.Run()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -83,21 +83,21 @@ func TestIndexNodeServer(t *testing.T) {
 			DataPaths: []string{},
 		}
 		resp, err := server.CreateJob(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("QueryJob", func(t *testing.T) {
 		req := &indexpb.QueryJobsRequest{}
 		resp, err := server.QueryJobs(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("DropJobs", func(t *testing.T) {
 		req := &indexpb.DropJobsRequest{}
 		resp, err := server.DropJobs(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -106,15 +106,15 @@ func TestIndexNodeServer(t *testing.T) {
 			Pattern: "",
 		}
 		resp, err := server.ShowConfigurations(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		resp, err := server.GetMetrics(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -126,5 +126,5 @@ func TestIndexNodeServer(t *testing.T) {
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

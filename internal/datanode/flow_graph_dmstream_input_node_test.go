@@ -110,5 +110,5 @@ func TestNewDmInputNode(t *testing.T) {
 		msFactory:    &mockMsgStreamFactory{},
 		vChannelName: "mock_vchannel_0",
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

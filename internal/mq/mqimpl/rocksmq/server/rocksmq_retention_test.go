@@ -45,14 +45,14 @@ func TestRmqRetention_Basic(t *testing.T) {
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "2")
 	rmq, err := NewRocksMQ(rocksdbPath, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.Close()
 	params.Save(params.RocksmqCfg.RetentionSizeInMB.Key, "0")
 	params.Save(params.RocksmqCfg.RetentionTimeInMinutes.Key, "0")
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 
 	msgNum := 100
@@ -63,7 +63,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
@@ -76,11 +76,11 @@ func TestRmqRetention_Basic(t *testing.T) {
 	}
 	rmq.RegisterConsumer(consumer)
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	cMsgs := make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -90,9 +90,9 @@ func TestRmqRetention_Basic(t *testing.T) {
 
 	// Seek to a previous consumed message, the message should be clean up
 	err = rmq.ForceSeek(topicName, groupName, cMsgs[msgNum/2].MsgID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 0)
 
 	// test acked size acked ts and other meta are updated as expect
@@ -140,7 +140,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	params.Save(params.RocksmqCfg.PageSize.Key, "10")
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "2")
 	rmq, err := NewRocksMQ(rocksdbPath, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.Close()
 
 	params.Save(params.RocksmqCfg.RetentionSizeInMB.Key, "0")
@@ -148,7 +148,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 
 	msgNum := 100
@@ -159,7 +159,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
@@ -172,11 +172,11 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	}
 	rmq.RegisterConsumer(consumer)
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	cMsgs := make([]ConsumerMessage, 0)
 	for i := 0; i < 5; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), 5)
@@ -194,9 +194,9 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 
 	// Seek to a previous consumed message, the message should be clean up
 	err = rmq.ForceSeek(topicName, groupName, cMsgs[1].MsgID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 1)
 	assert.Equal(t, newRes[0].MsgID, id+4)
 
@@ -251,7 +251,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.Close()
 
 	// no retention by size
@@ -261,7 +261,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 
 	msgNum := 100
@@ -272,12 +272,12 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids1, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids1))
 
 	topicName = "topic_b"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 	pMsgs = make([]ProducerMessage, msgNum)
 	for i := 0; i < msgNum; i++ {
@@ -286,7 +286,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids2, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids2))
 
 	topicName = "topic_a"
@@ -304,7 +304,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	cMsgs := make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -313,9 +313,9 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	time.Sleep(time.Duration(3) * time.Second)
 
 	err = rmq.ForceSeek(topicName, groupName, ids1[10])
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 0)
 
 	// test acked size acked ts and other meta are updated as expect
@@ -378,7 +378,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	cMsgs = make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -387,9 +387,9 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	time.Sleep(time.Duration(3) * time.Second)
 
 	err = rmq.ForceSeek(topicName, groupName, ids2[10])
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	newRes, err = rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 0)
 
 }
@@ -415,26 +415,26 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	params := paramtable.Get()
 	params.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, rmq)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	rmq.Close()
 	rmq, err = NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, rmq)
 
 	assert.Equal(t, rmq.isClosed(), false)
 	// write some data, restart and check.
 	topicName = "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	topicName = "topic_b"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	msgNum := 100
 	pMsgs := make([]ProducerMessage, msgNum)
@@ -444,7 +444,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
 	rmq.Close()
@@ -474,7 +474,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.Close()
 
 	// no retention by size
@@ -484,7 +484,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 
 	msgNum := 100
@@ -495,7 +495,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
@@ -512,7 +512,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	cMsgs := make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -527,14 +527,14 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		pMsgs2[i] = pMsg
 	}
 	ids2, err := rmq.Produce(topicName, pMsgs2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs2), len(ids2))
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	cMsgs = make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -542,9 +542,9 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		err = rmq.ForceSeek(topicName, groupName, ids[0])
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		newRes, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(newRes), 1)
 		// point to first not consumed messages
 		return newRes[0].MsgID == ids2[0]
@@ -600,7 +600,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	params.Save(params.RocksmqCfg.TickerTimeInSeconds.Key, "1")
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.Close()
 
 	// no retention by size
@@ -610,7 +610,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer rmq.DestroyTopic(topicName)
 
 	// need to be larger than 1M
@@ -622,7 +622,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 		pMsgs[i] = pMsg
 	}
 	ids, err := rmq.Produce(topicName, pMsgs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
 	groupName := "test_group"
@@ -635,11 +635,11 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	}
 	rmq.RegisterConsumer(consumer)
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	cMsgs := make([]ConsumerMessage, 0)
 	for i := 0; i < msgNum; i++ {
 		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
@@ -647,9 +647,9 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	// wait for enough time for page expiration
 	time.Sleep(time.Duration(2) * time.Second)
 	err = rmq.ForceSeek(topicName, groupName, ids[0])
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, len(newRes), 1)
 	// make sure clean up happens
 	assert.True(t, newRes[0].MsgID > ids[0])

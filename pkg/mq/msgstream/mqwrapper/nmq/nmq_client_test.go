@@ -35,21 +35,21 @@ func createNmqClient() (*nmqClient, error) {
 
 func Test_NewNmqClient(t *testing.T) {
 	client, err := createNmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	client.Close()
 }
 
 func TestNmqClient_CreateProducer(t *testing.T) {
 	client, err := createNmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	defer client.Close()
 
 	topic := "TestNmqClient_CreateProducer"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	defer producer.Close()
 
@@ -61,7 +61,7 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 		Properties: nil,
 	}
 	_, err = nmqProducer.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	invalidOpts := mqwrapper.ProducerOptions{Topic: ""}
 	producer, e := client.CreateProducer(invalidOpts)
@@ -71,13 +71,13 @@ func TestNmqClient_CreateProducer(t *testing.T) {
 
 func TestNmqClient_GetLatestMsg(t *testing.T) {
 	client, err := createNmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer client.Close()
 
 	topic := fmt.Sprintf("t2GetLatestMsg-%d", rand.Int())
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer producer.Close()
 
 	for i := 0; i < 10; i++ {
@@ -86,7 +86,7 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 			Properties: nil,
 		}
 		_, err = producer.Send(context.TODO(), msg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	subName := "subName"
@@ -98,10 +98,10 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 	}
 
 	consumer, err := client.Subscribe(consumerOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	expectLastMsg, err := consumer.GetLatestMsgID()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	var actualLastMsg mqwrapper.Message
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -118,13 +118,13 @@ func TestNmqClient_GetLatestMsg(t *testing.T) {
 	}
 	require.NotNil(t, actualLastMsg)
 	ret, err := expectLastMsg.LessOrEqualThan(actualLastMsg.ID().Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, ret)
 }
 
 func TestNmqClient_IllegalSubscribe(t *testing.T) {
 	client, err := createNmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	defer client.Close()
 
@@ -144,14 +144,14 @@ func TestNmqClient_IllegalSubscribe(t *testing.T) {
 
 func TestNmqClient_Subscribe(t *testing.T) {
 	client, err := createNmqClient()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	defer client.Close()
 
 	topic := "TestNmqClient_Subscribe"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	defer producer.Close()
 
@@ -164,12 +164,12 @@ func TestNmqClient_Subscribe(t *testing.T) {
 	}
 
 	consumer, err := client.Subscribe(consumerOpts)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	consumerOpts.Topic = topic
 	consumer, err = client.Subscribe(consumerOpts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 	assert.Equal(t, consumer.Subscription(), subName)
@@ -179,7 +179,7 @@ func TestNmqClient_Subscribe(t *testing.T) {
 		Properties: nil,
 	}
 	_, err = producer.Send(context.TODO(), msg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -217,13 +217,13 @@ func TestNmqClient_StringToMsgID(t *testing.T) {
 
 	str := "5"
 	res, err := client.StringToMsgID(str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 
 	str = "X"
 	res, err = client.StringToMsgID(str)
 	assert.Nil(t, res)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestNmqClient_BytesToMsgID(t *testing.T) {
@@ -232,6 +232,6 @@ func TestNmqClient_BytesToMsgID(t *testing.T) {
 
 	mid := client.EarliestMessageID()
 	res, err := client.BytesToMsgID(mid.Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 }

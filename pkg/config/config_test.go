@@ -36,11 +36,11 @@ func TestConfigFromEnv(t *testing.T) {
 	mgr, _ = Init(WithEnvSource(formatKey))
 
 	v, err := mgr.GetConfig("test.env")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "value", v)
 
 	v, err = mgr.GetConfig("TEST_ENV")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, "value", v)
 }
 
@@ -48,7 +48,7 @@ func TestConfigFromRemote(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
 	cfg.Dir = "/tmp/milvus/test"
 	e, err := embed.StartEtcd(cfg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer e.Close()
 	defer os.RemoveAll(cfg.Dir)
 
@@ -74,10 +74,10 @@ func TestConfigFromRemote(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		v, err := mgr.GetConfig("test.etcd")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "value", v)
 		v, err = mgr.GetConfig("TEST_ETCD")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "value", v)
 
 		client.KV.Delete(ctx, "test/config/test/etcd")

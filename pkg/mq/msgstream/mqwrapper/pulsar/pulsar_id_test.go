@@ -60,15 +60,15 @@ func TestLessOrEqualThan(t *testing.T) {
 	}
 
 	ret, err := pid1.LessOrEqualThan(pid2.Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, ret)
 
 	ret, err = pid2.LessOrEqualThan(pid1.Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.False(t, ret)
 
 	ret, err = pid2.LessOrEqualThan([]byte{1})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.False(t, ret)
 }
 
@@ -85,13 +85,13 @@ func TestPulsarID_Equal(t *testing.T) {
 
 	{
 		ret, err := pid1.Equal(pid1.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, ret)
 	}
 
 	{
 		ret, err := pid1.Equal(pid2.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.False(t, ret)
 	}
 }
@@ -109,7 +109,7 @@ func Test_DeserializePulsarMsgID(t *testing.T) {
 
 	binary := SerializePulsarMsgID(mid)
 	res, err := DeserializePulsarMsgID(binary)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 }
 
@@ -126,6 +126,6 @@ func Test_StringToPulsarMsgID(t *testing.T) {
 
 	str := msgIDToString(mid)
 	res, err := stringToMsgID(str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, res)
 }
