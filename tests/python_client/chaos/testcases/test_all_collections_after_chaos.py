@@ -1,6 +1,6 @@
 import time
 import pytest
-
+from pymilvus import Collection
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
@@ -26,11 +26,12 @@ class TestAllCollection(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self, collection_name):
+        self._connect()
         # create
         name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         t0 = time.time()
-        collection_w = self.init_collection_wrap(name=name, active_trace=True, enable_dynamic_field=False,
-                                                 with_json=False)
+        schema = Collection(name=name).schema
+        collection_w = self.init_collection_wrap(name=name, schema=schema)
         tt = time.time() - t0
         assert collection_w.name == name
         # compact collection before getting num_entities
@@ -43,7 +44,11 @@ class TestAllCollection(TestcaseBase):
 
         # insert
         insert_batch = 3000
-        data = cf.gen_default_list_data(start=-insert_batch, with_json=False)
+        with_json = False
+        for field in collection_w.schema.fields:
+            if field.dtype.name == "JSON":
+                with_json = True
+        data = cf.gen_default_list_data(start=-insert_batch, with_json=with_json)
         t0 = time.time()
         _, res = collection_w.insert(data)
         tt = time.time() - t0
@@ -89,7 +94,7 @@ class TestAllCollection(TestcaseBase):
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
         # query
-        term_expr = f'{ct.default_int64_field_name} in {[i for i in range(-insert_batch,0)]}'
+        term_expr = f'{ct.default_int64_field_name} in {[i for i in range(-insert_batch, 0)]}'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
@@ -98,7 +103,7 @@ class TestAllCollection(TestcaseBase):
         collection_w.release()
 
         # insert data
-        d = cf.gen_default_list_data(with_json=False)
+        d = cf.gen_default_list_data(with_json=with_json)
         collection_w.insert(d)
 
         # load
