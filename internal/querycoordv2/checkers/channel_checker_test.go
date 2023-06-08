@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -36,7 +37,7 @@ import (
 
 type ChannelCheckerTestSuite struct {
 	suite.Suite
-	kv      *etcdkv.EtcdKV
+	kv      kv.MetaKv
 	checker *ChannelChecker
 	meta    *meta.Meta
 	broker  *meta.MockBroker

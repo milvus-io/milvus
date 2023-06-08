@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -42,7 +43,7 @@ import (
 
 type fixture struct {
 	t      *testing.T
-	etcdKV *etcdkv.EtcdKV
+	etcdKV kv.MetaKv
 }
 
 type parameters struct {
@@ -359,7 +360,7 @@ func generateBaseMsg() msgstream.BaseMsg {
 
 /****************************************Rmq test******************************************/
 
-func initRmq(name string) *etcdkv.EtcdKV {
+func initRmq(name string) kv.MetaKv {
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
@@ -381,7 +382,7 @@ func initRmq(name string) *etcdkv.EtcdKV {
 	return etcdKV
 }
 
-func Close(rocksdbName string, intputStream, outputStream msgstream.MsgStream, etcdKV *etcdkv.EtcdKV) {
+func Close(rocksdbName string, intputStream, outputStream msgstream.MsgStream, etcdKV kv.MetaKv) {
 	server.CloseRocksMQ()
 	intputStream.Close()
 	outputStream.Close()

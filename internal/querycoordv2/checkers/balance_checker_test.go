@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -37,7 +38,7 @@ import (
 
 type BalanceCheckerTestSuite struct {
 	suite.Suite
-	kv        *etcdkv.EtcdKV
+	kv        kv.MetaKv
 	checker   *BalanceChecker
 	balancer  *balance.MockBalancer
 	meta      *meta.Meta
