@@ -101,7 +101,7 @@ func (suite *ServerSuite) SetupSuite() {
 func (suite *ServerSuite) SetupTest() {
 	var err error
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.Require().NoError(err)
 	suite.hackServer()
 	err = suite.server.Start()
@@ -139,7 +139,7 @@ func (suite *ServerSuite) TestRecover() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.hackServer()
 	err = suite.server.Start()
@@ -240,7 +240,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Initializing, suite.server.status.Load().(commonpb.StateCode))
 	suite.hackServer()
@@ -262,7 +262,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	err := suite.server.Stop()
 	suite.NoError(err)
 
-	suite.server, err = newQueryCoord()
+	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	mockRootCoord := coordMocks.NewRootCoord(suite.T())
 	mockDataCoord := coordMocks.NewDataCoord(suite.T())
@@ -272,18 +272,16 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 		Schema: &schemapb.CollectionSchema{},
 	}, nil).Maybe()
 	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
-			req := &milvuspb.ShowPartitionsRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-				),
-				CollectionID: collection,
-			}
-			mockRootCoord.EXPECT().ShowPartitionsInternal(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
-				Status:       successStatus,
-				PartitionIDs: suite.partitions[collection],
-			}, nil).Maybe()
+		req := &milvuspb.ShowPartitionsRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+			),
+			CollectionID: collection,
 		}
+		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+			Status:       successStatus,
+			PartitionIDs: suite.partitions[collection],
+		}, nil).Maybe()
 		suite.expectGetRecoverInfoByMockDataCoord(collection, mockDataCoord)
 	}
 	err = suite.server.SetRootCoord(mockRootCoord)
@@ -500,7 +498,33 @@ func (suite *ServerSuite) hackServer() {
 	log.Debug("server hacked")
 }
 
-func newQueryCoord() (*Server, error) {
+func (suite *ServerSuite) hackBroker(server *Server) {
+	mockRootCoord := coordMocks.NewRootCoord(suite.T())
+	mockDataCoord := coordMocks.NewDataCoord(suite.T())
+
+	for _, collection := range suite.collections {
+		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{},
+			Schema: &schemapb.CollectionSchema{},
+		}, nil).Maybe()
+		req := &milvuspb.ShowPartitionsRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+			),
+			CollectionID: collection,
+		}
+		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+			Status:       &commonpb.Status{},
+			PartitionIDs: suite.partitions[collection],
+		}, nil).Maybe()
+	}
+	err := server.SetRootCoord(mockRootCoord)
+	suite.NoError(err)
+	err = server.SetDataCoord(mockDataCoord)
+	suite.NoError(err)
+}
+
+func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	server, err := NewQueryCoord(context.Background(), dependency.NewDefaultFactory(true))
 	if err != nil {
 		return nil, err
@@ -518,6 +542,7 @@ func newQueryCoord() (*Server, error) {
 		return nil, err
 	}
 	server.SetEtcdClient(etcdCli)
+	suite.hackBroker(server)
 
 	err = server.Init()
 	return server, err

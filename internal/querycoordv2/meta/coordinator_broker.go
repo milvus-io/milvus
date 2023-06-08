@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -79,14 +80,16 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	}
-	resp, err := broker.rootCoord.DescribeCollectionInternal(ctx, req)
+	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		err = errors.New(resp.GetStatus().GetReason())
-		log.Error("failed to get collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
+		log.Warn("failed to get collection schema",
+			zap.Int64("collectionID", collectionID),
+			zap.String("code", resp.GetStatus().GetErrorCode().String()),
+			zap.String("reason", resp.GetStatus().GetReason()))
+		return nil, common.NewStatusError(resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
 	}
 	return resp.GetSchema(), nil
 }
@@ -101,16 +104,18 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	}
-	resp, err := broker.rootCoord.ShowPartitionsInternal(ctx, req)
+	resp, err := broker.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
 		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(resp.Status.Reason)
-		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
+		log.Warn("showPartition failed",
+			zap.Int64("collectionID", collectionID),
+			zap.String("code", resp.GetStatus().GetErrorCode().String()),
+			zap.String("reason", resp.GetStatus().GetReason()))
+		return nil, common.NewStatusError(resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
 	}
 
 	return resp.PartitionIDs, nil
