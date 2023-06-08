@@ -128,6 +128,18 @@ var (
 			requestScope,
 		})
 
+	QueryNodeSQLatencyWaitTSafe = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "sq_wait_tsafe_latency",
+			Help:      "latency of search or query to wait for tsafe",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeSQLatencyInQueue = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -356,6 +368,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumDeltaChannels)
 	registry.MustRegister(QueryNodeSQCount)
 	registry.MustRegister(QueryNodeSQReqLatency)
+	registry.MustRegister(QueryNodeSQLatencyWaitTSafe)
 	registry.MustRegister(QueryNodeSQLatencyInQueue)
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
