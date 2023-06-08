@@ -414,31 +414,15 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName
 }
 
 func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error) {
-	_, err := m.GetCollectionID(ctx, database, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
-	}
-
-	m.mu.RLock()
-
-	var collInfo *collectionInfo
-	var ok bool
-
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	method := "GetPartitions"
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheMissLabel).Inc()
-		m.mu.RUnlock()
 
 		partitions, err := m.showPartitions(ctx, database, collectionName)
 		if err != nil {
@@ -462,7 +446,6 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 		return ret, nil
 
 	}
-	defer m.mu.RUnlock()
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheHitLabel).Inc()
 
 	ret := make(map[string]typeutil.UniqueID)
@@ -475,29 +458,12 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error) {
-	_, err := m.GetCollectionID(ctx, database, collectionName)
+	collInfo, err := m.GetCollectionInfo(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	m.mu.RLock()
-
-	var collInfo *collectionInfo
-	var ok bool
-
-	db, dbOk := m.collInfo[database]
-	if dbOk {
-		collInfo, ok = db[collectionName]
-	}
-
-	if !ok {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
-
-	var partInfo *partitionInfo
-	partInfo, ok = collInfo.partInfo[partitionName]
-	m.mu.RUnlock()
+	partInfo, ok := collInfo.partInfo[partitionName]
 
 	method := "GetPartitionInfo"
 	if !ok {
