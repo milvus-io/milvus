@@ -4,7 +4,7 @@ package mocks
 
 import (
 	context "context"
-	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 

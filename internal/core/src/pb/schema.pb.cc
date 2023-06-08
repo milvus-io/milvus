@@ -565,16 +565,16 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\n\014BinaryVector\020d\022\017\n\013FloatVector\020e*V\n\nFie"
   "ldState\022\020\n\014FieldCreated\020\000\022\021\n\rFieldCreati"
   "ng\020\001\022\021\n\rFieldDropping\020\002\022\020\n\014FieldDropped\020"
-  "\003Bf\n\016io.milvus.grpcB\013SchemaProtoP\001Z1gith"
-  "ub.com/milvus-io/milvus-proto/go-api/sch"
-  "emapb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "\003Bi\n\016io.milvus.grpcB\013SchemaProtoP\001Z4gith"
+  "ub.com/milvus-io/milvus-proto/go-api/v2/"
+  "schemapb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_schema_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_schema_2eproto = {
-    false, false, 2753, descriptor_table_protodef_schema_2eproto,
+    false, false, 2756, descriptor_table_protodef_schema_2eproto,
     "schema.proto",
     &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_deps, 1, 17,
     schemas, file_default_instances, TableStruct_schema_2eproto::offsets,

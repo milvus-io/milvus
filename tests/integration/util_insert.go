@@ -22,8 +22,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64) {

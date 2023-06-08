@@ -3,7 +3,7 @@
 package segments
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	mock "github.com/stretchr/testify/mock"
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"

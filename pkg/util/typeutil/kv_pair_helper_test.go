@@ -3,7 +3,7 @@ package typeutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
 )

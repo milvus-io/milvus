@@ -2,7 +2,7 @@ package indexparamcheck
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 type baseChecker struct {

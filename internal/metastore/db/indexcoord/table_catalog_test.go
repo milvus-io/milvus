@@ -10,7 +10,7 @@ package indexcoord
 //	"github.com/milvus-io/milvus/internal/metastore"
 //	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel/mocks"
 //	"github.com/milvus-io/milvus/internal/metastore/model"
-//	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+//	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 //	"github.com/milvus-io/milvus/pkg/util/contextutil"
 //	"github.com/milvus-io/milvus/pkg/util/typeutil"
 //	"github.com/stretchr/testify/mock"

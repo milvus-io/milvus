@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"

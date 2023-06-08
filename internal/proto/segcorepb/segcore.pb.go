@@ -6,8 +6,8 @@ package segcorepb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
-	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	math "math"
 )
 
