@@ -29,7 +29,8 @@ class TestAllCollection(TestcaseBase):
         # create
         name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         t0 = time.time()
-        collection_w = self.init_collection_wrap(name=name, active_trace=True)
+        collection_w = self.init_collection_wrap(name=name, active_trace=True, enable_dynamic_field=False,
+                                                 with_json=False)
         tt = time.time() - t0
         assert collection_w.name == name
         # compact collection before getting num_entities
@@ -42,7 +43,7 @@ class TestAllCollection(TestcaseBase):
 
         # insert
         insert_batch = 3000
-        data = cf.gen_default_list_data(start=-insert_batch)
+        data = cf.gen_default_list_data(start=-insert_batch, with_json=False)
         t0 = time.time()
         _, res = collection_w.insert(data)
         tt = time.time() - t0
@@ -97,7 +98,7 @@ class TestAllCollection(TestcaseBase):
         collection_w.release()
 
         # insert data
-        d = cf.gen_default_list_data()
+        d = cf.gen_default_list_data(with_json=False)
         collection_w.insert(d)
 
         # load

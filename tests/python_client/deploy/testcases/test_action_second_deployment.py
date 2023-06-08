@@ -190,7 +190,8 @@ class TestActionSecondDeployment(TestDeployBase):
         # insert data and flush
         for i in range(2):
             self.insert_data_general(insert_data=True, is_binary=is_binary, nb=data_size,
-                                     is_flush=False, is_index=True, name=name)
+                                    is_flush=False, is_index=True, name=name,
+                                     enable_dynamic_field=False, with_json=False)
         if pymilvus_version >= "2.2.0":
             collection_w.flush()
         else:

@@ -1631,7 +1631,7 @@ class TestQueryString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_invaild_string_expressions())
+    @pytest.mark.parametrize("expression", cf.gen_invalid_string_expressions())
     def test_query_with_invalid_string_expr(self, expression):
         """
         target: test query data
@@ -1674,10 +1674,10 @@ class TestQueryString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_string_with_invaild_prefix_expr(self):
+    def test_query_string_with_invalid_prefix_expr(self):
         """
         target: test query with invalid prefix string expression
-        method: specify string primary field, use invaild prefix string expr
+        method: specify string primary field, use invalid prefix string expr
         expected: raise error
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
