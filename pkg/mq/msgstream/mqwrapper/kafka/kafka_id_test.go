@@ -26,11 +26,11 @@ func TestKafkaID_LessOrEqualThan(t *testing.T) {
 		rid1 := &kafkaID{messageID: 8}
 		rid2 := &kafkaID{messageID: 0}
 		ret, err := rid1.LessOrEqualThan(rid2.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.False(t, ret)
 
 		ret, err = rid2.LessOrEqualThan(rid1.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, ret)
 	}
 
@@ -38,7 +38,7 @@ func TestKafkaID_LessOrEqualThan(t *testing.T) {
 		rid1 := &kafkaID{messageID: 0}
 		rid2 := &kafkaID{messageID: 0}
 		ret, err := rid1.LessOrEqualThan(rid2.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, ret)
 	}
 }
@@ -49,13 +49,13 @@ func TestKafkaID_Equal(t *testing.T) {
 
 	{
 		ret, err := rid1.Equal(rid1.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, ret)
 	}
 
 	{
 		ret, err := rid1.Equal(rid2.Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.False(t, ret)
 	}
 }

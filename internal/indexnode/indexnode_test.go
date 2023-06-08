@@ -33,7 +33,7 @@ import (
 //	)
 //	Params.Init()
 //	in, err := NewIndexNode(ctx, factory)
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	in.SetEtcdClient(getEtcdClient())
 //	assert.Nil(t, in.initSession())
 //	assert.Nil(t, in.Register())
@@ -42,7 +42,7 @@ import (
 //		key = fmt.Sprintf("%s-%d", key, in.session.ServerID)
 //	}
 //	resp, err := getEtcdClient().Get(ctx, path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, key))
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	assert.Equal(t, int64(1), resp.Count)
 //	sess := &sessionutil.Session{}
 //	assert.Nil(t, json.Unmarshal(resp.Kvs[0].Value, sess))
@@ -93,7 +93,7 @@ import (
 //			},
 //		}
 //		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		kvs := make(map[string][]byte, len(binLogs))
 //		paths := make([]string, 0, len(binLogs))
 //		for i, blob := range binLogs {
@@ -102,7 +102,7 @@ import (
 //			kvs[key] = blob.Value[:]
 //		}
 //		err = in.chunkManager.MultiWrite(kvs)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //
 //		indexMeta := &indexpb.IndexMeta{
 //			IndexBuildID: indexBuildID1,
@@ -111,9 +111,9 @@ import (
 //		}
 //
 //		value, err := proto.Marshal(indexMeta)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		err = in.etcdKV.Save(metaPath1, string(value))
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		req := &indexpb.CreateIndexRequest{
 //			IndexBuildID: indexBuildID1,
 //			IndexName:    "FloatVector",
@@ -151,19 +151,19 @@ import (
 //		assert.Nil(t, err3)
 //		indexMetaTmp := indexpb.IndexMeta{}
 //		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		for indexMetaTmp.State != commonpb.IndexState_Finished {
 //			time.Sleep(100 * time.Millisecond)
 //			strValue, err := in.etcdKV.Load(metaPath1)
-//			assert.Nil(t, err)
+//			assert.NoError(t, err)
 //			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//			assert.Nil(t, err)
+//			assert.NoError(t, err)
 //		}
 //		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)
-//				assert.Nil(t, err)
+//				assert.NoError(t, err)
 //			}
 //		}()
 //
@@ -208,7 +208,7 @@ import (
 //			},
 //		}
 //		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		kvs := make(map[string][]byte, len(binLogs))
 //		paths := make([]string, 0, len(binLogs))
 //		for i, blob := range binLogs {
@@ -217,7 +217,7 @@ import (
 //			kvs[key] = blob.Value[:]
 //		}
 //		err = in.chunkManager.MultiWrite(kvs)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //
 //		indexMeta := &indexpb.IndexMeta{
 //			IndexBuildID: indexBuildID2,
@@ -226,9 +226,9 @@ import (
 //		}
 //
 //		value, err := proto.Marshal(indexMeta)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		err = in.etcdKV.Save(metaPath2, string(value))
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		req := &indexpb.CreateIndexRequest{
 //			IndexBuildID: indexBuildID2,
 //			IndexName:    "BinaryVector",
@@ -262,19 +262,19 @@ import (
 //		assert.Nil(t, err3)
 //		indexMetaTmp := indexpb.IndexMeta{}
 //		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		for indexMetaTmp.State != commonpb.IndexState_Finished {
 //			time.Sleep(100 * time.Millisecond)
 //			strValue, err = in.etcdKV.Load(metaPath2)
-//			assert.Nil(t, err)
+//			assert.NoError(t, err)
 //			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//			assert.Nil(t, err)
+//			assert.NoError(t, err)
 //		}
 //		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)
-//				assert.Nil(t, err)
+//				assert.NoError(t, err)
 //			}
 //		}()
 //
@@ -320,7 +320,7 @@ import (
 //			},
 //		}
 //		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		kvs := make(map[string][]byte, len(binLogs))
 //		paths := make([]string, 0, len(binLogs))
 //		for i, blob := range binLogs {
@@ -329,7 +329,7 @@ import (
 //			kvs[key] = blob.Value[:]
 //		}
 //		err = in.chunkManager.MultiWrite(kvs)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //
 //		indexMeta := &indexpb.IndexMeta{
 //			IndexBuildID: indexBuildID1,
@@ -339,9 +339,9 @@ import (
 //		}
 //
 //		value, err := proto.Marshal(indexMeta)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		err = in.etcdKV.Save(metaPath3, string(value))
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		req := &indexpb.CreateIndexRequest{
 //			IndexBuildID: indexBuildID1,
 //			IndexName:    "FloatVector",
@@ -379,21 +379,21 @@ import (
 //		assert.Nil(t, err3)
 //		indexMetaTmp := indexpb.IndexMeta{}
 //		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		assert.Equal(t, true, indexMetaTmp.MarkDeleted)
 //		assert.Equal(t, int64(1), indexMetaTmp.IndexVersion)
 //		//for indexMetaTmp.State != commonpb.IndexState_Finished {
 //		//	time.Sleep(100 * time.Millisecond)
 //		//	strValue, err := in.etcdKV.Load(metaPath3)
-//		//	assert.Nil(t, err)
+//		//	assert.NoError(t, err)
 //		//	err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-//		//	assert.Nil(t, err)
+//		//	assert.NoError(t, err)
 //		//}
 //		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)
-//				assert.Nil(t, err)
+//				assert.NoError(t, err)
 //			}
 //		}()
 //
@@ -402,20 +402,20 @@ import (
 //
 //	t.Run("GetComponentStates", func(t *testing.T) {
 //		resp, err := in.GetComponentStates(ctx)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //		assert.Equal(t, commonpb.StateCode_Healthy, resp.State.StateCode)
 //	})
 //
 //	t.Run("GetTimeTickChannel", func(t *testing.T) {
 //		resp, err := in.GetTimeTickChannel(ctx)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //	})
 //
 //	t.Run("GetStatisticsChannel", func(t *testing.T) {
 //		resp, err := in.GetStatisticsChannel(ctx)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //	})
 //
@@ -438,18 +438,18 @@ import (
 //
 //	t.Run("GetMetrics_system_info", func(t *testing.T) {
 //		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		resp, err := in.GetMetrics(ctx, req)
-//		assert.Nil(t, err)
+//		assert.NoError(t, err)
 //		log.Info("GetMetrics_system_info",
 //			zap.String("resp", resp.Response),
 //			zap.String("name", resp.ComponentName))
 //	})
 //	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //
 //	resp, err = getEtcdClient().Get(ctx, path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, in.session.ServerName))
-//	assert.Nil(t, err)
+//	assert.NoError(t, err)
 //	assert.Equal(t, resp.Count, int64(0))
 //}
 
@@ -464,26 +464,26 @@ func TestComponentState(t *testing.T) {
 	in := NewIndexNode(ctx, factory)
 	in.SetEtcdClient(getEtcdClient())
 	state, err := in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
 
 	assert.Nil(t, in.Init())
 	state, err = in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Initializing)
 
 	assert.Nil(t, in.Start())
 	state, err = in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
 	assert.Nil(t, in.Stop())
 	assert.Nil(t, in.Stop())
 	state, err = in.GetComponentStates(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
 }
@@ -498,7 +498,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	Params.Init()
 	in := NewIndexNode(ctx, factory)
 	ret, err := in.GetTimeTickChannel(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
 }
 
@@ -513,7 +513,7 @@ func TestGetStatisticChannel(t *testing.T) {
 	in := NewIndexNode(ctx, factory)
 
 	ret, err := in.GetStatisticsChannel(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
 }
 
@@ -570,7 +570,7 @@ func TestInitErr(t *testing.T) {
 	// 	ctx     = context.TODO()
 	// )
 	// in, err := NewIndexNode(ctx, factory)
-	// assert.Nil(t, err)
+	// assert.NoError(t, err)
 	// in.SetEtcdClient(getEtcdClient())
 	// assert.Error(t, in.Init())
 }

@@ -62,11 +62,11 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	req := &milvuspb.GetMetricsRequest{}
 	// nil node
 	_, err := svr.getDataNodeMetrics(ctx, req, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// nil client node
 	_, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, nil))
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	creator := func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(100, nil)
@@ -75,14 +75,14 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	// mock datanode client
 	session := NewSession(&NodeInfo{}, creator)
 	info, err := svr.getDataNodeMetrics(ctx, req, session)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
 	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) dataNodeCreatorFunc {
 		return func(ctx context.Context, addr string) (types.DataNode, error) {
 			cli, err := creator(ctx, addr)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			return &mockMetricDataNodeClient{DataNode: cli, mock: mockFunc}, nil
 		}
 	}
@@ -92,7 +92,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	})
 
 	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
 	// mock status not success
@@ -106,7 +106,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	})
 
 	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, "mocked error", info.ErrorReason)
 
@@ -121,7 +121,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	})
 
 	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
 }
@@ -134,13 +134,13 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	req := &milvuspb.GetMetricsRequest{}
 	// nil node
 	_, err := svr.getIndexNodeMetrics(ctx, req, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// return error
 	info, err := svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{mock: func() (*milvuspb.GetMetricsResponse, error) {
 		return nil, errors.New("mock error")
 	}})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
 	// failed
@@ -156,7 +156,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 			}, nil
 		},
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
@@ -173,7 +173,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 			}, nil
 		},
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
@@ -211,7 +211,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 		},
 	})
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 }

@@ -989,364 +989,364 @@ func Test_NewServer(t *testing.T) {
 	var err error
 	t.Run("Run", func(t *testing.T) {
 		err = runAndWaitForServerReady(server)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		_, err := server.GetComponentStates(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		_, err := server.GetStatisticsChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("InvalidateCollectionMetaCache", func(t *testing.T) {
 		_, err := server.InvalidateCollectionMetaCache(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateCollection", func(t *testing.T) {
 		_, err := server.CreateCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropCollection", func(t *testing.T) {
 		_, err := server.DropCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("HasCollection", func(t *testing.T) {
 		_, err := server.HasCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("LoadCollection", func(t *testing.T) {
 		_, err := server.LoadCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
 		_, err := server.ReleaseCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DescribeCollection", func(t *testing.T) {
 		_, err := server.DescribeCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetCollectionStatistics", func(t *testing.T) {
 		_, err := server.GetCollectionStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ShowCollections", func(t *testing.T) {
 		_, err := server.ShowCollections(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreatePartition", func(t *testing.T) {
 		_, err := server.CreatePartition(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropPartition", func(t *testing.T) {
 		_, err := server.DropPartition(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("HasPartition", func(t *testing.T) {
 		_, err := server.HasPartition(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("LoadPartitions", func(t *testing.T) {
 		_, err := server.LoadPartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
 		_, err := server.ReleasePartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetPartitionStatistics", func(t *testing.T) {
 		_, err := server.GetPartitionStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ShowPartitions", func(t *testing.T) {
 		_, err := server.ShowPartitions(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetLoadingProgress", func(t *testing.T) {
 		_, err := server.GetLoadingProgress(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateIndex", func(t *testing.T) {
 		_, err := server.CreateIndex(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropIndex", func(t *testing.T) {
 		_, err := server.DropIndex(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DescribeIndex", func(t *testing.T) {
 		_, err := server.DescribeIndex(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetIndexStatistics", func(t *testing.T) {
 		_, err := server.GetIndexStatistics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
 		_, err := server.GetIndexBuildProgress(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetIndexState", func(t *testing.T) {
 		_, err := server.GetIndexState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Insert", func(t *testing.T) {
 		_, err := server.Insert(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Delete", func(t *testing.T) {
 		_, err := server.Delete(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
 		_, err := server.Upsert(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Search", func(t *testing.T) {
 		_, err := server.Search(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Flush", func(t *testing.T) {
 		_, err := server.Flush(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Query", func(t *testing.T) {
 		_, err := server.Query(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CalcDistance", func(t *testing.T) {
 		_, err := server.CalcDistance(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetDdChannel", func(t *testing.T) {
 		_, err := server.GetDdChannel(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetPersistentSegmentInfo", func(t *testing.T) {
 		_, err := server.GetPersistentSegmentInfo(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetQuerySegmentInfo", func(t *testing.T) {
 		_, err := server.GetQuerySegmentInfo(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Dummy", func(t *testing.T) {
 		_, err := server.Dummy(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("RegisterLink", func(t *testing.T) {
 		_, err := server.RegisterLink(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
 		_, err := server.GetMetrics(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("LoadBalance", func(t *testing.T) {
 		_, err := server.LoadBalance(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateAlias", func(t *testing.T) {
 		_, err := server.CreateAlias(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropAlias", func(t *testing.T) {
 		_, err := server.DropAlias(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("AlterAlias", func(t *testing.T) {
 		_, err := server.AlterAlias(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetCompactionState", func(t *testing.T) {
 		_, err := server.GetCompactionState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ManualCompaction", func(t *testing.T) {
 		_, err := server.ManualCompaction(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetCompactionStateWithPlans", func(t *testing.T) {
 		_, err := server.GetCompactionStateWithPlans(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateCredential", func(t *testing.T) {
 		_, err := server.CreateCredential(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("UpdateCredential", func(t *testing.T) {
 		_, err := server.UpdateCredential(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DeleteCredential", func(t *testing.T) {
 		_, err := server.DeleteCredential(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ListCredUsers", func(t *testing.T) {
 		_, err := server.ListCredUsers(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("InvalidateCredentialCache", func(t *testing.T) {
 		_, err := server.InvalidateCredentialCache(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("UpdateCredentialCache", func(t *testing.T) {
 		_, err := server.UpdateCredentialCache(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateRole", func(t *testing.T) {
 		_, err := server.CreateRole(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropRole", func(t *testing.T) {
 		_, err := server.DropRole(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("OperateUserRole", func(t *testing.T) {
 		_, err := server.OperateUserRole(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("SelectRole", func(t *testing.T) {
 		_, err := server.SelectRole(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("SelectUser", func(t *testing.T) {
 		_, err := server.SelectUser(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("OperatePrivilege", func(t *testing.T) {
 		_, err := server.OperatePrivilege(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("SelectGrant", func(t *testing.T) {
 		_, err := server.SelectGrant(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("RefreshPrivilegeInfoCache", func(t *testing.T) {
 		_, err := server.RefreshPolicyInfoCache(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CheckHealth", func(t *testing.T) {
 		_, err := server.CheckHealth(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("RenameCollection", func(t *testing.T) {
 		_, err := server.RenameCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("CreateResourceGroup", func(t *testing.T) {
 		_, err := server.CreateResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DropResourceGroup", func(t *testing.T) {
 		_, err := server.DropResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("TransferNode", func(t *testing.T) {
 		_, err := server.TransferNode(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("TransferReplica", func(t *testing.T) {
 		_, err := server.TransferReplica(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ListResourceGroups", func(t *testing.T) {
 		_, err := server.ListResourceGroups(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("DescribeResourceGroup", func(t *testing.T) {
 		_, err := server.DescribeResourceGroup(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("FlushAll", func(t *testing.T) {
 		_, err := server.FlushAll(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetFlushAllState", func(t *testing.T) {
 		_, err := server.GetFlushAllState(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// Update config and start server again to test with different config set.
 	// This works as config will be initialized only once
 	paramtable.Get().Save(proxy.Params.ProxyCfg.GinLogging.Key, "false")
 	err = runAndWaitForServerReady(server)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServer_Check(t *testing.T) {
@@ -1356,13 +1356,13 @@ func TestServer_Check(t *testing.T) {
 
 	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
 	ret, err := server.Check(ctx, req)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 
 	mockProxy.On("GetComponentStates", ctx).Return(nil, fmt.Errorf("mock grpc unexpected error")).Once()
 
 	ret, err = server.Check(ctx, req)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo := &milvuspb.ComponentInfo{
@@ -1378,22 +1378,22 @@ func TestServer_Check(t *testing.T) {
 	mockProxy.On("GetComponentStates", ctx).Return(componentState, nil)
 
 	ret, err = server.Check(ctx, req)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	ret, err = server.Check(ctx, req)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo.StateCode = commonpb.StateCode_Initializing
 	ret, err = server.Check(ctx, req)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo.StateCode = commonpb.StateCode_Healthy
 	ret, err = server.Check(ctx, req)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 }
 
@@ -1409,14 +1409,14 @@ func TestServer_Watch(t *testing.T) {
 	err := server.Watch(req, watchServer)
 	ret := <-resultChan
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 
 	mockProxy.On("GetComponentStates", ctx).Return(nil, fmt.Errorf("mock grpc unexpected error")).Once()
 
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo := &milvuspb.ComponentInfo{
@@ -1433,25 +1433,25 @@ func TestServer_Watch(t *testing.T) {
 
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo.StateCode = commonpb.StateCode_Initializing
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
 	componentInfo.StateCode = commonpb.StateCode_Healthy
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 }
 
@@ -1460,9 +1460,9 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
 	err := runAndWaitForServerReady(server)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	defer func() {
 		e := recover()
@@ -1478,7 +1478,7 @@ func getServer(t *testing.T) *Server {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.NotNil(t, server)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	server.proxy = &MockProxy{}
 	server.rootCoordClient = &MockRootCoord{}
@@ -1511,10 +1511,10 @@ func Test_NewServer_TLS_TwoWay(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 
 	err := runAndWaitForServerReady(server)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_NewServer_TLS_OneWay(t *testing.T) {
@@ -1527,10 +1527,10 @@ func Test_NewServer_TLS_OneWay(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 
 	err := runAndWaitForServerReady(server)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
@@ -1542,25 +1542,25 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 	err := runAndWaitForServerReady(server)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	server.Stop()
 
 	paramtable.Get().Save(Params.TLSMode.Key, "2")
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
 	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
 	err = runAndWaitForServerReady(server)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	server.Stop()
 
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
 	paramtable.Get().Save(Params.CaPemPath.Key, "../not/existed/ca.pem")
 	err = runAndWaitForServerReady(server)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	server.Stop()
 
 	paramtable.Get().Save(Params.CaPemPath.Key, "service.go")
 	err = runAndWaitForServerReady(server)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	server.Stop()
 }
 
@@ -1570,7 +1570,7 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		server := getServer(t)
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Empty(t, resp.GetVersion())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test get version failed", func(t *testing.T) {
@@ -1579,6 +1579,6 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Equal(t, "v1", resp.GetVersion())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 }

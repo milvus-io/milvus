@@ -70,9 +70,9 @@ func Test_GetFieldSchemaByID(t *testing.T) {
 		},
 	}
 	_, err := GetFieldSchemaByID(coll, 1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = GetFieldSchemaByID(coll, 2)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_EncodeMsgPositions(t *testing.T) {
@@ -83,12 +83,12 @@ func Test_EncodeMsgPositions(t *testing.T) {
 
 	str, err := EncodeMsgPositions([]*msgstream.MsgPosition{})
 	assert.Empty(t, str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	mps := []*msgstream.MsgPosition{mp}
 	str, err = EncodeMsgPositions(mps)
 	assert.NotEmpty(t, str)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_DecodeMsgPositions(t *testing.T) {
@@ -98,17 +98,17 @@ func Test_DecodeMsgPositions(t *testing.T) {
 	}
 
 	str, err := EncodeMsgPositions([]*msgstream.MsgPosition{mp})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	mpOut := make([]*msgstream.MsgPosition, 1)
 	err = DecodeMsgPositions(str, &mpOut)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = DecodeMsgPositions("", &mpOut)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = DecodeMsgPositions("null", &mpOut)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_getTravelTs(t *testing.T) {

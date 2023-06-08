@@ -28,7 +28,7 @@ func TestPulsarMsgUtil(t *testing.T) {
 
 	ctx := context.Background()
 	msgStream, err := pmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer msgStream.Close()
 
 	// create a topic

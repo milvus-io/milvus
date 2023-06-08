@@ -149,7 +149,7 @@ func TestRun(t *testing.T) {
 	rcServerConfig := &paramtable.Get().RootCoordGrpcServerCfg
 	paramtable.Get().Save(rcServerConfig.Port.Key, "1000000")
 	err := svr.Run()
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
 	svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
@@ -176,33 +176,33 @@ func TestRun(t *testing.T) {
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = svr.Run()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("CheckHealth", func(t *testing.T) {
 		ret, err := svr.CheckHealth(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
 	t.Run("RenameCollection", func(t *testing.T) {
 		_, err := svr.RenameCollection(ctx, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	err = svr.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
@@ -211,14 +211,14 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 	assert.Panics(t, func() { server.Run() })
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
@@ -227,14 +227,14 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 	assert.Panics(t, func() { server.Run() })
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
@@ -243,14 +243,14 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 	assert.Panics(t, func() { server.Run() })
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestServer_QueryCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
 	server.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
@@ -259,5 +259,5 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 	assert.Panics(t, func() { server.Run() })
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

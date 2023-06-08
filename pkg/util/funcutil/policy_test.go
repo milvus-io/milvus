@@ -14,14 +14,14 @@ func Test_GetPrivilegeExtObj(t *testing.T) {
 		CollectionName: "col1",
 	}
 	privilegeExt, err := GetPrivilegeExtObj(request)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ObjectType_Collection, privilegeExt.ObjectType)
 	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeLoad, privilegeExt.ObjectPrivilege)
 	assert.Equal(t, int32(3), privilegeExt.ObjectNameIndex)
 
 	request2 := &milvuspb.CreatePartitionRequest{}
 	_, err = GetPrivilegeExtObj(request2)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_GetResourceName(t *testing.T) {

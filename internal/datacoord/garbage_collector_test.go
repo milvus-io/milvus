@@ -56,7 +56,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	require.NoError(t, err)
 
 	meta, err := newMemoryMeta()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("normal gc", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
@@ -109,7 +109,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	require.NoError(t, err)
 
 	meta, err := newMemoryMeta()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("key is reference", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{

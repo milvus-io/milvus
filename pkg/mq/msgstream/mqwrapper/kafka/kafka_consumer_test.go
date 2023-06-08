@@ -42,7 +42,7 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 
 	msgID := &kafkaID{messageID: 1}
 	err = consumer.Seek(msgID, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 333, BytesToInt(msg.Payload()))
@@ -68,7 +68,7 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 
 	msgID := &kafkaID{messageID: 1}
 	err = consumer.Seek(msgID, true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 222, BytesToInt(msg.Payload()))
@@ -90,7 +90,7 @@ func TestKafkaConsumer_GetSeek(t *testing.T) {
 
 	msgID := &kafkaID{messageID: 0}
 	err = consumer.Seek(msgID, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	assert.Error(t, consumer.Seek(msgID, false))
 }
@@ -165,7 +165,7 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 
 	latestMsgID, err := consumer.GetLatestMsgID()
 	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	data1 := []int{111, 222, 333}
 	data2 := []string{"111", "222", "333"}
@@ -173,7 +173,7 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 
 	latestMsgID, err = consumer.GetLatestMsgID()
 	assert.Equal(t, int64(2), latestMsgID.(*kafkaID).messageID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
@@ -232,7 +232,7 @@ func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
 func TestKafkaConsumer_createKafkaConsumer(t *testing.T) {
 	consumer := &Consumer{config: &kafka.ConfigMap{}}
 	err := consumer.createKafkaConsumer()
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func testKafkaConsumerProduceData(t *testing.T, topic string, data []int, arr []string) {

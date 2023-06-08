@@ -43,7 +43,7 @@ func TestProxyManager(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -55,19 +55,19 @@ func TestProxyManager(t *testing.T) {
 		ServerID: 100,
 	}
 	b1, err := json.Marshal(&s1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	k1 := path.Join(sessKey, typeutil.ProxyRole+"-100")
 	_, err = etcdCli.Put(ctx, k1, string(b1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	s0 := sessionutil.Session{
 		ServerID: 99,
 	}
 	b0, err := json.Marshal(&s0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	k0 := path.Join(sessKey, typeutil.ProxyRole+"-99")
 	_, err = etcdCli.Put(ctx, k0, string(b0))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	f1 := func(sess []*sessionutil.Session) {
 		assert.Equal(t, len(sess), 2)
@@ -76,7 +76,7 @@ func TestProxyManager(t *testing.T) {
 		t.Log("get sessions", sess[0], sess[1])
 	}
 	pm := newProxyManager(ctx, etcdCli, f1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)
 		t.Log("add session", sess)
@@ -89,20 +89,20 @@ func TestProxyManager(t *testing.T) {
 	pm.DelSessionFunc(fd)
 
 	err = pm.WatchProxy()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	t.Log("======== start watch proxy ==========")
 
 	s2 := sessionutil.Session{
 		ServerID: 101,
 	}
 	b2, err := json.Marshal(&s2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	k2 := path.Join(sessKey, typeutil.ProxyRole+"-101")
 	_, err = etcdCli.Put(ctx, k2, string(b2))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = etcdCli.Delete(ctx, k1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 	pm.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -119,7 +119,7 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -143,7 +143,7 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
 		v := "invalid session: " + strconv.FormatInt(int64(i), 10)
 		_, err = etcdCli.Put(ctx, k, v)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	// The reason there the error is no handle is that if you run compact twice, an error will be reported;
@@ -157,6 +157,6 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
 		_, err = etcdCli.Delete(ctx, k)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 }

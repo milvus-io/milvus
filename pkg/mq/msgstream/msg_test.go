@@ -57,14 +57,14 @@ func Test_convertToByteArray(t *testing.T) {
 		bytes := []byte{1, 2, 3}
 		byteArray, err := convertToByteArray(bytes)
 		assert.Equal(t, bytes, byteArray)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 
 	{
 		bytes := 4
 		byteArray, err := convertToByteArray(bytes)
 		assert.Equal(t, ([]byte)(nil), byteArray)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	}
 }
 
@@ -114,10 +114,10 @@ func TestInsertMsg(t *testing.T) {
 	assert.Equal(t, int64(3), insertMsg.SourceID())
 
 	bytes, err := insertMsg.Marshal(insertMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := insertMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	insertMsg2, ok := tsMsg.(*InsertMsg)
 	assert.True(t, ok)
@@ -129,7 +129,7 @@ func TestInsertMsg(t *testing.T) {
 func TestInsertMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	insertMsg := &InsertMsg{}
 	tsMsg, err := insertMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -298,10 +298,10 @@ func TestDeleteMsg(t *testing.T) {
 	assert.Equal(t, int64(3), deleteMsg.SourceID())
 
 	bytes, err := deleteMsg.Marshal(deleteMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := deleteMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	deleteMsg2, ok := tsMsg.(*DeleteMsg)
 	assert.True(t, ok)
@@ -313,7 +313,7 @@ func TestDeleteMsg(t *testing.T) {
 func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	deleteMsg := &DeleteMsg{}
 	tsMsg, err := deleteMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -341,10 +341,10 @@ func TestTimeTickMsg(t *testing.T) {
 	assert.Equal(t, int64(3), timeTickMsg.SourceID())
 
 	bytes, err := timeTickMsg.Marshal(timeTickMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := timeTickMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	timeTickMsg2, ok := tsMsg.(*TimeTickMsg)
 	assert.True(t, ok)
@@ -356,7 +356,7 @@ func TestTimeTickMsg(t *testing.T) {
 func TestTimeTickMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	timeTickMsg := &TimeTickMsg{}
 	tsMsg, err := timeTickMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -393,10 +393,10 @@ func TestCreateCollectionMsg(t *testing.T) {
 	assert.Equal(t, int64(3), createCollectionMsg.SourceID())
 
 	bytes, err := createCollectionMsg.Marshal(createCollectionMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := createCollectionMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	createCollectionMsg2, ok := tsMsg.(*CreateCollectionMsg)
 	assert.True(t, ok)
@@ -408,7 +408,7 @@ func TestCreateCollectionMsg(t *testing.T) {
 func TestCreateCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	createCollectionMsg := &CreateCollectionMsg{}
 	tsMsg, err := createCollectionMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -440,10 +440,10 @@ func TestDropCollectionMsg(t *testing.T) {
 	assert.Equal(t, int64(3), dropCollectionMsg.SourceID())
 
 	bytes, err := dropCollectionMsg.Marshal(dropCollectionMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := dropCollectionMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	dropCollectionMsg2, ok := tsMsg.(*DropCollectionMsg)
 	assert.True(t, ok)
@@ -455,7 +455,7 @@ func TestDropCollectionMsg(t *testing.T) {
 func TestDropCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	dropCollectionMsg := &DropCollectionMsg{}
 	tsMsg, err := dropCollectionMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -489,10 +489,10 @@ func TestCreatePartitionMsg(t *testing.T) {
 	assert.Equal(t, int64(3), createPartitionMsg.SourceID())
 
 	bytes, err := createPartitionMsg.Marshal(createPartitionMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := createPartitionMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	createPartitionMsg2, ok := tsMsg.(*CreatePartitionMsg)
 	assert.True(t, ok)
@@ -504,7 +504,7 @@ func TestCreatePartitionMsg(t *testing.T) {
 func TestCreatePartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	createPartitionMsg := &CreatePartitionMsg{}
 	tsMsg, err := createPartitionMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -538,10 +538,10 @@ func TestDropPartitionMsg(t *testing.T) {
 	assert.Equal(t, int64(3), dropPartitionMsg.SourceID())
 
 	bytes, err := dropPartitionMsg.Marshal(dropPartitionMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := dropPartitionMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	dropPartitionMsg2, ok := tsMsg.(*DropPartitionMsg)
 	assert.True(t, ok)
@@ -553,7 +553,7 @@ func TestDropPartitionMsg(t *testing.T) {
 func TestDropPartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	dropPartitionMsg := &DropPartitionMsg{}
 	tsMsg, err := dropPartitionMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }
 
@@ -583,10 +583,10 @@ func TestDataNodeTtMsg(t *testing.T) {
 	assert.Equal(t, int64(3), dataNodeTtMsg.SourceID())
 
 	bytes, err := dataNodeTtMsg.Marshal(dataNodeTtMsg)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	tsMsg, err := dataNodeTtMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	dataNodeTtMsg2, ok := tsMsg.(*DataNodeTtMsg)
 	assert.True(t, ok)
@@ -598,6 +598,6 @@ func TestDataNodeTtMsg(t *testing.T) {
 func TestDataNodeTtMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	dataNodeTtMsg := &DataNodeTtMsg{}
 	tsMsg, err := dataNodeTtMsg.Unmarshal(10)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, tsMsg)
 }

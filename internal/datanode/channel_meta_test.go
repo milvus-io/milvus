@@ -234,7 +234,7 @@ func TestChannelMeta_segmentFlushed(t *testing.T) {
 				startPos:    nil,
 				endPos:      nil,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test segmentFlushed", func(t *testing.T) {
@@ -532,7 +532,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		err = channel.addSegment(
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
@@ -543,7 +543,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test_addSegmentStatsError", func(t *testing.T) {
@@ -561,7 +561,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		err = channel.addSegment(
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
@@ -572,7 +572,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test_addSegmentPkfilterError", func(t *testing.T) {
@@ -590,7 +590,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		err = channel.addSegment(
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
@@ -601,7 +601,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 				recoverTs:    0,
 			})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test_mergeFlushedSegments", func(t *testing.T) {
@@ -790,7 +790,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 			startPos:    startPos,
 			endPos:      endPos,
 		})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = channel.addSegment(
 		addSegmentReq{
 			segType:      datapb.SegmentType_Normal,
@@ -801,7 +801,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 			statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
 			recoverTs:    0,
 		})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	segNew := channel.segments[1]
 	segNormal := channel.segments[2]

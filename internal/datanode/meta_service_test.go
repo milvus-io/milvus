@@ -92,7 +92,7 @@ func TestMetaServiceRootCoodFails(t *testing.T) {
 
 		ms := newMetaService(rc, collectionID0)
 		_, err := ms.getCollectionSchema(context.Background(), collectionID1, 0)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test Describe wit nil response", func(t *testing.T) {
@@ -102,6 +102,6 @@ func TestMetaServiceRootCoodFails(t *testing.T) {
 
 		ms := newMetaService(rc, collectionID0)
 		_, err := ms.getCollectionSchema(context.Background(), collectionID1, 0)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 }

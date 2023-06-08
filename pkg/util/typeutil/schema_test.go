@@ -141,36 +141,36 @@ func TestSchema(t *testing.T) {
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
 		size, err := EstimateSizePerRecord(schema)
 		assert.Equal(t, 680+DynamicFieldMaxLength*2, size)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("SchemaHelper", func(t *testing.T) {
 		_, err := CreateSchemaHelper(nil)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		helper, err := CreateSchemaHelper(schema)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		field, err := helper.GetPrimaryKeyField()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "field_int64", field.Name)
 
 		field1, err := helper.GetFieldFromName("field_int8")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "field_int8", field1.Name)
 
 		field2, err := helper.GetFieldFromID(102)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "field_int32", field2.Name)
 
 		dim, err := helper.GetVectorDimFromID(107)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 128, dim)
 		dim1, err := helper.GetVectorDimFromID(108)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 128, dim1)
 		_, err = helper.GetVectorDimFromID(103)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Type", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestSchema_GetVectorFieldSchema(t *testing.T) {
 	t.Run("GetVectorFieldSchema", func(t *testing.T) {
 		fieldSchema, err := GetVectorFieldSchema(schemaNormal)
 		assert.Equal(t, "field_float_vector", fieldSchema.Name)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	schemaInvalid := &schemapb.CollectionSchema{
@@ -291,7 +291,7 @@ func TestSchema_invalid(t *testing.T) {
 			},
 		}
 		_, err := CreateSchemaHelper(schema)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "duplicated fieldName: field_int8")
 	})
 	t.Run("Duplicate field id", func(t *testing.T) {
@@ -317,7 +317,7 @@ func TestSchema_invalid(t *testing.T) {
 			},
 		}
 		_, err := CreateSchemaHelper(schema)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "duplicated fieldID: 100")
 	})
 	t.Run("Duplicated primary key", func(t *testing.T) {
@@ -343,7 +343,7 @@ func TestSchema_invalid(t *testing.T) {
 			},
 		}
 		_, err := CreateSchemaHelper(schema)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "primary key is not unique")
 	})
 	t.Run("field not exist", func(t *testing.T) {
@@ -362,18 +362,18 @@ func TestSchema_invalid(t *testing.T) {
 			},
 		}
 		helper, err := CreateSchemaHelper(schema)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = helper.GetPrimaryKeyField()
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "failed to get primary key field: no primary in schema")
 
 		_, err = helper.GetFieldFromName("none")
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.EqualError(t, err, "fieldID(101) not found")
 	})
 	t.Run("vector dim not exist", func(t *testing.T) {
@@ -399,16 +399,16 @@ func TestSchema_invalid(t *testing.T) {
 			},
 		}
 		helper, err := CreateSchemaHelper(schema)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = helper.GetVectorDimFromID(100)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		_, err = helper.GetVectorDimFromID(103)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		_, err = helper.GetVectorDimFromID(107)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 }
 
@@ -797,7 +797,7 @@ func TestGetPrimaryFieldSchema(t *testing.T) {
 
 	int64Field.IsPrimaryKey = true
 	primaryField, err := GetPrimaryFieldSchema(schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, primaryField.DataType)
 }
 
@@ -1179,7 +1179,7 @@ func TestMergeFieldData(t *testing.T) {
 	}
 
 	err := MergeFieldData(dstFields, srcFields)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	assert.Equal(t, []int64{1, 2, 3, 4, 5, 6}, dstFields[0].GetScalars().GetLongData().Data)
 	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6}, dstFields[1].GetVectors().GetFloatVector().Data)

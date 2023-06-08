@@ -33,7 +33,7 @@ func TestPartition_GetByCollID(t *testing.T) {
 
 	// actual
 	res, err := partitionTestDb.GetByCollectionID(tenantID, collID1, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, partitions, res)
 }
 
@@ -73,7 +73,7 @@ func TestPartition_Insert(t *testing.T) {
 
 	// actual
 	err := partitionTestDb.Insert(partitions)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestPartition_Insert_Error(t *testing.T) {

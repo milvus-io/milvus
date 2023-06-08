@@ -92,7 +92,7 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 		compErr:   errors.New("error"),
 	}
 	err := WaitForComponentInitOrHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	mc = &MockComponent{
 		compState: &milvuspb.ComponentStates{
@@ -104,7 +104,7 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 		compErr: nil,
 	}
 	err = WaitForComponentInitOrHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	validCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy}
 	testCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal}
@@ -112,9 +112,9 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 		mc := buildMockComponent(code)
 		err := WaitForComponentInitOrHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
 		if funcutil.SliceContain(validCodes, code) {
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		} else {
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}
 	}
 }
@@ -126,9 +126,9 @@ func Test_WaitForComponentInit(t *testing.T) {
 		mc := buildMockComponent(code)
 		err := WaitForComponentInit(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
 		if funcutil.SliceContain(validCodes, code) {
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		} else {
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}
 	}
 }

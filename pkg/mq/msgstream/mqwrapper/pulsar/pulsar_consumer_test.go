@@ -34,7 +34,7 @@ import (
 func TestPulsarConsumer_Subscription(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer pc.Close()
 
 	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
@@ -44,7 +44,7 @@ func TestPulsarConsumer_Subscription(t *testing.T) {
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
@@ -66,7 +66,7 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 func TestComsumeCompressedMessage(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer pc.Close()
 
 	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
@@ -111,14 +111,14 @@ func TestComsumeCompressedMessage(t *testing.T) {
 	assert.Equal(t, compressedMsg, recvMsg.Payload())
 	assert.Equal(t, traceValue, recvMsg.Properties()[common.TraceIDKey])
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 }
 
 func TestPulsarConsumer_Close(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
@@ -127,7 +127,7 @@ func TestPulsarConsumer_Close(t *testing.T) {
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
 	str := consumer.Subscription()
@@ -222,7 +222,7 @@ func TestPulsarClientUnsubscribeTwice(t *testing.T) {
 func TestCheckPreTopicValid(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
@@ -231,7 +231,7 @@ func TestCheckPreTopicValid(t *testing.T) {
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
 
 	str := consumer.Subscription()

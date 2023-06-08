@@ -103,11 +103,11 @@ func TestBaseTaskQueue(t *testing.T) {
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockTask())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockTask())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestDdTaskQueue(t *testing.T) {
@@ -180,11 +180,11 @@ func TestDdTaskQueue(t *testing.T) {
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDdlTask())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockDdlTask())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 // test the logic of queue
@@ -257,11 +257,11 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDmlTask())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockDmlTask())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 // test the timestamp statistics
@@ -354,7 +354,7 @@ func TestDmTaskQueue_TimestampStatistics2(t *testing.T) {
 				return
 			case <-ticker.C:
 				stats, err := queue.getPChanStatsInfo()
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				if currPChanStats == nil {
 					currPChanStats = stats
 				} else {
@@ -408,7 +408,7 @@ func TestDmTaskQueue_TimestampStatistics2(t *testing.T) {
 	wgSchedule.Wait()
 
 	stats, err := queue.getPChanStatsInfo()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Zero(t, len(stats))
 }
 
@@ -482,11 +482,11 @@ func TestDqTaskQueue(t *testing.T) {
 	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDqlTask())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	}
 	assert.True(t, queue.utFull())
 	err = queue.Enqueue(newDefaultMockDqlTask())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestTaskScheduler(t *testing.T) {

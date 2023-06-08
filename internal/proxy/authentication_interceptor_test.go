@@ -35,7 +35,7 @@ func TestValidAuth(t *testing.T) {
 	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	res = validAuth(ctx, []string{crypto.Base64Encode("mockUser:mockPass")})
 	assert.True(t, res)
 
@@ -62,26 +62,26 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)  // mock authorization is turned on
 	// no metadata
 	_, err := AuthenticationInterceptor(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	// mock metacache
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rootCoord, queryCoord, mgr)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	// with invalid metadata
 	md := metadata.Pairs("xxx", "yyy")
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	// with valid username/password
 	md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:mockPass"))
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	// with valid sourceId
 	md = metadata.Pairs("sourceid", crypto.Base64Encode(util.MemberCredID))
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

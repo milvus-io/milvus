@@ -30,7 +30,7 @@ func TestUser_GetByUsername(t *testing.T) {
 
 	// actual
 	res, err := userTestDb.GetByUsername(tenantID, username)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, user, res)
 }
 
@@ -85,7 +85,7 @@ func TestUser_ListUsername(t *testing.T) {
 
 	// actual
 	res, err := userTestDb.ListUser(tenantID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 2, len(res))
 	assert.Equal(t, usernames[0], res[0].Username)
 	assert.Equal(t, usernames[1], res[1].Username)
@@ -123,7 +123,7 @@ func TestUser_Insert(t *testing.T) {
 
 	// actual
 	err := userTestDb.Insert(user)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestUser_Insert_Error(t *testing.T) {
@@ -161,7 +161,7 @@ func TestUser_MarkDeletedByUsername(t *testing.T) {
 
 	// actual
 	err := userTestDb.MarkDeletedByUsername(tenantID, username)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestUser_MarkDeletedByUsername_Error(t *testing.T) {
@@ -192,7 +192,7 @@ func TestUser_UpdatePassword(t *testing.T) {
 
 	// actual
 	err := userTestDb.UpdatePassword(tenantID, username, encryptedPassword)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestUser_UpdatePassword_Error(t *testing.T) {

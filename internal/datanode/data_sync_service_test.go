@@ -287,7 +287,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
 	defer close(sync.flushListener)
@@ -444,7 +444,7 @@ func TestDataSyncService_Close(t *testing.T) {
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
 	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)
 	defer close(sync.flushListener)
@@ -600,22 +600,22 @@ func TestBytesReader(t *testing.T) {
 
 	var fvector = make([]float32, 2)
 	err := binary.Read(rawDataReader, common.Endian, &fvector)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.ElementsMatch(t, fvector, []float32{1, 2})
 
 	var bvector = make([]byte, 4)
 	err = binary.Read(rawDataReader, common.Endian, &bvector)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.ElementsMatch(t, bvector, []byte{255, 255, 255, 0})
 
 	var fieldBool bool
 	err = binary.Read(rawDataReader, common.Endian, &fieldBool)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, fieldBool)
 
 	var dataInt8 int8
 	err = binary.Read(rawDataReader, common.Endian, &dataInt8)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, int8(100), dataInt8)
 }
 
@@ -625,7 +625,7 @@ func TestGetSegmentInfos(t *testing.T) {
 		dataCoord: dataCoord,
 	}
 	segmentInfos, err := dsService.getSegmentInfos([]int64{1})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(segmentInfos))
 
 	dataCoord.GetSegmentInfosError = true

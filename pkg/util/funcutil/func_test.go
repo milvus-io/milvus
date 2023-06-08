@@ -41,7 +41,7 @@ func Test_CheckGrpcReady(t *testing.T) {
 	go CheckGrpcReady(context.TODO(), errChan)
 
 	err := <-errChan
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// test CheckGrpcReady can finish after context done
 	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
@@ -153,13 +153,13 @@ func Test_ConvertChannelName(t *testing.T) {
 		tTo           = "rootcoord-delta"
 	)
 	_, err := ConvertChannelName("by-dev", tFrom, tTo)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	_, err = ConvertChannelName("by-dev", "", tTo)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	_, err = ConvertChannelName("by-dev_rootcoord-delta_123v0", tFrom, tTo)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	str, err := ConvertChannelName(chanName, tFrom, tTo)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, deltaChanName, str)
 }
 

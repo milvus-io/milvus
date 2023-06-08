@@ -73,7 +73,7 @@ func generateTestData(t *testing.T, num int) []*Blob {
 	}}
 
 	blobs, err := insertCodec.Serialize(1, 1, data)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	return blobs
 }
 
@@ -90,7 +90,7 @@ func TestInsertlogIterator(t *testing.T) {
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 1)
 		itr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		itr.Dispose()
 		assert.False(t, itr.HasNext())
@@ -101,12 +101,12 @@ func TestInsertlogIterator(t *testing.T) {
 	t.Run("not empty iterator", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
 		itr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		for i := 1; i <= 3; i++ {
 			assert.True(t, itr.HasNext())
 			v, err := itr.Next()
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			value := v.(*Value)
 
 			f102 := make([]float32, 8)
@@ -156,7 +156,7 @@ func TestMergeIterator(t *testing.T) {
 	t.Run("empty and non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
 		insertItr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		iterators := []Iterator{
 			&InsertBinlogIterator{data: &InsertData{}},
 			insertItr,
@@ -167,7 +167,7 @@ func TestMergeIterator(t *testing.T) {
 		for i := 1; i <= 3; i++ {
 			assert.True(t, itr.HasNext())
 			v, err := itr.Next()
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			value := v.(*Value)
 			f102 := make([]float32, 8)
 			for j := range f102 {
@@ -200,9 +200,9 @@ func TestMergeIterator(t *testing.T) {
 	t.Run("non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
 		itr1, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		itr2, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		iterators := []Iterator{itr1, itr2}
 		itr := NewMergeIterator(iterators)
 
@@ -231,7 +231,7 @@ func TestMergeIterator(t *testing.T) {
 			for j := 0; j < 2; j++ {
 				assert.True(t, itr.HasNext())
 				v, err := itr.Next()
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				value := v.(*Value)
 				assert.EqualValues(t, expected, value)
 			}
@@ -245,7 +245,7 @@ func TestMergeIterator(t *testing.T) {
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
 		itr1, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		itr := NewMergeIterator([]Iterator{itr1})
 
 		itr.Dispose()

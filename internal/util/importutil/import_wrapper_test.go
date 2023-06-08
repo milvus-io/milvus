@@ -213,21 +213,21 @@ func Test_NewImportWrapper(t *testing.T) {
 	}
 
 	err = wrapper.SetCallbackFunctions(assignSegFunc, createBinFunc, saveBinFunc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = wrapper.SetCallbackFunctions(assignSegFunc, createBinFunc, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	err = wrapper.SetCallbackFunctions(assignSegFunc, nil, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	err = wrapper.SetCallbackFunctions(nil, nil, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	err = wrapper.Cancel()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_ImportWrapperRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 	params.Params.Init()
 
@@ -278,11 +278,11 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, rowCounter.rowCount)
 
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
@@ -303,14 +303,14 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
 	files = append(files, "/dummy/dummy.json")
 	err = wrapper.Import(files, ImportOptions{OnlyValidate: true})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
@@ -319,77 +319,77 @@ func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
 
 	filePath := path.Join(cm.RootPath(), "FieldBool.npy")
 	content, err := CreateNumpyData([]bool{true, false, true, true, true})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err = CreateNumpyData([]int8{10, 11, 12, 13, 14})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldInt16.npy")
 	content, err = CreateNumpyData([]int16{100, 101, 102, 103, 104})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldInt32.npy")
 	content, err = CreateNumpyData([]int32{1000, 1001, 1002, 1003, 1004})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldInt64.npy")
 	content, err = CreateNumpyData([]int64{10000, 10001, 10002, 10003, 10004})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldFloat.npy")
 	content, err = CreateNumpyData([]float32{3.14, 3.15, 3.16, 3.17, 3.18})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldDouble.npy")
 	content, err = CreateNumpyData([]float64{5.1, 5.2, 5.3, 5.4, 5.5})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldString.npy")
 	content, err = CreateNumpyData([]string{"a", "bb", "ccc", "dd", "e"})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldJSON.npy")
 	content, err = CreateNumpyData([]string{"{\"x\": 10, \"y\": 5}", "{\"z\": 5}", "{}", "{}", "{\"x\": 3}"})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldBinaryVector.npy")
 	content, err = CreateNumpyData([][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = path.Join(cm.RootPath(), "FieldFloatVector.npy")
 	content, err = CreateNumpyData([][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
@@ -399,7 +399,7 @@ func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
 
 func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
@@ -436,14 +436,14 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 
 	files := createSampleNumpyFiles(t, cm)
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// row count of fields not equal
 	filePath := path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err := CreateNumpyData([]int8{10})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files[1] = filePath
@@ -453,14 +453,14 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
 	files = append(files, "/dummy/dummy.npy")
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func perfSchema(dim int) *schemapb.CollectionSchema {
@@ -495,7 +495,7 @@ func perfSchema(dim int) *schemapb.CollectionSchema {
 
 func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
@@ -550,7 +550,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 
 		encoder := json.NewEncoder(bw)
 		err = encoder.Encode(entities)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = bw.Flush()
 		assert.NoError(t, err)
 		err = cm.Write(ctx, filePath, b.Bytes())
@@ -583,7 +583,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, rowCount, rowCounter.rowCount)
 
 	tr.Record("parse large json file " + filePath)
@@ -680,7 +680,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 		cm.size = params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() + 1
 		wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
 		rowBased, err := wrapper.fileValidation(files)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
 
@@ -688,14 +688,14 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 		files := []string{"a/1.json"}
 		cm.sizeErr = errors.New("error")
 		rowBased, err := wrapper.fileValidation(files)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.True(t, rowBased)
 	})
 }
 
 func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
@@ -749,14 +749,14 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 		return errors.New("mock error")
 	}
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 }
 
 func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
@@ -799,14 +799,14 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	files := createSampleNumpyFiles(t, cm)
 
 	err = wrapper.Import(files, DefaultImportOptions())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 }
 
 func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
@@ -892,7 +892,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	// failed to create new BinlogParser
 	err := wrapper.doBinlogImport(paths, 0, math.MaxUint64)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	cm.listErr = errors.New("error")
 	wrapper.chunkManager = cm
@@ -903,11 +903,11 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	// failed to call parser.Parse()
 	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// Import() failed
 	err = wrapper.Import(paths, DefaultImportOptions())
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	cm.listErr = nil
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
@@ -927,7 +927,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 
 	// succeed
 	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_ImportWrapperReportPersisted(t *testing.T) {
@@ -954,11 +954,11 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	rowCounter := &rowCounterTest{}
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
 	err := wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// success
 	err = wrapper.reportPersisted(2, tr)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotEmpty(t, wrapper.importResult.GetInfos())
 
 	// error when closing segments

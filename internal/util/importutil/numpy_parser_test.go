@@ -163,7 +163,7 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 
 func Test_NumpyParserValidateHeader(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	parser := createNumpyParser(t)
@@ -175,14 +175,14 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 	t.Run("not a valid numpy array", func(t *testing.T) {
 		filePath := TempFilesPath + "invalid.npy"
 		err = CreateNumpyFile(filePath, "aaa")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		columnReader := &NumpyColumnReader{
 			fieldName: "invalid",
@@ -196,14 +196,14 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 		filePath := TempFilesPath + fieldSchema.GetName() + ".npy"
 
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		dim, _ := getFieldDimension(fieldSchema)
 		columnReader := &NumpyColumnReader{
@@ -290,7 +290,7 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 
 func Test_NumpyParserCreateReaders(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -349,7 +349,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 		files := createSampleNumpyFiles(t, cm)
 		filePath := TempFilesPath + "FieldBool.npy"
 		err = CreateNumpyFile(filePath, []bool{true})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders(files)
 		assert.Error(t, err)
@@ -360,7 +360,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 	t.Run("velidate header failed", func(t *testing.T) {
 		filePath := TempFilesPath + "FieldBool.npy"
 		err = CreateNumpyFile(filePath, []int32{1, 2, 3, 4, 5})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		files := []string{filePath}
 		readers, err := parser.createReaders(files)
 		assert.Error(t, err)
@@ -371,7 +371,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 
 func Test_NumpyParserReadData(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -411,7 +411,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readEmptyFunc := func(filedName string, data interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -431,7 +431,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readBatchFunc := func(filedName string, data interface{}, dataLen int, getValue func(k int) interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -459,7 +459,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readErrorFunc := func(filedName string, data interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -599,7 +599,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 
 func Test_NumpyParserCheckRowCount(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -706,7 +706,7 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 
 func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -870,7 +870,7 @@ func Test_NumpyParserCalcRowCountPerBlock(t *testing.T) {
 
 func Test_NumpyParserConsume(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -920,7 +920,7 @@ func Test_NumpyParserConsume(t *testing.T) {
 
 func Test_NumpyParserParse(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	parser := createNumpyParser(t)
@@ -967,7 +967,7 @@ func Test_NumpyParserParse(t *testing.T) {
 func Test_NumpyParserParse_perf(t *testing.T) {
 	ctx := context.Background()
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -1034,7 +1034,7 @@ func Test_NumpyParserParse_perf(t *testing.T) {
 	parser.collectionSchema = perfSchema(dim)
 
 	err = parser.Parse([]string{idFilePath, vecFilePath})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, rowCount, totalRowCount)
 
 	tr.Record("parse large numpy files")

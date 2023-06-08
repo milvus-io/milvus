@@ -66,28 +66,28 @@ func Test_NewClient(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	err = client.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Register()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret any, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 			} else {
 				assert.Nil(t, ret)
-				assert.NotNil(t, err)
+				assert.Error(t, err)
 			}
 		}
 
@@ -230,7 +230,7 @@ func Test_NewClient(t *testing.T) {
 	// special case since this method didn't use recall()
 	ret, err := client.SaveBinlogPaths(ctx, nil)
 	assert.Nil(t, ret)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
 		GetGrpcClientErr: nil,
@@ -244,7 +244,7 @@ func Test_NewClient(t *testing.T) {
 	// special case since this method didn't use recall()
 	ret, err = client.SaveBinlogPaths(ctx, nil)
 	assert.Nil(t, ret)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
 		GetGrpcClientErr: nil,
@@ -258,8 +258,8 @@ func Test_NewClient(t *testing.T) {
 	// special case since this method didn't use recall()
 	ret, err = client.SaveBinlogPaths(ctx, nil)
 	assert.NotNil(t, ret)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

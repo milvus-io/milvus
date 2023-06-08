@@ -54,9 +54,9 @@ func newIDAllocator(ctx context.Context, t *testing.T, allocErr error) *allocato
 	}
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mockIDAllocator, int64(1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = idAllocator.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	return idAllocator
 }
@@ -64,7 +64,7 @@ func newIDAllocator(ctx context.Context, t *testing.T, allocErr error) *allocato
 func Test_NewJSONRowConsumer(t *testing.T) {
 	// nil schema
 	consumer, err := NewJSONRowConsumer(nil, nil, 2, 16, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	// wrong schema
@@ -82,27 +82,27 @@ func Test_NewJSONRowConsumer(t *testing.T) {
 		},
 	}
 	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	// no primary key
 	schema.Fields[0].IsPrimaryKey = false
 	schema.Fields[0].DataType = schemapb.DataType_Int64
 	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	// primary key is autoid, but no IDAllocator
 	schema.Fields[0].IsPrimaryKey = true
 	schema.Fields[0].AutoID = true
 	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, consumer)
 
 	// success
 	consumer, err = NewJSONRowConsumer(sampleSchema(), nil, 2, 16, nil)
 	assert.NotNil(t, consumer)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func Test_JSONRowConsumerFlush(t *testing.T) {
@@ -135,7 +135,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 	var blockSize int64 = 1
 	consumer, err := NewJSONRowConsumer(schema, nil, shardNum, blockSize, flushFunc)
 	assert.NotNil(t, consumer)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// force flush
 	rowCountEachShard := 100
@@ -147,7 +147,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 	}
 
 	err = consumer.flush(true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, shardNum, callTime)
 	assert.Equal(t, rowCountEachShard*int(shardNum), totalCount)
 	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
@@ -166,7 +166,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 		}
 	}
 	err = consumer.flush(true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, shardNum/2, callTime)
 	assert.Equal(t, rowCountEachShard*int(shardNum)/2, totalCount)
 	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
@@ -203,7 +203,7 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 	t.Run("handle int64 pk", func(t *testing.T) {
 		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)
 		assert.NotNil(t, consumer)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		pkFieldData := consumer.segmentsData[0][101].(*storage.Int64FieldData)
 		for i := 0; i < 10; i++ {
@@ -212,7 +212,7 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 
 		// nil input will trigger flush
 		err = consumer.Handle(nil)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Equal(t, int32(1), callTime)
 
 		// optional flush
@@ -229,18 +229,18 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 			input[j][101] = int64(j)
 		}
 		err = consumer.Handle(input)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Equal(t, int32(1), callTime)
 
 		// failed to auto-generate pk
 		consumer.blockSize = 1024 * 1024
 		err = consumer.Handle(input)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		// hash int64 pk
 		consumer.rowIDAllocator = newIDAllocator(ctx, t, nil)
 		err = consumer.Handle(input)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, int64(rowCount), consumer.rowCounter)
 		assert.Equal(t, 2, len(consumer.autoIDRange))
 		assert.Equal(t, int64(1), consumer.autoIDRange[0])
@@ -259,7 +259,7 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 		schema.Fields[0].AutoID = false
 		consumer, err = NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)
 		assert.NotNil(t, consumer)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = consumer.Handle(input)
 		assert.Error(t, err)
 
@@ -290,7 +290,7 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 		idAllocator := newIDAllocator(ctx, t, nil)
 		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
 		assert.NotNil(t, consumer)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		rowCount := 100
 		input := make([]map[storage.FieldID]interface{}, rowCount)
@@ -301,16 +301,16 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 
 		// varchar pk cannot be auto-generated
 		err = consumer.Handle(input)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		// hash varchar pk
 		schema.Fields[0].AutoID = false
 		consumer, err = NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
 		assert.NotNil(t, consumer)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = consumer.Handle(input)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, int64(rowCount), consumer.RowCount())
 		assert.Equal(t, 0, len(consumer.autoIDRange))
 

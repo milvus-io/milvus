@@ -42,7 +42,7 @@ func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 		Topic: topics[0],
 	})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
@@ -51,7 +51,7 @@ func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 		BufSize:                     1024,
 	})
 	defer consumer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	testSendAndRecv(t, producer, consumer)
 }
@@ -63,7 +63,7 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 		Topic: topics[0],
 	})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	ids := sendMessages(context.Background(), t, producer, generateRandMessage(1024, 1000))
 
@@ -73,12 +73,12 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
 		BufSize:                     1024,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	latestID, err := consumer.GetLatestMsgID()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	compare, err := ids[len(ids)-1].Equal(latestID.Serialize())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.True(t, compare)
 
 	defer consumer.Close()
@@ -92,7 +92,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 		Topic: topics[0],
 	})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	cases := generateRandMessage(1024, 1000)
 	ids := sendMessages(context.Background(), t, producer, cases)
@@ -103,7 +103,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer consumer.Close()
 
 	// seek half and inclusive.
@@ -111,7 +111,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 	half := len(ids) / 2
 	ids = ids[half:]
 	err = consumer.Seek(ids[0], true)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	consumerIDs := recvMessages(context.Background(), t, consumer, cases[half:], time.Minute)
 	compareMultiIDs(t, ids, consumerIDs)
 	assert.Empty(t, recvMessages(context.Background(), t, consumer, cases, 5*time.Second))
@@ -126,7 +126,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 		Topic: topics[0],
 	})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	cases := generateRandMessage(1024, 1000)
 	ids := sendMessages(context.Background(), t, producer, cases)
@@ -137,7 +137,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer consumer.Close()
 
 	// seek half and inclusive.
@@ -145,7 +145,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 	half := len(ids) / 2
 	ids = ids[half:]
 	err = consumer.Seek(ids[0], false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	consumerIDs := recvMessages(context.Background(), t, consumer, cases[half+1:], time.Minute)
 	compareMultiIDs(t, ids[1:], consumerIDs)
 	assert.Empty(t, recvMessages(context.Background(), t, consumer, cases, 5*time.Second))
@@ -160,7 +160,7 @@ func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) 
 		Topic: topics[0],
 	})
 	defer producer.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	cases := generateRandMessage(1024, 1000)
 	sendMessages(context.Background(), t, producer, cases)
@@ -171,15 +171,15 @@ func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) 
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionUnknown,
 		BufSize:                     1024,
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer consumer.Close()
 	latestID, err := consumer.GetLatestMsgID()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// seek half and inclusive.
 	// consume all and compare.
 	err = consumer.Seek(latestID, false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	testSendAndRecv(t, producer, consumer)
 }
 
@@ -215,7 +215,7 @@ func compareMultiIDs(t *testing.T, producerIDs []mqwrapper.MessageID, consumerID
 	assert.Equal(t, len(producerIDs), len(consumerIDs))
 	for i := range producerIDs {
 		compare, err := producerIDs[i].Equal(consumerIDs[i].Serialize())
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.True(t, compare)
 	}
 }
@@ -235,7 +235,7 @@ func sendMessages(ctx context.Context, t *testing.T, p mqwrapper.Producer, testC
 		id, err := p.Send(ctx, &mqwrapper.ProducerMessage{
 			Payload: []byte(s),
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		ids = append(ids, id)
 	}
 	return ids

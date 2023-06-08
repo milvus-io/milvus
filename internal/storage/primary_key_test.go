@@ -23,21 +23,21 @@ func TestVarCharPrimaryKey(t *testing.T) {
 
 	// test GT
 	err := testPk.SetValue("bivlus")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, pk.GT(testPk))
 
 	// test LT
 	err = testPk.SetValue("mivlut")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, pk.LT(testPk))
 
 	t.Run("unmarshal", func(t *testing.T) {
 		blob, err := json.Marshal(pk)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		unmarshalledPk := &VarCharPrimaryKey{}
 		err = json.Unmarshal(blob, unmarshalledPk)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, pk.Value, unmarshalledPk.Value)
 	})
 }
@@ -55,21 +55,21 @@ func TestInt64PrimaryKey(t *testing.T) {
 
 	// test GT
 	err := testPk.SetValue(int64(10))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, pk.GT(testPk))
 
 	// test LT
 	err = testPk.SetValue(int64(200))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, true, pk.LT(testPk))
 
 	t.Run("unmarshal", func(t *testing.T) {
 		blob, err := json.Marshal(pk)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		unmarshalledPk := &Int64PrimaryKey{}
 		err = json.Unmarshal(blob, unmarshalledPk)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, pk.Value, unmarshalledPk.Value)
 	})
 }
@@ -111,7 +111,7 @@ func TestParseFieldData2PrimaryKeys(t *testing.T) {
 		}
 
 		pks, err := ParseFieldData2PrimaryKeys(fieldData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		assert.ElementsMatch(t, pks, testPks)
 	})
@@ -152,7 +152,7 @@ func TestParseFieldData2PrimaryKeys(t *testing.T) {
 		}
 
 		pks, err := ParseFieldData2PrimaryKeys(fieldData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		assert.ElementsMatch(t, pks, testPks)
 	})

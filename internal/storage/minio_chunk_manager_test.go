@@ -214,11 +214,11 @@ func TestMinIOCM(t *testing.T) {
 		defer cancel()
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testMultiSaveRoot)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer testCM.RemoveWithPrefix(ctx, testMultiSaveRoot)
 
 		err = testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		kvs := map[string][]byte{
 			path.Join(testMultiSaveRoot, "key_1"): []byte("123"),
@@ -226,10 +226,10 @@ func TestMinIOCM(t *testing.T) {
 		}
 
 		err = testCM.MultiWrite(ctx, kvs)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		val, err := testCM.Read(ctx, path.Join(testMultiSaveRoot, "key_1"))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, []byte("123"), val)
 	})
 
@@ -239,7 +239,7 @@ func TestMinIOCM(t *testing.T) {
 		defer cancel()
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testRemoveRoot)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer testCM.RemoveWithPrefix(ctx, testRemoveRoot)
 
 		prepareTests := []struct {
@@ -588,7 +588,7 @@ func TestMinioChunkManager_Read(t *testing.T) {
 		assert.Equal(t, value[i], byte(i))
 	}
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestMinioChunkManager_ReadEOF(t *testing.T) {
@@ -604,7 +604,7 @@ func TestMinioChunkManager_ReadEOF(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		assert.Equal(t, value[i], byte(i))
 	}
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 type MockReader struct {

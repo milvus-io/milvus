@@ -28,20 +28,20 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Authorization Enabled", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		ctx = GetContext(context.Background(), "alice:123456")
 		client := &MockRootCoordClientInterface{}
@@ -71,71 +71,71 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "root:123456"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = InitMetaCache(ctx, client, queryCoord, mgr)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.GetLoadStateRequest{
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		fooCtx := GetContext(context.Background(), "foo:123456")
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.InsertRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.UpsertRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadStateRequest{
 			CollectionName: "col1",
 		})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
 			DbName:          "db_test",
 			CollectionNames: []string{"col1"},
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		g := sync.WaitGroup{}
 		for i := 0; i < 20; i++ {
@@ -166,7 +166,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.ListResourceGroupsRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockRootCoordClientInterface{}
@@ -196,26 +196,26 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListResourceGroupsRequest{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferNodeRequest{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferReplicaRequest{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 }

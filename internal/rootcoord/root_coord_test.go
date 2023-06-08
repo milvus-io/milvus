@@ -1337,49 +1337,49 @@ func TestCore_Rbac(t *testing.T) {
 
 	{
 		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.DropRole(ctx, &milvuspb.DropRoleRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	}
 }

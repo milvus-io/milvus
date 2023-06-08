@@ -70,10 +70,10 @@ func assertValidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr string
 
 func assertValidExprV2(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
 	expr1, err := parseExpr(schema, exprStr)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	expr2, err := planparserv2.ParseExpr(schema, exprStr)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	if !planparserv2.CheckPredicatesIdentical(expr1, expr2) {
 		t.Log("expr: ", exprStr)
@@ -98,15 +98,15 @@ func assertInvalidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr stri
 
 func assertValidSearchPlan(t *testing.T, schema *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) {
 	_, err := createQueryPlan(schema, exprStr, vectorFieldName, queryInfo)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func assertValidSearchPlanV2(t *testing.T, schema *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) {
 	planProto1, err := createQueryPlan(schema, exprStr, vectorFieldName, queryInfo)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	planProto2, err := planparserv2.CreateSearchPlan(schema, exprStr, vectorFieldName, queryInfo)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	expr1 := planProto1.GetVectorAnns().GetPredicates()
 	assert.NotNil(t, expr1)
@@ -138,7 +138,7 @@ func assertInvalidSearchPlan(t *testing.T, schema *schemapb.CollectionSchema, ex
 func TestParseExpr_Naive(t *testing.T) {
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("test UnaryNode", func(t *testing.T) {
 		exprStrs := []string{
@@ -337,7 +337,7 @@ func TestParsePlanNode_Naive(t *testing.T) {
 func TestExternalParser(t *testing.T) {
 	ast, err := ant_parser.Parse(`!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5) and (d > "str1" or d < "str2")`)
 	// NOTE: probe ast here via IDE
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	println(ast.Node.Location().Column)
 }
@@ -363,7 +363,7 @@ func TestExprPlan_Str(t *testing.T) {
 
 	// without filter
 	planProto, err := createQueryPlan(schema, "", "fakevec", queryInfo)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	dbgStr := proto.MarshalTextString(planProto)
 	println(dbgStr)
 

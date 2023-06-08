@@ -42,7 +42,7 @@ func TestFlowGraphManager(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer etcdCli.Close()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)

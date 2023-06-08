@@ -282,7 +282,7 @@ func Test_ListSegments(t *testing.T) {
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		txn.walkWithPrefix = func(prefix string, paginationSize int, fn func(k []byte, v []byte) error) error {
 			if strings.HasPrefix(k5, prefix) {
@@ -305,7 +305,7 @@ func Test_ListSegments(t *testing.T) {
 
 		ret, err := catalog.ListSegments(context.TODO())
 		assert.NotNil(t, ret)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		verifySegments(t, logID, ret)
 	})
@@ -351,7 +351,7 @@ func Test_AddSegments(t *testing.T) {
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		adjustedSeg, err := catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
 		assert.NoError(t, err)
 		// Check that num of rows is corrected from 100 to 5.
@@ -400,10 +400,10 @@ func Test_AlterSegments(t *testing.T) {
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		_, ok := savedKvs[k4]
 		assert.False(t, ok)
@@ -433,7 +433,7 @@ func Test_AlterSegments(t *testing.T) {
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		var binlogXL []*datapb.FieldBinlog
 		for i := 0; i < 255; i++ {
@@ -460,7 +460,7 @@ func Test_AlterSegments(t *testing.T) {
 		}
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
 		assert.Equal(t, 3, opGroupCount)
 
@@ -603,7 +603,7 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 	{
 		var segments []*datapb.SegmentInfo
 		err := catalog.SaveDroppedSegmentsInBatch(context.TODO(), segments)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 0, count)
 		assert.Equal(t, 0, kvSize)
 	}
@@ -619,7 +619,7 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 		}
 
 		err := catalog.SaveDroppedSegmentsInBatch(context.TODO(), segments1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, count)
 		assert.Equal(t, 1, kvSize)
 	}
@@ -638,7 +638,7 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 		count = 0
 		kvSize = 0
 		err := catalog.SaveDroppedSegmentsInBatch(context.TODO(), segments2)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 2, count)
 		assert.Equal(t, 129, kvSize)
 	}

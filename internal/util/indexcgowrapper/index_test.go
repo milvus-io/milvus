@@ -219,11 +219,11 @@ func TestCIndex_Error(t *testing.T) {
 	indexParams[common.IndexTypeKey] = "IVF_FLAT"
 	indexParams[common.MetricTypeKey] = "L2"
 	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, indexParams, genStorageConfig())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("Serialize error", func(t *testing.T) {
 		blobs, err := indexPtr.Serialize()
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, blobs)
 	})
 
@@ -234,18 +234,18 @@ func TestCIndex_Error(t *testing.T) {
 		},
 		}
 		err = indexPtr.Load(blobs)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("BuildFloatVecIndexWithoutIds error", func(t *testing.T) {
 		floatVectors := []float32{1.1, 2.2, 3.3}
 		err = indexPtr.Build(GenFloatVecDataset(floatVectors))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("BuildBinaryVecIndexWithoutIds error", func(t *testing.T) {
 		binaryVectors := []byte("binaryVectors")
 		err = indexPtr.Build(GenBinaryVecDataset(binaryVectors))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 }

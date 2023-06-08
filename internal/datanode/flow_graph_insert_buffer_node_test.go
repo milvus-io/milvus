@@ -1027,14 +1027,14 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
 			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 		}
 
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
 			msg.RowIDs = []int64{} //misaligned data
 			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		}
 	}
 }

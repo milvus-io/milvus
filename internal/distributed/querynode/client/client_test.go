@@ -35,17 +35,17 @@ func Test_NewClient(t *testing.T) {
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
 	assert.Nil(t, client)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	client, err = NewClient(ctx, "test")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	err = client.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Register()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -53,10 +53,10 @@ func Test_NewClient(t *testing.T) {
 		retCheck := func(notNil bool, ret any, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 			} else {
 				assert.Nil(t, ret)
-				assert.NotNil(t, err)
+				assert.Error(t, err)
 			}
 		}
 
@@ -158,5 +158,5 @@ func Test_NewClient(t *testing.T) {
 	checkFunc(false)
 
 	err = client.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

@@ -410,17 +410,17 @@ func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	_, err := inputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack5)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	o1 := consumer(ctx, outputStream)
 	o2 := consumer(ctx, outputStream)
@@ -465,7 +465,7 @@ func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
 
 	// produce test data
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// pick a seekPosition
 	var seekPosition *msgpb.MsgPosition
@@ -485,10 +485,10 @@ func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
 	outputStream2.AsConsumer(consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionEarliest)
 	lastMsgID, err := outputStream2.GetLatestMsgID(c)
 	defer outputStream2.Close()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = outputStream2.Seek([]*msgpb.MsgPosition{seekPosition})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	cnt := 0
 	var value int64 = 6
@@ -509,7 +509,7 @@ func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
 				cnt++
 
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 				if ret {
 					hasMore = false
 					break
@@ -561,21 +561,21 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	_, err := inputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack4)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	err = inputStream.Produce(&msgPack5)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack6)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = inputStream.Broadcast(&msgPack7)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(receivedMsg.Msgs), 2)
@@ -875,7 +875,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 	}
 
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
@@ -920,7 +920,7 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 	}
 
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
@@ -947,14 +947,14 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 	}
 
 	err = outputStream2.Seek(p)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 	err = inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	result := consumer(ctx, outputStream2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))
 }
@@ -976,7 +976,7 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 	}
 
 	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream2, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
@@ -989,7 +989,7 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 	err = inputStream.Produce(msgPack)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
 		result := consumer(ctx, outputStream2)
@@ -1008,9 +1008,9 @@ func TestStream_BroadcastMark(t *testing.T) {
 
 	factory := ProtoUDFactory{}
 	pulsarClient, err := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	outputStream, err := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// add producer channels
 	outputStream.AsProducer(producerChannels)
@@ -1019,7 +1019,7 @@ func TestStream_BroadcastMark(t *testing.T) {
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
 	ids, err := outputStream.Broadcast(&msgPack0)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(producerChannels), len(ids))
 	for _, c := range producerChannels {
@@ -1033,7 +1033,7 @@ func TestStream_BroadcastMark(t *testing.T) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	ids, err = outputStream.Broadcast(&msgPack1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(producerChannels), len(ids))
 	for _, c := range producerChannels {
@@ -1044,19 +1044,19 @@ func TestStream_BroadcastMark(t *testing.T) {
 
 	// edge cases
 	_, err = outputStream.Broadcast(nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, &MarshalFailTsMsg{})
 	_, err = outputStream.Broadcast(&msgPack2)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// mock send fail
 	for k, p := range outputStream.producers {
 		outputStream.producers[k] = &mockSendFailProducer{Producer: p}
 	}
 	_, err = outputStream.Broadcast(&msgPack1)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	outputStream.Close()
 }

@@ -334,7 +334,7 @@ func TestSearchTask_Reduce(t *testing.T) {
 	//     dataArray = append(dataArray, data1)
 	//     dataArray = append(dataArray, data2)
 	//     res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
-	//     assert.Nil(t, err)
+	//     assert.NoError(t, err)
 	//     assert.Equal(t, ids, res.Results.Ids.GetIntId().Data)
 	//     assert.Equal(t, []float32{1.0, 2.0, 3.0, 4.0}, res.Results.Scores)
 	// })
@@ -349,7 +349,7 @@ func TestSearchTask_Reduce(t *testing.T) {
 	//     dataArray = append(dataArray, data1)
 	//     dataArray = append(dataArray, data2)
 	//     res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
-	//     assert.Nil(t, err)
+	//     assert.NoError(t, err)
 	//     assert.ElementsMatch(t, []int64{1, 5, 2, 3}, res.Results.Ids.GetIntId().Data)
 	// })
 }

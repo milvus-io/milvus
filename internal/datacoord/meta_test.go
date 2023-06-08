@@ -150,7 +150,7 @@ func TestMeta_Basic(t *testing.T) {
 
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	testSchema := newTestSchema()
 
@@ -186,22 +186,22 @@ func TestMeta_Basic(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName, true)
 		segID1_0, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName, false)
 		segID1_1, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName, false)
 
 		// check AddSegment
 		err = meta.AddSegment(segInfo0_0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = meta.AddSegment(segInfo1_0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = meta.AddSegment(segInfo1_1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// check GetSegment
 		info0_0 := meta.GetHealthySegment(segID0_0)
@@ -229,15 +229,15 @@ func TestMeta_Basic(t *testing.T) {
 
 		// check DropSegment
 		err = meta.DropSegment(segID1_0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segIDs = meta.GetSegmentsIDOfPartition(collID, partID1)
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
 		err = meta.SetState(segID0_0, commonpb.SegmentState_Sealed)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = meta.SetState(segID0_0, commonpb.SegmentState_Flushed)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		info0_0 = meta.GetHealthySegment(segID0_0)
 		assert.NotNil(t, info0_0)
@@ -273,28 +273,28 @@ func TestMeta_Basic(t *testing.T) {
 		fkv := &saveFailKV{MetaKv: memoryKV}
 		catalog := datacoord.NewCatalog(fkv, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		fkv2 := &removeFailKV{MetaKv: memoryKV}
 		catalog = datacoord.NewCatalog(fkv2, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		// nil, since Save error not injected
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		// error injected
 		err = meta.DropSegment(0)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(fkv, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("Test GetCount", func(t *testing.T) {
@@ -307,19 +307,19 @@ func TestMeta_Basic(t *testing.T) {
 
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// check partition/collection statistics
 		nums = meta.GetNumRowsOfPartition(collID, partID0)
@@ -373,19 +373,19 @@ func TestMeta_Basic(t *testing.T) {
 
 		// add seg0 with size0
 		segID0, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
 		segInfo0.size.Store(size0)
 		err = meta.AddSegment(segInfo0)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// add seg1 with size1
 		segID1, err := mockAllocator.allocID(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
 		segInfo1.size.Store(size1)
 		err = meta.AddSegment(segInfo1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		// check TotalBinlogSize
 		total, collectionBinlogSize := meta.GetCollectionBinlogSize()
@@ -397,7 +397,7 @@ func TestMeta_Basic(t *testing.T) {
 
 func TestGetUnFlushedSegments(t *testing.T) {
 	meta, err := newMemoryMeta()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	s1 := &datapb.SegmentInfo{
 		ID:           0,
 		CollectionID: 0,
@@ -405,7 +405,7 @@ func TestGetUnFlushedSegments(t *testing.T) {
 		State:        commonpb.SegmentState_Growing,
 	}
 	err = meta.AddSegment(NewSegmentInfo(s1))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	s2 := &datapb.SegmentInfo{
 		ID:           1,
 		CollectionID: 0,
@@ -413,10 +413,10 @@ func TestGetUnFlushedSegments(t *testing.T) {
 		State:        commonpb.SegmentState_Flushed,
 	}
 	err = meta.AddSegment(NewSegmentInfo(s2))
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	segments := meta.GetUnFlushedSegments()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, len(segments))
 	assert.EqualValues(t, 0, segments[0].ID)
@@ -426,18 +426,18 @@ func TestGetUnFlushedSegments(t *testing.T) {
 func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		meta, err := newMemoryMeta()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
 			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog0", 1))}}}
 		err = meta.AddSegment(segment1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, true, false, true, []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(1, 10, getInsertLogPath("binlog1", 1))},
 			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getStatsLogPath("statslog1", 1))},
 			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		updated := meta.GetHealthySegment(1)
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -462,24 +462,24 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 
 	t.Run("update non-existed segment", func(t *testing.T) {
 		meta, err := newMemoryMeta()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {
 		meta, err := newMemoryMeta()
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}}
 		err = meta.AddSegment(segment1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}},
 
 			[]*datapb.SegmentStartPosition{{SegmentID: 2, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, meta.GetHealthySegment(2))
 	})
 
@@ -488,7 +488,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		failedKv := &saveFailKV{kv}
 		catalog := datacoord.NewCatalog(failedKv, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		segmentInfo := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -503,7 +503,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("statslog", 1))},
 			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Equal(t, "mocked fail", err.Error())
 		segmentInfo = meta.GetHealthySegment(1)
 		assert.EqualValues(t, 0, segmentInfo.NumOfRows)
@@ -614,7 +614,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		NumOfRows:           2,
 	}
 	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
 	assert.NotNil(t, newSegment)

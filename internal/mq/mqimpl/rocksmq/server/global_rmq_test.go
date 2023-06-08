@@ -64,7 +64,7 @@ func Test_InitRocksMQ(t *testing.T) {
 	groupName := "group_register"
 	_ = Rmq.DestroyConsumerGroup(topicName, groupName)
 	err = Rmq.CreateConsumerGroup(topicName, groupName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	consumer := &Consumer{
 		Topic:     topicName,

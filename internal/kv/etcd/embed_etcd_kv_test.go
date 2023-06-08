@@ -261,7 +261,7 @@ func TestEmbedEtcd(te *testing.T) {
 		rootPath := "/etcd/test/root/LoadBytesWithRevision"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -306,7 +306,7 @@ func TestEmbedEtcd(te *testing.T) {
 	te.Run("EtcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -416,7 +416,7 @@ func TestEmbedEtcd(te *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -702,7 +702,7 @@ func TestEmbedEtcd(te *testing.T) {
 	te.Run("EtcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -720,7 +720,7 @@ func TestEmbedEtcd(te *testing.T) {
 		rootPath := "/etcd/test/root/revision_bytes"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -767,7 +767,7 @@ func TestEmbedEtcd(te *testing.T) {
 	te.Run("Etcd WalkWithPagination", func(t *testing.T) {
 		rootPath := "/etcd/test/root/walkWithPagination"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")

@@ -34,7 +34,7 @@ func TestRoundRobinPolicy(t *testing.T) {
 	querier.init()
 
 	err = RoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, querier.records(), map[UniqueID][]string{0: {"c0", "c2"}, 1: {"c1", "c3"}})
 
 	mockerr := fmt.Errorf("mock query node error")
@@ -42,7 +42,7 @@ func TestRoundRobinPolicy(t *testing.T) {
 	querier.failset[0] = mockerr
 
 	err = RoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, querier.records(), map[int64][]string{1: {"c0", "c1", "c3"}, 2: {"c2"}})
 
 	querier.init()

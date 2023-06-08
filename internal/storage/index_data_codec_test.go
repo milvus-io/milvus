@@ -55,10 +55,10 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	codec := NewIndexFileBinlogCodec()
 
 	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	idxBuildID, v, collID, parID, segID, fID, params, idxName, idxID, blobs, err := codec.DeserializeImpl(serializedBlobs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, indexBuildID, idxBuildID)
 	assert.Equal(t, version, v)
 	assert.Equal(t, collectionID, collID)
@@ -74,7 +74,7 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	assert.ElementsMatch(t, datas, blobs)
 
 	blobs, indexParams, indexName, indexID, err = codec.Deserialize(serializedBlobs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.ElementsMatch(t, datas, blobs)
 	for key, value := range indexParams {
 		assert.Equal(t, value, params[key])
@@ -84,7 +84,7 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 
 	// empty
 	_, _, _, _, _, _, _, _, _, _, err = codec.DeserializeImpl(nil)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestIndexFileBinlogCodecError(t *testing.T) {
@@ -93,7 +93,7 @@ func TestIndexFileBinlogCodecError(t *testing.T) {
 	// failed to read binlog
 	codec := NewIndexFileBinlogCodec()
 	_, _, _, _, err = codec.Deserialize([]*Blob{{Key: "key", Value: []byte("not in binlog format")}})
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	indexBuildID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 	version := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
@@ -113,7 +113,7 @@ func TestIndexFileBinlogCodecError(t *testing.T) {
 	}
 
 	_, err = codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndexCodec(t *testing.T) {
@@ -139,11 +139,11 @@ func TestIndexCodec(t *testing.T) {
 		"k1": "v1", "k2": "v2",
 	}
 	blobsInput, err := indexCodec.Serialize(blobs, indexParams, "index_test_name", 1234)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.EqualValues(t, 4, len(blobsInput))
 	assert.EqualValues(t, IndexParamsKey, blobsInput[3].Key)
 	blobsOutput, indexParamsOutput, indexName, indexID, err := indexCodec.Deserialize(blobsInput)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.EqualValues(t, 3, len(blobsOutput))
 	for i := 0; i < 3; i++ {
 		assert.EqualValues(t, blobs[i], blobsOutput[i])
@@ -154,5 +154,5 @@ func TestIndexCodec(t *testing.T) {
 
 	blobs = []*Blob{}
 	_, _, _, _, err = indexCodec.Deserialize(blobs)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }

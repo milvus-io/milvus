@@ -24,7 +24,7 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
 	producer, err := kc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
 	kafkaProd := producer.(*kafkaProducer)
@@ -35,7 +35,7 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 		Properties: map[string]string{},
 	}
 	msgID, err := producer.Send(context.TODO(), msg2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
 	producer.Close()
@@ -50,7 +50,7 @@ func TestKafkaProducer_SendFail(t *testing.T) {
 		topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
 		pp, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": kafkaAddress})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: topic}
 
 		msg := &mqwrapper.ProducerMessage{
@@ -62,7 +62,7 @@ func TestKafkaProducer_SendFail(t *testing.T) {
 
 		ret, err := producer.Send(context.TODO(), msg)
 		assert.Nil(t, ret)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		producer.Close()
 	}

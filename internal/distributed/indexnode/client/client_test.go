@@ -42,29 +42,29 @@ func Test_NewClient(t *testing.T) {
 	ctx := context.Background()
 	client, err := NewClient(ctx, "", false)
 	assert.Nil(t, client)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	client, err = NewClient(ctx, "test", false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	err = client.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = client.Register()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
-				assert.Nil(t, err)
+				assert.NoError(t, err)
 			} else {
 				assert.Nil(t, ret)
-				assert.NotNil(t, err)
+				assert.Error(t, err)
 			}
 		}
 
@@ -119,7 +119,7 @@ func Test_NewClient(t *testing.T) {
 	checkFunc(true)
 
 	err = client.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndexNodeClient(t *testing.T) {
@@ -128,7 +128,7 @@ func TestIndexNodeClient(t *testing.T) {
 
 	factory := dependency.NewDefaultFactory(true)
 	ins, err := grpcindexnode.NewServer(ctx, factory)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, ins)
 
 	inm := indexnode.NewIndexNodeMock()
@@ -143,31 +143,31 @@ func TestIndexNodeClient(t *testing.T) {
 	assert.NoError(t, err)
 	inm.SetEtcdClient(etcdCli)
 	err = ins.SetClient(inm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = ins.Run()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	inc, err := NewClient(ctx, "localhost:21121", false)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, inc)
 
 	err = inc.Init()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = inc.Start()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := inc.GetComponentStates(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		resp, err := inc.GetStatisticsChannel(ctx)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -177,21 +177,21 @@ func TestIndexNodeClient(t *testing.T) {
 			BuildID:   0,
 		}
 		resp, err := inc.CreateJob(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("QueryJob", func(t *testing.T) {
 		req := &indexpb.QueryJobsRequest{}
 		resp, err := inc.QueryJobs(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("DropJob", func(t *testing.T) {
 		req := &indexpb.DropJobsRequest{}
 		resp, err := inc.DropJobs(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -200,15 +200,15 @@ func TestIndexNodeClient(t *testing.T) {
 			Pattern: "",
 		}
 		resp, err := inc.ShowConfigurations(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		resp, err := inc.GetMetrics(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -220,8 +220,8 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	err = ins.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = inc.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

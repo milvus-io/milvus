@@ -33,7 +33,7 @@ type positionGenerator func(channelName string, timestamp uint64, msgGroup strin
 
 func TestNmq(t *testing.T) {
 	storeDir, err := os.MkdirTemp("", "milvus_mq_nmq")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(storeDir)
 
 	paramtable.Init()
@@ -77,14 +77,14 @@ func testFactoryCommonOperation(t *testing.T, f Factory) {
 	var err error
 	ctx := context.Background()
 	_, err = f.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = f.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = f.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = f.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

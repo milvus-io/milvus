@@ -77,7 +77,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("rootCoord", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		rootCoord := &testRootCoord{}
 		grpcServer := grpc.NewServer()
@@ -94,7 +94,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("queryCoord", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		queryCoord := &testQueryCoord{}
 		grpcServer := grpc.NewServer()
@@ -111,7 +111,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("dataCoord", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		dataCoord := &testDataCoord{}
 		grpcServer := grpc.NewServer()
@@ -128,7 +128,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("queryNode", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		queryNode := &testQueryNode{}
 		grpcServer := grpc.NewServer()
@@ -145,7 +145,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("dataNode", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		dataNode := &testDataNode{}
 		grpcServer := grpc.NewServer()
@@ -162,7 +162,7 @@ func TestConnectionManager(t *testing.T) {
 
 	t.Run("indexNode", func(t *testing.T) {
 		lis, err := net.Listen("tcp", "127.0.0.1:")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer lis.Close()
 		indexNode := &testIndexNode{}
 		grpcServer := grpc.NewServer()

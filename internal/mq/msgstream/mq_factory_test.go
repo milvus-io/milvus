@@ -36,14 +36,14 @@ func TestRmsFactory(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := rmsFactory.NewMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = rmsFactory.NewTtMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }

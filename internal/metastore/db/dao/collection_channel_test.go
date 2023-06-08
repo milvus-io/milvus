@@ -35,7 +35,7 @@ func TestCollectionChannel_GetByCollID(t *testing.T) {
 
 	// actual
 	res, err := channelTestDb.GetByCollectionID(tenantID, collID1, ts)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, collChannels, res)
 }
 
@@ -75,7 +75,7 @@ func TestCollectionChannel_Insert(t *testing.T) {
 
 	// actual
 	err := channelTestDb.Insert(collChannels)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestCollectionChannel_Insert_Error(t *testing.T) {

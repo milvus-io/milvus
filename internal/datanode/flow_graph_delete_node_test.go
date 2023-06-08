@@ -52,7 +52,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
 			dn, err := newDeleteNode(test.ctx, nil, nil, make(chan string, 1), test.config)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			assert.NotNil(t, dn)
 			assert.Equal(t, "deleteNode-"+dn.channelName, dn.Name())
@@ -194,7 +194,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 
 		dn, err := newDeleteNode(context.Background(), fm, delBufManager, make(chan string, 1), c)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		segID2Pks, _ := dn.filterSegmentByPK(0, varCharPks, tss)
 		expected := map[int64][]primaryKey{
@@ -228,7 +228,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 
 		dn, err := newDeleteNode(context.Background(), fm, delBufManager, make(chan string, 1), c)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		segID2Pks, _ := dn.filterSegmentByPK(0, int64Pks, tss)
 		t.Log(segID2Pks)
@@ -325,7 +325,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 		sig := make(chan string, 1)
 		delNode, err := newDeleteNode(ctx, fm, delBufManager, sig, c)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.segmentsToSync = segIDs
@@ -364,7 +364,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			delBufHeap: &PriorityQueue{},
 		}
 		delNode, err := newDeleteNode(ctx, fm, delBufManager, make(chan string, 1), c)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		compactedSegment := UniqueID(10020987)
 		seg := Segment{
@@ -420,7 +420,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			recordFlushedSeg: true,
 		}
 		delNode, err := newDeleteNode(ctx, mockFlushManager, delBufManager, make(chan string, 1), c)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		//2. here we set flushing segments inside fgmsg to empty
 		//in order to verify the validity of auto flush function

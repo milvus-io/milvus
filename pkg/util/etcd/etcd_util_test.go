@@ -47,21 +47,21 @@ func TestEtcd(t *testing.T) {
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",
 		"some not right word")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	etcdCli, err = GetEtcdClient(false, true, []string{},
 		"../../../configs/cert/client.pem",
 		"../../../configs/cert/client.key",
 		"wrong/file",
 		"1.2")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	etcdCli, err = GetEtcdClient(false, true, []string{},
 		"wrong/file",
 		"../../../configs/cert/client.key",
 		"../../../configs/cert/ca.pem",
 		"1.2")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 }
 

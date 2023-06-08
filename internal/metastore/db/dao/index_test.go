@@ -35,7 +35,7 @@ func TestIndex_Get(t *testing.T) {
 
 	// actual
 	res, err := indexTestDb.Get(tenantID, collID1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, indexes, res)
 }
 
@@ -76,7 +76,7 @@ func TestIndex_List(t *testing.T) {
 
 	// actual
 	res, err := indexTestDb.List(tenantID)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, indexResults, res)
 }
 
@@ -120,7 +120,7 @@ func TestIndex_Insert(t *testing.T) {
 
 	// actual
 	err := indexTestDb.Insert(indexes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndex_Insert_Error(t *testing.T) {
@@ -170,7 +170,7 @@ func TestIndex_Update(t *testing.T) {
 
 	// actual
 	err := indexTestDb.Update(index)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndex_Update_Error(t *testing.T) {
@@ -205,7 +205,7 @@ func TestIndex_MarkDeletedByCollID(t *testing.T) {
 
 	// actual
 	err := indexTestDb.MarkDeletedByCollectionID(tenantID, collID1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndex_MarkDeletedByCollID_Error(t *testing.T) {
@@ -231,7 +231,7 @@ func TestIndex_MarkDeletedByIdxID(t *testing.T) {
 
 	// actual
 	err := indexTestDb.MarkDeletedByIndexID(tenantID, indexID1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestIndex_MarkDeletedByIdxID_Error(t *testing.T) {

@@ -57,13 +57,13 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 	for _, v := range msgPack.Msgs {
 		headerMsg := commonpb.MsgHeader{}
 		payload, err := v.Marshal(v)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		p, err := convertToByteArray(payload)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		err = proto.Unmarshal(p, &headerMsg)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		msg, err := unmarshalDispatcher.Unmarshal(p, headerMsg.Base.MsgType)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		t.Log("msg type: ", msg.Type(), ", msg value: ", msg, "msg tag: ")
 	}
 }

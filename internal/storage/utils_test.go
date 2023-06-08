@@ -851,7 +851,7 @@ func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim)
 
 	idata, err := RowBasedInsertMsgToInsertData(msg, schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
 		fData, ok := idata.Data[fID]
@@ -869,7 +869,7 @@ func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 	msg, _, columns := genColumnBasedInsertMsg(schema, numRows, fVecDim, bVecDim)
 
 	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
 		fData, ok := idata.Data[fID]
@@ -888,7 +888,7 @@ func TestInsertMsgToInsertData(t *testing.T) {
 	msg, _, columns := genRowBasedInsertMsg(numRows, fVecDim, bVecDim)
 
 	idata, err := InsertMsgToInsertData(msg, schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
 		fData, ok := idata.Data[fID]
@@ -906,7 +906,7 @@ func TestInsertMsgToInsertData2(t *testing.T) {
 	msg, _, columns := genColumnBasedInsertMsg(schema, numRows, fVecDim, bVecDim)
 
 	idata, err := InsertMsgToInsertData(msg, schema)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for idx, fID := range fieldIDs {
 		column := columns[idx]
 		fData, ok := idata.Data[fID]

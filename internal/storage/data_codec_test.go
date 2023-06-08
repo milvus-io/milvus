@@ -316,20 +316,20 @@ func TestInsertCodec(t *testing.T) {
 	assert.Empty(t, s)
 
 	Blobs1, err := insertCodec.Serialize(PartitionID, SegmentID, insertData1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for _, blob := range Blobs1 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
 	Blobs2, err := insertCodec.Serialize(PartitionID, SegmentID, insertData2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for _, blob := range Blobs2 {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
 	resultBlobs := append(Blobs1, Blobs2...)
 	collID, partID, segID, resultData, err := insertCodec.DeserializeAll(resultBlobs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, UniqueID(CollectionID), collID)
 	assert.Equal(t, UniqueID(PartitionID), partID)
 	assert.Equal(t, UniqueID(SegmentID), segID)
@@ -367,19 +367,19 @@ func TestInsertCodec(t *testing.T) {
 
 	blobs := []*Blob{}
 	_, _, _, err = insertCodec.Deserialize(blobs)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	_, _, _, _, err = insertCodec.DeserializeAll(blobs)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	statsBlob1, err := insertCodec.SerializePkStatsByData(insertData1)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = DeserializeStats([]*Blob{statsBlob1})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	statsBlob2, err := insertCodec.SerializePkStatsByData(insertData2)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	_, err = DeserializeStats([]*Blob{statsBlob2})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestDeleteCodec(t *testing.T) {
@@ -399,10 +399,10 @@ func TestDeleteCodec(t *testing.T) {
 		}
 		deleteData.Append(pk2, 23578294723)
 		blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, pid, int64(1))
 		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, data, deleteData)
@@ -420,10 +420,10 @@ func TestDeleteCodec(t *testing.T) {
 		pk2 := NewVarCharPrimaryKey("test2")
 		deleteData.Append(pk2, 23578294723)
 		blob, err := deleteCodec.Serialize(CollectionID, 1, 1, deleteData)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		pid, sid, data, err := deleteCodec.Deserialize([]*Blob{blob})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, pid, int64(1))
 		assert.Equal(t, sid, int64(1))
 		assert.Equal(t, data, deleteData)
@@ -433,7 +433,7 @@ func TestDeleteCodec(t *testing.T) {
 func TestUpgradeDeleteLog(t *testing.T) {
 	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, CollectionID, 1, 1)
 	eventWriter, err := binlogWriter.NextDeleteEventWriter()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	dData := &DeleteData{
 		Pks:      []PrimaryKey{&Int64PrimaryKey{Value: 1}, &Int64PrimaryKey{Value: 2}},
@@ -446,7 +446,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
 		ts := dData.Tss[i]
 		err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		sizeTotal += binary.Size(int64PkValue)
 		sizeTotal += binary.Size(ts)
 	}
@@ -455,14 +455,14 @@ func TestUpgradeDeleteLog(t *testing.T) {
 	binlogWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	err = binlogWriter.Finish()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	buffer, err := binlogWriter.GetBuffer()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	blob := &Blob{Value: buffer}
 
 	dCodec := NewDeleteCodec()
 	parID, segID, deleteData, err := dCodec.Deserialize([]*Blob{blob})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(1), parID)
 	assert.Equal(t, int64(1), segID)
 	assert.ElementsMatch(t, dData.Pks, deleteData.Pks)
@@ -485,18 +485,18 @@ func TestDDCodec(t *testing.T) {
 		DropPartitionEventType,
 	}
 	blobs, err := dataDefinitionCodec.Serialize(ts, ddRequests, eventTypeCodes)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	for _, blob := range blobs {
 		blob.Key = fmt.Sprintf("1/data_definition/3/4/5/%d", 99)
 	}
 	resultTs, resultRequests, err := dataDefinitionCodec.Deserialize(blobs)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
 
 	blobs = []*Blob{}
 	_, _, err = dataDefinitionCodec.Deserialize(blobs)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestTsError(t *testing.T) {
@@ -504,7 +504,7 @@ func TestTsError(t *testing.T) {
 	insertCodec := NewInsertCodecWithSchema(nil)
 	blobs, err := insertCodec.Serialize(1, 1, insertData)
 	assert.Nil(t, blobs)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestMemorySize(t *testing.T) {
