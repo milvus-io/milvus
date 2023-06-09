@@ -59,7 +59,7 @@ class TestCollectionParams(TestcaseBase):
             pytest.skip("None schema is valid")
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    @pytest.fixture(scope="function", params=ct.get_invalid_type_fields)
     def get_invalid_type_fields(self, request):
         if isinstance(request.param, list):
             pytest.skip("list is valid fields")
@@ -734,10 +734,9 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         int_field = cf.gen_int64_field(is_primary=True, auto_id=True)
         vec_field = cf.gen_float_vec_field(name='vec')
-        error = {ct.err_code: 0, ct.err_msg: "The auto_id of the collection is inconsistent with "
-                                             "the auto_id of the primary key field"}
-        self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=False,
-                                                           check_task=CheckTasks.err_res, check_items=error)
+
+        schema, _ = self.collection_schema_wrap.init_collection_schema([int_field, vec_field], auto_id=False)
+        assert schema.auto_id
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -3759,14 +3758,10 @@ class TestCollectionString(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
         fields = [int_field, string_field, vec_field]
-        schema, _ = self.collection_schema_wrap.init_collection_schema(fields=fields)
-#         error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
-        c_name = cf.gen_unique_str(prefix)
-        self.collection_wrap.init_collection(name=c_name, schema=schema,
-                                             check_task=CheckTasks.check_collection_property, 
-                                             check_items={exp_name: c_name, exp_schema: schema})
+        error = {ct.err_code: 0, ct.err_msg: "The auto_id can only be specified on field with DataType.INT64"}
+        self.collection_schema_wrap.init_collection_schema(fields=fields,
+                                                           check_task=CheckTasks.err_res, check_items=error)
         
-
 class TestCollectionJSON(TestcaseBase):
     """
     ******************************************************************
