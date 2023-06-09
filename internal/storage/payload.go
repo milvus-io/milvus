@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // PayloadWriterInterface abstracts PayloadWriter
@@ -88,20 +87,8 @@ type PayloadWriter struct {
 }
 
 // NewPayloadWriter is constructor of PayloadWriter
-func NewPayloadWriter(colType schemapb.DataType, dim ...int) (*PayloadWriter, error) {
-	var w C.CPayloadWriter
-	if typeutil.IsVectorType(colType) {
-		if len(dim) != 1 {
-			return nil, fmt.Errorf("incorrect input numbers")
-		}
-		w = C.NewVectorPayloadWriter(C.int(colType), C.int(dim[0]))
-	} else {
-		w = C.NewPayloadWriter(C.int(colType))
-	}
-	if w == nil {
-		return nil, errors.New("create Payload writer failed")
-	}
-	return &PayloadWriter{payloadWriterPtr: w, colType: colType}, nil
+func NewPayloadWriter(colType schemapb.DataType, dim ...int) (PayloadWriterInterface, error) {
+	return NewPurePayloadWriter(colType, dim...)
 }
 
 // AddDataToPayload adds @msgs into payload, if @msgs is vector, dimension should be specified by @dim

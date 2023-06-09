@@ -213,7 +213,7 @@ func newDescriptorEvent() *descriptorEvent {
 }
 
 func newInsertEventWriter(dataType schemapb.DataType, dim ...int) (*insertEventWriter, error) {
-	var payloadWriter *PayloadWriter
+	var payloadWriter PayloadWriterInterface
 	var err error
 	if typeutil.IsVectorType(dataType) {
 		if len(dim) != 1 {
