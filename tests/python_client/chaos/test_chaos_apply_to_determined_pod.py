@@ -61,12 +61,12 @@ class TestChaosApply:
         release_name = self.release_name
         deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
         target_pod_list = []
-        if target_pod == 'etcd_leader':
+        if target_pod in ['etcd_leader', 'etcd-leader']:
             etcd_leader = get_etcd_leader(release_name, deploy_tool)
             if etcd_leader is None:
                 raise Exception("no etcd leader")
             target_pod_list.append(etcd_leader)
-        if target_pod == 'etcd_followers':
+        if target_pod in ['etcd_followers', 'etcd-followers']:
             etcd_followers = get_etcd_followers(release_name, deploy_tool)
             if etcd_followers is None:
                 raise Exception("no etcd followers")
