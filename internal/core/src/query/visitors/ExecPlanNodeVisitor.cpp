@@ -193,7 +193,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())
             ? segment->search_ids(
                   final_view, expr_cached_pk_id_offsets_, timestamp_)
-            : segment->search_ids(final_view, timestamp_);
+            : segment->search_ids(bitset_holder.flip(), timestamp_);
     retrieve_result.result_offsets_.assign(
         (int64_t*)seg_offsets.data(),
         (int64_t*)seg_offsets.data() + seg_offsets.size());

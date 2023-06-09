@@ -891,12 +891,14 @@ std::vector<SegOffset>
 SegmentSealedImpl::search_ids(const BitsetType& bitset,
                               Timestamp timestamp) const {
     std::vector<SegOffset> dst_offset;
-    for (int i = 0; i < bitset.size(); i++) {
-        if (bitset[i]) {
-            auto offset = SegOffset(i);
-            if (insert_record_.timestamps_[offset.get()] <= timestamp) {
-                dst_offset.push_back(offset);
-            }
+    for (int i = bitset.find_first(); i < bitset.size();
+         i = bitset.find_next(i)) {
+        if (i == BitsetType::npos) {
+            return dst_offset;
+        }
+        auto offset = SegOffset(i);
+        if (insert_record_.timestamps_[offset.get()] <= timestamp) {
+            dst_offset.push_back(offset);
         }
     }
     return dst_offset;
