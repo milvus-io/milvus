@@ -21,11 +21,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // IndexCoord implements IndexCoord grpc server
@@ -49,6 +49,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 // Run starts service
 func (s *IndexCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
+		log.Error("IndexCoord starts error", zap.Error(err))
 		return err
 	}
 	log.Debug("IndexCoord successfully started")

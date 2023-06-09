@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 )
