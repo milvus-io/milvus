@@ -18,6 +18,7 @@ package proxy
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -48,6 +49,8 @@ type CollectionWorkLoad struct {
 type LBPolicy interface {
 	Execute(ctx context.Context, workload CollectionWorkLoad) error
 	ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error
+	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
+	Close()
 }
 
 type LBPolicyImpl struct {
@@ -55,7 +58,8 @@ type LBPolicyImpl struct {
 	clientMgr shardClientMgr
 }
 
-func NewLBPolicyImpl(balancer LBBalancer, clientMgr shardClientMgr) *LBPolicyImpl {
+func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
+	balancer := NewLookAsideBalancer(clientMgr)
 	return &LBPolicyImpl{
 		balancer:  balancer,
 		clientMgr: clientMgr,
@@ -135,6 +139,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
+
+			// cancel work load which assign to the target node
+			lb.balancer.CancelWorkload(targetNode, workload.nq)
 			return merr.WrapErrShardDelegatorAccessFailed(workload.channel, err.Error())
 		}
 
@@ -144,8 +151,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Int64("nodeID", targetNode),
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
+			lb.balancer.CancelWorkload(targetNode, workload.nq)
 			return merr.WrapErrShardDelegatorAccessFailed(workload.channel, err.Error())
 		}
+
+		lb.balancer.CancelWorkload(targetNode, workload.nq)
 		return nil
 	}, retry.Attempts(workload.retryTimes))
 
@@ -178,4 +188,12 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 
 	err = wg.Wait()
 	return err
+}
+
+func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {
+	lb.balancer.UpdateCostMetrics(node, cost)
+}
+
+func (lb *LBPolicyImpl) Close() {
+	lb.balancer.Close()
 }

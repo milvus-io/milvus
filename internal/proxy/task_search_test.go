@@ -1543,12 +1543,12 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
-		return qn, nil
-	}
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 
-	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
-	lb := NewLBPolicyImpl(NewRoundRobinBalancer(), mgr)
+	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
+	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
+	lb := NewLBPolicyImpl(mgr)
 
 	rc.Start()
 	defer rc.Stop()
@@ -1661,6 +1661,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
@@ -1670,6 +1671,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1678,6 +1680,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

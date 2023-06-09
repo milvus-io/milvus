@@ -5,6 +5,7 @@ package proxy
 import (
 	context "context"
 
+	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -64,13 +65,13 @@ func (_c *MockLBPolicy_Execute_Call) RunAndReturn(run func(context.Context, Coll
 	return _c
 }
 
-// ExecuteWithRetry provides a mock function with given fields: ctx, workload, retryTimes
-func (_m *MockLBPolicy) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload, retryTimes uint) error {
-	ret := _m.Called(ctx, workload, retryTimes)
+// ExecuteWithRetry provides a mock function with given fields: ctx, workload
+func (_m *MockLBPolicy) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
+	ret := _m.Called(ctx, workload)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, ChannelWorkload, uint) error); ok {
-		r0 = rf(ctx, workload, retryTimes)
+	if rf, ok := ret.Get(0).(func(context.Context, ChannelWorkload) error); ok {
+		r0 = rf(ctx, workload)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -86,14 +87,13 @@ type MockLBPolicy_ExecuteWithRetry_Call struct {
 // ExecuteWithRetry is a helper method to define mock.On call
 //   - ctx context.Context
 //   - workload ChannelWorkload
-//   - retryTimes uint
-func (_e *MockLBPolicy_Expecter) ExecuteWithRetry(ctx interface{}, workload interface{}, retryTimes interface{}) *MockLBPolicy_ExecuteWithRetry_Call {
-	return &MockLBPolicy_ExecuteWithRetry_Call{Call: _e.mock.On("ExecuteWithRetry", ctx, workload, retryTimes)}
+func (_e *MockLBPolicy_Expecter) ExecuteWithRetry(ctx interface{}, workload interface{}) *MockLBPolicy_ExecuteWithRetry_Call {
+	return &MockLBPolicy_ExecuteWithRetry_Call{Call: _e.mock.On("ExecuteWithRetry", ctx, workload)}
 }
 
-func (_c *MockLBPolicy_ExecuteWithRetry_Call) Run(run func(ctx context.Context, workload ChannelWorkload, retryTimes uint)) *MockLBPolicy_ExecuteWithRetry_Call {
+func (_c *MockLBPolicy_ExecuteWithRetry_Call) Run(run func(ctx context.Context, workload ChannelWorkload)) *MockLBPolicy_ExecuteWithRetry_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(ChannelWorkload), args[2].(uint))
+		run(args[0].(context.Context), args[1].(ChannelWorkload))
 	})
 	return _c
 }
@@ -103,7 +103,41 @@ func (_c *MockLBPolicy_ExecuteWithRetry_Call) Return(_a0 error) *MockLBPolicy_Ex
 	return _c
 }
 
-func (_c *MockLBPolicy_ExecuteWithRetry_Call) RunAndReturn(run func(context.Context, ChannelWorkload, uint) error) *MockLBPolicy_ExecuteWithRetry_Call {
+func (_c *MockLBPolicy_ExecuteWithRetry_Call) RunAndReturn(run func(context.Context, ChannelWorkload) error) *MockLBPolicy_ExecuteWithRetry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateCostMetrics provides a mock function with given fields: node, cost
+func (_m *MockLBPolicy) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {
+	_m.Called(node, cost)
+}
+
+// MockLBPolicy_UpdateCostMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCostMetrics'
+type MockLBPolicy_UpdateCostMetrics_Call struct {
+	*mock.Call
+}
+
+// UpdateCostMetrics is a helper method to define mock.On call
+//   - node int64
+//   - cost *internalpb.CostAggregation
+func (_e *MockLBPolicy_Expecter) UpdateCostMetrics(node interface{}, cost interface{}) *MockLBPolicy_UpdateCostMetrics_Call {
+	return &MockLBPolicy_UpdateCostMetrics_Call{Call: _e.mock.On("UpdateCostMetrics", node, cost)}
+}
+
+func (_c *MockLBPolicy_UpdateCostMetrics_Call) Run(run func(node int64, cost *internalpb.CostAggregation)) *MockLBPolicy_UpdateCostMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*internalpb.CostAggregation))
+	})
+	return _c
+}
+
+func (_c *MockLBPolicy_UpdateCostMetrics_Call) Return() *MockLBPolicy_UpdateCostMetrics_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLBPolicy_UpdateCostMetrics_Call) RunAndReturn(run func(int64, *internalpb.CostAggregation)) *MockLBPolicy_UpdateCostMetrics_Call {
 	_c.Call.Return(run)
 	return _c
 }

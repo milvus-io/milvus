@@ -77,11 +77,11 @@ func (s *StatisticTaskSuite) SetupTest() {
 	s.rc.Start()
 	s.qn = types.NewMockQueryNode(s.T())
 
-	mockCreator := func(ctx context.Context, addr string) (types.QueryNode, error) {
-		return s.qn, nil
-	}
-	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
-	s.lb = NewLBPolicyImpl(NewRoundRobinBalancer(), mgr)
+	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+	mgr := NewMockShardClientManager(s.T())
+	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
+	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.lb = NewLBPolicyImpl(mgr)
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, mgr)
 	s.NoError(err)

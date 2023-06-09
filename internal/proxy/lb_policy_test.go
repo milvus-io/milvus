@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -91,11 +92,13 @@ func (s *LBPolicySuite) SetupTest() {
 
 	s.qn = types.NewMockQueryNode(s.T())
 	s.qn.EXPECT().GetAddress().Return("localhost").Maybe()
+	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 
 	s.mgr = NewMockShardClientManager(s.T())
 	s.mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.lbBalancer = NewMockLBBalancer(s.T())
-	s.lbPolicy = NewLBPolicyImpl(s.lbBalancer, s.mgr)
+	s.lbPolicy = NewLBPolicyImpl(s.mgr)
+	s.lbPolicy.balancer = s.lbBalancer
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
 	s.NoError(err)
@@ -223,6 +226,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		collection:   s.collection,
 		channel:      s.channels[0],
@@ -255,6 +259,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		collection:   s.collection,
 		channel:      s.channels[0],
@@ -270,6 +275,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		collection:   s.collection,
 		channel:      s.channels[0],
@@ -287,6 +293,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := 0
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		collection:   s.collection,
@@ -310,6 +317,7 @@ func (s *LBPolicySuite) TestExecute() {
 	// test  all channel success
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		collection: s.collection,
 		nq:         1,
@@ -346,6 +354,11 @@ func (s *LBPolicySuite) TestExecute() {
 		},
 	})
 	s.Error(err)
+}
+
+func (s *LBPolicySuite) TestUpdateCostMetrics() {
+	s.lbBalancer.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything)
+	s.lbPolicy.UpdateCostMetrics(1, &internalpb.CostAggregation{})
 }
 
 func TestLBPolicySuite(t *testing.T) {
