@@ -778,6 +778,49 @@ func TestImpl_Search(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, ret.GetStatus().GetErrorCode())
 }
 
+func TestImpl_SearchFailed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	require.NoError(t, err)
+
+	schema := genTestCollectionSchema()
+	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
+	require.NoError(t, err)
+
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, 1)
+	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
+	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
+	assert.True(t, ok)
+	sc.SetupFirstVersion()
+	req.Base.TargetID = Params.QueryNodeCfg.GetNodeID()
+
+	// collection not exist
+	err = node.metaReplica.removeCollection(defaultCollectionID)
+	assert.NoError(t, err)
+	ret, err := node.Search(ctx, &queryPb.SearchRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, ret.GetStatus().GetErrorCode())
+
+	// metric type mismatch
+	col := node.metaReplica.addCollection(defaultCollectionID, schema)
+	assert.NotNil(t, col)
+	col.setMetricType("L2")
+	req.MetricType = "IP"
+	ret, err = node.Search(ctx, &queryPb.SearchRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, ret.GetStatus().GetErrorCode())
+}
+
 func TestImpl_searchWithDmlChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
