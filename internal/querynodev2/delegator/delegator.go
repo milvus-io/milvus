@@ -38,10 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -215,11 +217,15 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	// wait tsafe
+	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
 		return nil, err
 	}
+	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
@@ -270,11 +276,15 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	// wait tsafe
+	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err
 	}
+	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
