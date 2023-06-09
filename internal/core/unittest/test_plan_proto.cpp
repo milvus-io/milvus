@@ -187,6 +187,7 @@ vector_anns: <
       values: <
         %4%: 3
       >
+      is_in_field : false
     >
   >
   query_info: <
@@ -218,7 +219,8 @@ vector_anns: <
             {
                 "term": {
                     "%1%": {
-                        "values": [1,2,3]
+                        "values": [1,2,3],
+                        "is_in_field" : false
                     }
                 }
             },

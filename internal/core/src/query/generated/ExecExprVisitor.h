@@ -119,6 +119,14 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename ExprValueType>
     auto
+    ExecTermJsonVariableInField(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecTermJsonFieldInVariable(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
     ExecTermVisitorImplTemplateJson(TermExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>

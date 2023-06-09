@@ -1740,8 +1740,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw)
 
 template <typename ExprValueType>
 auto
-ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
-    -> BitsetType {
+ExecExprVisitor::ExecTermJsonFieldInVariable(TermExpr& expr_raw) -> BitsetType {
     using Index = index::ScalarIndex<milvus::Json>;
     auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
     auto pointer = milvus::Json::pointer(expr.column_.nested_path);
@@ -1781,6 +1780,53 @@ ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
 
     return ExecRangeVisitorImpl<milvus::Json>(
         expr.column_.field_id, index_func, elem_func);
+}
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecTermJsonVariableInField(TermExpr& expr_raw) -> BitsetType {
+    using Index = index::ScalarIndex<milvus::Json>;
+    auto& expr = static_cast<TermExprImpl<ExprValueType>&>(expr_raw);
+    auto pointer = milvus::Json::pointer(expr.column_.nested_path);
+    auto index_func = [](Index* index) { return TargetBitmap{}; };
+
+    AssertInfo(expr.terms_.size() == 1,
+               "element length in json array must be one");
+    ExprValueType target_val = expr.terms_[0];
+
+    auto elem_func = [&target_val, &pointer](const milvus::Json& json) {
+        using GetType =
+            std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                               std::string_view,
+                               ExprValueType>;
+        auto doc = json.doc();
+        auto array = doc.at_pointer(pointer).get_array();
+        if (array.error())
+            return false;
+        for (auto it = array.begin(); it != array.end(); ++it) {
+            auto val = (*it).template get<GetType>();
+            if (val.error()) {
+                return false;
+            }
+            if (val.value() == target_val)
+                return true;
+        }
+        return false;
+    };
+
+    return ExecRangeVisitorImpl<milvus::Json>(
+        expr.column_.field_id, index_func, elem_func);
+}
+
+template <typename ExprValueType>
+auto
+ExecExprVisitor::ExecTermVisitorImplTemplateJson(TermExpr& expr_raw)
+    -> BitsetType {
+    if (expr_raw.is_in_field_) {
+        return ExecTermJsonVariableInField<ExprValueType>(expr_raw);
+    } else {
+        return ExecTermJsonFieldInVariable<ExprValueType>(expr_raw);
+    }
 }
 
 void

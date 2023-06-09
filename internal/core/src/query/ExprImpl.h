@@ -32,8 +32,10 @@ struct TermExprImpl : TermExpr {
 
     TermExprImpl(ColumnInfo column,
                  const std::vector<T>& terms,
-                 const proto::plan::GenericValue::ValCase val_case)
-        : TermExpr(std::forward<ColumnInfo>(column), val_case), terms_(terms) {
+                 const proto::plan::GenericValue::ValCase val_case,
+                 const bool is_in_field = false)
+        : TermExpr(std::forward<ColumnInfo>(column), val_case, is_in_field),
+          terms_(terms) {
     }
 };
 

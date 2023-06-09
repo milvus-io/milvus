@@ -189,6 +189,13 @@ struct GeneratedData {
             uint64_t seed,
             uint64_t ts_offset,
             int repeat_count);
+    friend GeneratedData
+    DataGenForJsonArray(SchemaPtr schema,
+                        int64_t N,
+                        uint64_t seed,
+                        uint64_t ts_offset,
+                        int repeat_count,
+                        int array_len);
 };
 
 inline GeneratedData
@@ -340,6 +347,90 @@ DataGen(SchemaPtr schema,
     }
 
     GeneratedData res;
+    res.schema_ = schema;
+    res.raw_ = insert_data.release();
+    res.raw_->set_num_rows(N);
+    for (int i = 0; i < N; ++i) {
+        res.row_ids_.push_back(i);
+        res.timestamps_.push_back(i + ts_offset);
+    }
+
+    return res;
+}
+
+template <typename T>
+std::string
+join(const std::vector<T>& items, const std::string& delimiter) {
+    std::stringstream ss;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            ss << delimiter;
+        }
+        ss << items[i];
+    }
+    return ss.str();
+}
+
+inline GeneratedData
+DataGenForJsonArray(SchemaPtr schema,
+                    int64_t N,
+                    uint64_t seed = 42,
+                    uint64_t ts_offset = 0,
+                    int repeat_count = 1,
+                    int array_len = 1) {
+    using std::vector;
+    std::default_random_engine er(seed);
+    std::normal_distribution<> distr(0, 1);
+
+    auto insert_data = std::make_unique<InsertData>();
+    auto insert_cols = [&insert_data](
+                           auto& data, int64_t count, auto& field_meta) {
+        auto array = milvus::segcore::CreateDataArrayFrom(
+            data.data(), count, field_meta);
+        insert_data->mutable_fields_data()->AddAllocated(array.release());
+    };
+    for (auto field_id : schema->get_field_ids()) {
+        auto field_meta = schema->operator[](field_id);
+        switch (field_meta.get_data_type()) {
+            case DataType::INT64: {
+                vector<int64_t> data(N);
+                for (int i = 0; i < N; i++) {
+                    data[i] = i / repeat_count;
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::JSON: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    std::vector<std::string> intVec;
+                    std::vector<std::string> doubleVec;
+                    std::vector<std::string> stringVec;
+                    std::vector<std::string> boolVec;
+                    for (int i = 0; i < array_len; ++i) {
+                        intVec.push_back(std::to_string(er()));
+                        doubleVec.push_back(
+                            std::to_string(static_cast<double>(er())));
+                        stringVec.push_back("\"" + std::to_string(er()) + "\"");
+                        boolVec.push_back(i % 2 == 0 ? "true" : "false");
+                    }
+                    auto str = R"({"int":[)" + join(intVec, ",") +
+                               R"(],"double":[)" + join(doubleVec, ",") +
+                               R"(],"string":[)" + join(stringVec, ",") +
+                               R"(],"bool": [)" + join(boolVec, ",") + "]}";
+                    //std::cout << str << std::endl;
+                    data[i] = str;
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            default: {
+                throw std::runtime_error("unimplemented");
+            }
+        }
+    }
+
+    milvus::segcore::GeneratedData res;
     res.schema_ = schema;
     res.raw_ = insert_data.release();
     res.raw_->set_num_rows(N);

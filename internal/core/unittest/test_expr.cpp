@@ -719,7 +719,8 @@ TEST(Expr, TestTerm) {
                 {
                     "term": {
                         "age": {
-                            "values": @@@@
+                            "values": @@@@,
+                            "is_in_field" : false
                         }
                     }
                 },
@@ -810,6 +811,7 @@ TEST(Expr, TestSimpleDsl) {
         }
         query::Json s;
         s["term"]["age"]["values"] = terms;
+        s["term"]["age"]["is_in_field"] = false;
         return s;
     };
     // std::cout << get_item(0).dump(-2);
@@ -2896,6 +2898,200 @@ TEST(Expr, TestExistsWithJSON) {
             } else {
                 ASSERT_TRUE(false) << "No test case defined for this data type";
             }
+        }
+    }
+}
+
+template <typename T>
+struct Testcase {
+    std::vector<T> term;
+    std::vector<std::string> nested_path;
+};
+
+TEST(Expr, TestTermInFieldJson) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 10000;
+    std::vector<std::string> json_col;
+    int num_iters = 2;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGenForJsonArray(schema, N, iter);
+        auto new_json_col = raw_data.get_col<std::string>(json_fid);
+
+        json_col.insert(
+            json_col.end(), new_json_col.begin(), new_json_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ExecExprVisitor visitor(
+        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+
+    std::vector<Testcase<bool>> bool_testcases{{{true}, {"bool"}},
+                                               {{false}, {"bool"}}};
+
+    for (auto testcase : bool_testcases) {
+        auto check = [&](const std::vector<bool>& values) {
+            return std::find(values.begin(), values.end(), testcase.term[0]) !=
+                   values.end();
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ = std::make_unique<TermExprImpl<bool>>(
+            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+            testcase.term,
+            proto::plan::GenericValue::ValCase::kBoolVal,
+            true);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+                             .array_at(pointer);
+            std::vector<bool> res;
+            for (const auto& element : array) {
+                res.push_back(element.template get<bool>());
+            }
+            ASSERT_EQ(ans, check(res));
+        }
+    }
+
+    std::vector<Testcase<double>> double_testcases{
+        {{1.123}, {"double"}},
+        {{10.34}, {"double"}},
+        {{100.234}, {"double"}},
+        {{1000.4546}, {"double"}},
+    };
+
+    for (auto testcase : double_testcases) {
+        auto check = [&](const std::vector<double>& values) {
+            return std::find(values.begin(), values.end(), testcase.term[0]) !=
+                   values.end();
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ = std::make_unique<TermExprImpl<double>>(
+            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+            testcase.term,
+            proto::plan::GenericValue::ValCase::kFloatVal,
+            true);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+                             .array_at(pointer);
+            std::vector<double> res;
+            for (const auto& element : array) {
+                res.push_back(element.template get<double>());
+            }
+            ASSERT_EQ(ans, check(res));
+        }
+    }
+
+    std::vector<Testcase<int64_t>> testcases{
+        {{1}, {"int"}},
+        {{10}, {"int"}},
+        {{100}, {"int"}},
+        {{1000}, {"int"}},
+    };
+
+    for (auto testcase : testcases) {
+        auto check = [&](const std::vector<int64_t>& values) {
+            return std::find(values.begin(), values.end(), testcase.term[0]) !=
+                   values.end();
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ = std::make_unique<TermExprImpl<int64_t>>(
+            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+            testcase.term,
+            proto::plan::GenericValue::ValCase::kInt64Val,
+            true);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+                             .array_at(pointer);
+            std::vector<int64_t> res;
+            for (const auto& element : array) {
+                res.push_back(element.template get<int64_t>());
+            }
+            ASSERT_EQ(ans, check(res));
+        }
+    }
+
+    std::vector<Testcase<std::string>> testcases_string = {
+        {{"1sads"}, {"string"}},
+        {{"10dsf"}, {"string"}},
+        {{"100"}, {"string"}},
+        {{"100ddfdsssdfdsfsd0"}, {"string"}},
+    };
+
+    for (auto testcase : testcases_string) {
+        auto check = [&](const std::vector<std::string_view>& values) {
+            return std::find(values.begin(), values.end(), testcase.term[0]) !=
+                   values.end();
+        };
+        RetrievePlanNode plan;
+        auto pointer = milvus::Json::pointer(testcase.nested_path);
+        plan.predicate_ = std::make_unique<TermExprImpl<std::string>>(
+            ColumnInfo(json_fid, DataType::JSON, testcase.nested_path),
+            testcase.term,
+            proto::plan::GenericValue::ValCase::kStringVal,
+            true);
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*plan.predicate_.value());
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+                             .array_at(pointer);
+            std::vector<std::string_view> res;
+            for (const auto& element : array) {
+                res.push_back(element.template get<std::string_view>());
+            }
+            ASSERT_EQ(ans, check(res));
         }
     }
 }

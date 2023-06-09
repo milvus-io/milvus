@@ -2470,7 +2470,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
              {
                  "term": {
                      "counter": {
-                         "values": [4200, 4201, 4202, 4203, 4204]
+                         "values": [4200, 4201, 4202, 4203, 4204],
+                         "is_in_field": false
                      }
                  }
              },
@@ -3134,7 +3135,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
             {
                 "term": {
                     "counter": {
-                        "values": [4200, 4201, 4202, 4203, 4204]
+                        "values": [4200, 4201, 4202, 4203, 4204],
+                        "is_in_field": false
                     }
                 }
             },
