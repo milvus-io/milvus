@@ -51,6 +51,8 @@ issues:
     - G304
     # Deferring unsafe method like *os.File Close 
     - G307
+    # TLS MinVersion too low
+    - G402
     # Use of weak random number generator math/rand
     - G404
     # Exclude copylocks

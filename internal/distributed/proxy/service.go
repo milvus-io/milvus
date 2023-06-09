@@ -30,6 +30,11 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/credentials"
+
+	"github.com/milvus-io/milvus/internal/management"
+	"github.com/soheilhy/cmux"
+
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
@@ -39,7 +44,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
@@ -85,6 +89,10 @@ type Server struct {
 	ctx                context.Context
 	wg                 sync.WaitGroup
 	proxy              types.ProxyComponent
+	httpListener       net.Listener
+	grpcListener       net.Listener
+	tcpServer          cmux.CMux
+	httpServer         *http.Server
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
 
@@ -113,6 +121,18 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
+func authenticate(c *gin.Context) {
+	username, password, ok := httpserver.ParseUsernamePassword(c)
+	if ok {
+		if proxy.PasswordVerify(c, username, password) {
+			log.Debug("auth successful", zap.String("username", username))
+			c.Set(httpserver.ContextUsername, username)
+			return
+		}
+	}
+	c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{"code": http.StatusProxyAuthRequired, "message": proxy.ErrUnauthenticated().Error()})
+}
+
 // registerHTTPServer register the http server, panic when failed
 func (s *Server) registerHTTPServer() {
 	// (Embedded Milvus Only) Discard gin logs if logging is disabled.
@@ -125,10 +145,27 @@ func (s *Server) registerHTTPServer() {
 	if !HTTPParams.DebugMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	ginHandler := gin.Default()
-	apiv1 := ginHandler.Group(apiPathPrefix)
+	metricsGinHandler := gin.Default()
+	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
-	http.Handle("/", ginHandler)
+	management.Register(&management.HTTPHandler{
+		Path:        "/",
+		HandlerFunc: nil,
+		Handler:     metricsGinHandler.Handler(),
+	})
+}
+
+func (s *Server) startHTTPServer() {
+	defer s.wg.Done()
+	ginHandler := gin.Default()
+	app := ginHandler.Group("/v1", authenticate)
+	httpserver.NewHandlers(s.proxy).RegisterRoutesToV1(app)
+	s.httpServer = &http.Server{Handler: ginHandler}
+	if err := s.httpServer.Serve(s.httpListener); err != nil && err != cmux.ErrServerClosed {
+		log.Warn("start Proxy http server to listen failed", zap.Error(err))
+		return
+	}
+	log.Info("Proxy http server exited")
 }
 
 func (s *Server) startInternalRPCServer(grpcInternalPort int, errChan chan error) {
@@ -152,15 +189,6 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-
-	log.Info("Proxy server listen on tcp", zap.Int("port", grpcPort))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
-	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
-		errChan <- err
-		return
-	}
-	log.Info("Proxy server already listen on tcp", zap.Int("port", grpcPort))
 
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
@@ -235,11 +263,12 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
-	if err := s.grpcExternalServer.Serve(lis); err != nil {
+	if err := s.grpcExternalServer.Serve(s.grpcListener); err != nil && err != cmux.ErrServerClosed {
 		log.Error("failed to serve on Proxy's listener", zap.Error(err))
 		errChan <- err
 		return
 	}
+	log.Info("Proxy external grpc server exited")
 }
 
 func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
@@ -290,6 +319,7 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		errChan <- err
 		return
 	}
+	log.Info("Proxy internal grpc server exited")
 }
 
 // Start start the Proxy Server
@@ -307,6 +337,17 @@ func (s *Server) Run() error {
 	}
 	log.Info("start Proxy server done")
 
+	if s.tcpServer != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.tcpServer.Serve(); err != nil && err != cmux.ErrServerClosed {
+				log.Warn("Proxy server for tcp port failed", zap.Error(err))
+				return
+			}
+			log.Info("Proxy tcp server exited")
+		}()
+	}
 	return nil
 }
 
@@ -354,6 +395,25 @@ func (s *Server) init() error {
 		}
 	}
 	{
+		log.Info("Proxy server listen on tcp", zap.Int("port", Params.Port))
+		var lis net.Listener
+		var listenErr error
+
+		log.Info("Proxy server already listen on tcp", zap.Int("port", Params.Port))
+		lis, listenErr = net.Listen("tcp", ":"+strconv.Itoa(Params.Port))
+		if listenErr != nil {
+			log.Error("Proxy server(grpc/http) failed to listen on", zap.Error(err), zap.Int("port", Params.Port))
+			return err
+		}
+		if HTTPParams.Enabled && Params.TLSMode == 0 {
+			s.tcpServer = cmux.New(lis)
+			s.grpcListener = s.tcpServer.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+			s.httpListener = s.tcpServer.Match(cmux.Any())
+		} else {
+			s.grpcListener = lis
+		}
+	}
+	{
 		s.startExternalRPCServer(Params.Port, errChan)
 		if err := <-errChan; err != nil {
 			log.Error("failed to create external rpc server", zap.Error(err))
@@ -363,7 +423,7 @@ func (s *Server) init() error {
 
 	if HTTPParams.Enabled {
 		registerHTTPHandlerOnce.Do(func() {
-			log.Info("register http server of proxy")
+			log.Info("register Proxy http server")
 			s.registerHTTPServer()
 		})
 	}
@@ -502,6 +562,12 @@ func (s *Server) start() error {
 		return err
 	}
 
+	if s.tcpServer != nil {
+		log.Info("start Proxy http server")
+		s.wg.Add(1)
+		go s.startHTTPServer()
+	}
+
 	return nil
 }
 
@@ -528,7 +594,10 @@ func (s *Server) Stop() error {
 			log.Info("Graceful stop grpc internal server...")
 			s.grpcInternalServer.GracefulStop()
 		}
-		if s.grpcExternalServer != nil {
+		if s.tcpServer != nil {
+			log.Info("Graceful stop Proxy tcp server...")
+			s.tcpServer.Close()
+		} else if s.grpcExternalServer != nil {
 			log.Info("Graceful stop grpc external server...")
 			s.grpcExternalServer.GracefulStop()
 		}
