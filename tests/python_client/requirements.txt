@@ -42,3 +42,5 @@ loguru==0.6.0
 
 # util
 psutil==5.9.4
+# for standby test
+etcd-sdk-python==0.0.2
