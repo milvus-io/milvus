@@ -81,10 +81,26 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func validateTopKLimit(limit int64) error {
+func validateMaxQueryResultWindow(offset int64, limit int64) error {
+	if offset < 0 {
+		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
+	}
+	if limit <= 0 {
+		return fmt.Errorf("%s [%d] is invalid, should be greater than 0", LimitKey, limit)
+	}
+
+	depth := offset + limit
+	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
+	if depth <= 0 || depth > maxQueryResultWindow {
+		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
+	}
+	return nil
+}
+
+func validateTopKLimit(topK int64) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
-	if limit <= 0 || limit > topKLimit {
-		return fmt.Errorf("should be in range [1, %d], but got %d", topKLimit, limit)
+	if topK <= 0 || topK > topKLimit {
+		return fmt.Errorf("top k should be in range [1, %d], but got %d", topKLimit, topK)
 	}
 	return nil
 }
