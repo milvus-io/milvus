@@ -16,12 +16,11 @@ if [[ $version == "" ]]; then
     line
     exit 1
 fi
-echo $(pwd)
+
 commitID=$(git ls-remote https://github.com/milvus-io/milvus-proto.git refs/tags/${version} | cut -f 1) 
 
 line
-echo "Update the milvus-proto/api/v2@${version}"
-commitID=$(git ls-remote https://github.com/milvus-io/milvus-proto.git refs/heads/master | cut -f 1)
+echo "Update the milvus-proto/go-api/v2@${version}"
 if [[ $commitID == "" ]]; then
     echo "${version} is not a valid tag, try to use it as commit ID"
     commitID=$version
@@ -39,6 +38,6 @@ line echo "Update the milvus-proto repo"
 THIRD_PARTY_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty
 
 pushd $THIRD_PARTY_DIR/milvus-proto
-  git fetch
-  git checkout -b $version $commitID
+    git fetch
+    git checkout -b $version $commitID
 popd
