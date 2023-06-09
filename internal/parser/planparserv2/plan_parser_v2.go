@@ -117,10 +117,12 @@ func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vecto
 
 	expr, err := ParseExpr(schema, exprStr)
 	if err != nil {
+		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
 	}
 	vectorField, err := schema.GetFieldFromName(vectorFieldName)
 	if err != nil {
+		log.Info("CreateSearchPlan failed", zap.Error(err))
 		return nil, err
 	}
 	fieldID := vectorField.FieldID

@@ -436,6 +436,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`VarCharField in [4.0]`,
 		`Int32Field in [4.0]`,
 		`FloatField in [5, 6.0, true]`,
+		`1 in A`,
 		// ----------------------- range -------------------------
 		//`1 < not_in_schema < 2`, // maybe in json
 		`1 < 3 < 2`,
@@ -1174,6 +1175,42 @@ func Test_InvalidExprWithMultipleJSONField(t *testing.T) {
 		RoundDecimal: 0,
 	})
 	assert.Error(t, err)
+
+	expr = `A in [1, 2, 3]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `A not in [1, 2, 3]`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `"1" in A`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `"1" not in A`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
 }
 
 func Test_exprWithSingleQuotes(t *testing.T) {
@@ -1226,6 +1263,251 @@ func Test_exprWithSingleQuotes(t *testing.T) {
 	assert.Error(t, err)
 
 	expr = `'abc' < StringField < "def"g"`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+}
+
+func Test_JSONContains(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	var err error
+	expr = `json_contains(A, 10)`
+	plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
+
+	expr = `not json_contains(A, 10)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+
+	expr = `json_contains(A, 10.5)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
+
+	expr = `not json_contains(A, 10.5)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+
+	expr = `json_contains(A, "10")`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
+
+	expr = `not json_contains(A, "10")`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+
+	expr = `json_contains($meta["A"], 10)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
+
+	expr = `not json_contains($meta["A"], 10)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+
+	expr = `json_contains(JSONField["x"], 5)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
+
+	expr = `not json_contains(JSONField["x"], 5)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+}
+
+func Test_InvalidJSONContains(t *testing.T) {
+	schema := newTestSchema()
+	expr := ""
+	var err error
+	expr = `json_contains(10, A)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(1, [1,2,3])`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains([1,2,3], 1)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains([1,2,3], [1,2,3])`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains([1,2,3], [1,2])`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A, [1,2,3])`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains($meta, 1)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A, B)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `not json_contains(A, B)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A, B > 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(StringField, "a")`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A, StringField > 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(A, 5, C)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_contains(JSONField, 5)`
 	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",

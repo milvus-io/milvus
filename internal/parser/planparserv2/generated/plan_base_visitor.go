@@ -75,6 +75,10 @@ func (v *BasePlanVisitor) VisitTerm(ctx *TermContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitJSONContains(ctx *JSONContainsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }

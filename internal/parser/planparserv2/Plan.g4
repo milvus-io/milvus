@@ -17,6 +17,7 @@ expr:
 	| expr op = (SHL | SHR) expr							                     # Shift
 	| expr op = (IN | NIN) ('[' expr (',' expr)* ','? ']')                       # Term
 	| expr op = (IN | NIN) EmptyTerm                                             # EmptyTerm
+	| JSONContains'('expr',' expr')'                                             # JSONContains
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                     # Relational
@@ -69,6 +70,8 @@ NOT: '!' | 'not';
 IN: 'in';
 NIN: 'not in';
 EmptyTerm: '[' (Whitespace | Newline)* ']';
+
+JSONContains: 'json_contains';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 
