@@ -118,8 +118,6 @@ print-build-info:
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
-
-
 embd-milvus: build-cpp-embd print-build-info
 	@echo "Building **Embedded** Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
@@ -129,7 +127,7 @@ embd-milvus: build-cpp-embd print-build-info
 
 update-milvus-api: download-milvus-proto
 	@echo "Update milvus/api version ..."
-	@(env bash $(PWD)/scripts/update-api-version.sh)
+	@(env bash $(PWD)/scripts/update-api-version.sh $(PROTO_API_VERSION))
 
 download-milvus-proto:
 	@echo "Download milvus-proto repo ..."
