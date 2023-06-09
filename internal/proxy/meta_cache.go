@@ -341,7 +341,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 		}
 		if loaded {
 			m.mu.Lock()
-			m.collInfo[database][collectionName].isLoaded = true
+			collInfo.isLoaded = loaded
 			m.mu.Unlock()
 		}
 	}
