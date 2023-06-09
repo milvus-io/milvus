@@ -384,9 +384,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetPartitions", metrics.CacheHitLabel).Inc()
 
 	ret := make(map[string]typeutil.UniqueID)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	partInfo := m.collInfo[collectionName].partInfo
+	partInfo := collInfo.partInfo
 	for k, v := range partInfo {
 		ret[k] = v.partitionID
 	}
