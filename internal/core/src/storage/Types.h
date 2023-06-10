@@ -89,6 +89,7 @@ struct StorageConfig {
     std::string iam_endpoint = "";
     bool useSSL = false;
     bool useIAM = false;
+    bool useVirtualAddressing = false;
 
     bool
     operator==(const StorageConfig& other) const {
@@ -96,7 +97,8 @@ struct StorageConfig {
                access_key_id.compare(other.access_key_id) == 0 &&
                access_key_value.compare(other.access_key_value) == 0 &&
                remote_root_path.compare(other.remote_root_path) == 0 && storage_type.compare(other.storage_type) == 0 &&
-               iam_endpoint.compare(other.iam_endpoint) == 0 && useSSL == other.useSSL && useIAM == other.useIAM;
+               iam_endpoint.compare(other.iam_endpoint) == 0 && useSSL == other.useSSL && useIAM == other.useIAM &&
+               useVirtualAddressing == other.useVirtualAddressing;
     }
 };
 

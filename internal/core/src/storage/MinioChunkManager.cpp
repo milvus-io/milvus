@@ -124,7 +124,8 @@ MinioChunkManager::BuildS3Client(const StorageConfig& storage_config, const Aws:
         AssertInfo(!aws_credentials.GetSessionToken().empty(), "if use iam, token should not be empty");
 
         client_ = std::make_shared<Aws::S3::S3Client>(provider, config,
-                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+                                                      storage_config.useVirtualAddressing);
     } else {
         AssertInfo(!storage_config.access_key_id.empty(), "if not use iam, access key should not be empty");
         AssertInfo(!storage_config.access_key_value.empty(), "if not use iam, access value should not be empty");
@@ -132,7 +133,7 @@ MinioChunkManager::BuildS3Client(const StorageConfig& storage_config, const Aws:
         client_ = std::make_shared<Aws::S3::S3Client>(
             Aws::Auth::AWSCredentials(ConvertToAwsString(storage_config.access_key_id),
                                       ConvertToAwsString(storage_config.access_key_value)),
-            config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+            config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, storage_config.useVirtualAddressing);
     }
 }
 
@@ -142,7 +143,7 @@ MinioChunkManager::BuildGoogleCloudClient(const StorageConfig& storage_config,
     if (storage_config.useIAM) {
         // Using S3 client instead of google client because of compatible protocol
         client_ = std::make_shared<Aws::S3::S3Client>(config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-                                                      false);
+                                                      storage_config.useVirtualAddressing);
     } else {
         throw std::runtime_error("google cloud only support iam mode now");
     }
@@ -206,7 +207,8 @@ MinioChunkManager::BuildAliyunCloudClient(const StorageConfig& storage_config,
         AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(), "if use iam, secret key should not be empty");
         AssertInfo(!aliyun_credentials.GetSessionToken().empty(), "if use iam, token should not be empty");
         client_ = std::make_shared<Aws::S3::S3Client>(aliyun_provider, config,
-                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
+                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+                                                      true);  // aliyun cloud only supports useVirtualAddressing
     } else {
         throw std::runtime_error("aliyun cloud only support iam mode now");
     }

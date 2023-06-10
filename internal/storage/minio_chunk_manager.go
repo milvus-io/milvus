@@ -78,11 +78,12 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	var creds *credentials.Credentials
 	var newMinioFn = minio.New
 	var bucketLookupType = minio.BucketLookupAuto
+	if c.useVirtualAddressing {
+		bucketLookupType = minio.BucketLookupDNS
+	}
 
 	switch c.cloudProvider {
 	case paramtable.CloudProviderAliyun:
-		// auto doesn't work for aliyun, so we set to dns deliberately
-		bucketLookupType = minio.BucketLookupDNS
 		if c.useIAM {
 			newMinioFn = aliyun.NewMinioClient
 		} else {

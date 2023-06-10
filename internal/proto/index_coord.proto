@@ -206,6 +206,7 @@ message StorageConfig {
   bool useIAM = 7;
   string IAMEndpoint = 8;
   string storage_type = 9;
+  bool useVirtualAddressing = 10;
 }
 
 message CreateJobRequest {

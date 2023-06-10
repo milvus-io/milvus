@@ -281,15 +281,16 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		} else {
 			storageConfig = &indexpb.StorageConfig{
-				Address:         Params.MinioCfg.Address,
-				AccessKeyID:     Params.MinioCfg.AccessKeyID,
-				SecretAccessKey: Params.MinioCfg.SecretAccessKey,
-				UseSSL:          Params.MinioCfg.UseSSL,
-				BucketName:      Params.MinioCfg.BucketName,
-				RootPath:        Params.MinioCfg.RootPath,
-				UseIAM:          Params.MinioCfg.UseIAM,
-				IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
-				StorageType:     Params.CommonCfg.StorageType,
+				Address:              Params.MinioCfg.Address,
+				AccessKeyID:          Params.MinioCfg.AccessKeyID,
+				SecretAccessKey:      Params.MinioCfg.SecretAccessKey,
+				UseSSL:               Params.MinioCfg.UseSSL,
+				BucketName:           Params.MinioCfg.BucketName,
+				RootPath:             Params.MinioCfg.RootPath,
+				UseIAM:               Params.MinioCfg.UseIAM,
+				IAMEndpoint:          Params.MinioCfg.IAMEndpoint,
+				StorageType:          Params.CommonCfg.StorageType,
+				UseVirtualAddressing: Params.MinioCfg.UseVirtualAddressing,
 			}
 		}
 		req := &indexpb.CreateJobRequest{

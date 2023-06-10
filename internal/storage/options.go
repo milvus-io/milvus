@@ -2,16 +2,17 @@ package storage
 
 // Option for setting params used by chunk manager client.
 type config struct {
-	address           string
-	bucketName        string
-	accessKeyID       string
-	secretAccessKeyID string
-	useSSL            bool
-	createBucket      bool
-	rootPath          string
-	useIAM            bool
-	cloudProvider     string
-	iamEndpoint       string
+	address              string
+	bucketName           string
+	accessKeyID          string
+	secretAccessKeyID    string
+	useSSL               bool
+	createBucket         bool
+	rootPath             string
+	useIAM               bool
+	cloudProvider        string
+	iamEndpoint          string
+	useVirtualAddressing bool
 }
 
 func newDefaultConfig() *config {
@@ -77,5 +78,11 @@ func CloudProvider(cloudProvider string) Option {
 func IAMEndpoint(iamEndpoint string) Option {
 	return func(c *config) {
 		c.iamEndpoint = iamEndpoint
+	}
+}
+
+func UseVirtualAddressing(useVirtualAddressing bool) Option {
+	return func(c *config) {
+		c.useVirtualAddressing = useVirtualAddressing
 	}
 }

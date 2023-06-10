@@ -86,6 +86,7 @@ typedef struct CStorageConfig {
     const char* iam_endpoint;
     bool useSSL;
     bool useIAM;
+    bool useVirtualAddressing;
 } CStorageConfig;
 
 #ifdef __cplusplus

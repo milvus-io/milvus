@@ -159,6 +159,7 @@ class TestConfigWrapper {
         auto rootPath = minioConfig["rootPath"].as<std::string>();
         auto useSSL = minioConfig["useSSL"].as<bool>();
         auto useIam = minioConfig["useIAM"].as<bool>();
+        auto useVirtualAddressing = minioConfig["useVirtualAddressing"].as<bool>();
         auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
         auto bucketName = minioConfig["bucketName"].as<std::string>();
         std::string storage_type = "minio";
@@ -172,6 +173,7 @@ class TestConfigWrapper {
         config_.iam_endpoint = new char[iamEndPoint.length() + 1];
         config_.useSSL = useSSL;
         config_.useIAM = useIam;
+        config_.useVirtualAddressing = useVirtualAddressing;
 
         strcpy(const_cast<char*>(config_.address), endpoint.c_str());
         strcpy(const_cast<char*>(config_.bucket_name), bucketName.c_str());

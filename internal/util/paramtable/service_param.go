@@ -476,15 +476,16 @@ func (p *RocksmqConfig) initPath() {
 type MinioConfig struct {
 	Base *BaseTable
 
-	Address         string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	RootPath        string
-	UseIAM          bool
-	CloudProvider   string
-	IAMEndpoint     string
+	Address              string
+	AccessKeyID          string
+	SecretAccessKey      string
+	UseSSL               bool
+	BucketName           string
+	RootPath             string
+	UseIAM               bool
+	CloudProvider        string
+	IAMEndpoint          string
+	UseVirtualAddressing bool
 }
 
 func (p *MinioConfig) init(base *BaseTable) {
@@ -499,6 +500,7 @@ func (p *MinioConfig) init(base *BaseTable) {
 	p.initUseIAM()
 	p.initCloudProvider()
 	p.initIAMEndpoint()
+	p.initUseVirtualAddressing()
 }
 
 func (p *MinioConfig) initAddress() {
@@ -586,4 +588,13 @@ func (p *MinioConfig) initCloudProvider() {
 
 func (p *MinioConfig) initIAMEndpoint() {
 	p.IAMEndpoint = p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
+}
+
+func (p *MinioConfig) initUseVirtualAddressing() {
+	var err error
+	useVirtualAddressing := p.Base.LoadWithDefault("minio.useVirtualAddressing", DefaultMinioUseVirtualAddressing)
+	p.UseVirtualAddressing, err = strconv.ParseBool(useVirtualAddressing)
+	if err != nil {
+		panic("parse bool useVirtualAddressing:" + err.Error())
+	}
 }

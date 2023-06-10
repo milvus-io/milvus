@@ -87,12 +87,15 @@ minio:
   # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun". 
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
-  # You can use "aliyun" for other cloud provider uses virtual host style bucket 
+  # You can use "aliyun" for aliyun oss
+  # Note: you still have to set correct address, port, useSSL
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: ""
+  # Whether to use virtual addressing style
+  useVirtualAddressing: false 
 
 # Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file

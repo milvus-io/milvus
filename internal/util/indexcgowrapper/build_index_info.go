@@ -60,15 +60,16 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 	defer C.free(unsafe.Pointer(cStorageType))
 	defer C.free(unsafe.Pointer(cIamEndPoint))
 	storageConfig := C.CStorageConfig{
-		address:          cAddress,
-		bucket_name:      cBucketName,
-		access_key_id:    cAccessKey,
-		access_key_value: cAccessValue,
-		remote_root_path: cRootPath,
-		storage_type:     cStorageType,
-		iam_endpoint:     cIamEndPoint,
-		useSSL:           C.bool(config.UseSSL),
-		useIAM:           C.bool(config.UseIAM),
+		address:              cAddress,
+		bucket_name:          cBucketName,
+		access_key_id:        cAccessKey,
+		access_key_value:     cAccessValue,
+		remote_root_path:     cRootPath,
+		storage_type:         cStorageType,
+		iam_endpoint:         cIamEndPoint,
+		useSSL:               C.bool(config.UseSSL),
+		useIAM:               C.bool(config.UseIAM),
+		useVirtualAddressing: C.bool(config.UseVirtualAddressing),
 	}
 
 	status := C.NewBuildIndexInfo(&cBuildIndexInfo, storageConfig)
