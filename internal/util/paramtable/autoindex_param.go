@@ -68,7 +68,7 @@ func (p *autoIndexConfig) initParams() {
 		// logic for open source autoindex.
 		p.indexParamsStr = p.Base.LoadWithDefault(
 			"autoIndex.params.build",
-			`{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`,
+			`{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}`,
 		)
 		p.parseBuildParams(p.indexParamsStr)
 		p.panicIfNotInvalid()
