@@ -152,7 +152,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
 
     // set search list
     auto search_list_size = GetValueFromConfig<uint32_t>(search_info.search_params_, DISK_ANN_QUERY_LIST);
-    query_config.search_list_size = search_list_size.has_value() ? search_list_size.value() : 0;
+    if (search_list_size.has_value()) {
+        query_config.search_list_size = search_list_size.value();
+    }
 
     // set beamwidth
     query_config.beamwidth = search_beamwidth_;
