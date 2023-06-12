@@ -106,8 +106,13 @@ func (p *ComponentParam) SetLogConfig(role string) {
 	p.BaseTable.SetLogConfig()
 }
 
-func (p *ComponentParam) RocksmqEnable() bool {
-	return p.RocksmqCfg.Path != ""
+func (p *ComponentParam) RocksmqPath() string {
+	mqPath, err := p.Load("rocksmq.path")
+	if err != nil {
+		log.Warn("failed to load rocksmq.path", zap.Error(err))
+		return ""
+	}
+	return mqPath
 }
 
 func (p *ComponentParam) PulsarEnable() bool {

@@ -64,12 +64,8 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 }
 
 func (f *DefaultFactory) initMQLocalService(params *paramtable.ComponentParam) msgstream.Factory {
-	if params.RocksmqEnable() {
-		path, err := params.Load("rocksmq.path")
-		if err != nil {
-			panic(err)
-		}
-		return msgstream.NewRmsFactory(path)
+	if rocksPath := params.RocksmqPath(); rocksPath != "" {
+		return msgstream.NewRmsFactory(rocksPath)
 	}
 	return nil
 }
