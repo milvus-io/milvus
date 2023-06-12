@@ -48,6 +48,8 @@ type flushManager interface {
 	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error)
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
+	// isFull return true if the task pool is full
+	isFull() bool
 	// injectFlush injects compaction or other blocking task before flush sync
 	injectFlush(injection *taskInjection, segments ...UniqueID)
 	// startDropping changes flush manager into dropping mode
@@ -147,7 +149,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 // postTask handles clean up work after a task is done
 func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
 	// delete task from working map
-	q.working.Delete(string(pack.pos.MsgID))
+	q.working.Delete(getSyncTaskID(pack.pos))
 	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
 	q.runningTasks--
@@ -336,6 +338,20 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 	}
 	// normal mode
 	m.getFlushQueue(segmentID).enqueueDelFlush(task, deltaLogs, pos)
+}
+
+// isFull return true if the task pool is full
+func (m *rendezvousFlushManager) isFull() bool {
+	var num int
+	m.dispatcher.Range(func(_, q any) bool {
+		queue := q.(*orderFlushQueue)
+		queue.working.Range(func(_, _ any) bool {
+			num++
+			return true
+		})
+		return true
+	})
+	return num >= Params.DataNodeCfg.MaxParallelSyncTaskNum
 }
 
 // flushBufferData notifies flush manager insert buffer data.
@@ -868,5 +884,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		dsService.flushingSegCache.Remove(req.GetSegmentID())
 		dsService.channel.evictHistoryInsertBuffer(req.GetSegmentID(), pack.pos)
 		dsService.channel.evictHistoryDeleteBuffer(req.GetSegmentID(), pack.pos)
+		segment := dsService.channel.getSegment(req.GetSegmentID())
+		segment.setSyncing(false)
 	}
 }

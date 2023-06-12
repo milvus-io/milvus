@@ -1687,6 +1687,7 @@ type dataNodeConfig struct {
 	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
+	MaxParallelSyncTaskNum  int
 
 	// segment
 	FlushInsertBufferSize  int64
@@ -1726,6 +1727,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initWatchEventTicklerInterval()
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
+	p.initMaxParallelSyncTaskNum()
 	p.initFlushInsertBufferSize()
 	p.initFlushDeleteBufferSize()
 	p.initBinlogMaxSize()
@@ -1757,6 +1759,10 @@ func (p *dataNodeConfig) initFlowGraphMaxQueueLength() {
 
 func (p *dataNodeConfig) initFlowGraphMaxParallelism() {
 	p.FlowGraphMaxParallelism = p.Base.ParseInt32WithDefault("dataNode.dataSync.flowGraph.maxParallelism", 1024)
+}
+
+func (p *dataNodeConfig) initMaxParallelSyncTaskNum() {
+	p.MaxParallelSyncTaskNum = p.Base.ParseIntWithDefault("dataNode.dataSync.maxParallelSyncTaskNum", 2)
 }
 
 func (p *dataNodeConfig) initFlushInsertBufferSize() {

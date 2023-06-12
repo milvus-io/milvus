@@ -55,6 +55,23 @@ type Segment struct {
 	lastSyncTs  Timestamp
 	startPos    *internalpb.MsgPosition // TODO readonly
 	lazyLoading atomic.Value
+	syncing     atomic.Value
+}
+
+func (s *Segment) isSyncing() bool {
+	if s != nil {
+		b, ok := s.syncing.Load().(bool)
+		if ok {
+			return b
+		}
+	}
+	return false
+}
+
+func (s *Segment) setSyncing(syncing bool) {
+	if s != nil {
+		s.syncing.Store(syncing)
+	}
 }
 
 type addSegmentReq struct {
