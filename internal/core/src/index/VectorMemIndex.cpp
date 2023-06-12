@@ -163,6 +163,11 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
         knowhere::SetMetaMetricType(search_conf, GetMetricType());
         auto index_type = GetIndexType();
         auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
+        try {
+            adapter->CheckSearch(search_conf, index_type, GetIndexMode());
+        } catch (std::exception& e) {
+            AssertInfo(false, e.what());
+        }
         return index_->Query(dataset, search_conf, bitset);
     }();
 
