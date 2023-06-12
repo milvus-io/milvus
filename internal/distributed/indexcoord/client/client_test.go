@@ -157,6 +157,16 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, 1, len(resp.IndexInfos))
 	})
 
+	t.Run("GetIndexStatistics", func(t *testing.T) {
+		req := &indexpb.GetIndexStatisticsRequest{
+			CollectionID: 1,
+			IndexName:    "",
+		}
+		resp, err := icc.GetIndexStatistics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(resp.IndexInfos))
+	})
+
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
 		req := &indexpb.GetIndexBuildProgressRequest{
 			CollectionID: 1,

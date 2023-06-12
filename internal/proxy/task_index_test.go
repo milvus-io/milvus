@@ -600,3 +600,64 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestGetIndexStatisticsTask(t *testing.T) {
+	collectionName := "collection1"
+	collectionID := UniqueID(1)
+	//fieldName := newTestSchema().Fields[0].Name
+	indexName := "_default"
+	Params.InitOnce()
+	ic := newMockIndexCoord()
+	ctx := context.Background()
+
+	git := getIndexStatisticsTask{
+		ctx: ctx,
+		GetIndexStatisticsRequest: &milvuspb.GetIndexStatisticsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetIndexStatistics,
+			},
+			CollectionName: collectionName,
+			IndexName:      indexName,
+		},
+		indexCoord:   ic,
+		result:       nil,
+		collectionID: collectionID,
+	}
+
+	t.Run("pre execute get collection id fail", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(collectionID, errors.New("mock error"))
+		globalMetaCache = mockCache
+
+		err := git.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("execute GetCollectionSchema fail", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(newTestSchema(), errors.New("mock error"))
+		globalMetaCache = mockCache
+		err := git.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("execute indexcoord GetIndexStatistics fail", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionSchema",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(newTestSchema(), nil)
+		globalMetaCache = mockCache
+		err := git.Execute(ctx)
+		assert.Error(t, err)
+	})
+}

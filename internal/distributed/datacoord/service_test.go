@@ -255,7 +255,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		indexCoord.EXPECT().Init().Return(nil)
 		server.indexCoord = indexCoord
 

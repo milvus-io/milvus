@@ -175,6 +175,16 @@ func (coord *IndexCoordMock) DescribeIndex(ctx context.Context, req *indexpb.Des
 	}, nil
 }
 
+// GetIndexStatistics get the statistics of the index.
+func (coord *IndexCoordMock) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return &indexpb.GetIndexStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexInfos: nil,
+	}, nil
+}
+
 // GetIndexBuildProgress get the index building progress by num rows.
 func (coord *IndexCoordMock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{
@@ -249,12 +259,14 @@ func NewIndexCoordMock() *IndexCoordMock {
 
 type GetIndexStateFunc func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
 type DescribeIndexFunc func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
+type GetIndexStatisticsFunc func(ctx context.Context, request *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error)
 type DropIndexFunc func(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error)
 
 type mockIndexCoord struct {
 	types.IndexCoord
 	GetIndexStateFunc
 	DescribeIndexFunc
+	GetIndexStatisticsFunc
 	DropIndexFunc
 }
 
@@ -271,6 +283,16 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, request *indexpb.Des
 	if m.DescribeIndexFunc != nil {
 		log.Warn("DescribeIndexFunc not nil")
 		return m.DescribeIndexFunc(ctx, request)
+	}
+	log.Warn("DescribeIndexFunc nil")
+	return nil, errors.New("mock")
+}
+
+// GetIndexStatistics get the statistics of the index.
+func (m *mockIndexCoord) GetIndexStatistics(ctx context.Context, request *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	if m.GetIndexStatisticsFunc != nil {
+		log.Warn("GetIndexStatistics not nil")
+		return m.GetIndexStatisticsFunc(ctx, request)
 	}
 	log.Warn("DescribeIndexFunc nil")
 	return nil, errors.New("mock")

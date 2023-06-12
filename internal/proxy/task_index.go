@@ -523,6 +523,122 @@ func (dit *describeIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type getIndexStatisticsTask struct {
+	Condition
+	*milvuspb.GetIndexStatisticsRequest
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	result     *milvuspb.GetIndexStatisticsResponse
+
+	nodeID       int64
+	collectionID UniqueID
+}
+
+func (git *getIndexStatisticsTask) TraceCtx() context.Context {
+	return git.ctx
+}
+
+func (git *getIndexStatisticsTask) ID() UniqueID {
+	return git.Base.MsgID
+}
+
+func (git *getIndexStatisticsTask) SetID(uid UniqueID) {
+	git.Base.MsgID = uid
+}
+
+func (git *getIndexStatisticsTask) Name() string {
+	return DescribeIndexTaskName
+}
+
+func (git *getIndexStatisticsTask) Type() commonpb.MsgType {
+	return git.Base.MsgType
+}
+
+func (git *getIndexStatisticsTask) BeginTs() Timestamp {
+	return git.Base.Timestamp
+}
+
+func (git *getIndexStatisticsTask) EndTs() Timestamp {
+	return git.Base.Timestamp
+}
+
+func (git *getIndexStatisticsTask) SetTs(ts Timestamp) {
+	git.Base.Timestamp = ts
+}
+
+func (git *getIndexStatisticsTask) OnEnqueue() error {
+	git.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (git *getIndexStatisticsTask) PreExecute(ctx context.Context) error {
+	git.Base.MsgType = commonpb.MsgType_GetIndexStatistics
+	git.Base.SourceID = git.nodeID
+
+	if err := validateCollectionName(git.CollectionName); err != nil {
+		return err
+	}
+
+	collID, err := globalMetaCache.GetCollectionID(ctx, git.GetDbName(), git.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	git.collectionID = collID
+	return nil
+}
+
+func (git *getIndexStatisticsTask) Execute(ctx context.Context) error {
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, git.GetDbName(), git.GetCollectionName())
+	if err != nil {
+		log.Error("failed to get collection schema", zap.Error(err))
+		return fmt.Errorf("failed to get collection schema: %s", err)
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Error("failed to parse collection schema", zap.Error(err))
+		return fmt.Errorf("failed to parse collection schema: %s", err)
+	}
+
+	resp, err := git.indexCoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
+		CollectionID: git.collectionID, IndexName: git.IndexName})
+	if err != nil || resp == nil {
+		log.Error("failed in call indexcoord GetIndexStatistics", zap.Error(err))
+		return err
+	}
+	git.result = &milvuspb.GetIndexStatisticsResponse{}
+	git.result.Status = resp.GetStatus()
+	if git.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(git.result.Status.Reason)
+	}
+	for _, indexInfo := range resp.IndexInfos {
+		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		if err != nil {
+			log.Error("failed to get collection field", zap.Error(err))
+			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
+		}
+		params := indexInfo.GetUserIndexParams()
+		if params == nil {
+			params = indexInfo.GetIndexParams()
+		}
+		desc := &milvuspb.IndexDescription{
+			IndexName:            indexInfo.GetIndexName(),
+			IndexID:              indexInfo.GetIndexID(),
+			FieldName:            field.Name,
+			Params:               params,
+			IndexedRows:          indexInfo.GetIndexedRows(),
+			TotalRows:            indexInfo.GetTotalRows(),
+			State:                indexInfo.GetState(),
+			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
+		}
+		git.result.IndexDescriptions = append(git.result.IndexDescriptions, desc)
+	}
+	return err
+}
+
+func (git *getIndexStatisticsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
 type dropIndexTask struct {
 	Condition
 	ctx context.Context

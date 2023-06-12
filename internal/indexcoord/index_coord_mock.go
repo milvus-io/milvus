@@ -57,6 +57,7 @@ type Mock struct {
 	CallGetSegmentIndexState  func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
 	CallGetIndexInfos         func(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
 	CallDescribeIndex         func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
+	CallGetIndexStatistics    func(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error)
 	CallGetIndexBuildProgress func(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
 	CallDropIndex             func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 	CallShowConfigurations    func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
@@ -127,6 +128,10 @@ func (m *Mock) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReque
 
 func (m *Mock) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	return m.CallDescribeIndex(ctx, req)
+}
+
+func (m *Mock) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+	return m.CallGetIndexStatistics(ctx, req)
 }
 
 func (m *Mock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
@@ -246,6 +251,23 @@ func NewIndexCoordMock() *Mock {
 		},
 		CallDescribeIndex: func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID: 1,
+						FieldID:      0,
+						IndexName:    "default",
+						IndexID:      0,
+						TypeParams:   nil,
+						IndexParams:  nil,
+					},
+				},
+			}, nil
+		},
+		CallGetIndexStatistics: func(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
+			return &indexpb.GetIndexStatisticsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},

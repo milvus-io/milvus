@@ -62,7 +62,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 
-	indexCoord := mocks.NewMockIndexCoord(t)
+	indexCoord := mocks.NewIndexCoord(t)
 
 	t.Run("normal gc", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
@@ -148,7 +148,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			},
 		}
 
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -170,7 +170,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -196,7 +196,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -225,7 +225,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -242,7 +242,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -264,7 +264,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("list object with error", func(t *testing.T) {
-		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord := mocks.NewIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,

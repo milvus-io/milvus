@@ -299,6 +299,9 @@ mock-rootcoord:
 mock-datacoord:
 	mockery --name=DataCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datacoord.go --with-expecter
 
+mock-indexcoord:
+	mockery --name=IndexCoord --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_indexcoord.go --with-expecter
+
 mock-tnx-kv:
 	mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=TxnKV.go --with-expecter
 

@@ -2412,8 +2412,8 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			},
 		},
 	}
-	svr.indexCoord = mocks.NewMockIndexCoord(t)
-	svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+	svr.indexCoord = mocks.NewIndexCoord(t)
+	svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
 		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "chx1", CollectionID: 0}, allPartitionID)
@@ -2462,8 +2462,8 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 
 	t.Run("filter non indexed segments", func(t *testing.T) {
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(
 			&indexpb.GetIndexInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 
 		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
@@ -2699,8 +2699,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 		assert.Nil(t, err)
 
 		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
@@ -3046,8 +3046,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -3124,7 +3124,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -3213,8 +3213,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
 		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
@@ -3264,7 +3264,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -3333,8 +3333,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		svr.indexCoord = mocks.NewMockIndexCoord(t)
-		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
+		svr.indexCoord = mocks.NewIndexCoord(t)
+		svr.indexCoord.(*mocks.IndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -4317,7 +4317,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 		opt(svr)
 	}
 
-	indexCoord := mocks.NewMockIndexCoord(t)
+	indexCoord := mocks.NewIndexCoord(t)
 	indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	svr.indexCoord = indexCoord
 
@@ -4369,7 +4369,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
-	indexCoord := mocks.NewMockIndexCoord(t)
+	indexCoord := mocks.NewIndexCoord(t)
 	indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	svr.indexCoord = indexCoord
 
