@@ -71,7 +71,7 @@ IN: 'in';
 NIN: 'not in';
 EmptyTerm: '[' (Whitespace | Newline)* ']';
 
-JSONContains: 'json_contains';
+JSONContains: 'json_contains' | 'JSON_CONTAINS';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 
