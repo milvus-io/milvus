@@ -90,6 +90,9 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
         struct sigaction psa;
         psa.sa_handler = SwallowHandler;
         psa.sa_flags = psa.sa_flags | SA_ONSTACK;
+        // block multiple SIGPIPE concurrently processing
+        sigemptyset(&psa.sa_mask);
+        sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
 #ifdef BUILD_GCP
         if (type == RemoteStorageType::GOOGLE_CLOUD) {
