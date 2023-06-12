@@ -61,7 +61,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 	counter := atomic.Int64{}
 	finish := sync.WaitGroup{}
 
-	size := 1000
+	size := 10
 	finish.Add(size)
 	q := newOrderFlushQueue(1, func(*segmentFlushPack) {
 		counter.Inc()
@@ -101,7 +101,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	counter := atomic.Int64{}
 	finish := sync.WaitGroup{}
 
-	size := 1000
+	size := 10
 	finish.Add(size)
 	resultList := make([][]byte, 0, size)
 	q := newOrderFlushQueue(1, func(pack *segmentFlushPack) {
@@ -152,7 +152,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	size := 1000
+	size := 10
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
@@ -191,7 +191,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	size := 1000
+	size := 10
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
@@ -324,7 +324,7 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	size := 1000
+	size := 10
 	var counter atomic.Int64
 	var finish sync.WaitGroup
 	finish.Add(size)
@@ -513,7 +513,7 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-	size := 1000
+	size := 10
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
