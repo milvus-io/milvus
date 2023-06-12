@@ -3800,7 +3800,7 @@ class TestCollectionJSON(TestcaseBase):
                                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    @pytest.mark.parametrize("primary_field", [ct.default_float_field_name, ct.default_json_field_name])
     def test_collection_json_field_partition_key(self, primary_field):
         """
         target: test create collection with multiple JSON fields
@@ -3809,11 +3809,10 @@ class TestCollectionJSON(TestcaseBase):
         expected: Raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_json_default_collection_schema(primary_field=primary_field, is_partition_key=True)
+        cf.gen_unique_str(prefix)
         error = {ct.err_code: 1, ct.err_msg: "Partition key field type must be DataType.INT64 or DataType.VARCHAR."}
-        self.collection_wrap.init_collection(name=c_name, schema=schema, partition_key_field=ct.default_json_field_name,
-                                             check_task=CheckTasks.err_res, check_items=error)
+        cf.gen_json_default_collection_schema(primary_field=primary_field, is_partition_key=True,
+                                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
