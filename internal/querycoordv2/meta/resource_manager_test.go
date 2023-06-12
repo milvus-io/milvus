@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -33,7 +34,7 @@ import (
 type ResourceManagerSuite struct {
 	suite.Suite
 
-	kv      *etcdkv.EtcdKV
+	kv      kv.MetaKv
 	manager *ResourceManager
 }
 

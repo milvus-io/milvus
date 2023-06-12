@@ -449,31 +449,31 @@ type SnapShotKV interface {
 ###### A.7.5 Etcd KV
 
 ```go
-type EtcdKV struct {
+type etcdKV struct {
 	client   *clientv3.Client
 	rootPath string
 }
 
-func (kv *EtcdKV) Close()
-func (kv *EtcdKV) GetPath(key string) string
-func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error)
-func (kv *EtcdKV) Load(key string) (string, error)
-func (kv *EtcdKV) GetCount(key string) (int64, error)
-func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error)
-func (kv *EtcdKV) Save(key, value string) error
-func (kv *EtcdKV) MultiSave(kvs map[string]string) error
-func (kv *EtcdKV) RemoveWithPrefix(prefix string) error
-func (kv *EtcdKV) Remove(key string) error
-func (kv *EtcdKV) MultiRemove(keys []string) error
-func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
-func (kv *EtcdKV) Watch(key string) clientv3.WatchChan
-func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan
-func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan
+func (kv *etcdKV) Close()
+func (kv *etcdKV) GetPath(key string) string
+func (kv *etcdKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *etcdKV) Load(key string) (string, error)
+func (kv *etcdKV) GetCount(key string) (int64, error)
+func (kv *etcdKV) MultiLoad(keys []string) ([]string, error)
+func (kv *etcdKV) Save(key, value string) error
+func (kv *etcdKV) MultiSave(kvs map[string]string) error
+func (kv *etcdKV) RemoveWithPrefix(prefix string) error
+func (kv *etcdKV) Remove(key string) error
+func (kv *etcdKV) MultiRemove(keys []string) error
+func (kv *etcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
+func (kv *etcdKV) Watch(key string) clientv3.WatchChan
+func (kv *etcdKV) WatchWithPrefix(key string) clientv3.WatchChan
+func (kv *etcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan
 
-func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
+func NewEtcdKV(etcdAddr string, rootPath string) *etcdKV
 ```
 
-EtcdKV implements all _TxnKV_ interfaces.
+etcdKV implements all _TxnKV_ interfaces.
 
 ###### A.7.6 Memory KV
 

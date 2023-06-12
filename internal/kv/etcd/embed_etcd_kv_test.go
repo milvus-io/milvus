@@ -42,7 +42,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	param.Init()
 
-	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
+	te.Run("etcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		require.NoError(te, err)
@@ -146,7 +146,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV SaveAndLoadBytes", func(t *testing.T) {
+	te.Run("etcdKV SaveAndLoadBytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandloadbytes"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
@@ -257,7 +257,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV LoadBytesWithRevision", func(t *testing.T) {
+	te.Run("etcdKV LoadBytesWithRevision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/LoadBytesWithRevision"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
@@ -303,7 +303,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	})
 
-	te.Run("EtcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
+	te.Run("etcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.NoError(t, err)
@@ -412,7 +412,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("EtcdKV MultiSaveAndMultiLoadBytes", func(t *testing.T) {
+	te.Run("etcdKV MultiSaveAndMultiLoadBytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
@@ -522,7 +522,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("EtcdKV MultiRemoveWithPrefix", func(t *testing.T) {
+	te.Run("etcdKV MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		require.NoError(t, err)
@@ -610,7 +610,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV MultiRemoveWithPrefixBytes", func(t *testing.T) {
+	te.Run("etcdKV MultiRemoveWithPrefixBytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix_bytes"
 		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
@@ -699,7 +699,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV Watch", func(t *testing.T) {
+	te.Run("etcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.NoError(t, err)

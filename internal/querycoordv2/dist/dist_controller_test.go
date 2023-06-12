@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -42,7 +43,7 @@ type DistControllerTestSuite struct {
 	mockCluster   *session.MockCluster
 	mockScheduler *task.MockScheduler
 
-	kv     *etcdkv.EtcdKV
+	kv     kv.MetaKv
 	meta   *meta.Meta
 	broker *meta.MockBroker
 }

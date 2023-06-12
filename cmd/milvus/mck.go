@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -51,7 +52,7 @@ type mck struct {
 	taskIDToInvalidPath map[int64][]string
 	segmentIDMap        map[int64]*datapb.SegmentInfo
 	partitionIDMap      map[int64]struct{}
-	etcdKV              *etcdkv.EtcdKV
+	metaKV              kv.MetaKv
 	minioChunkManager   storage.ChunkManager
 
 	etcdIP          string
@@ -106,7 +107,7 @@ func (c *mck) execute(args []string, flags *flag.FlagSet) {
 func (c *mck) run() {
 	c.connectMinio()
 
-	_, values, err := c.etcdKV.LoadWithPrefix(segmentPrefix)
+	_, values, err := c.metaKV.LoadWithPrefix(segmentPrefix)
 	if err != nil {
 		log.Fatal("failed to list the segment info", zap.String("key", segmentPrefix), zap.Error(err))
 	}
@@ -120,7 +121,7 @@ func (c *mck) run() {
 		c.segmentIDMap[info.ID] = info
 	}
 
-	_, values, err = c.etcdKV.LoadWithPrefix(collectionPrefix)
+	_, values, err = c.metaKV.LoadWithPrefix(collectionPrefix)
 	if err != nil {
 		log.Fatal("failed to list the collection info", zap.String("key", collectionPrefix), zap.Error(err))
 	}
@@ -149,13 +150,13 @@ func (c *mck) run() {
 	}
 	log.Info("partition ids", zap.Int64s("ids", ids))
 
-	keys, values, err := c.etcdKV.LoadWithPrefix(triggerTaskPrefix)
+	keys, values, err := c.metaKV.LoadWithPrefix(triggerTaskPrefix)
 	if err != nil {
 		log.Fatal("failed to list the trigger task info", zap.Error(err))
 	}
 	c.extractTask(triggerTaskPrefix, keys, values)
 
-	keys, values, err = c.etcdKV.LoadWithPrefix(activeTaskPrefix)
+	keys, values, err = c.metaKV.LoadWithPrefix(activeTaskPrefix)
 	if err != nil {
 		log.Fatal("failed to list the active task info", zap.Error(err))
 	}
@@ -229,7 +230,7 @@ func (c *mck) connectEctd() {
 	}
 
 	rootPath := getConfigValue(c.ectdRootPath, c.params.EtcdCfg.MetaRootPath.GetValue(), "ectd_root_path")
-	c.etcdKV = etcdkv.NewEtcdKV(etcdCli, rootPath)
+	c.metaKV = etcdkv.NewEtcdKV(etcdCli, rootPath)
 	log.Info("Etcd root path", zap.String("root_path", rootPath))
 }
 
@@ -255,7 +256,7 @@ func getConfigValue(a string, b string, name string) string {
 }
 
 func (c *mck) cleanTrash() {
-	keys, _, err := c.etcdKV.LoadWithPrefix(MckTrash)
+	keys, _, err := c.metaKV.LoadWithPrefix(MckTrash)
 	if err != nil {
 		log.Error("failed to load backup info", zap.Error(err))
 		return
@@ -269,7 +270,7 @@ func (c *mck) cleanTrash() {
 	deleteAll := ""
 	fmt.Scanln(&deleteAll)
 	if deleteAll == "Y" {
-		err = c.etcdKV.RemoveWithPrefix(MckTrash)
+		err = c.metaKV.RemoveWithPrefix(MckTrash)
 		if err != nil {
 			log.Error("failed to remove backup infos", zap.String("key", MckTrash), zap.Error(err))
 			return
@@ -392,31 +393,31 @@ func (c *mck) extractTask(prefix string, keys []string, values []string) {
 func (c *mck) removeTask(invalidTask int64) bool {
 	taskType := c.taskNameMap[invalidTask]
 	key := c.taskKeyMap[invalidTask]
-	err := c.etcdKV.Save(getTrashKey(taskType, key), c.allTaskInfo[key])
+	err := c.metaKV.Save(getTrashKey(taskType, key), c.allTaskInfo[key])
 	if err != nil {
 		log.Warn("failed to backup task", zap.String("key", getTrashKey(taskType, key)), zap.Int64("task_id", invalidTask), zap.Error(err))
 		return false
 	}
 	fmt.Printf("Back up task successfully, back path: %s\n", getTrashKey(taskType, key))
-	err = c.etcdKV.Remove(key)
+	err = c.metaKV.Remove(key)
 	if err != nil {
 		log.Warn("failed to remove task", zap.Int64("task_id", invalidTask), zap.Error(err))
 		return false
 	}
 
 	key = fmt.Sprintf("%s/%d", taskInfoPrefix, invalidTask)
-	taskInfo, err := c.etcdKV.Load(key)
+	taskInfo, err := c.metaKV.Load(key)
 	if err != nil {
 		log.Warn("failed to load task info", zap.Int64("task_id", invalidTask), zap.Error(err))
 		return false
 	}
-	err = c.etcdKV.Save(getTrashKey(taskType, key), taskInfo)
+	err = c.metaKV.Save(getTrashKey(taskType, key), taskInfo)
 	if err != nil {
 		log.Warn("failed to backup task info", zap.Int64("task_id", invalidTask), zap.Error(err))
 		return false
 	}
 	fmt.Printf("Back up task info successfully, back path: %s\n", getTrashKey(taskType, key))
-	err = c.etcdKV.Remove(key)
+	err = c.metaKV.Remove(key)
 	if err != nil {
 		log.Warn("failed to remove task info", zap.Int64("task_id", invalidTask), zap.Error(err))
 	}

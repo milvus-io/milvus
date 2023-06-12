@@ -152,8 +152,8 @@ type MockBroker_DescribeIndex_Call struct {
 }
 
 // DescribeIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) DescribeIndex(ctx interface{}, collectionID interface{}) *MockBroker_DescribeIndex_Call {
 	return &MockBroker_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", ctx, collectionID)}
 }

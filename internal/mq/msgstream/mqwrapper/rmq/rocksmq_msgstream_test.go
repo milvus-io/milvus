@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -41,8 +42,8 @@ import (
 )
 
 type fixture struct {
-	t      *testing.T
-	etcdKV *etcdkv.EtcdKV
+	t  *testing.T
+	kv kv.MetaKv
 }
 
 type parameters struct {
@@ -61,8 +62,8 @@ func (f *fixture) setup() []parameters {
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
-	f.etcdKV = etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	idAllocator := allocator.NewGlobalIDAllocator("dummy", f.etcdKV)
+	f.kv = etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", f.kv)
 	_ = idAllocator.Initialize()
 	err = server.InitRmq(rocksdbName, idAllocator)
 	if err != nil {
@@ -81,7 +82,7 @@ func (f *fixture) teardown() {
 	rocksdbName := "/tmp/rocksmq_unittest_" + f.t.Name()
 
 	server.CloseRocksMQ()
-	f.etcdKV.Close()
+	f.kv.Close()
 	_ = os.RemoveAll(rocksdbName)
 	_ = os.RemoveAll(rocksdbName + "_meta_kv")
 }
@@ -359,7 +360,7 @@ func generateBaseMsg() msgstream.BaseMsg {
 
 /****************************************Rmq test******************************************/
 
-func initRmq(name string) *etcdkv.EtcdKV {
+func initRmq(name string) kv.MetaKv {
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
@@ -369,8 +370,8 @@ func initRmq(name string) *etcdkv.EtcdKV {
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	kv := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", kv)
 	_ = idAllocator.Initialize()
 
 	err = server.InitRmq(name, idAllocator)
@@ -378,14 +379,14 @@ func initRmq(name string) *etcdkv.EtcdKV {
 	if err != nil {
 		log.Fatalf("InitRmq error = %v", err)
 	}
-	return etcdKV
+	return kv
 }
 
-func Close(rocksdbName string, intputStream, outputStream msgstream.MsgStream, etcdKV *etcdkv.EtcdKV) {
+func Close(rocksdbName string, intputStream, outputStream msgstream.MsgStream, kv kv.MetaKv) {
 	server.CloseRocksMQ()
 	intputStream.Close()
 	outputStream.Close()
-	etcdKV.Close()
+	kv.Close()
 	err := os.RemoveAll(rocksdbName)
 	_ = os.RemoveAll(rocksdbName + "_meta_kv")
 	log.Println(err)
@@ -449,14 +450,14 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	rocksdbName := "/tmp/rocksmq_insert"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqStream(ctx, producerChannels, consumerChannels, consumerGroupName)
 	err := inputStream.Produce(&msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(rocksdbName, inputStream, outputStream, kv)
 }
 
 func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
@@ -475,7 +476,7 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
 	rocksdbName := "/tmp/rocksmq_insert_tt"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
@@ -489,12 +490,12 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack1.Msgs))
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(rocksdbName, inputStream, outputStream, kv)
 }
 
 func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_tt_msg_seek"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
@@ -549,12 +550,12 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[1].Type())
 	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[2].Type())
 
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(rocksdbName, inputStream, outputStream, kv)
 }
 
 func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_tt_msg_seek"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
@@ -661,12 +662,12 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 		assert.Equal(t, msg.BeginTs(), uint64(19))
 	}
 
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(rocksdbName, inputStream, outputStream, kv)
 }
 
 func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_tt_msg_seekInvalid"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -720,7 +721,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	result := consumer(ctx, outputStream2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))
 
-	Close(rocksdbName, inputStream, outputStream2, etcdKV)
+	Close(rocksdbName, inputStream, outputStream2, kv)
 }
 
 func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
@@ -729,7 +730,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	rocksdbName := "/tmp/rocksmq_asconsumer_withpos"
-	etcdKV := initRmq(rocksdbName)
+	kv := initRmq(rocksdbName)
 	factory := msgstream.ProtoUDFactory{}
 
 	rmqClient, _ := NewClientWithDefaultOptions()
@@ -755,7 +756,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	assert.Equal(t, 1, len(pack.Msgs))
 	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
 
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(rocksdbName, inputStream, outputStream, kv)
 }
 
 func getTimeTickMsgPack(reqID msgstream.UniqueID) *msgstream.MsgPack {

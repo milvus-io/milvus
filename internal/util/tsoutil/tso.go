@@ -21,10 +21,11 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 )
 
-// NewTSOKVBase returns a etcdkv.EtcdKV object
-func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) *etcdkv.EtcdKV {
+// NewTSOKVBase returns a kv.TxnKV object
+func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) kv.TxnKV {
 	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
 }

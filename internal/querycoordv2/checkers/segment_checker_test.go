@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -38,7 +39,7 @@ import (
 
 type SegmentCheckerTestSuite struct {
 	suite.Suite
-	kv      *etcdkv.EtcdKV
+	kv      kv.MetaKv
 	checker *SegmentChecker
 	meta    *meta.Meta
 	broker  *meta.MockBroker

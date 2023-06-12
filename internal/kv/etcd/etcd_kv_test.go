@@ -53,7 +53,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	defer etcdCli.Close()
 	assert.NoError(te, err)
-	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
+	te.Run("etcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 		err = etcdKV.RemoveWithPrefix("")
@@ -156,7 +156,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV SaveAndLoadBytes", func(t *testing.T) {
+	te.Run("etcdKV SaveAndLoadBytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandloadbytes"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 		err = etcdKV.RemoveWithPrefix("")
@@ -273,7 +273,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV LoadBytesWithRevision", func(t *testing.T) {
+	te.Run("etcdKV LoadBytesWithRevision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/LoadBytesWithRevision"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 
@@ -321,7 +321,7 @@ func TestEtcdKV_Load(te *testing.T) {
 
 	})
 
-	te.Run("EtcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
+	te.Run("etcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 
@@ -429,7 +429,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("EtcdKV MultiSaveBytesAndMultiLoadBytes", func(t *testing.T) {
+	te.Run("etcdKV MultiSaveBytesAndMultiLoadBytes", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_bytes_and_multi_load_bytes"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 
@@ -551,7 +551,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
-	te.Run("EtcdKV MultiRemoveWithPrefix", func(t *testing.T) {
+	te.Run("etcdKV MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 		defer etcdKV.Close()
@@ -637,7 +637,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 	})
 
-	te.Run("EtcdKV Watch", func(t *testing.T) {
+	te.Run("etcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 
