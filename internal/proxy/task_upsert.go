@@ -100,10 +100,7 @@ func (it *upsertTask) EndTs() Timestamp {
 func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	ret := make(map[pChan]pChanStatistics)
 
-	channels, err := it.getChannels()
-	if err != nil {
-		return ret, err
-	}
+	channels := it.getChannels()
 
 	beginTs := it.BeginTs()
 	endTs := it.EndTs()
@@ -117,20 +114,21 @@ func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	return ret, nil
 }
 
-func (it *upsertTask) getChannels() ([]pChan, error) {
-	if len(it.pChannels) != 0 {
-		return it.pChannels, nil
-	}
+func (it *upsertTask) setChannels() error {
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.req.CollectionName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	channels, err := it.chMgr.getChannels(collID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	it.pChannels = channels
-	return channels, nil
+	return nil
+}
+
+func (it *upsertTask) getChannels() []pChan {
+	return it.pChannels
 }
 
 func (it *upsertTask) OnEnqueue() error {

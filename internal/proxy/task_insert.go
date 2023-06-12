@@ -73,20 +73,21 @@ func (it *insertTask) EndTs() Timestamp {
 	return it.insertMsg.EndTimestamp
 }
 
-func (it *insertTask) getChannels() ([]pChan, error) {
-	if len(it.pChannels) != 0 {
-		return it.pChannels, nil
-	}
+func (it *insertTask) setChannels() error {
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.CollectionName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	channels, err := it.chMgr.getChannels(collID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	it.pChannels = channels
-	return channels, nil
+	return nil
+}
+
+func (it *insertTask) getChannels() []pChan {
+	return it.pChannels
 }
 
 func (it *insertTask) OnEnqueue() error {
