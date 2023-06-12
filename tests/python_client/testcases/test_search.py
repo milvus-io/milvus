@@ -137,6 +137,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_guarantee_timestamp(self, request):
         if request.param == 9999999999:
             pytest.skip("9999999999 is valid for guarantee_timestamp")
+        if request.param is None:
+            pytest.skip("None is valid for guarantee_timestamp")
         yield request.param
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
@@ -2648,10 +2650,12 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize a collection without data
-        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id)[0]
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id, is_index=False)[0]
         # 2. insert data
         insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
         # 3. load data
+        index_params = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metrics}
+        collection_w.create_index("binary_vector", index_params)
         collection_w.load()
         # 4. search
         log.info("test_search_binary_without_flush: searching collection %s" % collection_w.name)
@@ -4067,8 +4071,9 @@ class TestSearchBase(TestcaseBase):
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
         assert len(res[0]) <= top_k
 
@@ -4094,8 +4099,9 @@ class TestSearchBase(TestcaseBase):
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
         assert len(res[0]) <= top_k
 
@@ -4161,14 +4167,15 @@ class TestSearchBase(TestcaseBase):
         collection_w.load()
 
         # 4. search
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
 
         assert len(res[0]) <= top_k
 
         collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, top_k,
+                            search_params, top_k,
                             default_search_exp, [partition_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
@@ -4202,8 +4209,9 @@ class TestSearchBase(TestcaseBase):
         collection_w.load()
 
         # 4. search
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp, [par_name])
 
         assert len(res[0]) <= top_k
@@ -5791,10 +5799,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit})
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_radius(self):
@@ -5822,10 +5829,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit})
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
@@ -5853,10 +5859,9 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit})
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2])
@@ -6449,7 +6454,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                                                   dim=default_dim,
                                                                                                   is_index=False,)[0:5]
         # 2. create index
-        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
         collection_w.create_index("binary_vector", default_index)
         collection_w.load()
         # 3. compute the distance
@@ -6539,7 +6544,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. compute the distance
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         # 4. range search
-        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": -1,
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1,
                                                                "range_filter": -10}}
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit,
@@ -6556,10 +6561,12 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize a collection without data
-        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id)[0]
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id, is_index=False)[0]
         # 2. insert data
         insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
         # 3. load data
+        index_params = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metrics}
+        collection_w.create_index("binary_vector", index_params)
         collection_w.load()
         # 4. search
         log.info("test_range_search_binary_without_flush: searching collection %s" % collection_w.name)
