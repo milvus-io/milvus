@@ -465,14 +465,26 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 	ibNode.channel.(*ChannelMeta).needToSync.Store(false)
 
 	for _, task := range syncTasks {
-		log.Info("insertBufferNode syncing BufferData",
-			zap.Int64("segmentID", task.segmentID),
+		log := log.With(zap.Int64("segmentID", task.segmentID),
 			zap.Bool("flushed", task.flushed),
 			zap.Bool("dropped", task.dropped),
 			zap.Bool("auto", task.auto),
 			zap.Any("position", endPosition),
 			zap.String("channel", ibNode.channelName),
 		)
+		// check if task pool is full
+		if !task.dropped && !task.flushed && ibNode.flushManager.isFull() {
+			log.Warn("task pool is full, skip it")
+			continue
+		}
+		// check if segment is syncing
+		segment := ibNode.channel.getSegment(task.segmentID)
+		if !task.dropped && !task.flushed && segment.isSyncing() {
+			log.Info("segment is syncing, skip it")
+			continue
+		}
+		segment.setSyncing(true)
+		log.Info("insertBufferNode syncing BufferData")
 		// use the flushed pk stats to take current stat
 		var pkStats *storage.PrimaryKeyStats
 		// TODO, this has to be async flush, no need to block here.

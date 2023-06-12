@@ -969,6 +969,7 @@ type mockFlushManager struct {
 	returnError      bool
 	recordFlushedSeg bool
 	flushedSegIDs    []UniqueID
+	full             bool
 	injectOverCount  struct {
 		sync.RWMutex
 		value int
@@ -992,6 +993,10 @@ func (mfm *mockFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID, 
 		mfm.flushedSegIDs = append(mfm.flushedSegIDs, segmentID)
 	}
 	return nil
+}
+
+func (mfm *mockFlushManager) isFull() bool {
+	return mfm.full
 }
 
 func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
