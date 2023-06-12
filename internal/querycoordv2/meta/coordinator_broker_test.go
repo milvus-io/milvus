@@ -21,26 +21,23 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/stretchr/testify/mock"
-
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
-	t.Run("got error on DescribeCollectionInternal", func(t *testing.T) {
+	t.Run("got error on DescribeCollection", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, errors.New("error mock DescribeCollectionInternal"))
+		).Return(nil, errors.New("error mock DescribeCollection"))
 		ctx := context.Background()
 		broker := &CoordinatorBroker{rootCoord: rootCoord}
 		_, err := broker.GetCollectionSchema(ctx, 100)
@@ -49,7 +46,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("non-success code", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{
@@ -63,7 +60,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollectionInternal",
+		rootCoord.On("DescribeCollection",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{
@@ -75,6 +72,40 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 		schema, err := broker.GetCollectionSchema(ctx, 100)
 		assert.NoError(t, err)
 		assert.Equal(t, "test_schema", schema.GetName())
+	})
+}
+
+func TestCoordinatorBroker_GetPartitions(t *testing.T) {
+	collection := int64(100)
+	partitions := []int64{10, 11, 12}
+
+	t.Run("normal case", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status:       &commonpb.Status{},
+			PartitionIDs: partitions,
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{rootCoord: rc}
+
+		retPartitions, err := broker.GetPartitions(ctx, collection)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, partitions, retPartitions)
+	})
+
+	t.Run("collection not exist", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			},
+		}, nil)
+
+		ctx := context.Background()
+		broker := &CoordinatorBroker{rootCoord: rc}
+		_, err := broker.GetPartitions(ctx, collection)
+		assert.True(t, common.IsCollectionNotExistError(err))
 	})
 }
 
