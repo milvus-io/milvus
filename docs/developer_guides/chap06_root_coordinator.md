@@ -444,7 +444,7 @@ type Core struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
-	kvBase  *etcdkv.EtcdKV
+	kvBase  *etcdkv.etcdKV
 
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp) error
@@ -607,7 +607,7 @@ message SegmentIndexInfo {
 }
 ```
 
-###### 6.6.2 KV pairs in EtcdKV
+###### 6.6.2 KV pairs in etcdKV
 
 ```go
 "proxy/$proxyId" string -> proxyMetaBlob string

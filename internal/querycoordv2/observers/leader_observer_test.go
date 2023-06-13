@@ -27,6 +27,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -40,7 +41,7 @@ import (
 type LeaderObserverTestSuite struct {
 	suite.Suite
 	observer    *LeaderObserver
-	kv          *etcdkv.EtcdKV
+	kv          kv.MetaKv
 	mockCluster *session.MockCluster
 
 	meta   *meta.Meta

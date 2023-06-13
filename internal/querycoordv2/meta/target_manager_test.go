@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -47,7 +48,7 @@ type TargetManagerSuite struct {
 	allChannels []string
 	allSegments []int64
 
-	kv     *etcdkv.EtcdKV
+	kv     kv.MetaKv
 	meta   *Meta
 	broker *MockBroker
 	// Test object

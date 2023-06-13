@@ -187,7 +187,7 @@ func Test_binarySearchRecords(t *testing.T) {
 
 func Test_ComposeIsTsKey(t *testing.T) {
 	sep := "_ts"
-	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
+	ss, err := NewSuffixSnapshot(etcdkv.NewEtcdKV(nil, ""), sep, "", snapshotPrefix)
 	require.Nil(t, err)
 	defer ss.Close()
 
@@ -227,7 +227,7 @@ func Test_ComposeIsTsKey(t *testing.T) {
 
 func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
 	sep := "_ts"
-	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
+	ss, err := NewSuffixSnapshot(etcdkv.NewEtcdKV(nil, ""), sep, "", snapshotPrefix)
 	require.Nil(t, err)
 	defer ss.Close()
 

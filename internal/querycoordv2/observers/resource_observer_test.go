@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -38,7 +39,7 @@ import (
 type ResourceObserverSuite struct {
 	suite.Suite
 
-	kv *etcdKV.EtcdKV
+	kv kv.MetaKv
 	//dependency
 	store    *meta.MockStore
 	meta     *meta.Meta

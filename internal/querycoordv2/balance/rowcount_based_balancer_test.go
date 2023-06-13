@@ -22,6 +22,7 @@ import (
 	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -36,7 +37,7 @@ import (
 type RowCountBasedBalancerTestSuite struct {
 	suite.Suite
 	balancer      *RowCountBasedBalancer
-	kv            *etcdkv.EtcdKV
+	kv            kv.MetaKv
 	broker        *meta.MockBroker
 	mockScheduler *task.MockScheduler
 }
