@@ -221,6 +221,7 @@ func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 		if len(blob.Value) == 0 {
 			continue
 		}
+
 		sr := &StatsReader{}
 		sr.SetBuffer(blob.Value)
 		stats, err := sr.GetPrimaryKeyStats()

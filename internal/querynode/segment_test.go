@@ -225,6 +225,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
+	err = segment.FlushDelete()
+	assert.NoError(t, err)
+
 	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 	assert.NoError(t, err)
 	insertRecord := &segcorepb.InsertRecord{
@@ -1036,5 +1039,14 @@ func TestDeleteBuff(t *testing.T) {
 		assert.NoError(t, err)
 		err = seg.FlushDelete()
 		assert.NoError(t, err)
+		deletedCount := seg.getDeletedCount()
+		assert.EqualValues(t, 2, deletedCount)
+
+		// should delete nothing
+		err = seg.segmentDelete([]primaryKey{newInt64PrimaryKey(1), newInt64PrimaryKey(2)},
+			[]Timestamp{11, 12})
+		assert.NoError(t, err)
+		deletedCount = seg.getDeletedCount()
+		assert.EqualValues(t, 2, deletedCount)
 	})
 }

@@ -227,19 +227,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 	failedSetMetaSegmentIDs := make([]UniqueID, 0)
 	for _, id := range loadDoneSegmentIDSet.Collect() {
 		segment := newSegments[id]
-		err = segment.FlushDelete()
-		if err != nil {
-			log.Error("load segment failed, set segment to meta failed",
-				zap.Int64("collectionID", segment.collectionID),
-				zap.Int64("partitionID", segment.partitionID),
-				zap.Int64("segmentID", segment.segmentID),
-				zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
-				zap.Error(err))
-			failedSetMetaSegmentIDs = append(failedSetMetaSegmentIDs, id)
-			loadDoneSegmentIDSet.Remove(id)
-			continue
-		}
-
 		err = loader.metaReplica.setSegment(segment)
 		if err != nil {
 			log.Error("load segment failed, set segment to meta failed",
@@ -568,7 +555,7 @@ func (loader *segmentLoader) loadStatslog(ctx context.Context, segment *Segment,
 	stats, err := storage.DeserializeStats(blobs)
 	if err != nil {
 		log.Warn("failed to deserialize stats", zap.Error(err))
-		return err
+		return multierr.Combine(errBinlogCorrupted, err)
 	}
 	var size uint
 	for _, stat := range stats {
