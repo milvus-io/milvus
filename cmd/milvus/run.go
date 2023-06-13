@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -49,6 +51,9 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	}
 	c.serverType = args[2]
 	c.formatFlags(args, flags)
+
+	// make go ignore SIGPIPE when all cgo threads set mask of SIGPIPE
+	signal.Ignore(syscall.SIGPIPE)
 
 	var local = false
 	role := roles.MilvusRoles{}
