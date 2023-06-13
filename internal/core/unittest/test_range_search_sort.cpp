@@ -88,7 +88,8 @@ CheckRangeSearchSortResult(int64_t* p_id,
     auto dist = milvus::GetDatasetDistance(dataset);
     for (int i = 0; i < n; i++) {
         AssertInfo(id[i] == p_id[i], "id of range search result not same");
-        AssertInfo(dist[i] == p_dist[i], "distance of range search result not same");
+        AssertInfo(dist[i] == p_dist[i],
+                   "distance of range search result not same");
     }
 }
 
@@ -166,7 +167,8 @@ INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
     auto res = milvus::ReGenRangeSearchResult(dataset, TOPK, N, metric_type);
-    auto [p_id, p_dist] = RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
+    auto [p_id, p_dist] =
+        RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
     CheckRangeSearchSortResult(p_id, p_dist, res, N * TOPK);
     delete[] p_id;
     delete[] p_dist;

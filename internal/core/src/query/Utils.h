@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include <limits>
 #include <string>
+
 #include "query/Expr.h"
 #include "common/Utils.h"
 
@@ -49,5 +51,12 @@ Match<std::string_view>(const std::string_view& str,
         default:
             PanicInfo("not supported");
     }
+}
+
+template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+inline bool
+out_of_range(int64_t t) {
+    return t > std::numeric_limits<T>::max() ||
+           t < std::numeric_limits<T>::min();
 }
 }  // namespace milvus::query

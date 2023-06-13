@@ -22,6 +22,7 @@
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
+#include "query/Utils.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -33,25 +34,30 @@ ExtractTermExprImpl(FieldId field_id,
                     const planpb::TermExpr& expr_proto) {
     static_assert(IsScalar<T>);
     auto size = expr_proto.values_size();
-    std::vector<T> terms(size);
+    std::vector<T> terms;
+    terms.reserve(size);
     auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     for (int i = 0; i < size; ++i) {
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            terms[i] = static_cast<T>(value_proto.bool_val());
+            terms.push_back(static_cast<T>(value_proto.bool_val()));
             val_case = proto::plan::GenericValue::ValCase::kBoolVal;
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            terms[i] = static_cast<T>(value_proto.int64_val());
+            auto value = value_proto.int64_val();
+            if (out_of_range<T>(value)) {
+                continue;
+            }
+            terms.push_back(static_cast<T>(value));
             val_case = proto::plan::GenericValue::ValCase::kInt64Val;
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            terms[i] = static_cast<T>(value_proto.float_val());
+            terms.push_back(static_cast<T>(value_proto.float_val()));
             val_case = proto::plan::GenericValue::ValCase::kFloatVal;
         } else if constexpr (std::is_same_v<T, std::string>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
-            terms[i] = static_cast<T>(value_proto.string_val());
+            terms.push_back(static_cast<T>(value_proto.string_val()));
             val_case = proto::plan::GenericValue::ValCase::kStringVal;
         } else {
             static_assert(always_false<T>);
