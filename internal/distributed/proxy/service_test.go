@@ -487,6 +487,10 @@ func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.
 	return nil, nil
 }
 
+func (m *MockDataCoord) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase

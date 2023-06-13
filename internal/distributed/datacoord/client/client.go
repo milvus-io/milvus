@@ -637,3 +637,16 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return client.DropIndex(ctx, req)
 	})
 }
+
+func (c *Client) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.ReportDataNodeTtMsgs(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

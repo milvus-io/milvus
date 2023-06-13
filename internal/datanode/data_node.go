@@ -108,6 +108,7 @@ type DataNode struct {
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
 	compactionExecutor *compactionExecutor
+	timeTickSender     *timeTickSender
 
 	etcdCli   *clientv3.Client
 	address   string
@@ -538,6 +539,11 @@ func (node *DataNode) Start() error {
 		go node.BackGroundGC(node.clearSignal)
 
 		go node.compactionExecutor.start(node.ctx)
+
+		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
+			node.timeTickSender = newTimeTickManager(node.dataCoord, node.session.ServerID)
+			go node.timeTickSender.start(node.ctx)
+		}
 
 		node.wg.Add(1)
 		// Start node watch node

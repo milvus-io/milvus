@@ -116,22 +116,11 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	dataCoord := &DataCoordFactory{}
+	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
-
-	/*ctxDone, cancel := context.WithCancel(ctx)
-	cancel() // cancel now to make context done
-	_, err = newInsertBufferNode(ctxDone, flushChan, fm, newCache(), c)
-	assert.Error(t, err)*/
-
-	c.msFactory = &CDFMsFactory{
-		Factory: factory,
-		cd:      0,
-	}
-
-	_, err = newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
-	assert.Error(t, err)
 }
 
 type mockMsg struct {
@@ -162,9 +151,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
-				ibn := &insertBufferNode{
-					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
-				}
+				ibn := &insertBufferNode{}
 				assert.False(t0, ibn.IsValidInMsg(test.in))
 			})
 		}
@@ -223,11 +210,10 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	dataCoord := &DataCoordFactory{}
+	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
-
-	// trigger log ts
-	iBNode.ttLogger.counter.Store(999)
 
 	flushChan <- flushMsg{
 		msgID:        1,
@@ -400,7 +386,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		channel:    channel,
 		delBufHeap: &PriorityQueue{},
 	}
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+	dataCoord := &DataCoordFactory{}
+	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -645,7 +633,10 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 		channel:    channel,
 		delBufHeap: &PriorityQueue{},
 	}
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+
+	dataCoord := &DataCoordFactory{}
+	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -1020,7 +1011,10 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			channel:    channel,
 			delBufHeap: &PriorityQueue{},
 		}
-		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c)
+
+		dataCoord := &DataCoordFactory{}
+		atimeTickSender := newTimeTickManager(dataCoord, 0)
+		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 		require.NoError(t, err)
 
 		inMsg := genFlowGraphInsertMsg(insertChannelName)

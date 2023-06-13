@@ -174,7 +174,8 @@ type commonConfig struct {
 	QueryNodeSubName       ParamItem `refreshable:"false"`
 
 	// Deprecated: do not use it anymore
-	DataCoordStatistic    ParamItem `refreshable:"true"`
+	DataCoordStatistic ParamItem `refreshable:"true"`
+	// Deprecated
 	DataCoordTimeTick     ParamItem `refreshable:"false"`
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
 	DataCoordSubName      ParamItem `refreshable:"false"`
@@ -2148,6 +2149,7 @@ type dataNodeConfig struct {
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryWatermark           ParamItem `refreshable:"true"`
 
+	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
@@ -2259,6 +2261,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "10",
 	}
 	p.IOConcurrency.Init(base.mgr)
+
+	p.DataNodeTimeTickByRPC = ParamItem{
+		Key:          "datanode.timetick.byRPC",
+		Version:      "2.2.9",
+		PanicIfEmpty: false,
+		DefaultValue: "true",
+	}
+	p.DataNodeTimeTickByRPC.Init(base.mgr)
 
 	p.DataNodeTimeTickInterval = ParamItem{
 		Key:          "datanode.timetick.interval",

@@ -400,11 +400,14 @@ func TestWatchChannel(t *testing.T) {
 		msFactory := node.factory
 		defer func() { node.factory = msFactory }()
 
+		// todo review the UT logic
+		// As we remove timetick channel logic, flow_graph_insert_buffer_node no longer depend on MessageStreamFactory
+		// so data_sync_service can be created. this assert becomes true
 		node.factory = &FailMessageStreamFactory{}
 		node.handleWatchInfo(e, ch, bs)
 		<-chPut
 		exist = node.flowgraphManager.exist(ch)
-		assert.False(t, exist)
+		assert.True(t, exist)
 	})
 
 	t.Run("handle watchinfo out of date", func(t *testing.T) {

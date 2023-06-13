@@ -217,3 +217,7 @@ func (m *GrpcDataCoordClient) GetIndexStatistics(ctx context.Context, in *indexp
 func (m *GrpcDataCoordClient) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{}, m.Err
 }
+
+func (m *GrpcDataCoordClient) ReportDataNodeTtMsgs(ctx context.Context, in *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
