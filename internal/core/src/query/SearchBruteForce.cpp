@@ -77,7 +77,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                               "failed to range search, " +
                                   MatchKnowhereError(res.error()));
             }
-            auto result = SortRangeSearchResult(
+            auto result = ReGenRangeSearchResult(
                 res.value(), topk, nq, dataset.metric_type);
             std::copy_n(
                 GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());

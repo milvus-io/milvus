@@ -122,7 +122,7 @@ VectorMemIndex::Query(const DatasetPtr dataset,
                               "failed to range search, " +
                                   MatchKnowhereError(res.error()));
             }
-            return SortRangeSearchResult(
+            return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_conf, bitset);

@@ -22,12 +22,12 @@
 #include "test_utils/indexbuilder_test_utils.h"
 
 bool
-cmp1(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
+greater(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
     return a.first > b.first;
 }
 
 bool
-cmp2(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
+less(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
     return a.first < b.first;
 }
 
@@ -35,7 +35,7 @@ auto
 RangeSearchSortResultBF(milvus::DatasetPtr data_set,
                         int64_t topk,
                         size_t nq,
-                        std::string metric_type) {
+                        std::string& metric_type) {
     auto lims = milvus::GetDatasetLims(data_set);
     auto id = milvus::GetDatasetIDs(data_set);
     auto dist = milvus::GetDatasetDistance(data_set);
@@ -43,32 +43,26 @@ RangeSearchSortResultBF(milvus::DatasetPtr data_set,
     memset(p_id, -1, sizeof(int64_t) * topk * nq);
     auto p_dist = new float[topk * nq];
     std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
+
+    auto cmp_func = (milvus::PositivelyRelated(metric_type)) ? greater : less;
+
     //  cnt means the subscript of p_id and p_dist
-    int cnt = 0;
     for (int i = 0; i < nq; i++) {
-        auto size = lims[i + 1] - lims[i];
-        int capacity = topk > size ? size : topk;
+        auto capacity = std::min<int64_t>(lims[i + 1] - lims[i], topk);
+
         // sort each layer
         std::vector<std::pair<float, int64_t>> list;
-        if (milvus::IsMetricType(metric_type, knowhere::metric::IP)) {
-            for (int j = lims[i]; j < lims[i + 1]; j++) {
-                list.push_back(std::pair<float, int64_t>(dist[j], id[j]));
-            }
-            std::sort(list.begin(), list.end(), cmp1);
+        for (int j = lims[i]; j < lims[i + 1]; j++) {
+            list.emplace_back(dist[j], id[j]);
+        }
+        std::sort(list.begin(), list.end(), cmp_func);
 
-        } else {
-            for (int j = lims[i]; j < lims[i + 1]; j++) {
-                list.push_back(std::pair<float, int64_t>(dist[j], id[j]));
-            }
-            std::sort(list.begin(), list.end(), cmp2);
+        for (int k = 0; k < capacity; k++) {
+            p_dist[i * topk + k] = list[k].first;
+            p_id[i * topk + k] = list[k].second;
         }
-        for (int k = cnt; k < capacity + cnt; k++) {
-            p_dist[k] = list[k - cnt].first;
-            p_id[k] = list[k - cnt].second;
-        }
-        cnt += topk;
     }
-    return std::make_tuple(cnt, p_id, p_dist);
+    return std::make_tuple(p_id, p_dist);
 }
 
 milvus::DatasetPtr
@@ -93,10 +87,8 @@ CheckRangeSearchSortResult(int64_t* p_id,
     auto id = milvus::GetDatasetIDs(dataset);
     auto dist = milvus::GetDatasetDistance(dataset);
     for (int i = 0; i < n; i++) {
-        AssertInfo(id[i] == p_id[i],
-                   "id of range search result are not the same");
-        AssertInfo(dist[i] == p_dist[i],
-                   "distance of range search result are not the same");
+        AssertInfo(id[i] == p_id[i], "id of range search result not same");
+        AssertInfo(dist[i] == p_dist[i], "distance of range search result not same");
     }
 }
 
@@ -173,10 +165,9 @@ INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
                                           knowhere::metric::HAMMING));
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
-    auto res = milvus::SortRangeSearchResult(dataset, TOPK, N, metric_type);
-    auto [real_num, p_id, p_dist] =
-        RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
-    CheckRangeSearchSortResult(p_id, p_dist, res, real_num);
+    auto res = milvus::ReGenRangeSearchResult(dataset, TOPK, N, metric_type);
+    auto [p_id, p_dist] = RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
+    CheckRangeSearchSortResult(p_id, p_dist, res, N * TOPK);
     delete[] p_id;
     delete[] p_dist;
 }
