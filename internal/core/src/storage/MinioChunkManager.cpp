@@ -49,13 +49,18 @@ std::mutex MinioChunkManager::client_mutex_;
 
 static void
 SwallowHandler(int signal) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
     switch (signal) {
         case SIGPIPE:
-            LOG_SERVER_WARNING_ << "SIGPIPE Swallowed" << std::endl;
+            // cannot use log or stdio
+            write(1, "SIGPIPE Swallowed\n", 18);
             break;
         default:
-            LOG_SERVER_ERROR_ << "Unexpected signal in SIGPIPE handler: " << signal << std::endl;
+            // cannot use log or stdio
+            write(2, "Unexpected signal\n", 18);
     }
+#pragma GCC diagnostic pop
 }
 
 /**
@@ -104,6 +109,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
             };
         }
 #endif
+        sdk_options_.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Info;
         Aws::InitAPI(sdk_options_);
     }
 }
