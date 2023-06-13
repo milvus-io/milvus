@@ -2267,10 +2267,12 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize a collection without data
-        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id)[0]
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id, is_index=True)[0]
         # 2. insert data
         insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
         # 3. load data
+        index_params = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metrics}
+        collection_w.create_index("binary_vector", index_params)
         collection_w.load()
         # 4. search
         log.info("test_search_binary_without_flush: searching collection %s" % collection_w.name)
@@ -3445,8 +3447,9 @@ class TestSearchBase(TestcaseBase):
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
         assert len(res[0]) <= top_k
 
@@ -3472,18 +3475,19 @@ class TestSearchBase(TestcaseBase):
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
         assert len(res[0]) <= top_k
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [2, 8, 128, 768])
     @pytest.mark.parametrize("nb", [1, 2, 10, 100])
-    @pytest.mark.skip(reason="is_index is confusing, please help to fix it @Nico")
+    # @pytest.mark.skip(reason="is_index is confusing, please help to fix it @Nico")
     def test_search_ip_brute_force(self, nb, dim):
         """
-        target: https://github.com/milvus-io/milvus/issues/17378. Ensure the logic of IP distances won't be changed.
+        target: #17378. Ensure the logic of IP distances won't be changed.
         method: search with the given vectors, check the result
         expected: The inner product of vector themselves should be positive.
         """
@@ -3492,10 +3496,12 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, insert_entities, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
                                                                                        is_binary=False,
-                                                                                       dim=dim)[0:5]
+                                                                                       dim=dim, is_index=True)[0:5]
         insert_vectors = insert_entities[0][default_search_field].tolist()
 
         # 2. load collection.
+        index_params = {"index_type": "FLAT", "params": {"nlist": 128}, "metric_type": "IP"}
+        collection_w.create_index(default_search_field, index_params)
         collection_w.load()
 
         # 3. search and then check if the distances are expected.
@@ -3537,14 +3543,15 @@ class TestSearchBase(TestcaseBase):
         collection_w.load()
 
         # 4. search
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp)
 
         assert len(res[0]) <= top_k
 
         collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, top_k,
+                            search_params, top_k,
                             default_search_exp, [partition_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
@@ -3578,8 +3585,9 @@ class TestSearchBase(TestcaseBase):
         collection_w.load()
 
         # 4. search
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     default_search_params, top_k,
+                                     search_params, top_k,
                                      default_search_exp, [par_name])
 
         assert len(res[0]) <= top_k
@@ -4394,7 +4402,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      is_index=False)[0:4]
+                                                                      is_index=True)[0:4]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -4558,7 +4566,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=False)[0:5]
+                                                                                  dim=dim, is_index=True)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -4710,12 +4718,12 @@ class  TestsearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
-                                         "_async": _async}
-                            )
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [1])
     @pytest.mark.parametrize("search_list", [-1, 201])
+    @pytest.mark.skip("The limit of search list has been removed.")
     def test_search_invalid_params_with_diskann_A(self, dim, auto_id, search_list, limit):
         """
         target: test delete after creating index
@@ -4747,6 +4755,7 @@ class  TestsearchDiskann(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [20])
     @pytest.mark.parametrize("search_list", [-1, 201])
+    @pytest.mark.skip("The limit of search list has been removed.")
     def test_search_invalid_params_with_diskann_B(self, dim, auto_id, search_list, limit):
         """
         target: test delete after creating index
@@ -4778,6 +4787,7 @@ class  TestsearchDiskann(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6553])
     @pytest.mark.parametrize("search_list", [-1, 65531])
+    @pytest.mark.skip("The limit of search list has been removed.")
     def test_search_invalid_params_with_diskann_C(self, dim, auto_id, search_list, limit):
         """
         target: test delete after creating index
@@ -4900,10 +4910,11 @@ class  TestsearchDiskann(TestcaseBase):
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
-        index_params_one = {}
-        collection_w.create_index("float", index_params_one, index_name="a")
-        index_param_two ={}
-        collection_w.create_index("varchar", index_param_two, index_name="b")
+        if not enable_dynamic_field:
+            index_params_one = {}
+            collection_w.create_index("float", index_params_one, index_name="a")
+            index_param_two = {}
+            collection_w.create_index("varchar", index_param_two, index_name="b")
         
         collection_w.load()
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'

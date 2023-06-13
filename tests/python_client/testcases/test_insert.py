@@ -839,7 +839,8 @@ class TestInsertOperation(TestcaseBase):
         method: calculated critical value and insert equivalent data
         expected: raise exception
         """
-        nb = 127583
+        # nb = 127583 without json field
+        nb = 108993
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         data = cf.gen_default_dataframe_data(nb)
