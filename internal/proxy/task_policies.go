@@ -12,11 +12,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-// type pickShardPolicy func(ctx context.Context, mgr *shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
+// type pickShardPolicy func(ctx context.Context, mgr shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
 type queryFunc func(context.Context, UniqueID, types.QueryNode, ...string) error
 
-type pickShardPolicy func(context.Context, *shardClientMgr, queryFunc, map[string][]nodeInfo) error
+type pickShardPolicy func(context.Context, shardClientMgr, queryFunc, map[string][]nodeInfo) error
 
 var (
 	errInvalidShardLeaders = errors.New("Invalid shard leader")
@@ -26,7 +26,7 @@ var (
 // if request failed, it finds shard leader for failed dml channels
 func RoundRobinPolicy(
 	ctx context.Context,
-	mgr *shardClientMgr,
+	mgr shardClientMgr,
 	query queryFunc,
 	dml2leaders map[string][]nodeInfo) error {
 

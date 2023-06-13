@@ -100,7 +100,7 @@ type Proxy struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	session  *sessionutil.Session
-	shardMgr *shardClientMgr
+	shardMgr shardClientMgr
 
 	factory dependency.Factory
 
@@ -109,6 +109,9 @@ type Proxy struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	// for load balance in replicas
+	lbPolicy LBPolicy
 }
 
 // NewProxy returns a Proxy struct.
@@ -116,13 +119,15 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
+	mgr := newShardClientMgr()
 	node := &Proxy{
 		ctx:              ctx1,
 		cancel:           cancel,
 		factory:          factory,
 		searchResultCh:   make(chan *internalpb.SearchResults, n),
-		shardMgr:         newShardClientMgr(),
+		shardMgr:         mgr,
 		multiRateLimiter: NewMultiRateLimiter(),
+		lbPolicy:         NewLBPolicyImpl(NewRoundRobinBalancer(), mgr),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
@@ -484,7 +489,7 @@ func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
 }
 
 func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string) (types.QueryNode, error)) {
-	node.shardMgr.clientCreator = f
+	node.shardMgr.SetClientCreatorFunc(f)
 }
 
 // GetRateLimiter returns the rateLimiter in Proxy.

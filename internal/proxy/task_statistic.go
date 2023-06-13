@@ -16,10 +16,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -42,20 +42,19 @@ type getStatisticsTask struct {
 	// partition ids that are not loaded into query node, require get statistics from DataCoord
 	unloadedPartitionIDs []UniqueID
 
-	ctx             context.Context
-	dc              types.DataCoord
-	tr              *timerecord.TimeRecorder
-	toReduceResults []*internalpb.GetStatisticsResponse
+	ctx context.Context
+	dc  types.DataCoord
+	tr  *timerecord.TimeRecorder
 
 	fromDataCoord bool
 	fromQueryNode bool
 
 	// if query from shard
 	*internalpb.GetStatisticsRequest
-	qc                   types.QueryCoord
-	resultBuf            chan *internalpb.GetStatisticsResponse
-	statisticShardPolicy pickShardPolicy
-	shardMgr             *shardClientMgr
+	qc        types.QueryCoord
+	resultBuf *typeutil.ConcurrentSet[*internalpb.GetStatisticsResponse]
+
+	lb LBPolicy
 }
 
 func (g *getStatisticsTask) TraceCtx() context.Context {
@@ -106,10 +105,6 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-PreExecute")
 	defer sp.End()
-
-	if g.statisticShardPolicy == nil {
-		g.statisticShardPolicy = RoundRobinPolicy
-	}
 
 	// TODO: Maybe we should create a new MsgType: GetStatistics?
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
@@ -204,23 +199,22 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		tr.Elapse("done")
 	}()
 
-	if g.fromQueryNode {
-		select {
-		case <-g.TraceCtx().Done():
-			log.Debug("wait to finish timeout!")
-			return nil
-		default:
-			log.Debug("all get statistics are finished or canceled")
-			close(g.resultBuf)
-			for res := range g.resultBuf {
-				g.toReduceResults = append(g.toReduceResults, res)
-				log.Debug("proxy receives one get statistic response",
-					zap.Int64("sourceID", res.GetBase().GetSourceID()))
-			}
-		}
+	toReduceResults := make([]*internalpb.GetStatisticsResponse, 0)
+	select {
+	case <-g.TraceCtx().Done():
+		log.Debug("wait to finish timeout!")
+		return nil
+	default:
+		log.Debug("all get statistics are finished or canceled")
+		g.resultBuf.Range(func(res *internalpb.GetStatisticsResponse) bool {
+			toReduceResults = append(toReduceResults, res)
+			log.Debug("proxy receives one get statistic response",
+				zap.Int64("sourceID", res.GetBase().GetSourceID()))
+			return true
+		})
 	}
 
-	validResults, err := decodeGetStatisticsResults(g.toReduceResults)
+	validResults, err := decodeGetStatisticsResults(toReduceResults)
 	if err != nil {
 		return err
 	}
@@ -259,7 +253,10 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(result.Status.Reason)
 	}
-	g.toReduceResults = append(g.toReduceResults, &internalpb.GetStatisticsResponse{
+	if g.resultBuf == nil {
+		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
+	}
+	g.resultBuf.Insert(&internalpb.GetStatisticsResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Stats:  result.Stats,
 	})
@@ -268,31 +265,17 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 
 func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) error {
 	g.GetStatisticsRequest.PartitionIDs = g.loadedPartitionIDs
-	executeGetStatistics := func(withCache bool) error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, g.collectionName)
-		if err != nil {
-			return err
-		}
-		g.resultBuf = make(chan *internalpb.GetStatisticsResponse, len(shard2Leaders))
-		if err := g.statisticShardPolicy(ctx, g.shardMgr, g.getStatisticsShard, shard2Leaders); err != nil {
-			log.Warn("failed to get statistics",
-				zap.Error(err),
-				zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
-			return err
-		}
-		return nil
+	if g.resultBuf == nil {
+		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
+	err := g.lb.Execute(ctx, CollectionWorkLoad{
+		collection: g.collectionName,
+		nq:         1,
+		exec:       g.getStatisticsShard,
+	})
 
-	err := executeGetStatistics(WithCache)
-	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
-		log.Warn("first get statistics failed, updating shard leader caches and retry",
-			zap.Error(err))
-		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.DeprecateShardCache(g.collectionName)
-		err = executeGetStatistics(WithoutCache)
-	}
 	if err != nil {
-		return fmt.Errorf("fail to get statistics on all shard leaders, err=%w", err)
+		return merr.WrapErrShardDelegatorStatisticFailed(err.Error())
 	}
 
 	return nil
@@ -329,7 +312,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 		globalMetaCache.DeprecateShardCache(g.collectionName)
 		return fmt.Errorf("fail to get statistic, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
-	g.resultBuf <- result
+	g.resultBuf.Insert(result)
 
 	return nil
 }

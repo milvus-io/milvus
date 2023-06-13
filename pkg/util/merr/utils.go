@@ -320,6 +320,14 @@ func WrapErrNodeLack(expectedNum, actualNum int64, msg ...string) error {
 	return err
 }
 
+func WrapErrNoAvailableNode(msg ...string) error {
+	err := error(ErrNoAvailableNode)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) error {
 	err := errors.Wrapf(ErrNodeNotMatch, "expectedNodeID=%d, actualNodeID=%d", expectedNodeID, actualNodeID)
 	if len(msg) > 0 {
@@ -408,6 +416,38 @@ func WrapErrAverageLabelNotRegister(label string, msg ...string) error {
 // shard delegator related
 func WrapErrShardDelegatorNotFound(channel string, msg ...string) error {
 	err := errors.Wrapf(ErrShardDelegatorNotFound, "channel=%s", channel)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrShardDelegatorAccessFailed(channel string, msg ...string) error {
+	err := errors.Wrapf(ErrShardDelegatorAccessFailed, "channel=%s", channel)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrShardDelegatorSearchFailed(msg ...string) error {
+	err := error(ErrShardDelegatorSearchFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrShardDelegatorQueryFailed(msg ...string) error {
+	err := error(ErrShardDelegatorQueryFailed)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrShardDelegatorStatisticFailed(msg ...string) error {
+	err := error(ErrShardDelegatorStatisticFailed)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

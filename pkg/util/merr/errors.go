@@ -85,10 +85,11 @@ var (
 	ErrIndexNotFound = newMilvusError("index not found", 700, false)
 
 	// Node related
-	ErrNodeNotFound = newMilvusError("node not found", 901, false)
-	ErrNodeOffline  = newMilvusError("node offline", 902, false)
-	ErrNodeLack     = newMilvusError("node lacks", 903, false)
-	ErrNodeNotMatch = newMilvusError("node not match", 904, false)
+	ErrNodeNotFound    = newMilvusError("node not found", 901, false)
+	ErrNodeOffline     = newMilvusError("node offline", 902, false)
+	ErrNodeLack        = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch    = newMilvusError("node not match", 904, false)
+	ErrNoAvailableNode = newMilvusError("no available node", 905, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
@@ -108,7 +109,11 @@ var (
 	ErrAverageLabelNotRegister = newMilvusError("average label not register", 1400, false)
 
 	// shard delegator related
-	ErrShardDelegatorNotFound = newMilvusError("shard delegator not found", 1500, false)
+	ErrShardDelegatorNotFound        = newMilvusError("shard delegator not found", 1500, false)
+	ErrShardDelegatorAccessFailed    = newMilvusError("fail to access shard delegator", 1501, true)
+	ErrShardDelegatorSearchFailed    = newMilvusError("fail to search on all shard leaders", 1502, true)
+	ErrShardDelegatorQueryFailed     = newMilvusError("fail to query on all shard leaders", 1503, true)
+	ErrShardDelegatorStatisticFailed = newMilvusError("get statistics on all shard leaders", 1504, true)
 
 	// task related
 	ErrTaskQueueFull = newMilvusError("task queue full", 1600, false)

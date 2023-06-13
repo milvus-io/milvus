@@ -55,20 +55,17 @@ type searchTask struct {
 
 	tr             *timerecord.TimeRecorder
 	collectionName string
-	channelNum     int32
 	schema         *schemapb.CollectionSchema
 	requery        bool
 
-	offset           int64
-	resultBuf        chan *internalpb.SearchResults
-	toReduceResults  []*internalpb.SearchResults
 	userOutputFields []string
 
-	searchShardPolicy pickShardPolicy
-	shardMgr          *shardClientMgr
+	offset    int64
+	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
 	qc   types.QueryCoord
 	node types.ProxyComponent
+	lb   LBPolicy
 }
 
 func getPartitionIDs(ctx context.Context, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
@@ -210,10 +207,6 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
-
-	if t.searchShardPolicy == nil {
-		t.searchShardPolicy = RoundRobinPolicy
-	}
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -408,31 +401,15 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
-	executeSearch := func(withCache bool) error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
-		if err != nil {
-			return err
-		}
-		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
-		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
-		t.channelNum = int32(len(shard2Leaders))
-		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
-			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
-			return err
-		}
-		return nil
-	}
+	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
-	err := executeSearch(WithCache)
+	err := t.lb.Execute(ctx, CollectionWorkLoad{
+		collection: t.collectionName,
+		nq:         t.Nq,
+		exec:       t.searchShard,
+	})
 	if err != nil {
-		log.Warn("first search failed, updating shardleader caches and retry search",
-			zap.Error(err))
-		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.DeprecateShardCache(t.collectionName)
-		err = executeSearch(WithoutCache)
-	}
-	if err != nil {
-		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
+		return merr.WrapErrShardDelegatorSearchFailed(err.Error())
 	}
 
 	log.Debug("Search Execute done.",
@@ -455,14 +432,14 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		Topk       = t.SearchRequest.GetTopk()
 		MetricType = t.SearchRequest.GetMetricType()
 	)
-
-	if err := t.collectSearchResults(ctx); err != nil {
+	toReduceResults, err := t.collectSearchResults(ctx)
+	if err != nil {
 		return err
 	}
 
 	// Decode all search results
 	tr.CtxRecord(ctx, "decodeResultStart")
-	validSearchResults, err := decodeSearchResults(ctx, t.toReduceResults)
+	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
 		return err
 	}
@@ -518,7 +495,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		Req:             searchReq,
 		DmlChannels:     channelIDs,
 		Scope:           querypb.DataScope_All,
-		TotalChannelNum: t.channelNum,
+		TotalChannelNum: int32(len(channelIDs)),
 	}
 
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
@@ -532,12 +509,10 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode search return error", zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -545,7 +520,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 			zap.String("reason", result.GetStatus().GetReason()))
 		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
-	t.resultBuf <- result
+	t.resultBuf.Insert(result)
 
 	return nil
 }
@@ -671,21 +646,22 @@ func (t *searchTask) fillInFieldInfo() {
 	}
 }
 
-func (t *searchTask) collectSearchResults(ctx context.Context) error {
+func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.SearchResults, error) {
 	select {
 	case <-t.TraceCtx().Done():
 		log.Ctx(ctx).Warn("search task wait to finish timeout!")
-		return fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
+		return nil, fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
 	default:
+		toReduceResults := make([]*internalpb.SearchResults, 0)
 		log.Ctx(ctx).Debug("all searches are finished or canceled")
-		close(t.resultBuf)
-		for res := range t.resultBuf {
-			t.toReduceResults = append(t.toReduceResults, res)
+		t.resultBuf.Range(func(res *internalpb.SearchResults) bool {
+			toReduceResults = append(toReduceResults, res)
 			log.Ctx(ctx).Debug("proxy receives one search result",
 				zap.Int64("sourceID", res.GetBase().GetSourceID()))
-		}
+			return true
+		})
+		return toReduceResults, nil
 	}
-	return nil
 }
 
 func decodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
