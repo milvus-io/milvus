@@ -250,6 +250,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 			LoadType:     querypb.LoadType_LoadCollection,
 			CollectionID: suite.collectionID,
 			PartitionIDs: suite.partitionIDs,
+			MetricType:   defaultMetricType,
 		},
 	}
 
@@ -298,6 +299,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 			LoadType:     querypb.LoadType_LoadCollection,
 			CollectionID: suite.collectionID,
 			PartitionIDs: suite.partitionIDs,
+			MetricType:   defaultMetricType,
 		},
 	}
 
@@ -342,6 +344,9 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 			},
 		},
 		Schema: segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64),
+		LoadMeta: &querypb.LoadMetaInfo{
+			MetricType: defaultMetricType,
+		},
 	}
 
 	// init msgstream failed
@@ -364,6 +369,14 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	status, err = suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+
+	// empty metric type
+	req.LoadMeta.MetricType = ""
+	req.Base.TargetID = paramtable.GetNodeID()
+	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
 func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
