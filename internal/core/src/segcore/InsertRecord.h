@@ -332,6 +332,16 @@ struct InsertRecord {
         fields_data_.erase(field_id);
     }
 
+    const ConcurrentVector<Timestamp>&
+    timestamps() const {
+        return timestamps_;
+    }
+
+    int64_t
+    size() const {
+        return ack_responder_.GetAck();
+    }
+
  private:
     //    std::vector<std::unique_ptr<VectorBase>> fields_data_;
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};

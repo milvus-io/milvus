@@ -27,8 +27,7 @@ TEST(Growing, DeleteCount) {
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
 
     int64_t c = 10;
-    auto offset = segment->PreDelete(c);
-    ASSERT_EQ(offset, 0);
+    auto offset = 0;
 
     Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
@@ -47,8 +46,7 @@ TEST(Growing, RealCount) {
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
 
     int64_t c = 10;
-    auto offset = segment->PreInsert(c);
-    ASSERT_EQ(offset, 0);
+    auto offset = 0;
     auto dataset = DataGen(schema, c);
     auto pks = dataset.get_col<int64_t>(pk);
     segment->Insert(offset,
@@ -62,8 +60,7 @@ TEST(Growing, RealCount) {
 
     // delete half.
     auto half = c / 2;
-    auto del_offset1 = segment->PreDelete(half);
-    ASSERT_EQ(del_offset1, 0);
+    auto del_offset1 = 0;
     auto del_ids1 = GenPKs(pks.begin(), pks.begin() + half);
     auto del_tss1 = GenTss(half, c);
     auto status =
@@ -72,7 +69,7 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(c - half, segment->get_real_count());
 
     // delete duplicate.
-    auto del_offset2 = segment->PreDelete(half);
+    auto del_offset2 = segment->get_deleted_count();
     ASSERT_EQ(del_offset2, half);
     auto del_tss2 = GenTss(half, c + half);
     status =
@@ -81,7 +78,7 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(c - half, segment->get_real_count());
 
     // delete all.
-    auto del_offset3 = segment->PreDelete(c);
+    auto del_offset3 = segment->get_deleted_count();
     ASSERT_EQ(del_offset3, half * 2);
     auto del_ids3 = GenPKs(pks.begin(), pks.end());
     auto del_tss3 = GenTss(c, c + half * 2);

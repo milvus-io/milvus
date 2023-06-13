@@ -32,12 +32,6 @@ SegmentGrowingImpl::PreInsert(int64_t size) {
     return reserved_begin;
 }
 
-int64_t
-SegmentGrowingImpl::PreDelete(int64_t size) {
-    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    return reserved_begin;
-}
-
 void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
@@ -145,11 +139,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     }
 
     // step 2: fill delete record
-    deleted_record_.timestamps_.set_data_raw(
-        reserved_begin, sort_timestamps.data(), size);
-    deleted_record_.pks_.set_data_raw(reserved_begin, sort_pks.data(), size);
-    deleted_record_.ack_responder_.AddSegment(reserved_begin,
-                                              reserved_begin + size);
+    deleted_record_.push(sort_pks, sort_timestamps.data());
     return Status::OK();
 }
 
@@ -159,7 +149,7 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     auto chunk_rows = segcore_config_.get_chunk_rows();
     int64_t ins_n = upper_align(insert_record_.reserved, chunk_rows);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, chunk_rows);
+    int64_t del_n = upper_align(deleted_record_.size(), chunk_rows);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }
@@ -181,11 +171,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    deleted_record_.pks_.set_data_raw(reserved_begin, pks.data(), size);
-    deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps, size);
-    deleted_record_.ack_responder_.AddSegment(reserved_begin,
-                                              reserved_begin + size);
+    deleted_record_.push(pks, timestamps);
 }
 
 SpanBase

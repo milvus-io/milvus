@@ -71,8 +71,8 @@ class SegmentInterface {
     virtual int64_t
     get_real_count() const = 0;
 
-    virtual int64_t
-    PreDelete(int64_t size) = 0;
+    //  virtual int64_t
+    //  PreDelete(int64_t size) = 0;
 
     virtual Status
     Delete(int64_t reserved_offset,

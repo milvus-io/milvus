@@ -71,10 +71,7 @@ TEST(Util, GetDeleteBitmap) {
     // test case delete pk1(ts = 0) -> insert repeated pk1 (ts = {1 ... N}) -> query (ts = N)
     std::vector<Timestamp> delete_ts = {0};
     std::vector<PkType> delete_pk = {1};
-    auto offset = delete_record.reserved.fetch_add(1);
-    delete_record.timestamps_.set_data_raw(offset, delete_ts.data(), 1);
-    delete_record.pks_.set_data_raw(offset, delete_pk.data(), 1);
-    delete_record.ack_responder_.AddSegment(offset, offset + 1);
+    delete_record.push(delete_pk, delete_ts.data());
 
     auto query_timestamp = tss[N - 1];
     auto del_barrier = get_barrier(delete_record, query_timestamp);
@@ -89,10 +86,7 @@ TEST(Util, GetDeleteBitmap) {
     // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N)
     delete_ts = {uint64_t(N)};
     delete_pk = {1};
-    offset = delete_record.reserved.fetch_add(1);
-    delete_record.timestamps_.set_data_raw(offset, delete_ts.data(), 1);
-    delete_record.pks_.set_data_raw(offset, delete_pk.data(), 1);
-    delete_record.ack_responder_.AddSegment(offset, offset + 1);
+    delete_record.push(delete_pk, delete_ts.data());
 
     del_barrier = get_barrier(delete_record, query_timestamp);
     res_bitmap = get_deleted_bitmap(del_barrier,

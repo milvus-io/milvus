@@ -48,12 +48,6 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
     return bitset[pos];
 }
 
-int64_t
-SegmentSealedImpl::PreDelete(int64_t size) {
-    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    return reserved_begin;
-}
-
 void
 SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     // print(info);
@@ -294,29 +288,7 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    ssize_t n = deleted_record_.ack_responder_.GetAck();
-    ssize_t divide_point = 0;
-    // Truncate the overlapping prefix
-    if (n > 0) {
-        auto last = deleted_record_.timestamps_[n - 1];
-        divide_point =
-            std::lower_bound(timestamps, timestamps + size, last + 1) -
-            timestamps;
-    }
-
-    // All these delete records have been loaded
-    if (divide_point == size) {
-        return;
-    }
-
-    size -= divide_point;
-    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    deleted_record_.pks_.set_data_raw(
-        reserved_begin, pks.data() + divide_point, size);
-    deleted_record_.timestamps_.set_data_raw(
-        reserved_begin, timestamps + divide_point, size);
-    deleted_record_.ack_responder_.AddSegment(reserved_begin,
-                                              reserved_begin + size);
+    deleted_record_.push(pks, timestamps);
 }
 
 // internal API: support scalar index only
@@ -393,7 +365,7 @@ SegmentSealedImpl::get_row_count() const {
 int64_t
 SegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
-    return deleted_record_.ack_responder_.GetAck();
+    return deleted_record_.size();
 }
 
 const Schema&
@@ -855,7 +827,7 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
 }
 
 Status
-SegmentSealedImpl::Delete(int64_t reserved_offset,
+SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
                           int64_t size,
                           const IdArray* ids,
                           const Timestamp* timestamps_raw) {
@@ -879,11 +851,8 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,
         sort_timestamps[i] = t;
         sort_pks[i] = pk;
     }
-    deleted_record_.timestamps_.set_data_raw(
-        reserved_offset, sort_timestamps.data(), size);
-    deleted_record_.pks_.set_data_raw(reserved_offset, sort_pks.data(), size);
-    deleted_record_.ack_responder_.AddSegment(reserved_offset,
-                                              reserved_offset + size);
+
+    deleted_record_.push(sort_pks, sort_timestamps.data());
     return Status::OK();
 }
 

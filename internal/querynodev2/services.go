@@ -1253,6 +1253,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			DstNodeID:    nodeID,
 			Version:      req.GetVersion(),
 			NeedTransfer: false,
+			LoadScope:    querypb.LoadScope_Delta,
 		})
 		if err != nil {
 			return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, "failed to sync(load) segment", err), nil
