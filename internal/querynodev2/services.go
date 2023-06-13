@@ -192,6 +192,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	log.Info("received watch channel request",
 		zap.Int64("version", req.GetVersion()),
+		zap.String("metricType", req.GetLoadMeta().GetMetricType()),
 	)
 
 	// check node healthy
@@ -209,6 +210,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
 		}
 		return status, nil
+	}
+
+	// check metric type
+	if req.GetLoadMeta().GetMetricType() == "" {
+		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
+		return merr.Status(err), nil
 	}
 
 	if !node.subscribingChannels.Insert(channel.GetChannelName()) {
