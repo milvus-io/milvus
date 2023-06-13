@@ -117,6 +117,9 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 					ChannelName:  "1000-dmc0",
 				},
 			},
+			LoadMeta: &querypb.LoadMetaInfo{
+				MetricType: defaultMetricType,
+			},
 		}
 
 		status, err := node.WatchDmChannels(ctx, req)
@@ -203,6 +206,9 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 					ChannelName:  "1001-dmc0",
 				},
 			},
+			LoadMeta: &querypb.LoadMetaInfo{
+				MetricType: defaultMetricType,
+			},
 		}
 
 		status, err := node.WatchDmChannels(ctx, req)
@@ -234,6 +240,9 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 					CollectionID: 1000,
 					ChannelName:  Params.CommonCfg.RootCoordDml + "-dmc0",
 				},
+			},
+			LoadMeta: &querypb.LoadMetaInfo{
+				MetricType: defaultMetricType,
 			},
 		}
 

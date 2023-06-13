@@ -46,6 +46,9 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 					ChannelName: defaultDMLChannel,
 				},
 			},
+			LoadMeta: &querypb.LoadMetaInfo{
+				MetricType: defaultMetricType,
+			},
 		}
 		return req
 	}
@@ -92,6 +95,26 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("test empty metric type", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultDMLChannel,
+			},
+		}
+		task.req.LoadMeta.MetricType = ""
+		task.req.PartitionIDs = []UniqueID{0}
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
 	t.Run("test execute repeated watchDmChannelTask", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
@@ -128,6 +151,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			LoadType:     querypb.LoadType_LoadPartition,
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
+			MetricType:   defaultMetricType,
 		}
 		task.req.Infos = []*datapb.VchannelInfo{
 			{

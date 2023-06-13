@@ -77,9 +77,14 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
 	}
 
+	if w.req.GetLoadMeta().GetMetricType() == "" {
+		return fmt.Errorf("empty metric type, collection = %d", collectionID)
+	}
+
 	log.Info("Starting WatchDmChannels ...",
 		zap.String("loadType", lType.String()),
 		zap.String("collectionName", w.req.GetSchema().GetName()),
+		zap.String("metricType", w.req.GetLoadMeta().GetMetricType()),
 	)
 
 	// init collection meta
