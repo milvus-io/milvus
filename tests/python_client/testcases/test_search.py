@@ -2368,14 +2368,14 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_index_partitions: searching (1000 entities) through partitions")
         par = collection_w.partitions
         log.info("test_search_index_partitions: partitions: %s" % par)
-        limit = 1000
+        search_params = {"metric_type": "L2", "params": {"nprobe": 64}}
         collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, limit, default_search_exp,
+                            search_params, ct.default_limit, default_search_exp,
                             [par[0].name, par[1].name], _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": limit,
+                                         "limit": ct.default_limit,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
