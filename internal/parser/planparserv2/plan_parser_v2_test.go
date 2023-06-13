@@ -1375,6 +1375,16 @@ func Test_JSONContains(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetUnaryExpr())
+
+	expr = `JSON_CONTAINS(JSONField["x"], 5)`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetTermExpr())
 }
 
 func Test_InvalidJSONContains(t *testing.T) {
@@ -1508,6 +1518,24 @@ func Test_InvalidJSONContains(t *testing.T) {
 	assert.Error(t, err)
 
 	expr = `json_contains(JSONField, 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `json_Contains(JSONField, 5)`
+	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	})
+	assert.Error(t, err)
+
+	expr = `JSON_contains(JSONField, 5)`
 	_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
 		MetricType:   "",
