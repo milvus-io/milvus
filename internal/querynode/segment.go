@@ -73,6 +73,58 @@ type IndexedFieldInfo struct {
 	indexInfo   *querypb.FieldIndexInfo
 }
 
+type DeleteRecord struct {
+	pk        primaryKey
+	timestamp Timestamp
+}
+
+type ByTimestamp []DeleteRecord
+
+func (a ByTimestamp) Len() int      { return len(a) }
+func (a ByTimestamp) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a ByTimestamp) Less(i, j int) bool {
+	return a[i].timestamp < a[j].timestamp
+}
+
+type DeleteRecords struct {
+	mut     sync.Mutex
+	records []DeleteRecord
+	flushed bool
+}
+
+// TryAppend appends the delete records to the buffer, and returns true
+// if the buffer is flushed, it will do nothing, and returns false.
+func (r *DeleteRecords) TryAppend(pks []primaryKey, timestamps []Timestamp) bool {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+
+	if r.flushed {
+		return false
+	}
+
+	for i := range pks {
+		r.records = append(r.records, DeleteRecord{pks[i], timestamps[i]})
+	}
+	return true
+}
+
+func (r *DeleteRecords) Flush() ([]primaryKey, []Timestamp) {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+
+	r.flushed = true
+
+	sort.Sort(ByTimestamp(r.records))
+	pks := make([]primaryKey, len(r.records))
+	timestamps := make([]Timestamp, len(r.records))
+	for i := range r.records {
+		pks[i] = r.records[i].pk
+		timestamps[i] = r.records[i].timestamp
+	}
+	r.records = nil
+	return pks, timestamps
+}
+
 // Segment is a wrapper of the underlying C-structure segment.
 type Segment struct {
 	mut        sync.RWMutex // protects segmentPtr
@@ -87,6 +139,7 @@ type Segment struct {
 	vChannelID   Channel
 	lastMemSize  int64
 	lastRowCount int64
+	deleteBuffer DeleteRecords
 
 	recentlyModified  *atomic.Bool
 	segmentType       *atomic.Int32
@@ -666,22 +719,6 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	return offset, nil
 }
 
-func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
-	/*
-		long int
-		PreDelete(CSegmentInterface c_segment, long int size);
-	*/
-	s.mut.RLock()
-	defer s.mut.RUnlock()
-	if !s.healthy() {
-		return -1
-	}
-
-	offset := C.PreDelete(s.segmentPtr, C.int64_t(int64(numOfRecords)))
-
-	return int64(offset)
-}
-
 func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps []Timestamp, record *segcorepb.InsertRecord) error {
 	if s.getType() != segmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
@@ -726,7 +763,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	return nil
 }
 
-func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps []Timestamp) error {
+func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) error {
 	/*
 		CStatus
 		Delete(CSegmentInterface c_segment,
@@ -739,26 +776,34 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 		return fmt.Errorf("empty pks to delete")
 	}
 
+	if len(entityIDs) != len(timestamps) {
+		return errors.New("length of entityIDs not equal to length of timestamps")
+	}
+
+	if s.deleteBuffer.TryAppend(entityIDs, timestamps) {
+		return nil
+	}
+
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
 		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
-	if len(entityIDs) != len(timestamps) {
-		return errors.New("length of entityIDs not equal to length of timestamps")
-	}
+	return s.deleteImpl(entityIDs, timestamps)
+}
 
-	var cOffset = C.int64_t(offset)
-	var cSize = C.int64_t(len(entityIDs))
+func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
+	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
+	offset := C.PreDelete(s.segmentPtr, cSize)
 
 	ids := &schemapb.IDs{}
-	pkType := entityIDs[0].Type()
+	pkType := pks[0].Type()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(entityIDs))
-		for index, entity := range entityIDs {
+		int64Pks := make([]int64, len(pks))
+		for index, entity := range pks {
 			int64Pks[index] = entity.(*int64PrimaryKey).Value
 		}
 		ids.IdField = &schemapb.IDs_IntId{
@@ -767,8 +812,8 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 			},
 		}
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(entityIDs))
-		for index, entity := range entityIDs {
+		varCharPks := make([]string, len(pks))
+		for index, entity := range pks {
 			varCharPks[index] = entity.(*varCharPrimaryKey).Value
 		}
 		ids.IdField = &schemapb.IDs_StrId{
@@ -785,13 +830,22 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 		return fmt.Errorf("failed to marshal ids: %s", err)
 	}
 
-	status := C.Delete(s.segmentPtr, cOffset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
+	status := C.Delete(s.segmentPtr, offset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
 
-	if err := HandleCStatus(&status, "Delete failed"); err != nil {
+	if err := HandleCStatus(&status, "flush delete records failed"); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (s *Segment) FlushDelete() error {
+	pks, tss := s.deleteBuffer.Flush()
+	if len(pks) == 0 {
+		return nil
+	}
+
+	return s.deleteImpl(pks, tss)
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
@@ -915,6 +969,10 @@ func (s *Segment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.Fie
 }
 
 func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps []Timestamp, rowCount int64) error {
+	if s.deleteBuffer.TryAppend(primaryKeys, timestamps) {
+		return nil
+	}
+
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {

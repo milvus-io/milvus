@@ -63,7 +63,6 @@ type insertData struct {
 type deleteData struct {
 	deleteIDs        map[UniqueID][]primaryKey // pks
 	deleteTimestamps map[UniqueID][]Timestamp
-	deleteOffset     map[UniqueID]int64
 }
 
 // Name returns the name of insertNode
@@ -160,6 +159,18 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("vchannel", iNode.vchannel))
 				panic(err)
 			}
+			segment, err := iNode.metaReplica.getSegmentByID(insertMsg.SegmentID, segmentTypeGrowing)
+			if err != nil {
+				err = fmt.Errorf("insertNode getSegment failed, err = %s", err)
+				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("vchannel", iNode.vchannel))
+				panic(err)
+			}
+			err = segment.FlushDelete()
+			if err != nil {
+				err = fmt.Errorf("insertNode flush delete failed, err = %s", err)
+				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("vchannel", iNode.vchannel))
+				panic(err)
+			}
 		}
 
 		insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.schema, insertMsg)
@@ -242,7 +253,6 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]primaryKey),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
-		deleteOffset:     make(map[UniqueID]int64),
 	}
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
@@ -263,8 +273,8 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 	}
 
 	// 2. do preDelete
-	for segmentID, pks := range delData.deleteIDs {
-		segment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
+	for segmentID := range delData.deleteIDs {
+		_, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 		if err != nil {
 			if errors.Is(err, ErrSegmentNotFound) {
 				log.Warn("segment not found when do preDelete, it may have been released due to compaction",
@@ -278,14 +288,10 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 			log.Error(err.Error())
 			panic(err)
 		}
-		offset := segment.segmentPreDelete(len(pks))
-		if offset >= 0 {
-			delData.deleteOffset[segmentID] = offset
-		}
 	}
 
 	// 3. do delete
-	for segmentID := range delData.deleteOffset {
+	for segmentID := range delData.deleteIDs {
 		segmentID := segmentID
 		wg.Add(1)
 		go func() {
@@ -436,9 +442,8 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) erro
 
 	ids := deleteData.deleteIDs[segmentID]
 	timestamps := deleteData.deleteTimestamps[segmentID]
-	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, ids, timestamps)
+	err = targetSegment.segmentDelete(ids, timestamps)
 	if err != nil {
 		if errors.Is(err, ErrSegmentUnhealthy) {
 			log.Warn("segment removed before delete")

@@ -239,12 +239,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
-	var offsetDelete = segment.segmentPreDelete(10)
-	assert.GreaterOrEqual(t, offsetDelete, int64(0))
-
 	pks, err := getPKs(insertMsg, collection.schema)
 	assert.NoError(t, err)
-	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
+	err = segment.segmentDelete(pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
 	var deletedCount = segment.getDeletedCount()
@@ -367,12 +364,9 @@ func TestSegment_segmentDelete(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
-	var offsetDelete = segment.segmentPreDelete(10)
-	assert.GreaterOrEqual(t, offsetDelete, int64(0))
-
 	pks, err := getPKs(insertMsg, schema)
 	assert.NoError(t, err)
-	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
+	err = segment.segmentDelete(pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
 	deleteCollection(collection)
@@ -479,9 +473,6 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
-
-	var offsetDelete = segment.segmentPreDelete(10)
-	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -1023,4 +1014,27 @@ func TestUpdateBloomFilter(t *testing.T) {
 		assert.False(t, seg.isPKExist(storage.NewVarCharPrimaryKey("test4")))
 	})
 
+}
+
+func TestDeleteBuff(t *testing.T) {
+	t.Run("test_int64_pk", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		err = replica.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultDMLChannel,
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+			segmentTypeGrowing)
+		assert.NoError(t, err)
+		seg, err := replica.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
+		assert.NoError(t, err)
+
+		err = seg.segmentDelete([]primaryKey{newInt64PrimaryKey(1), newInt64PrimaryKey(2)},
+			[]Timestamp{11, 12})
+		assert.NoError(t, err)
+		err = seg.FlushDelete()
+		assert.NoError(t, err)
+	})
 }

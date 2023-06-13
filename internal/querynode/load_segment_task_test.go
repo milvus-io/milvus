@@ -339,12 +339,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
-		segment, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		_, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 		assert.NoError(t, err)
-
-		// has reload 3 delete log from dm channel, so next delete offset should be 3
-		offset := segment.segmentPreDelete(1)
-		assert.Equal(t, int64(3), offset)
 	})
 
 	t.Run("test load with partial success", func(t *testing.T) {

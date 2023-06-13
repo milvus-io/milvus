@@ -91,9 +91,6 @@ func genFlowGraphDeleteData() (*deleteData, error) {
 		deleteTimestamps: map[UniqueID][]Timestamp{
 			defaultSegmentID: deleteMsg.Timestamps,
 		},
-		deleteOffset: map[UniqueID]int64{
-			defaultSegmentID: 0,
-		},
 	}
 	return dData, nil
 }

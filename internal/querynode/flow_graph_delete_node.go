@@ -99,7 +99,6 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	delData := &deleteData{
 		deleteIDs:        map[UniqueID][]primaryKey{},
 		deleteTimestamps: map[UniqueID][]Timestamp{},
-		deleteOffset:     map[UniqueID]int64{},
 	}
 
 	// 1. filter segment by bloom filter
@@ -128,25 +127,9 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	// 2. do preDelete
-	for segmentID, pks := range delData.deleteIDs {
-		segment, err := dNode.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
-		if err != nil {
-			// should not happen, segment should be created before
-			log.Warn("failed to get segment",
-				zap.Int64("collectionID", dNode.collectionID),
-				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", dNode.deltaVchannel),
-			)
-			continue
-		}
-		offset := segment.segmentPreDelete(len(pks))
-		delData.deleteOffset[segmentID] = offset
-	}
-
-	// 3. do delete
+	// 2. do delete
 	wg := sync.WaitGroup{}
-	for segmentID := range delData.deleteOffset {
+	for segmentID := range delData.deleteIDs {
 		segmentID := segmentID
 		wg.Add(1)
 		go func() {
@@ -190,10 +173,9 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID) erro
 
 	ids := deleteData.deleteIDs[segmentID]
 	timestamps := deleteData.deleteTimestamps[segmentID]
-	offset := deleteData.deleteOffset[segmentID]
 
 	_, err = dNode.pool.Submit(func() (any, error) {
-		err := targetSegment.segmentDelete(offset, ids, timestamps)
+		err := targetSegment.segmentDelete(ids, timestamps)
 		return nil, err
 	}).Await()
 	if err != nil {
