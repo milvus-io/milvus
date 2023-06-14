@@ -1,0 +1,43 @@
+cluster:
+  enabled: false
+
+log:
+  level: debug
+
+image:
+  all:
+    repository: milvusdb/milvus
+    tag: master-20230614-893c3c04
+    pullPolicy: IfNotPresent
+standalone:
+  heaptrack:
+    enabled: true
+  resources:
+    limits:
+      cpu: 8
+      memory: 16Gi
+    requests:
+      cpu: 4
+      memory: 8Gi
+
+kafka:
+  enabled: false
+  name: kafka
+  replicaCount: 3
+  defaultReplicationFactor: 2
+
+etcd:
+  replicaCount: 3
+  image:
+    debug: true
+    repository: milvusdb/etcd
+    tag: 3.5.5-r2  
+minio:
+  mode: standalone
+pulsar:
+  enabled: false
+
+extraConfigFiles:
+  user.yaml: |+
+    mq:
+     type: natsmq
