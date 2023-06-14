@@ -23,7 +23,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -32,13 +31,6 @@ var Rmq *rocksmq
 
 // once is used to init global rocksmq
 var once sync.Once
-
-// InitRmq is deprecate implementation of global rocksmq. will be removed later
-func InitRmq(rocksdbName string, idAllocator allocator.Interface) error {
-	var err error
-	Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
-	return err
-}
 
 // InitRocksMQ init global rocksmq single instance
 func InitRocksMQ(path string) error {

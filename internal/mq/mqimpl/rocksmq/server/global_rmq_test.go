@@ -12,43 +12,12 @@
 package server
 
 import (
-	"log"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/allocator"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
-
-func Test_InitRmq(t *testing.T) {
-	name := "/tmp/rmq_init"
-	defer os.RemoveAll("/tmp/rmq_init")
-	endpoints := os.Getenv("ETCD_ENDPOINTS")
-	if endpoints == "" {
-		endpoints = "localhost:2379"
-	}
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	defer etcdCli.Close()
-	if err != nil {
-		log.Fatalf("New clientv3 error = %v", err)
-	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
-	_ = idAllocator.Initialize()
-
-	defer os.RemoveAll(name + kvSuffix)
-	defer os.RemoveAll(name)
-	err = InitRmq(name, idAllocator)
-	defer Rmq.stopRetention()
-	assert.NoError(t, err)
-	defer CloseRocksMQ()
-}
 
 func Test_InitRocksMQ(t *testing.T) {
 	rmqPath := "/tmp/milvus/rdb_data_global"
