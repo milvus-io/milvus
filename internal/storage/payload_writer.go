@@ -47,7 +47,7 @@ type NativePayloadWriter struct {
 	releaseOnce sync.Once
 }
 
-func NewPurePayloadWriter(colType schemapb.DataType, dim ...int) (*NativePayloadWriter, error) {
+func NewPayloadWriter(colType schemapb.DataType, dim ...int) (PayloadWriterInterface, error) {
 	var arrowType arrow.DataType
 	if typeutil.IsVectorType(colType) {
 		if len(dim) != 1 {
