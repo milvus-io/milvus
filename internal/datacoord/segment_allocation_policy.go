@@ -117,7 +117,7 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	}
 }
 
-// sealByMaxBinlogSizePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
+// sealByLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
 func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
 		pts, _ := tsoutil.ParseTS(ts)
@@ -127,7 +127,7 @@ func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	}
 }
 
-// sealByMaxBinlogSizePolicy seal segment if binlog file number of segment exceed configured max number
+// sealByMaxBinlogFileNumberPolicy seal segment if binlog file number of segment exceed configured max number
 func sealByMaxBinlogFileNumberPolicy(maxBinlogFileNumber int) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
 		logFileCounter := 0
@@ -158,7 +158,7 @@ func sealLongTimeIdlePolicy(idleTimeTolerance time.Duration, minSizeToSealIdleSe
 // channelSealPolicy seal policy applies to channel
 type channelSealPolicy func(string, []*SegmentInfo, Timestamp) []*SegmentInfo
 
-// getChannelCapacityPolicy get channelSealPolicy with channel segment capacity policy
+// getChannelOpenSegCapacityPolicy get channelSealPolicy with channel segment capacity policy
 func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
 	return func(channel string, segs []*SegmentInfo, ts Timestamp) []*SegmentInfo {
 		if len(segs) <= limit {
@@ -173,7 +173,7 @@ func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
 	}
 }
 
-// sortSegStatusByLastExpires sort segmentStatus with lastExpireTime ascending order
+// sortSegmentsByLastExpires sort segmentStatus with lastExpireTime ascending order
 func sortSegmentsByLastExpires(segs []*SegmentInfo) {
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i].LastExpireTime < segs[j].LastExpireTime
