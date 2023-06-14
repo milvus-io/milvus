@@ -396,7 +396,12 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to get partitions of collection")
 		return err
 	}
-	metricType, err := getMetricType(ctx, task.CollectionID(), schema, ex.broker)
+	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	if err != nil {
+		log.Warn("fail to get index meta of collection")
+		return err
+	}
+	metricType, err := getMetricType(indexInfo, schema)
 	if err != nil {
 		log.Warn("failed to get metric type", zap.Error(err))
 		return err
@@ -414,7 +419,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn(msg, zap.String("channelName", action.ChannelName()))
 		return merr.WrapErrChannelReduplicate(action.ChannelName())
 	}
-	req := packSubChannelRequest(task, action, schema, loadMeta, dmChannel)
+	req := packSubChannelRequest(task, action, schema, loadMeta, dmChannel, indexInfo)
 	err = fillSubChannelRequest(ctx, req, ex.broker)
 	if err != nil {
 		log.Warn("failed to subscribe channel, failed to fill the request with segments",
