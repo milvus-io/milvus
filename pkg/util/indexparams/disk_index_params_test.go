@@ -155,7 +155,7 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.True(t, ok)
 		searchCacheBudgetRatio, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
 		assert.NoError(t, err)
-		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
+		assert.Equal(t, fmt.Sprintf("%f", float32(GetRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
 
 		numLoadThread, ok := indexParams[NumLoadThreadKey]
 		assert.True(t, ok)
@@ -216,7 +216,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
-		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
+		assert.Equal(t, fmt.Sprintf("%f", float32(GetRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
 
 		numLoadThread, ok := indexParams[NumLoadThreadKey]
 		assert.True(t, ok)

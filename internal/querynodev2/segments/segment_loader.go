@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -53,7 +54,7 @@ import (
 )
 
 const (
-	UsedDiskMemoryRatio = 4
+	DiskANNCacheExpansionFactor = 1.5
 )
 
 var (
@@ -141,6 +142,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}
 
 	log.Info("start loading...", zap.Int("segmentNum", segmentNum))
+	loader.appendFieldIndexLoadParams(infos...)
 
 	// Check memory & storage limit
 	memUsage, diskUsage, concurrencyLevel, err := loader.requestResource(infos...)
@@ -287,6 +289,24 @@ func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 	for i := range segments {
 		loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
 	}
+}
+
+func (loader *segmentLoader) appendFieldIndexLoadParams(segmentLoadInfos ...*querypb.SegmentLoadInfo) error {
+	for _, loadInfo := range segmentLoadInfos {
+		// set diskann load parameters
+		for _, fieldIndexInfo := range loadInfo.IndexInfos {
+			if fieldIndexInfo.EnableIndex {
+				indexParams := funcutil.KeyValuePair2Map(fieldIndexInfo.IndexParams)
+				if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+					err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, fieldIndexInfo.NumRows)
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // requestResource requests memory & storage to load segments,
@@ -953,9 +973,28 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}
 	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
-		neededDiskSize := indexInfo.IndexSize - neededMemSize
-		return uint64(neededMemSize), uint64(neededDiskSize), nil
+		chunkManagerBufferSize := uint64(64 * 1024 * 1024)
+		diskIndexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+		searchCacheProportion, err := strconv.ParseFloat(diskIndexParams[indexparams.SearchCacheBudgetKey], 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("%s not exist in index params", indexparams.SearchCacheBudgetKey)
+		}
+		PQCodeProportion, err := strconv.ParseFloat(diskIndexParams[indexparams.PQCodeBudgetRatioKey], 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("%s not exist in disk index's parameters", indexparams.SearchCacheBudgetKey)
+		}
+		dim, err := strconv.ParseInt(diskIndexParams["dim"], 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("dim not exist in index params")
+		}
+		rawDataSize := indexparams.GetRowDataSizeOfFloatVector(indexInfo.NumRows, dim)
+		// disk index only manintain pq table, pq code and cache in mem;
+		// searchCacheProportion is used with GB, it need to transform to Byte
+		neededMemSize := uint64(float64(rawDataSize)*(PQCodeProportion) + searchCacheProportion*DiskANNCacheExpansionFactor*(1024*1024*1024))
+		if neededMemSize < chunkManagerBufferSize {
+			neededMemSize = chunkManagerBufferSize
+		}
+		return neededMemSize, uint64(indexInfo.IndexSize), nil
 	}
 
 	return uint64(indexInfo.IndexSize), 0, nil
@@ -981,7 +1020,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 	}
 
 	usedMemAfterLoad := usedMem
-	maxSegmentSize := uint64(0)
+	maxSegmentMemUsgae := uint64(0)
 
 	localUsedSize, err := GetLocalUsedSize()
 	if err != nil {
@@ -992,6 +1031,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 
 	for _, loadInfo := range segmentLoadInfos {
 		oldUsedMem := usedMemAfterLoad
+		diskIndexMemSize := uint64(0)
 		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, fieldIndexInfo := range loadInfo.IndexInfos {
 			if fieldIndexInfo.EnableIndex {
@@ -1015,6 +1055,11 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 				}
 				usedMemAfterLoad += neededMemSize
 				usedLocalSizeAfterLoad += neededDiskSize
+				// diskann not need to copy data
+				indexType, _ := funcutil.GetAttrByKeyFromRepeatedKV("index_type", fieldIndexInfo.IndexParams)
+				if indexType == indexparamcheck.IndexDISKANN {
+					diskIndexMemSize += neededMemSize
+				}
 			} else {
 				usedMemAfterLoad += uint64(getFieldSizeFromFieldBinlog(fieldBinlog))
 			}
@@ -1030,8 +1075,18 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 			usedMemAfterLoad += uint64(getFieldSizeFromFieldBinlog(fieldBinlog))
 		}
 
-		if usedMemAfterLoad-oldUsedMem > maxSegmentSize {
-			maxSegmentSize = usedMemAfterLoad - oldUsedMem
+		if usedMemAfterLoad-oldUsedMem > maxSegmentMemUsgae {
+			maxSegmentMemUsgae = usedMemAfterLoad - oldUsedMem
+		}
+
+		// when load segment, data will be copied from go memory to c++ memory
+		currentSegmentSize := usedMemAfterLoad - oldUsedMem
+		currentSegmentMemUsage := uint64(float64(currentSegmentSize) * paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat())
+		if paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat() > 1 {
+			currentSegmentMemUsage -= uint64(float64(diskIndexMemSize) * (paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat() - 1))
+		}
+		if currentSegmentMemUsage > maxSegmentMemUsgae {
+			maxSegmentMemUsgae = currentSegmentMemUsage
 		}
 	}
 
@@ -1039,9 +1094,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 		return mem / 1024 / 1024
 	}
 
-	// when load segment, data will be copied from go memory to c++ memory
-	memLoadingUsage := usedMemAfterLoad + uint64(
-		float64(maxSegmentSize)*float64(concurrency)*paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat())
+	memLoadingUsage := usedMemAfterLoad + uint64(float64(maxSegmentMemUsgae)*float64(concurrency))
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Int("concurrency", concurrency),
 		zap.Uint64("memUsage", toMB(memLoadingUsage)),
@@ -1049,8 +1102,8 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
 
 	if memLoadingUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
-			toMB(maxSegmentSize),
+		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentMemUsgae = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
+			toMB(maxSegmentMemUsgae),
 			concurrency,
 			toMB(usedMemAfterLoad),
 			toMB(totalMem),
