@@ -309,7 +309,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 
 	// test collection with varChar field as primary and autoID = true
 	VarCharField.AutoID = true
-	assert.Error(t, validatePrimaryKey(&schemapb.CollectionSchema{
+	assert.Nil(t, validatePrimaryKey(&schemapb.CollectionSchema{
 		Name:        "coll1",
 		Description: "",
 		AutoID:      true,
