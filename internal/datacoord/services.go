@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -37,10 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/errorutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1414,6 +1416,70 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+// ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
+func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	if s.isClosed() {
+		log.Warn("failed to report dataNode ttMsgs on closed server")
+		return merr.Status(merr.WrapErrServiceUnavailable(msgDataCoordIsUnhealthy(s.session.ServerID))), nil
+	}
+
+	for _, ttMsg := range req.GetMsgs() {
+		sub := tsoutil.SubByNow(req.GetBase().GetTimestamp())
+		metrics.DataCoordConsumeDataNodeTimeTickLag.
+			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), ttMsg.GetChannelName()).
+			Set(float64(sub))
+		err := s.handleRPCTimetickMessage(ctx, ttMsg)
+		if err != nil {
+			log.Error("fail to handle Datanode Timetick Msg",
+				zap.Int64("sourceID", ttMsg.GetBase().GetSourceID()),
+				zap.String("channelName", ttMsg.GetChannelName()),
+				zap.Error(err))
+			return merr.Status(merr.WrapErrServiceInternal("fail to handle Datanode Timetick Msg")), nil
+		}
+	}
+
+	return merr.Status(nil), nil
+}
+
+func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
+	ch := ttMsg.GetChannelName()
+	ts := ttMsg.GetTimestamp()
+
+	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
+
+	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
+		return fmt.Errorf("expire allocations: %w", err)
+	}
+
+	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
+	if err != nil {
+		return fmt.Errorf("get flushable segments: %w", err)
+	}
+	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
+
+	if len(flushableSegments) == 0 {
+		return nil
+	}
+
+	log.Info("start flushing segments",
+		zap.Int64s("segment IDs", flushableIDs))
+	// update segment last update triggered time
+	// it's ok to fail flushing, since next timetick after duration will re-trigger
+	s.setLastFlushTime(flushableSegments)
+
+	finfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments))
+	for _, info := range flushableSegments {
+		finfo = append(finfo, info.SegmentInfo)
+	}
+	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
+	if err != nil {
+		log.Warn("failed to handle flush", zap.Any("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 // getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.

@@ -63,9 +63,10 @@ type dataSyncService struct {
 	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 
-	serverID      int64
-	stopOnce      sync.Once
-	flushListener chan *segmentFlushPack // chan to listen flush event
+	serverID       int64
+	stopOnce       sync.Once
+	flushListener  chan *segmentFlushPack // chan to listen flush event
+	timetickSender *timeTickSender        // reference to timeTickSender
 }
 
 func newDataSyncService(ctx context.Context,
@@ -83,6 +84,7 @@ func newDataSyncService(ctx context.Context,
 	compactor *compactionExecutor,
 	tickler *tickler,
 	serverID int64,
+	timetickSender *timeTickSender,
 ) (*dataSyncService, error) {
 
 	if channel == nil {
@@ -115,6 +117,7 @@ func newDataSyncService(ctx context.Context,
 		chunkManager:     chunkManager,
 		compactor:        compactor,
 		serverID:         serverID,
+		timetickSender:   timetickSender,
 	}
 
 	if err := service.initNodes(vchan, tickler); err != nil {
@@ -326,6 +329,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		dsService.flushManager,
 		dsService.flushingSegCache,
 		c,
+		dsService.timetickSender,
 	)
 	if err != nil {
 		return err

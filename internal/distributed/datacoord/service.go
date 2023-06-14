@@ -430,3 +430,7 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return s.dataCoord.GetIndexBuildProgress(ctx, req)
 }
+
+func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return s.dataCoord.ReportDataNodeTtMsgs(ctx, req)
+}

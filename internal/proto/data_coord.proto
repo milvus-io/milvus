@@ -83,6 +83,8 @@ service DataCoord {
   rpc GetIndexBuildProgress(index.GetIndexBuildProgressRequest) returns (index.GetIndexBuildProgressResponse) {}
 
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
+  
+  rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -662,142 +664,7 @@ message GcConfirmResponse {
   bool gc_finished = 2;
 }
 
-//message IndexInfo {
-//  int64 collectionID = 1;
-//  int64 fieldID = 2;
-//  string index_name = 3;
-//  int64 indexID = 4;
-//  repeated common.KeyValuePair type_params = 5;
-//  repeated common.KeyValuePair index_params = 6;
-//  // index build progress
-//  // The real-time statistics may not be expected due to the existence of the compaction mechanism.
-//  int64 indexed_rows = 7;
-//  int64 total_rows = 8;
-//  // index state
-//  common.IndexState state = 9;
-//  string index_state_fail_reason = 10;
-//  bool is_auto_index = 11;
-//  repeated common.KeyValuePair user_index_params = 12;
-//}
-//
-//message FieldIndex {
-//  IndexInfo index_info = 1;
-//  bool deleted = 2;
-//  uint64 create_time = 3;
-//}
-//
-//message SegmentIndex {
-//  int64 collectionID = 1;
-//  int64 partitionID = 2;
-//  int64 segmentID = 3;
-//  int64 num_rows = 4;
-//  int64 indexID = 5;
-//  int64 buildID = 6;
-//  int64 nodeID = 7;
-//  int64 index_version = 8;
-//  common.IndexState state = 9;
-//  string fail_reason = 10;
-//  repeated string index_file_keys = 11;
-//  bool deleted = 12;
-//  uint64 create_time = 13;
-//  uint64 serialize_size = 14;
-//  bool write_handoff = 15;
-//}
-//
-//message GetIndexStateRequest {
-//  int64 collectionID = 1;
-//  string index_name = 2;
-//}
-//
-//message GetIndexStateResponse {
-//  common.Status status = 1;
-//  common.IndexState state = 2;
-//  string fail_reason = 3;
-//}
-//
-//message GetSegmentIndexStateRequest {
-//  int64 collectionID = 1;
-//  string index_name = 2;
-//  repeated int64 segmentIDs = 3;
-//}
-//
-//message SegmentIndexState {
-//  int64 segmentID = 1;
-//  common.IndexState state = 2;
-//  string fail_reason = 3;
-//}
-//
-//message GetSegmentIndexStateResponse {
-//  common.Status status = 1;
-//  repeated SegmentIndexState states = 2;
-//}
-//
-//message CreateIndexRequest {
-//  int64 collectionID = 1;
-//  int64 fieldID = 2;
-//  string index_name = 3;
-//  repeated common.KeyValuePair type_params = 4;
-//  repeated common.KeyValuePair index_params = 5;
-//  uint64 timestamp = 6;
-//  bool  is_auto_index = 7;
-//  repeated common.KeyValuePair user_index_params = 8;
-//}
-//
-//message GetIndexInfoRequest {
-//  int64 collectionID = 1;
-//  repeated int64 segmentIDs = 2;
-//  string index_name = 3;
-//}
-//
-//message IndexFilePathInfo {
-//  int64 segmentID = 1;
-//  int64 fieldID = 2;
-//  int64 indexID = 3;
-//  int64 buildID = 4;
-//  string index_name = 5;
-//  repeated common.KeyValuePair index_params = 6;
-//  repeated string index_file_paths = 7;
-//  uint64 serialized_size = 8;
-//  int64 index_version = 9;
-//  int64 num_rows = 10;
-//}
-//
-//message SegmentIndexInfo {
-//  int64 collectionID = 1;
-//  int64 segmentID = 2;
-//  bool enable_index = 3;
-//  repeated IndexFilePathInfo index_infos = 4;
-//}
-//
-//message GetIndexInfoResponse {
-//  common.Status status = 1;
-//  map<int64, SegmentIndexInfo> segment_info = 2;
-//}
-//
-//message DropIndexRequest {
-//  int64 collectionID = 1;
-//  repeated int64 partitionIDs = 2;
-//  string index_name = 3;
-//  bool drop_all = 4;
-//}
-//
-//message DescribeIndexRequest {
-//  int64 collectionID = 1;
-//  string index_name = 2;
-//}
-//
-//message DescribeIndexResponse {
-//  common.Status status = 1;
-//  repeated IndexInfo index_infos = 2;
-//}
-//
-//message GetIndexBuildProgressRequest {
-//  int64 collectionID = 1;
-//  string index_name = 2;
-//}
-//
-//message GetIndexBuildProgressResponse {
-//  common.Status status = 1;
-//  int64 indexed_rows = 2;
-//  int64 total_rows = 3;
-//}
+message ReportDataNodeTtMsgsRequest {
+  common.MsgBase base = 1;
+  repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}

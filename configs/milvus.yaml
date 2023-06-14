@@ -346,6 +346,8 @@ dataNode:
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
     watermarkStandalone: 0.2 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
     watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
+  timetick:
+    byRPC: true
 
 # Configures the system log output.
 log:

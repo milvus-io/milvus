@@ -28,8 +28,6 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -54,10 +52,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -548,8 +548,11 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopWg.Add(3)
-	s.startDataNodeTtLoop(s.serverLoopCtx)
+	s.serverLoopWg.Add(2)
+	if !Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
+		s.serverLoopWg.Add(1)
+		s.startDataNodeTtLoop(s.serverLoopCtx)
+	}
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.startIndexService(s.serverLoopCtx)

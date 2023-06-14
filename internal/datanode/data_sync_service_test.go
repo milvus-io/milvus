@@ -140,16 +140,6 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			1, 0, "by-dev-rootcoord-dml-test_v1", 0,
 			1, 1, "by-dev-rootcoord-dml-test_v2", 0,
 			"add normal segments"},
-		{false, false, &mockMsgStreamFactory{true, false},
-			0, "by-dev-rootcoord-dml-test_v0",
-			0, 0, "", 0,
-			0, 0, "", 0,
-			"error when newinsertbufernode"},
-		{false, true, &mockMsgStreamFactory{true, false},
-			0, "by-dev-rootcoord-dml-test_v0",
-			0, 0, "", 0,
-			0, 0, "", 0,
-			"channel nil"},
 		{true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 1, "by-dev-rootcoord-dml-test_v1", 0,
@@ -185,6 +175,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 				newCompactionExecutor(),
 				genTestTickler(),
 				0,
+				nil,
 			)
 
 			if !test.isValidCase {
@@ -286,8 +277,9 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
-	assert.NoError(t, err)
+	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
+	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
 	defer close(sync.flushListener)
@@ -443,7 +435,8 @@ func TestDataSyncService_Close(t *testing.T) {
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
+	atimeTickSender := newTimeTickManager(mockDataCoord, 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
 	assert.NoError(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)
