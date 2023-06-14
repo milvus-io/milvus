@@ -212,25 +212,14 @@ pipeline {
                                                     e2e_timeout_seconds = 1 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
-                                                    if ("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
-                                                        sh """ 
-                                                        MILVUS_HELM_RELEASE_NAME="${release_name}" \
-                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
-                                                        MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                        MQ_MODE="${mqMode}" \
-                                                        ./ci_e2e.sh  "-n 6 --tags ${tag} testcases/test_utility.py::TestUtilityUserPassword testcases/test_utility.py::TestUtilityInvalidUserPassword"
-                                                        """
-                                                    } else {
-                                                        sh """ 
-                                                        MILVUS_HELM_RELEASE_NAME="${release_name}" \
-                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
-                                                        MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                        MQ_MODE="${mqMode}" \
-                                                        ./ci_e2e.sh  "-n 6 --tags ${tag}"
-                                                        """
-                                                    }
+                                                    sh """
+                                                    MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                    MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                    MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                    TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                    MQ_MODE="${mqMode}" \
+                                                    ./ci_e2e.sh  "-n 6 --tags ${tag}"
+                                                    """
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                                 }
