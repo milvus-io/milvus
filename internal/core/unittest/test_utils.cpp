@@ -109,3 +109,17 @@ TEST(Util, GetDeleteBitmap) {
         del_barrier, N, delete_record, insert_record, query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
 }
+
+TEST(Util, OutOfRange) {
+    using milvus::query::out_of_range;
+
+    ASSERT_FALSE(out_of_range<int32_t>(
+        static_cast<int64_t>(std::numeric_limits<int32_t>::max()) - 1));
+    ASSERT_FALSE(out_of_range<int32_t>(
+        static_cast<int64_t>(std::numeric_limits<int32_t>::min()) + 1));
+
+    ASSERT_TRUE(out_of_range<int32_t>(
+        static_cast<int64_t>(std::numeric_limits<int32_t>::max()) + 1));
+    ASSERT_TRUE(out_of_range<int32_t>(
+        static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1));
+}
