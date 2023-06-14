@@ -68,6 +68,10 @@ class ExecExprVisitor : ExprVisitor {
 
     template <typename T>
     auto
+    ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename T>
+    auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
@@ -351,7 +355,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
 auto
-ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw)
     -> BitsetType {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -422,6 +426,58 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
     }
 }
 #pragma clang diagnostic pop
+
+template <typename T>
+auto
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
+    -> BitsetType {
+    if constexpr (std::is_integral_v<T>) {
+        auto& expr = static_cast<UnaryRangeExprImpl<int64_t>&>(expr_raw);
+        auto val = expr.value_;
+
+        if (!out_of_range<T>(val)) {
+            return ExecUnaryRangeVisitorDispatcherImpl<T>(expr_raw);
+        }
+
+        // see also: https://github.com/milvus-io/milvus/issues/23646.
+        switch (expr.op_type_) {
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual: {
+                BitsetType r(row_count_);
+                if (lt_lb<T>(val)) {
+                    r.set();
+                }
+                return r;
+            }
+
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual: {
+                BitsetType r(row_count_);
+                if (gt_ub<T>(val)) {
+                    r.set();
+                }
+                return r;
+            }
+
+            case proto::plan::Equal: {
+                BitsetType r(row_count_);
+                r.reset();
+                return r;
+            }
+
+            case proto::plan::NotEqual: {
+                BitsetType r(row_count_);
+                r.set();
+                return r;
+            }
+
+            default: {
+                PanicInfo("unsupported range node");
+            }
+        }
+    }
+    return ExecUnaryRangeVisitorDispatcherImpl<T>(expr_raw);
+}
 
 template <typename ExprValueType>
 auto

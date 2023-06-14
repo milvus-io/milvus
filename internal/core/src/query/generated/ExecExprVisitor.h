@@ -84,6 +84,10 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename T>
     auto
+    ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename T>
+    auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
     template <typename ExprValueType>
