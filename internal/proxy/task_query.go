@@ -270,7 +270,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Validate partition names.")
 
-	//fetch search_growing from query param
+	// fetch search_growing from query param
 	var ignoreGrowing bool
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IgnoreGrowingKey {
@@ -284,7 +284,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
 
-	//fetch iteration_extension_reduce_rate from query param
+	// fetch iteration_extension_reduce_rate from query param
 	var iterationExtensionReduceRate int64
 	for i, kv := range t.request.GetQueryParams() {
 		if kv.GetKey() == IterationExtensionReduceRateKey {
@@ -355,6 +355,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Set username for this query request,
+	if username, _ := GetCurUserFromContext(ctx); username != "" {
+		t.RetrieveRequest.Username = username
+	}
+
 	if t.request.TravelTimestamp == 0 {
 		t.TravelTimestamp = t.BeginTs()
 	} else {
@@ -396,7 +401,6 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		nq:         1,
 		exec:       t.queryShard,
 	})
-
 	if err != nil {
 		return merr.WrapErrShardDelegatorQueryFailed(err.Error())
 	}

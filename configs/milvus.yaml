@@ -255,6 +255,22 @@ queryNode:
     maxReadConcurrentRatio: 1
     cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
+    # read task schedule policy: fifo(by default), user-task-polling.
+    scheduleReadPolicy:
+      # fifo: A FIFO queue support the schedule.
+      # user-task-polling:
+      #     The user's tasks will be polled one by one and scheduled.
+      #     Scheduling is fair on task granularity.
+      #     The policy is based on the username for authentication.
+      #     And an empty username is considered the same user.
+      #     When there are no multi-users, the policy decay into FIFO
+      name: fifo
+      maxPendingTask: 10240
+      # user-task-polling configure:
+      taskQueueExpire: 60 # 1 min by default, expire time of inner user task queue since queue is empty.
+      enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
+      maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
+
   gracefulStopTimeout: 30
   port: 21123
   grpc:

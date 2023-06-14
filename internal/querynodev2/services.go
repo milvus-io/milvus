@@ -19,7 +19,6 @@ package querynodev2
 import (
 	"context"
 	"fmt"
-
 	"strconv"
 	"sync"
 
@@ -721,9 +720,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
-	if !node.scheduler.Add(task) {
-		err := merr.WrapErrTaskQueueFull()
-		log.Warn("failed to search segments", zap.Error(err))
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to search channel", zap.Error(err))
 		return nil, err
 	}
 
@@ -1254,7 +1252,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}, nil
 	}
 
-	//translate segment action
+	// translate segment action
 	removeActions := make([]*querypb.SyncAction, 0)
 	addSegments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for _, action := range req.GetActions() {

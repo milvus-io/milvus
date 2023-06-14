@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
@@ -33,6 +35,9 @@ type ParamItem struct {
 	Forbidden bool
 
 	manager *config.Manager
+
+	// for unittest.
+	tempValue atomic.Pointer[string]
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
@@ -44,6 +49,11 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 
 // Get original value with error
 func (pi *ParamItem) get() (string, error) {
+	// For unittest.
+	if s := pi.tempValue.Load(); s != nil {
+		return *s, nil
+	}
+
 	if pi.manager == nil {
 		panic(fmt.Sprintf("manager is nil %s", pi.Key))
 	}
@@ -66,6 +76,16 @@ func (pi *ParamItem) get() (string, error) {
 		panic(fmt.Sprintf("%s is empty", pi.Key))
 	}
 	return ret, err
+}
+
+// SetTempValue set the value for this ParamItem,
+// Once value set, ParamItem will use the value instead of underlying config manager.
+// Usage: should only use for unittest, swap empty string will remove the value.
+func (pi *ParamItem) SwapTempValue(s string) *string {
+	if s == "" {
+		return pi.tempValue.Swap(nil)
+	}
+	return pi.tempValue.Swap(&s)
 }
 
 func (pi *ParamItem) GetValue() string {

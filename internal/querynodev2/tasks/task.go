@@ -1,9 +1,12 @@
 package tasks
 
+// TODO: rename this file into search_task.go
+
 import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -22,13 +25,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-type Task interface {
-	PreExecute() error
-	Execute() error
-	Done(err error)
-	Canceled() error
-	Wait() error
-}
+var (
+	_ Task      = &SearchTask{}
+	_ MergeTask = &SearchTask{}
+)
 
 type SearchTask struct {
 	ctx              context.Context
@@ -71,9 +71,34 @@ func NewSearchTask(ctx context.Context,
 	}
 }
 
+// Return the username which task is belong to.
+// Return "" if the task do not contain any user info.
+func (t *SearchTask) Username() string {
+	return t.req.Req.GetUsername()
+}
+
 func (t *SearchTask) PreExecute() error {
-	// update task wait time metric before execute
-	collector.Average.Add(metricsinfo.SearchQueueMetric, float64(t.tr.ElapseSpan().Microseconds()))
+	// Update task wait time metric before execute
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	inQueueDuration := t.tr.ElapseSpan()
+
+	// Update in queue metric for prometheus.
+	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel).
+		Observe(float64(inQueueDuration.Milliseconds()))
+
+	username := t.Username()
+	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
+		nodeID,
+		metrics.SearchLabel,
+		username).
+		Observe(float64(inQueueDuration.Milliseconds()))
+
+	// Update collector for query node quota.
+	collector.Average.Add(metricsinfo.SearchQueueMetric, float64(inQueueDuration.Microseconds()))
+
+	// Execute merged task's PreExecute.
 	for _, subTask := range t.others {
 		err := subTask.PreExecute()
 		if err != nil {
@@ -241,16 +266,12 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 }
 
 func (t *SearchTask) Done(err error) {
-	collector.Counter.Dec(metricsinfo.ExecuteQueueType, 1)
 	if !t.merged {
 		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.groupSize))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.nq))
 		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.topk))
 	}
-	select {
-	case t.notifier <- err:
-	default:
-	}
+	t.notifier <- err
 	for _, other := range t.others {
 		other.Done(err)
 	}
@@ -268,6 +289,18 @@ func (t *SearchTask) Result() *internalpb.SearchResults {
 	return t.result
 }
 
+func (t *SearchTask) NQ() int64 {
+	return t.nq
+}
+
+func (t *SearchTask) MergeWith(other Task) bool {
+	switch other := other.(type) {
+	case *SearchTask:
+		return t.Merge(other)
+	}
+	return false
+}
+
 // combinePlaceHolderGroups combine all the placeholder groups.
 func (t *SearchTask) combinePlaceHolderGroups() {
 	if len(t.others) > 0 {
@@ -280,7 +313,4 @@ func (t *SearchTask) combinePlaceHolderGroups() {
 		}
 		t.placeholderGroup, _ = proto.Marshal(ret)
 	}
-}
-
-type QueryTask struct {
 }

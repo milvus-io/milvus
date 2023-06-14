@@ -384,6 +384,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.Dsl = t.request.Dsl
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 
+	// Set username of this search request for feature like task scheduling.
+	if username, _ := GetCurUserFromContext(ctx); username != "" {
+		t.SearchRequest.Username = username
+	}
+
 	log.Ctx(ctx).Debug("search PreExecute done.",
 		zap.Uint64("travel_ts", travelTimestamp), zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),

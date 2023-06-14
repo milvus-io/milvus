@@ -51,6 +51,12 @@ func (c *counter) Dec(label string, value int64) {
 	}
 }
 
+func (c *counter) Set(label string, value int64) {
+	c.Lock()
+	defer c.Unlock()
+	c.values[label] = value
+}
+
 func (c *counter) Get(label string) int64 {
 	c.Lock()
 	defer c.Unlock()
