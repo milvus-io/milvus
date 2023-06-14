@@ -1191,6 +1191,16 @@ func getPartitionProgress(
 		)
 		return
 	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = merr.Error(resp.GetStatus())
+		log.Warn("fail to show partitions",
+			zap.String("collection_name", collectionName),
+			zap.Strings("partition_names", partitionNames),
+			zap.String("reason", resp.Status.Reason))
+		return
+	}
+
 	if len(resp.InMemoryPercentages) != len(partitionIDs) {
 		errMsg := "fail to show partitions from the querycoord, invalid data num"
 		err = errors.New(errMsg)
