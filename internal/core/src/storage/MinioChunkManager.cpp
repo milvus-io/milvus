@@ -51,15 +51,18 @@ std::mutex MinioChunkManager::client_mutex_;
 
 static void
 SwallowHandler(int signal) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
     switch (signal) {
         case SIGPIPE:
-            LOG_SERVER_WARNING_ << "SIGPIPE Swallowed" << std::endl;
+            // cannot use log or stdio
+            write(1, "SIGPIPE Swallowed\n", 18);
             break;
         default:
-            LOG_SERVER_ERROR_
-                << "Unexpected signal in SIGPIPE handler: " << signal
-                << std::endl;
+            // cannot use log or stdio
+            write(2, "Unexpected signal\n", 18);
     }
+#pragma GCC diagnostic pop
 }
 
 /**
@@ -95,6 +98,10 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
         psa.sa_handler = SwallowHandler;
         psa.sa_flags = psa.sa_flags | SA_ONSTACK;
         sigaction(SIGPIPE, &psa, 0);
+        // block multiple SIGPIPE concurrently processing
+        sigemptyset(&psa.sa_mask);
+        sigaddset(&psa.sa_mask, SIGPIPE);
+        sigaction(SIGPIPE, &psa, 0);
         if (type == RemoteStorageType::GOOGLE_CLOUD) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
                 // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
@@ -105,6 +112,8 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
                     GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };
         }
+        sdk_options_.loggingOptions.logLevel =
+            Aws::Utils::Logging::LogLevel::Info;
         Aws::InitAPI(sdk_options_);
     }
 }
