@@ -31,6 +31,7 @@
 #include "storage/AliyunSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
 #include "exceptions/EasyAssert.h"
+#include "signal.h"
 #include "log/Log.h"
 
 #define THROWS3ERROR(FUNCTION)                                                                         \
@@ -93,6 +94,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     if (initCount == 0) {
         // sdk_options_.httpOptions.installSigPipeHandler = true;
         struct sigaction psa;
+        memset(&psa, 0, sizeof psa);
         psa.sa_handler = SwallowHandler;
         psa.sa_flags = psa.sa_flags | SA_ONSTACK;
         // block multiple SIGPIPE concurrently processing
