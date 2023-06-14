@@ -65,7 +65,7 @@ ExtractTermExprImpl(FieldId field_id,
     }
     std::sort(terms.begin(), terms.end());
     return std::make_unique<TermExprImpl<T>>(
-        expr_proto.column_info(), terms, val_case);
+        expr_proto.column_info(), terms, val_case, expr_proto.is_in_field());
 }
 
 template <typename T>

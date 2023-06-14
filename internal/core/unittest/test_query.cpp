@@ -381,7 +381,8 @@ TEST(Query, ExecTerm) {
             {
                 "term": {
                     "age": {
-                        "values": []
+                        "values": [],
+                        "is_in_field": false
                     }
                 }
             },
@@ -700,7 +701,7 @@ TEST(Query, FillSegment) {
     auto dataset = DataGen(schema, N);
     const auto std_vec = dataset.get_col<int64_t>(FieldId(101));  // ids field
     const auto std_vfloat_vec =
-        dataset.get_col<float>(FieldId(100));  // vector field
+        dataset.get_col<float>(FieldId(100));    // vector field
     const auto std_i32_vec =
         dataset.get_col<int32_t>(FieldId(102));  // scalar field
 

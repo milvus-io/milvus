@@ -121,14 +121,18 @@ struct LogicalBinaryExpr : BinaryExprBase {
 struct TermExpr : Expr {
     const ColumnInfo column_;
     const proto::plan::GenericValue::ValCase val_case_;
+    const bool is_in_field_;
 
  protected:
     // prevent accidental instantiation
     TermExpr() = delete;
 
     TermExpr(ColumnInfo column,
-             const proto::plan::GenericValue::ValCase val_case)
-        : column_(std::move(column)), val_case_(val_case) {
+             const proto::plan::GenericValue::ValCase val_case,
+             const bool is_in_field)
+        : column_(std::move(column)),
+          val_case_(val_case),
+          is_in_field_(is_in_field) {
     }
 
  public:
