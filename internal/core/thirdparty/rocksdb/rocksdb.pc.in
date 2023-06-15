@@ -4,6 +4,6 @@ Name: Rocksdb
 Description: Rocksdb
 Version: @ROCKSDB_VERSION@
 
-Libs: -L${libdir} -lrocksdb
+Libs: -L${libdir} -lrocksdb 
 Libs.private: -lz -lbz2
 Cflags: -I${includedir}
