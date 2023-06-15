@@ -268,4 +268,10 @@ struct ExistsExpr : Expr {
     accept(ExprVisitor&) override;
 };
 
+inline bool
+IsTermExpr(Expr* expr) {
+    TermExpr* term_expr = dynamic_cast<TermExpr*>(expr);
+    return term_expr != nullptr;
+}
+
 }  // namespace milvus::query

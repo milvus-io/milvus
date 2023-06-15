@@ -917,6 +917,21 @@ SegmentSealedImpl::search_ids(const BitsetView& bitset,
     return dst_offset;
 }
 
+std::vector<SegOffset>
+SegmentSealedImpl::search_ids(const BitsetView& bitset,
+                              const std::vector<int64_t>& offsets,
+                              Timestamp timestamp) const {
+    std::vector<SegOffset> dst_offset;
+    for (auto& offset : offsets) {
+        if (!bitset.test(offset)) {
+            if (insert_record_.timestamps_[offset] <= timestamp) {
+                dst_offset.push_back(SegOffset(offset));
+            }
+        }
+    }
+    return dst_offset;
+}
+
 std::string
 SegmentSealedImpl::debug() const {
     std::string log_str;

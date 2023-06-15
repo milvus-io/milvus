@@ -211,6 +211,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
+    std::vector<SegOffset>
+    search_ids(const BitsetView& view,
+               const std::vector<int64_t>& offsets,
+               Timestamp timestamp) const override;
+
     bool
     HasIndex(FieldId field_id) const override {
         return true;

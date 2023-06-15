@@ -1709,9 +1709,16 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
 
         auto [uids, seg_offsets] = segment_.search_ids(*id_array, timestamp_);
         BitsetType bitset(row_count_);
+        std::vector<int64_t> cached_offsets;
         for (const auto& offset : seg_offsets) {
             auto _offset = (int64_t)offset.get();
             bitset[_offset] = true;
+            cached_offsets.push_back(_offset);
+        }
+        // If enable plan_visitor pk index cache, pass offsets to it
+        if (plan_visitor_ != nullptr) {
+            plan_visitor_->SetExprUsePkIndex(true);
+            plan_visitor_->SetExprCacheOffsets(std::move(cached_offsets));
         }
         AssertInfo(bitset.size() == row_count_,
                    "[ExecExprVisitor]Size of results not equal row count");

@@ -20,6 +20,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "query/ExprImpl.h"
 #include "ExprVisitor.h"
+#include "ExecPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -56,7 +57,20 @@ class ExecExprVisitor : public ExprVisitor {
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
                     int64_t row_count,
                     Timestamp timestamp)
-        : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
+        : segment_(segment),
+          row_count_(row_count),
+          timestamp_(timestamp),
+          plan_visitor_(nullptr) {
+    }
+
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+                    ExecPlanNodeVisitor* plan_visitor,
+                    int64_t row_count,
+                    Timestamp timestamp)
+        : segment_(segment),
+          plan_visitor_(plan_visitor),
+          row_count_(row_count),
+          timestamp_(timestamp) {
     }
 
     BitsetType
@@ -165,5 +179,6 @@ class ExecExprVisitor : public ExprVisitor {
     int64_t row_count_;
 
     BitsetTypeOpt bitset_opt_;
+    ExecPlanNodeVisitor* plan_visitor_;
 };
 }  // namespace milvus::query

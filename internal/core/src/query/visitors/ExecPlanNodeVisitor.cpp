@@ -100,7 +100,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     std::unique_ptr<BitsetType> bitset_holder;
     if (node.predicate_.has_value()) {
         bitset_holder = std::make_unique<BitsetType>(
-            ExecExprVisitor(*segment, active_count, timestamp_)
+            ExecExprVisitor(*segment, this, active_count, timestamp_)
                 .call_child(*node.predicate_.value()));
         bitset_holder->flip();
     } else {
@@ -166,8 +166,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     if (node.predicate_.has_value() && node.predicate_.value() != nullptr) {
-        bitset_holder = ExecExprVisitor(*segment, active_count, timestamp_)
-                            .call_child(*(node.predicate_.value()));
+        bitset_holder =
+            ExecExprVisitor(*segment, this, active_count, timestamp_)
+                .call_child(*(node.predicate_.value()));
         bitset_holder.flip();
     }
 
@@ -188,7 +189,11 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     BitsetView final_view = bitset_holder;
-    auto seg_offsets = segment->search_ids(final_view, timestamp_);
+    auto seg_offsets =
+        GetExprUsePkIndex() && IsTermExpr(node.predicate_.value().get())
+            ? segment->search_ids(
+                  final_view, expr_cached_pk_id_offsets_, timestamp_)
+            : segment->search_ids(final_view, timestamp_);
     retrieve_result.result_offsets_.assign(
         (int64_t*)seg_offsets.data(),
         (int64_t*)seg_offsets.data() + seg_offsets.size());
