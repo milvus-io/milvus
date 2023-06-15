@@ -358,10 +358,6 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	}
 }
 
-func (suite *TaskSuite) expectationsForLoadSegments() {
-
-}
-
 func (suite *TaskSuite) TestLoadSegmentTask() {
 	ctx := context.Background()
 	timeout := 10 * time.Second
@@ -375,6 +371,9 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestLoadSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -387,6 +386,18 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+			FieldID:      100,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -457,6 +468,9 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestLoadSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -469,6 +483,18 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, errors.New("index not ready"))
 	}
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+			FieldID:      100,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}, nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -650,6 +676,9 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestMoveSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	}, nil)
 	for _, segment := range suite.moveSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -662,6 +691,18 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+			FieldID:      100,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
@@ -747,6 +788,9 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestSubscribeChannelTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -759,6 +803,18 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+			FieldID:      100,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -823,6 +879,9 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
 		Name: "TestSegmentTaskStale",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
@@ -835,6 +894,18 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+			FieldID:      100,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MetricTypeKey,
+					Value: "L2",
+				},
+			},
+		},
+	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
