@@ -342,22 +342,16 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
                 return ExtractBinaryRangeExprImpl<bool>(
                     field_id, data_type, expr_pb);
             }
-            case DataType::INT8: {
-                return ExtractBinaryRangeExprImpl<int8_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractBinaryRangeExprImpl<int16_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractBinaryRangeExprImpl<int32_t>(
-                    field_id, data_type, expr_pb);
-            }
+
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractBinaryRangeExprImpl<int64_t>(
                     field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractBinaryRangeExprImpl<float>(
                     field_id, data_type, expr_pb);
