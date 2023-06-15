@@ -244,7 +244,10 @@ def load_and_search(prefix, replicas=1):
         logger.info("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
         expr = "count in [2,4,6,8]"
-        output_fields = ["count", "random_value", "float_vector"]
+        if "SQ" in col_name or "PQ" in col_name:
+            output_fields = ["count", "random_value"]
+        else:
+            output_fields = ["count", "random_value", "float_vector"]
         res = c.query(expr, output_fields, timeout=120)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
