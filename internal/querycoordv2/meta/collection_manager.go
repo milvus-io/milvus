@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -40,8 +41,23 @@ type Collection struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 
+	isRecovering    *atomic.Bool
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
+}
+
+func (collection *Collection) SetIsRecovering(b bool) {
+	if collection.isRecovering == nil {
+		collection.isRecovering = atomic.NewBool(false)
+	}
+	collection.isRecovering.Store(b)
+}
+
+func (collection *Collection) IsRecovering() bool {
+	if collection.isRecovering == nil {
+		collection.isRecovering = atomic.NewBool(false)
+	}
+	return collection.isRecovering.Load()
 }
 
 func (collection *Collection) SetRefreshNotifier(notifer chan struct{}) {
@@ -81,6 +97,7 @@ func (collection *Collection) Clone() *Collection {
 		LoadPercentage:     collection.LoadPercentage,
 		CreatedAt:          collection.CreatedAt,
 		UpdatedAt:          collection.UpdatedAt,
+		isRecovering:       collection.isRecovering,
 		refreshNotifier:    collection.refreshNotifier,
 	}
 }
@@ -204,6 +221,10 @@ func (m *CollectionManager) Recover(broker Broker) error {
 	if err != nil {
 		log.Error("upgrade recover failed", zap.Error(err))
 		return err
+	}
+
+	for _, collection := range m.collections {
+		collection.SetIsRecovering(true)
 	}
 	return nil
 }
@@ -523,6 +544,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 	if collectionPercent == 100 {
 		saveCollection = true
 		newCollection.Status = querypb.LoadStatus_Loaded
+		newCollection.SetIsRecovering(false)
 		elapsed := time.Since(newCollection.CreatedAt)
 
 		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after

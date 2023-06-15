@@ -113,7 +113,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 			}, nil
 		}
 
-		if collection.GetStatus() == querypb.LoadStatus_Loaded {
+		if !collection.IsRecovering() && collection.GetStatus() == querypb.LoadStatus_Loaded {
 			// when collection is loaded, regard collection as readable, set percentage == 100
 			percentage = 100
 		}
@@ -852,12 +852,17 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		Status: merr.Status(nil),
 	}
 
+	collection := s.meta.CollectionManager.GetCollection(req.GetCollectionID())
 	percentage := s.meta.CollectionManager.CalculateLoadPercentage(req.GetCollectionID())
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
 		log.Warn("failed to GetShardLeaders", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+	if !collection.IsRecovering() && collection.GetStatus() == querypb.LoadStatus_Loaded {
+		// when collection is loaded, regard collection as readable, set percentage == 100
+		percentage = 100
 	}
 	if percentage < 100 {
 		msg := fmt.Sprintf("collection %v is not fully loaded", req.GetCollectionID())
