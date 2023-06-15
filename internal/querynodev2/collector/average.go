@@ -76,7 +76,7 @@ func (c *averageCollector) Average(label string) (float64, error) {
 
 	average, ok := c.averages[label]
 	if !ok {
-		return 0, merr.WrapErrAverageLabelNotRegister(label)
+		return 0, merr.WrapErrMetricNotFound(label)
 	}
 
 	return average.Value(), nil

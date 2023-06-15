@@ -19,6 +19,7 @@ package job
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 )
@@ -86,7 +86,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 	if err != nil {
 		msg := "failed to remove collection"
 		log.Warn(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 
 	err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
@@ -173,7 +173,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		if err != nil {
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 		err = job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
 		if err != nil {
@@ -188,7 +188,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		if err != nil {
 			msg := "failed to release partitions from store"
 			log.Warn(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)

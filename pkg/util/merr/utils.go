@@ -82,8 +82,14 @@ func oldCode(code int32) commonpb.ErrorCode {
 		return commonpb.ErrorCode_NotReadyServe
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
+	case ErrParameterInvalid.code():
+		return commonpb.ErrorCode_IllegalArgument
 	case ErrNodeNotMatch.code():
 		return commonpb.ErrorCode_NodeIDNotMatch
+	case ErrCollectionNotFound.code(), ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
+		return commonpb.ErrorCode_MetaFailed
+	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
+		return commonpb.ErrorCode_NoReplicaAvailable
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -217,6 +223,14 @@ func WrapErrCollectionResourceLimitExceeded(msg ...string) error {
 	return err
 }
 
+func WrapErrCollectionNotFullyLoaded(collection any, msg ...string) error {
+	err := wrapWithField(ErrCollectionNotFullyLoaded, "collection", collection)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Partition related
 func WrapErrPartitionNotFound(partition any, msg ...string) error {
 	err := wrapWithField(ErrPartitionNotFound, "partition", partition)
@@ -228,6 +242,14 @@ func WrapErrPartitionNotFound(partition any, msg ...string) error {
 
 func WrapErrPartitionNotLoaded(partition any, msg ...string) error {
 	err := wrapWithField(ErrPartitionNotLoaded, "partition", partition)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrPartitionNotFullyLoaded(partition any, msg ...string) error {
+	err := wrapWithField(ErrPartitionNotFullyLoaded, "partition", partition)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -252,8 +274,8 @@ func WrapErrReplicaNotFound(id int64, msg ...string) error {
 	return err
 }
 
-func WrapErrNoAvailableNodeInReplica(id int64, msg ...string) error {
-	err := wrapWithField(ErrNoAvailableNodeInReplica, "replica", id)
+func WrapErrReplicaNotAvailable(id int64, msg ...string) error {
+	err := wrapWithField(ErrReplicaNotAvailable, "replica", id)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -279,6 +301,14 @@ func WrapErrChannelLack(name string, msg ...string) error {
 
 func WrapErrChannelReduplicate(name string, msg ...string) error {
 	err := wrapWithField(ErrChannelReduplicate, "channel", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrChannelNotAvailable(name string, msg ...string) error {
+	err := wrapWithField(ErrChannelNotAvailable, "channel", name)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -352,8 +382,8 @@ func WrapErrNodeLack(expectedNum, actualNum int64, msg ...string) error {
 	return err
 }
 
-func WrapErrNoAvailableNode(msg ...string) error {
-	err := error(ErrNoAvailableNode)
+func WrapErrNodeNotAvailable(id int64, msg ...string) error {
+	err := wrapWithField(ErrNodeNotAvailable, "node", id)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
@@ -436,15 +466,6 @@ func WrapErrTopicNotEmpty(name string, msg ...string) error {
 	return err
 }
 
-// Average related
-func WrapErrAverageLabelNotRegister(label string, msg ...string) error {
-	err := errors.Wrapf(ErrAverageLabelNotRegister, "averageLabel=%s", label)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
 // shard delegator related
 func WrapErrShardDelegatorNotFound(channel string, msg ...string) error {
 	err := errors.Wrapf(ErrShardDelegatorNotFound, "channel=%s", channel)
@@ -480,15 +501,6 @@ func WrapErrShardDelegatorQueryFailed(msg ...string) error {
 
 func WrapErrShardDelegatorStatisticFailed(msg ...string) error {
 	err := error(ErrShardDelegatorStatisticFailed)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "; "))
-	}
-	return err
-}
-
-// task related
-func WrapErrTaskQueueFull(msg ...string) error {
-	err := error(ErrTaskQueueFull)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}

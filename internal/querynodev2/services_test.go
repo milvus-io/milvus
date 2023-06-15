@@ -1020,7 +1020,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	req.GetReq().MetricType = "IP"
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	suite.Contains(resp.GetStatus().GetReason(), merr.ErrParameterInvalid.Error())
 	req.GetReq().MetricType = "L2"
 

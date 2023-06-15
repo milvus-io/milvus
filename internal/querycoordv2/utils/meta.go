@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var (
@@ -221,7 +222,7 @@ func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string
 	replicaSet := make([]*meta.Replica, 0)
 	for _, rgName := range resourceGroups {
 		if !m.ResourceManager.ContainResourceGroup(rgName) {
-			return nil, meta.ErrRGNotExist
+			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
 
 		replicas, err := m.ReplicaManager.Spawn(collection, 1, rgName)

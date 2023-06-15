@@ -82,6 +82,7 @@ list_content = "list_content"
 dict_content = "dict_content"
 value_content = "value_content"
 
+code = "code"
 err_code = "err_code"
 err_msg = "err_msg"
 in_cluster_env = "IN_CLUSTER"

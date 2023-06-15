@@ -112,7 +112,7 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 	}
 
 	if targetNode == -1 {
-		return -1, merr.WrapErrNoAvailableNode("all available nodes are unreachable")
+		return -1, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 	}
 
 	// update executing task cost

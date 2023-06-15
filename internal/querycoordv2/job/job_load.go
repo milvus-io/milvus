@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -94,12 +95,12 @@ func (job *LoadCollectionJob) PreExecute() error {
 			job.meta.GetReplicaNumber(req.GetCollectionID()),
 		)
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
 	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
 		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
 			collection.GetFieldIndexID())
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded collection")
 	}
 
 	return nil
@@ -115,7 +116,7 @@ func (job *LoadCollectionJob) Execute() error {
 	if err != nil {
 		msg := "failed to get partitions from RootCoord"
 		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(req.GetCollectionID()),
 		func(partition *meta.Partition, _ int) int64 {
@@ -125,7 +126,7 @@ func (job *LoadCollectionJob) Execute() error {
 		return partID, !lo.Contains(loadedPartitionIDs, partID)
 	})
 	if len(lackPartitionIDs) == 0 {
-		return ErrCollectionLoaded
+		return nil
 	}
 	job.undo.CollectionID = req.GetCollectionID()
 	job.undo.LackPartitions = lackPartitionIDs
@@ -138,7 +139,7 @@ func (job *LoadCollectionJob) Execute() error {
 		if err != nil {
 			msg := "failed to clear stale replicas"
 			log.Warn(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 	}
 
@@ -149,7 +150,7 @@ func (job *LoadCollectionJob) Execute() error {
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Error(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 		for _, replica := range replicas {
 			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
@@ -169,7 +170,7 @@ func (job *LoadCollectionJob) Execute() error {
 	if err != nil {
 		msg := "failed to update next target"
 		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 	job.undo.TargetUpdated = true
 
@@ -200,7 +201,7 @@ func (job *LoadCollectionJob) Execute() error {
 	if err != nil {
 		msg := "failed to store collection and partitions"
 		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
@@ -208,7 +209,7 @@ func (job *LoadCollectionJob) Execute() error {
 }
 
 func (job *LoadCollectionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrCollectionLoaded) {
+	if job.Error() != nil {
 		job.undo.RollBack()
 	}
 }
@@ -270,12 +271,12 @@ func (job *LoadPartitionJob) PreExecute() error {
 	if collection.GetReplicaNumber() != req.GetReplicaNumber() {
 		msg := "collection with different replica number existed, release this collection first before changing its replica number"
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	} else if !typeutil.MapEqual(collection.GetFieldIndexID(), req.GetFieldIndexID()) {
 		msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
 			job.meta.GetFieldIndex(req.GetCollectionID()))
 		log.Warn(msg)
-		return utils.WrapError(msg, ErrLoadParameterMismatched)
+		return merr.WrapErrParameterInvalid(collection.GetFieldIndexID(), req.GetFieldIndexID(), "can't change the index for loaded partitions")
 	}
 
 	return nil
@@ -298,7 +299,7 @@ func (job *LoadPartitionJob) Execute() error {
 		return partID, !lo.Contains(loadedPartitionIDs, partID)
 	})
 	if len(lackPartitionIDs) == 0 {
-		return ErrCollectionLoaded
+		return nil
 	}
 	job.undo.CollectionID = req.GetCollectionID()
 	job.undo.LackPartitions = lackPartitionIDs
@@ -311,7 +312,7 @@ func (job *LoadPartitionJob) Execute() error {
 		if err != nil {
 			msg := "failed to clear stale replicas"
 			log.Warn(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 	}
 
@@ -322,7 +323,7 @@ func (job *LoadPartitionJob) Execute() error {
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Error(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 		for _, replica := range replicas {
 			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
@@ -342,7 +343,7 @@ func (job *LoadPartitionJob) Execute() error {
 	if err != nil {
 		msg := "failed to update next target"
 		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 	job.undo.TargetUpdated = true
 
@@ -374,14 +375,14 @@ func (job *LoadPartitionJob) Execute() error {
 		if err != nil {
 			msg := "failed to store collection and partitions"
 			log.Error(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 	} else { // collection exists, put partitions only
 		err = job.meta.CollectionManager.PutPartition(partitions...)
 		if err != nil {
 			msg := "failed to store partitions"
 			log.Error(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
+			return errors.Wrap(err, msg)
 		}
 	}
 
@@ -390,7 +391,7 @@ func (job *LoadPartitionJob) Execute() error {
 }
 
 func (job *LoadPartitionJob) PostExecute() {
-	if job.Error() != nil && !errors.Is(job.Error(), ErrCollectionLoaded) {
+	if job.Error() != nil {
 		job.undo.RollBack()
 	}
 }

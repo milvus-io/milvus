@@ -122,7 +122,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 			log.Warn("no available shard delegator found",
 				zap.Int64s("nodes", nodes),
 				zap.Int64s("excluded", excludeNodes.Collect()))
-			return -1, merr.WrapErrNoAvailableNode("all available nodes has been excluded")
+			return -1, merr.WrapErrServiceUnavailable("no available shard delegator found")
 		}
 
 		targetNode, err = lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
