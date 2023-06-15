@@ -58,7 +58,9 @@ func Test_AdjustBufSize(t *testing.T) {
 
 	// small row
 	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema, nil)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+	parser := NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 
@@ -66,7 +68,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	schema.Fields[9].TypeParams = []*commonpb.KeyValuePair{
 		{Key: common.DimKey, Value: "32768"},
 	}
-	parser = NewJSONParser(ctx, schema, nil)
+	parser = NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 
@@ -77,9 +79,11 @@ func Test_AdjustBufSize(t *testing.T) {
 		AutoID:      true,
 		Fields:      []*schemapb.FieldSchema{},
 	}
-	parser = NewJSONParser(ctx, schema, nil)
+	parser = NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
+	adjustBufSize(parser, schema)
+
 }
 
 func Test_JSONParserParseRows_IntPK(t *testing.T) {
@@ -87,7 +91,9 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 	defer cancel()
 
 	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema, nil)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+	parser := NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
 
 	// prepare test data
@@ -188,6 +194,18 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 				assert.InDelta(t, contenctRow.FieldFloatVector[k], float32(fval), 10e-6)
 			}
 		}
+
+		// empty content
+		reader = strings.NewReader(`{}`)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
+		assert.NoError(t, err)
+
+		// row count is 0
+		reader = strings.NewReader(`{
+					"rows":[]
+				}`)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
+		assert.NoError(t, err)
 	})
 
 	t.Run("error cases", func(t *testing.T) {
@@ -195,11 +213,15 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, nil)
 		assert.Error(t, err)
 
+		// not a valid JSON format
+		reader = strings.NewReader(`{[]`)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
+		assert.Error(t, err)
+
 		// not a row-based format
 		reader = strings.NewReader(`{
 			"dummy":[]
 		}`)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
 		assert.Error(t, err)
 
@@ -207,7 +229,6 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		reader = strings.NewReader(`{
 			"rows":
 		}`)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(5)}, consumer)
 		assert.Error(t, err)
 
@@ -215,7 +236,6 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		reader = strings.NewReader(`{
 			"rows": [}
 		}`)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(6)}, consumer)
 		assert.Error(t, err)
 
@@ -223,7 +243,6 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		reader = strings.NewReader(`{
 			"rows": {}
 		}`)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(8)}, consumer)
 		assert.Error(t, err)
 
@@ -231,32 +250,30 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		reader = strings.NewReader(`{
 			"rows": [[]]
 		}`)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
+		assert.Error(t, err)
 
+		// typo
+		reader = strings.NewReader(`{
+			"rows": ["]
+		}`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
 		assert.Error(t, err)
 
 		// not valid json format
 		reader = strings.NewReader(`[]`)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
 		assert.Error(t, err)
 
-		// empty content
-		reader = strings.NewReader(`{}`)
-
-		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
-		assert.Error(t, err)
-
-		// empty content
+		// empty file
 		reader = strings.NewReader(``)
-
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, consumer)
 		assert.Error(t, err)
 
 		// redundant field
 		reader = strings.NewReader(`{
 			"rows":[
-				{"dummy": 1, "FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+				{"dummy": 1, "FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 10, "b": true}}
 			]
 		}`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
@@ -265,7 +282,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		// field missed
 		reader = strings.NewReader(`{
 			"rows":[
-				{"FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+				{"FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 10, "b": true}}
 			]
 		}`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
@@ -274,9 +291,9 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		// handle() error
 		content := `{
 			"rows":[
-				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
-				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
-				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 7, "b": true}},
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 8, "b": false}},
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4], "FieldJSON": {"a": 9, "b": true}}
 			]
 		}`
 		consumer.handleErr = errors.New("error")
@@ -287,13 +304,6 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 
 		reader = strings.NewReader(content)
 		parser.bufRowCount = 5
-		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
-		assert.Error(t, err)
-
-		// row count is 0
-		reader = strings.NewReader(`{
-			"rows":[]
-		}`)
 		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.Error(t, err)
 
@@ -311,10 +321,12 @@ func Test_JSONParserParseRows_StrPK(t *testing.T) {
 	defer cancel()
 
 	schema := strKeySchema()
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
 	updateProgress := func(percent int64) {
 		assert.Greater(t, percent, int64(0))
 	}
-	parser := NewJSONParser(ctx, schema, updateProgress)
+	parser := NewJSONParser(ctx, collectionInfo, updateProgress)
 	assert.NotNil(t, parser)
 
 	// prepare test data
@@ -413,7 +425,9 @@ func Test_JSONParserCombineDynamicRow(t *testing.T) {
 			},
 		},
 	}
-	parser := NewJSONParser(ctx, schema, nil)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+	parser := NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
 
 	// valid input:
@@ -425,87 +439,101 @@ func Test_JSONParserCombineDynamicRow(t *testing.T) {
 	// case 6: {"id": 1, "vector": [], "x": 8}
 	// case 7: {"id": 1, "vector": []}
 
-	// case 1
-	dynamicValues := map[string]interface{}{
-		"x": 8,
-	}
-	row := map[storage.FieldID]interface{}{
-		106: 1,
-		113: "{\"y\": 8}",
-	}
-	err := parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.Contains(t, row, int64(113))
-	assert.Contains(t, row[113], "x")
-	assert.Contains(t, row[113], "y")
+	t.Run("values combined for dynamic field", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{
+			"x": 8,
+		}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+			113: "{\"y\": 8}",
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+		assert.Contains(t, row[113], "x")
+		assert.Contains(t, row[113], "y")
+	})
 
-	// case 2
-	dynamicValues = map[string]interface{}{
-		"x": 8,
-	}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-		113: map[string]interface{}{},
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.Contains(t, row, int64(113))
-	assert.Contains(t, row[113], "x")
+	t.Run("outside value for dynamic field", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{
+			"x": 8,
+		}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+			113: map[string]interface{}{},
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+		assert.Contains(t, row[113], "x")
+	})
 
-	// case 3/4/5
-	dynamicValues = map[string]interface{}{}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-		113: "{\"x\": 8}",
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.Contains(t, row, int64(113))
+	t.Run("JSON format string/object for dynamic field", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+			113: "{\"x\": 8}",
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+	})
 
-	// case 6
-	dynamicValues = map[string]interface{}{
-		"x": 8,
-	}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.Contains(t, row, int64(113))
-	assert.Contains(t, row[113], "x")
+	t.Run("dynamic field is hidden", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{
+			"x": 8,
+		}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+		assert.Contains(t, row[113], "x")
+	})
 
-	// case 7
-	dynamicValues = map[string]interface{}{}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.Contains(t, row, int64(113))
-	assert.Equal(t, "{}", row[113])
+	t.Run("no values for dynamic field", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+		assert.Equal(t, "{}", row[113])
+	})
 
-	// invalid input
-	dynamicValues = map[string]interface{}{
-		"x": 8,
-	}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-		113: 5,
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.Error(t, err)
+	t.Run("invalid input for dynamic field", func(t *testing.T) {
+		dynamicValues := map[string]interface{}{
+			"x": 8,
+		}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+			113: 5,
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.Error(t, err)
 
-	// no dynamic field
-	parser.dynamicFieldID = -1
-	dynamicValues = map[string]interface{}{
-		"x": 8,
-	}
-	row = map[storage.FieldID]interface{}{
-		106: 1,
-	}
-	err = parser.combineDynamicRow(dynamicValues, row)
-	assert.NoError(t, err)
-	assert.NotContains(t, row, int64(113))
+		row = map[storage.FieldID]interface{}{
+			106: 1,
+			113: "abc",
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.Error(t, err)
+	})
+
+	t.Run("not allow dynamic values if no dynamic field", func(t *testing.T) {
+		parser.collectionInfo.DynamicField = nil
+		dynamicValues := map[string]interface{}{
+			"x": 8,
+		}
+		row := map[storage.FieldID]interface{}{
+			106: 1,
+		}
+		err = parser.combineDynamicRow(dynamicValues, row)
+		assert.NoError(t, err)
+		assert.NotContains(t, row, int64(113))
+	})
 }
 
 func Test_JSONParserVerifyRow(t *testing.T) {
@@ -535,39 +563,91 @@ func Test_JSONParserVerifyRow(t *testing.T) {
 			},
 		},
 	}
-	parser := NewJSONParser(ctx, schema, nil)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+
+	parser := NewJSONParser(ctx, collectionInfo, nil)
 	assert.NotNil(t, parser)
-	assert.Equal(t, int64(113), parser.dynamicFieldID)
 
-	// dynamic field provided
-	raw := map[string]interface{}{
-		"FieldID":      100,
-		"FieldDynamic": "{\"x\": 8}",
-		"y":            true,
-	}
-	row, err := parser.verifyRow(raw)
+	t.Run("input is not key-value map", func(t *testing.T) {
+		_, err = parser.verifyRow(nil)
+		assert.Error(t, err)
+
+		_, err = parser.verifyRow([]int{0})
+		assert.Error(t, err)
+	})
+
+	t.Run("not auto-id, dynamic field provided", func(t *testing.T) {
+		raw := map[string]interface{}{
+			"FieldID":      100,
+			"FieldDynamic": "{\"x\": 8}",
+			"y":            true,
+		}
+		row, err := parser.verifyRow(raw)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(106))
+		assert.Contains(t, row, int64(113))
+		assert.Contains(t, row[113], "x")
+		assert.Contains(t, row[113], "y")
+	})
+
+	t.Run("not auto-id, dynamic field not provided", func(t *testing.T) {
+		raw := map[string]interface{}{
+			"FieldID": 100,
+		}
+		row, err := parser.verifyRow(raw)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(106))
+		assert.Contains(t, row, int64(113))
+		assert.Equal(t, "{}", row[113])
+	})
+
+	t.Run("not auto-id, invalid input dynamic field", func(t *testing.T) {
+		raw := map[string]interface{}{
+			"FieldID":      100,
+			"FieldDynamic": true,
+			"y":            true,
+		}
+		_, err = parser.verifyRow(raw)
+		assert.Error(t, err)
+	})
+
+	schema.Fields[0].AutoID = true
+	err = collectionInfo.resetSchema(schema)
 	assert.NoError(t, err)
-	assert.Contains(t, row, int64(106))
-	assert.Contains(t, row, int64(113))
-	assert.Contains(t, row[113], "x")
-	assert.Contains(t, row[113], "y")
 
-	// dynamic field not provided
-	raw = map[string]interface{}{
-		"FieldID": 100,
-	}
-	row, err = parser.verifyRow(raw)
+	t.Run("no need to provide value for auto-id", func(t *testing.T) {
+		raw := map[string]interface{}{
+			"FieldID":      100,
+			"FieldDynamic": "{\"x\": 8}",
+			"y":            true,
+		}
+		_, err := parser.verifyRow(raw)
+		assert.Error(t, err)
+
+		raw = map[string]interface{}{
+			"FieldDynamic": "{\"x\": 8}",
+			"y":            true,
+		}
+		row, err := parser.verifyRow(raw)
+		assert.NoError(t, err)
+		assert.Contains(t, row, int64(113))
+	})
+
+	schema.Fields[1].IsDynamic = false
+	err = collectionInfo.resetSchema(schema)
 	assert.NoError(t, err)
-	assert.Contains(t, row, int64(106))
-	assert.Contains(t, row, int64(113))
-	assert.Equal(t, "{}", row[113])
 
-	// invalid input dynamic field
-	raw = map[string]interface{}{
-		"FieldID":      100,
-		"FieldDynamic": true,
-		"y":            true,
-	}
-	_, err = parser.verifyRow(raw)
-	assert.Error(t, err)
+	t.Run("auto id, no dynamic field", func(t *testing.T) {
+		raw := map[string]interface{}{
+			"FieldDynamic": "{\"x\": 8}",
+			"y":            true,
+		}
+		_, err := parser.verifyRow(raw)
+		assert.Error(t, err)
+
+		raw = map[string]interface{}{}
+		_, err = parser.verifyRow(raw)
+		assert.Error(t, err)
+	})
 }

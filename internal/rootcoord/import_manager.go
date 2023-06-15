@@ -205,6 +205,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			TaskId:       task.GetId(),
 			Files:        task.GetFiles(),
 			Infos:        task.GetInfos(),
+			DatabaseName: task.GetDatabaseName(),
 		}
 
 		// Get all busy dataNodes for reference.
@@ -461,7 +462,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					State: &datapb.ImportTaskState{
 						StateCode: commonpb.ImportState_ImportPending,
 					},
-					Infos: req.Options,
+					Infos:        req.Options,
+					DatabaseName: req.GetDbName(),
 				}
 
 				// Here no need to check error returned by setCollectionPartitionName(),
@@ -499,7 +501,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				State: &datapb.ImportTaskState{
 					StateCode: commonpb.ImportState_ImportPending,
 				},
-				Infos: req.Options,
+				Infos:        req.Options,
+				DatabaseName: req.GetDbName(),
 			}
 			// Here no need to check error returned by setCollectionPartitionName(),
 			// since here we always return task list to client no matter something missed.

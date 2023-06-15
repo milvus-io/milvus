@@ -124,6 +124,8 @@ type DataNode struct {
 
 	dispClient msgdispatcher.Client
 	factory    dependency.Factory
+
+	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -144,6 +146,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
 		flowgraphManager: newFlowgraphManager(),
 		clearSignal:      make(chan string, 100),
+
+		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node

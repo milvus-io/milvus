@@ -545,6 +545,7 @@ message ImportTask {
   int64 task_id = 6;                         // id of the task
   repeated string files = 7;                 // file paths to be imported
   repeated common.KeyValuePair infos = 8;    // extra information about the task, bucket, etc.
+  string database_name = 16;                 // Database name
 }
 
 message ImportTaskState {
@@ -571,6 +572,7 @@ message ImportTaskInfo {
   string partition_name = 13;                   // Partition name for the import task.
   repeated common.KeyValuePair infos = 14;      // extra information about the task, bucket, etc.
   int64 start_ts = 15;                          // Timestamp when the import task is sent to datanode to execute.
+  string database_name = 16;                    // Database name
 }
 
 message ImportTaskResponse {

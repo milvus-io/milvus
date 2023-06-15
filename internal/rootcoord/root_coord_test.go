@@ -1031,8 +1031,9 @@ func TestCore_Import(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withHealthyCode(),
 			withMeta(meta))
-		meta.GetCollectionIDByNameFunc = func(name string) (UniqueID, error) {
-			return 100, nil
+		coll := &model.Collection{Name: "a-good-name"}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll, nil
 		}
 		meta.GetCollectionVirtualChannelsFunc = func(colID int64) []string {
 			return []string{"ch-1", "ch-2"}

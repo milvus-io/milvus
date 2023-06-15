@@ -387,6 +387,7 @@ func (s *DataNodeServicesSuite) TestImport() {
 		collectionID: 100,
 		pkType:       schemapb.DataType_Int64,
 	}
+	s.node.reportImportRetryTimes = 1 // save test time cost from 440s to 180s
 	s.Run("test normal", func() {
 		content := []byte(`{
 		"rows":[
@@ -566,6 +567,42 @@ func (s *DataNodeServicesSuite) TestImport() {
 		stat, err = s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
 		s.Assert().False(merr.Ok(stat))
+	})
+
+	s.Run("test get partitions", func() {
+		s.node.rootCoord = &RootCoordFactory{
+			ShowPartitionsErr: true,
+		}
+
+		_, err := s.node.getPartitions(context.Background(), "", "")
+		s.Assert().Error(err)
+
+		s.node.rootCoord = &RootCoordFactory{
+			ShowPartitionsNotSuccess: true,
+		}
+
+		_, err = s.node.getPartitions(context.Background(), "", "")
+		s.Assert().Error(err)
+
+		s.node.rootCoord = &RootCoordFactory{
+			ShowPartitionsNames: []string{"a", "b"},
+			ShowPartitionsIDs:   []int64{1},
+		}
+
+		_, err = s.node.getPartitions(context.Background(), "", "")
+		s.Assert().Error(err)
+
+		s.node.rootCoord = &RootCoordFactory{
+			ShowPartitionsNames: []string{"a", "b"},
+			ShowPartitionsIDs:   []int64{1, 2},
+		}
+
+		partitions, err := s.node.getPartitions(context.Background(), "", "")
+		s.Assert().NoError(err)
+		s.Assert().Contains(partitions, "a")
+		s.Assert().Equal(int64(1), partitions["a"])
+		s.Assert().Contains(partitions, "b")
+		s.Assert().Equal(int64(2), partitions["b"])
 	})
 }
 

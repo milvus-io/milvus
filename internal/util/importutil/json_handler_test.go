@@ -19,6 +19,7 @@ package importutil
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -30,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type mockIDAllocator struct {
@@ -61,216 +61,61 @@ func newIDAllocator(ctx context.Context, t *testing.T, allocErr error) *allocato
 	return idAllocator
 }
 
-func Test_NewJSONRowConsumer(t *testing.T) {
-	// nil schema
-	consumer, err := NewJSONRowConsumer(nil, nil, 2, 16, nil)
-	assert.Error(t, err)
-	assert.Nil(t, consumer)
-
-	// wrong schema
-	schema := &schemapb.CollectionSchema{
-		Name:   "schema",
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "uid",
-				IsPrimaryKey: true,
-				AutoID:       false,
-				DataType:     schemapb.DataType_None,
-			},
-		},
-	}
-	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.Error(t, err)
-	assert.Nil(t, consumer)
-
-	// no primary key
-	schema.Fields[0].IsPrimaryKey = false
-	schema.Fields[0].DataType = schemapb.DataType_Int64
-	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.Error(t, err)
-	assert.Nil(t, consumer)
-
-	// primary key is autoid, but no IDAllocator
-	schema.Fields[0].IsPrimaryKey = true
-	schema.Fields[0].AutoID = true
-	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
-	assert.Error(t, err)
-	assert.Nil(t, consumer)
-
-	// success
-	consumer, err = NewJSONRowConsumer(sampleSchema(), nil, 2, 16, nil)
-	assert.NotNil(t, consumer)
+func Test_GetKeyValue(t *testing.T) {
+	fieldName := "dummy"
+	var obj1 interface{} = "aa"
+	val, err := getKeyValue(obj1, fieldName, true)
+	assert.Equal(t, val, "aa")
 	assert.NoError(t, err)
+
+	val, err = getKeyValue(obj1, fieldName, false)
+	assert.Empty(t, val)
+	assert.Error(t, err)
+
+	var obj2 interface{} = json.Number("10")
+	val, err = getKeyValue(obj2, fieldName, false)
+	assert.Equal(t, val, "10")
+	assert.NoError(t, err)
+
+	val, err = getKeyValue(obj2, fieldName, true)
+	assert.Empty(t, val)
+	assert.Error(t, err)
 }
 
-func Test_JSONRowConsumerFlush(t *testing.T) {
-	var callTime int32
-	var totalCount int
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shard int) error {
-		callTime++
-		field, ok := fields[101]
-		assert.True(t, ok)
-		assert.Greater(t, field.RowNum(), 0)
-		totalCount += field.RowNum()
-		return nil
-	}
-
-	schema := &schemapb.CollectionSchema{
-		Name:   "schema",
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "uid",
-				IsPrimaryKey: true,
-				AutoID:       false,
-				DataType:     schemapb.DataType_Int64,
-			},
-		},
-	}
-
-	var shardNum int32 = 4
-	var blockSize int64 = 1
-	consumer, err := NewJSONRowConsumer(schema, nil, shardNum, blockSize, flushFunc)
-	assert.NotNil(t, consumer)
-	assert.NoError(t, err)
-
-	// force flush
-	rowCountEachShard := 100
-	for i := 0; i < int(shardNum); i++ {
-		pkFieldData := consumer.segmentsData[i][101].(*storage.Int64FieldData)
-		for j := 0; j < rowCountEachShard; j++ {
-			pkFieldData.Data = append(pkFieldData.Data, int64(j))
-		}
-	}
-
-	err = consumer.flush(true)
-	assert.NoError(t, err)
-	assert.Equal(t, shardNum, callTime)
-	assert.Equal(t, rowCountEachShard*int(shardNum), totalCount)
-	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
-
-	// execeed block size trigger flush
-	callTime = 0
-	totalCount = 0
-	for i := 0; i < int(shardNum); i++ {
-		consumer.segmentsData[i] = initSegmentData(schema)
-		if i%2 == 0 {
-			continue
-		}
-		pkFieldData := consumer.segmentsData[i][101].(*storage.Int64FieldData)
-		for j := 0; j < rowCountEachShard; j++ {
-			pkFieldData.Data = append(pkFieldData.Data, int64(j))
-		}
-	}
-	err = consumer.flush(true)
-	assert.NoError(t, err)
-	assert.Equal(t, shardNum/2, callTime)
-	assert.Equal(t, rowCountEachShard*int(shardNum)/2, totalCount)
-	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
-}
-
-func Test_JSONRowConsumerHandle(t *testing.T) {
+func Test_JSONRowConsumerNew(t *testing.T) {
 	ctx := context.Background()
-	idAllocator := newIDAllocator(ctx, t, errors.New("error"))
 
-	var callTime int32
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shard int) error {
-		callTime++
-		return errors.New("dummy error")
-	}
-
-	schema := &schemapb.CollectionSchema{
-		Name:   "schema",
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "uid",
-				IsPrimaryKey: true,
-				AutoID:       true,
-				DataType:     schemapb.DataType_Int64,
-			},
-		},
-	}
-
-	var consumer *JSONRowConsumer
-	err := consumer.Handle(nil)
-	assert.Error(t, err)
-
-	t.Run("handle int64 pk", func(t *testing.T) {
-		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)
-		assert.NotNil(t, consumer)
-		assert.NoError(t, err)
-
-		pkFieldData := consumer.segmentsData[0][101].(*storage.Int64FieldData)
-		for i := 0; i < 10; i++ {
-			pkFieldData.Data = append(pkFieldData.Data, int64(i))
-		}
-
-		// nil input will trigger flush
-		err = consumer.Handle(nil)
+	t.Run("nil schema", func(t *testing.T) {
+		consumer, err := NewJSONRowConsumer(ctx, nil, nil, 16, nil)
 		assert.Error(t, err)
-		assert.Equal(t, int32(1), callTime)
-
-		// optional flush
-		callTime = 0
-		rowCount := 100
-		pkFieldData = consumer.segmentsData[0][101].(*storage.Int64FieldData)
-		for j := 0; j < rowCount; j++ {
-			pkFieldData.Data = append(pkFieldData.Data, int64(j))
-		}
-
-		input := make([]map[storage.FieldID]interface{}, rowCount)
-		for j := 0; j < rowCount; j++ {
-			input[j] = make(map[int64]interface{})
-			input[j][101] = int64(j)
-		}
-		err = consumer.Handle(input)
-		assert.Error(t, err)
-		assert.Equal(t, int32(1), callTime)
-
-		// failed to auto-generate pk
-		consumer.blockSize = 1024 * 1024
-		err = consumer.Handle(input)
-		assert.Error(t, err)
-
-		// hash int64 pk
-		consumer.rowIDAllocator = newIDAllocator(ctx, t, nil)
-		err = consumer.Handle(input)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(rowCount), consumer.rowCounter)
-		assert.Equal(t, 2, len(consumer.autoIDRange))
-		assert.Equal(t, int64(1), consumer.autoIDRange[0])
-		assert.Equal(t, int64(1+rowCount), consumer.autoIDRange[1])
-
-		// pk is auto-generated but IDAllocator is nil
-		consumer.rowIDAllocator = nil
-		err = consumer.Handle(input)
-		assert.Error(t, err)
-
-		// pk is not auto-generated, pk is not numeric value
-		input = make([]map[storage.FieldID]interface{}, 1)
-		input[0] = make(map[int64]interface{})
-		input[0][101] = "1"
-
-		schema.Fields[0].AutoID = false
-		consumer, err = NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)
-		assert.NotNil(t, consumer)
-		assert.NoError(t, err)
-		err = consumer.Handle(input)
-		assert.Error(t, err)
-
-		// pk is numeric value, but cannot parsed
-		input[0][101] = json.Number("A1")
-		err = consumer.Handle(input)
-		assert.Error(t, err)
+		assert.Nil(t, consumer)
 	})
 
-	t.Run("handle varchar pk", func(t *testing.T) {
-		schema = &schemapb.CollectionSchema{
+	t.Run("wrong schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:   "schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      101,
+					Name:         "uid",
+					IsPrimaryKey: true,
+					AutoID:       false,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+		collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+		assert.NoError(t, err)
+
+		schema.Fields[0].DataType = schemapb.DataType_None
+		consumer, err := NewJSONRowConsumer(ctx, collectionInfo, nil, 16, nil)
+		assert.Error(t, err)
+		assert.Nil(t, consumer)
+	})
+
+	t.Run("primary key is autoid but no IDAllocator", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
 			Name:   "schema",
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
@@ -279,67 +124,543 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 					Name:         "uid",
 					IsPrimaryKey: true,
 					AutoID:       true,
-					DataType:     schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.MaxLengthKey, Value: "1024"},
-					},
+					DataType:     schemapb.DataType_Int64,
 				},
 			},
 		}
+		collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+		assert.NoError(t, err)
+
+		consumer, err := NewJSONRowConsumer(ctx, collectionInfo, nil, 16, nil)
+		assert.Error(t, err)
+		assert.Nil(t, consumer)
+	})
+
+	t.Run("succeed", func(t *testing.T) {
+		collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+		assert.NoError(t, err)
+		consumer, err := NewJSONRowConsumer(ctx, collectionInfo, nil, 16, nil)
+		assert.NotNil(t, consumer)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_JSONRowConsumerHandleIntPK(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil input", func(t *testing.T) {
+		var consumer *JSONRowConsumer
+		err := consumer.Handle(nil)
+		assert.Error(t, err)
+	})
+
+	schema := &schemapb.CollectionSchema{
+		Name: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "FieldInt64",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "FieldVarchar",
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  103,
+				Name:     "FieldFloat",
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+
+	createConsumeFunc := func(shardNum int32, partitionIDs []int64, flushFunc ImportFlushFunc) *JSONRowConsumer {
+		collectionInfo, err := NewCollectionInfo(schema, shardNum, partitionIDs)
+		assert.NoError(t, err)
 
 		idAllocator := newIDAllocator(ctx, t, nil)
-		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
+		consumer, err := NewJSONRowConsumer(ctx, collectionInfo, idAllocator, 1, flushFunc)
 		assert.NotNil(t, consumer)
 		assert.NoError(t, err)
 
-		rowCount := 100
-		input := make([]map[storage.FieldID]interface{}, rowCount)
-		for j := 0; j < rowCount; j++ {
-			input[j] = make(map[int64]interface{})
-			input[j][101] = "abc"
+		return consumer
+	}
+
+	t.Run("auto pk no partition key", func(t *testing.T) {
+		flushErrFunc := func(fields BlockData, shard int, partID int64) error {
+			return errors.New("dummy error")
 		}
 
-		// varchar pk cannot be auto-generated
+		// rows to input
+		intputRowCount := 100
+		input := make([]map[storage.FieldID]interface{}, intputRowCount)
+		for j := 0; j < intputRowCount; j++ {
+			input[j] = map[int64]interface{}{
+				102: "string",
+				103: json.Number("6.18"),
+			}
+		}
+
+		shardNum := int32(2)
+		partitionID := int64(1)
+		consumer := createConsumeFunc(shardNum, []int64{partitionID}, flushErrFunc)
+		consumer.rowIDAllocator = newIDAllocator(ctx, t, errors.New("error"))
+
+		waitFlushRowCount := 10
+		fieldsData := createFieldsData(schema, waitFlushRowCount)
+		consumer.shardsData = createShardsData(schema, fieldsData, shardNum, []int64{partitionID})
+
+		// nil input will trigger force flush, flushErrFunc returns error
+		err := consumer.Handle(nil)
+		assert.Error(t, err)
+
+		// optional flush, flushErrFunc returns error
 		err = consumer.Handle(input)
 		assert.Error(t, err)
 
-		// hash varchar pk
-		schema.Fields[0].AutoID = false
-		consumer, err = NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
-		assert.NotNil(t, consumer)
+		// reset flushFunc
+		var callTime int32
+		var flushedRowCount int
+		consumer.callFlushFunc = func(fields BlockData, shard int, partID int64) error {
+			callTime++
+			assert.Less(t, int32(shard), shardNum)
+			assert.Equal(t, partitionID, partID)
+			assert.Greater(t, len(fields), 0)
+			for _, v := range fields {
+				assert.Greater(t, v.RowNum(), 0)
+			}
+			flushedRowCount += fields[102].RowNum()
+			return nil
+		}
+
+		// optional flush succeed, each shard has 10 rows, idErrAllocator returns error
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+		assert.Equal(t, waitFlushRowCount*int(shardNum), flushedRowCount)
+		assert.Equal(t, shardNum, callTime)
+
+		// optional flush again, large blockSize, nothing flushed, idAllocator returns error
+		callTime = int32(0)
+		flushedRowCount = 0
+		consumer.shardsData = createShardsData(schema, fieldsData, shardNum, []int64{partitionID})
+		consumer.rowIDAllocator = nil
+		consumer.blockSize = 8 * 1024 * 1024
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+		assert.Equal(t, 0, flushedRowCount)
+		assert.Equal(t, int32(0), callTime)
+
+		// idAllocator is ok, consume 100 rows, the previous shardsData(10 rows per shard) is flushed
+		callTime = int32(0)
+		flushedRowCount = 0
+		consumer.blockSize = 1
+		consumer.rowIDAllocator = newIDAllocator(ctx, t, nil)
+		err = consumer.Handle(input)
 		assert.NoError(t, err)
+		assert.Equal(t, waitFlushRowCount*int(shardNum), flushedRowCount)
+		assert.Equal(t, shardNum, callTime)
+		assert.Equal(t, int64(intputRowCount), consumer.RowCount())
+		assert.Equal(t, 2, len(consumer.IDRange()))
+		assert.Equal(t, int64(1), consumer.IDRange()[0])
+		assert.Equal(t, int64(1+intputRowCount), consumer.IDRange()[1])
+
+		// call handle again, the 100 rows are flushed
+		callTime = int32(0)
+		flushedRowCount = 0
+		err = consumer.Handle(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, intputRowCount, flushedRowCount)
+		assert.Equal(t, shardNum, callTime)
+	})
+
+	schema.Fields[0].AutoID = false
+	t.Run("manual pk no partition key", func(t *testing.T) {
+		shardNum := int32(1)
+		partitionID := int64(100)
+
+		var callTime int32
+		var flushedRowCount int
+		flushFunc := func(fields BlockData, shard int, partID int64) error {
+			callTime++
+			assert.Less(t, int32(shard), shardNum)
+			assert.Equal(t, partitionID, partID)
+			assert.Greater(t, len(fields), 0)
+			flushedRowCount += fields[102].RowNum()
+			return nil
+		}
+
+		consumer := createConsumeFunc(shardNum, []int64{partitionID}, flushFunc)
+
+		// failed to parse primary key
+		input := make([]map[storage.FieldID]interface{}, 1)
+		input[0] = map[int64]interface{}{
+			101: int64(99),
+			102: "string",
+			103: 11.11,
+		}
+
+		err := consumer.Handle(input)
+		assert.Error(t, err)
+
+		// failed to convert pk to int value
+		input[0] = map[int64]interface{}{
+			101: json.Number("a"),
+			102: "string",
+			103: 11.11,
+		}
+
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+
+		// failed to hash to partition
+		input[0] = map[int64]interface{}{
+			101: json.Number("99"),
+			102: "string",
+			103: json.Number("4.56"),
+		}
+		consumer.collectionInfo.PartitionIDs = nil
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+		consumer.collectionInfo.PartitionIDs = []int64{partitionID}
+
+		// failed to convert value
+		input[0] = map[int64]interface{}{
+			101: json.Number("99"),
+			102: "string",
+			103: json.Number("abc.56"),
+		}
+
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+		consumer.shardsData = createShardsData(schema, nil, shardNum, []int64{partitionID}) // in-memory data is dirty, reset
+
+		// succeed, consume 1 row
+		input[0] = map[int64]interface{}{
+			101: json.Number("99"),
+			102: "string",
+			103: json.Number("4.56"),
+		}
 
 		err = consumer.Handle(input)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(rowCount), consumer.RowCount())
-		assert.Equal(t, 0, len(consumer.autoIDRange))
+		assert.Equal(t, int64(1), consumer.RowCount())
+		assert.Equal(t, 0, len(consumer.IDRange()))
 
-		// pk is not string value
-		input = make([]map[storage.FieldID]interface{}, 1)
-		input[0] = make(map[int64]interface{})
-		input[0][101] = false
+		// call handle again, the 1 row is flushed
+		callTime = int32(0)
+		flushedRowCount = 0
+		err = consumer.Handle(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, flushedRowCount)
+		assert.Equal(t, shardNum, callTime)
+	})
+
+	schema.Fields[1].IsPartitionKey = true
+	t.Run("manual pk with partition key", func(t *testing.T) {
+		// 10 partitions
+		partitionIDs := make([]int64, 0)
+		for j := 0; j < 10; j++ {
+			partitionIDs = append(partitionIDs, int64(j))
+		}
+
+		shardNum := int32(2)
+		var flushedRowCount int
+		flushFunc := func(fields BlockData, shard int, partID int64) error {
+			assert.Less(t, int32(shard), shardNum)
+			assert.Contains(t, partitionIDs, partID)
+			assert.Greater(t, len(fields), 0)
+			flushedRowCount += fields[102].RowNum()
+			return nil
+		}
+
+		consumer := createConsumeFunc(shardNum, partitionIDs, flushFunc)
+
+		// rows to input
+		intputRowCount := 100
+		input := make([]map[storage.FieldID]interface{}, intputRowCount)
+		for j := 0; j < intputRowCount; j++ {
+			input[j] = map[int64]interface{}{
+				101: json.Number(strconv.Itoa(j)),
+				102: "partitionKey_" + strconv.Itoa(j),
+				103: json.Number("6.18"),
+			}
+		}
+
+		// 100 rows are consumed to different partitions
+		err := consumer.Handle(input)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(intputRowCount), consumer.RowCount())
+
+		// call handle again, 100 rows are flushed
+		flushedRowCount = 0
+		err = consumer.Handle(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, intputRowCount, flushedRowCount)
+	})
+}
+
+func Test_JSONRowConsumerHandleVarcharPK(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "FieldVarchar",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  102,
+				Name:     "FieldInt64",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  103,
+				Name:     "FieldFloat",
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+
+	createConsumeFunc := func(shardNum int32, partitionIDs []int64, flushFunc ImportFlushFunc) *JSONRowConsumer {
+		collectionInfo, err := NewCollectionInfo(schema, shardNum, partitionIDs)
+		assert.NoError(t, err)
+
+		idAllocator := newIDAllocator(ctx, t, nil)
+		consumer, err := NewJSONRowConsumer(ctx, collectionInfo, idAllocator, 1, flushFunc)
+		assert.NotNil(t, consumer)
+		assert.NoError(t, err)
+
+		return consumer
+	}
+
+	t.Run("no partition key", func(t *testing.T) {
+		shardNum := int32(2)
+		partitionID := int64(1)
+		var callTime int32
+		var flushedRowCount int
+		flushFunc := func(fields BlockData, shard int, partID int64) error {
+			callTime++
+			assert.Less(t, int32(shard), shardNum)
+			assert.Equal(t, partitionID, partID)
+			assert.Greater(t, len(fields), 0)
+			for _, v := range fields {
+				assert.Greater(t, v.RowNum(), 0)
+			}
+			flushedRowCount += fields[102].RowNum()
+			return nil
+		}
+
+		consumer := createConsumeFunc(shardNum, []int64{partitionID}, flushFunc)
+		consumer.shardsData = createShardsData(schema, nil, shardNum, []int64{partitionID})
+
+		// string type primary key cannot be auto-generated
+		input := make([]map[storage.FieldID]interface{}, 1)
+		input[0] = map[int64]interface{}{
+			101: true,
+			102: json.Number("1"),
+			103: json.Number("1.56"),
+		}
+		consumer.collectionInfo.PrimaryKey.AutoID = true
+		err := consumer.Handle(input)
+		assert.Error(t, err)
+		consumer.collectionInfo.PrimaryKey.AutoID = false
+
+		// failed to parse primary key
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+
+		// failed to hash to partition
+		input[0] = map[int64]interface{}{
+			101: "primaryKey_0",
+			102: json.Number("1"),
+			103: json.Number("1.56"),
+		}
+		consumer.collectionInfo.PartitionIDs = nil
+		err = consumer.Handle(input)
+		assert.Error(t, err)
+		consumer.collectionInfo.PartitionIDs = []int64{partitionID}
+
+		// rows to input
+		intputRowCount := 100
+		input = make([]map[storage.FieldID]interface{}, intputRowCount)
+		for j := 0; j < intputRowCount; j++ {
+			input[j] = map[int64]interface{}{
+				101: "primaryKey_" + strconv.Itoa(j),
+				102: json.Number(strconv.Itoa(j)),
+				103: json.Number("0.618"),
+			}
+		}
+
+		// rows are consumed
+		err = consumer.Handle(input)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(intputRowCount), consumer.RowCount())
+		assert.Equal(t, 0, len(consumer.IDRange()))
+
+		// call handle again, 100 rows are flushed
+		err = consumer.Handle(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, intputRowCount, flushedRowCount)
+		assert.Equal(t, shardNum, callTime)
+	})
+
+	schema.Fields[1].IsPartitionKey = true
+	t.Run("has partition key", func(t *testing.T) {
+		// 10 partitions
+		partitionIDs := make([]int64, 0)
+		for j := 0; j < 10; j++ {
+			partitionIDs = append(partitionIDs, int64(j))
+		}
+
+		shardNum := int32(2)
+		var flushedRowCount int
+		flushFunc := func(fields BlockData, shard int, partID int64) error {
+			assert.Less(t, int32(shard), shardNum)
+			assert.Contains(t, partitionIDs, partID)
+			assert.Greater(t, len(fields), 0)
+			flushedRowCount += fields[102].RowNum()
+			return nil
+		}
+
+		consumer := createConsumeFunc(shardNum, partitionIDs, flushFunc)
+
+		// rows to input
+		intputRowCount := 100
+		input := make([]map[storage.FieldID]interface{}, intputRowCount)
+		for j := 0; j < intputRowCount; j++ {
+			input[j] = map[int64]interface{}{
+				101: "primaryKey_" + strconv.Itoa(j),
+				102: json.Number(strconv.Itoa(j)),
+				103: json.Number("0.618"),
+			}
+		}
+
+		// 100 rows are consumed to different partitions
+		err := consumer.Handle(input)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(intputRowCount), consumer.RowCount())
+
+		// call handle again, 100 rows are flushed
+		flushedRowCount = 0
+		err = consumer.Handle(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, intputRowCount, flushedRowCount)
+
+		// string type primary key cannot be auto-generated
+		consumer.validators[101].autoID = true
 		err = consumer.Handle(input)
 		assert.Error(t, err)
 	})
 }
 
-func Test_GetPrimaryKey(t *testing.T) {
-	fieldName := "dummy"
-	var obj1 interface{} = "aa"
-	val, err := getPrimaryKey(obj1, fieldName, true)
-	assert.Equal(t, val, "aa")
+func Test_JSONRowHashToPartition(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "ID",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "FieldVarchar",
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  102,
+				Name:     "FieldInt64",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	partitionID := int64(1)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{partitionID})
+	assert.NoError(t, err)
+	consumer, err := NewJSONRowConsumer(ctx, collectionInfo, nil, 16, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer)
+
+	input := make(map[int64]interface{})
+	input[100] = int64(1)
+	input[101] = "abc"
+	input[102] = int64(100)
+
+	t.Run("no partition key", func(t *testing.T) {
+		partID, err := consumer.hashToPartition(input, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, partitionID, partID)
+	})
+
+	t.Run("partition list is empty", func(t *testing.T) {
+		collectionInfo.PartitionIDs = []int64{}
+		partID, err := consumer.hashToPartition(input, 0)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), partID)
+		collectionInfo.PartitionIDs = []int64{partitionID}
+	})
+
+	schema.Fields[1].IsPartitionKey = true
+	err = collectionInfo.resetSchema(schema)
+	assert.NoError(t, err)
+	collectionInfo.PartitionIDs = []int64{1, 2, 3}
+
+	t.Run("varchar partition key", func(t *testing.T) {
+		input := make(map[int64]interface{})
+		input[100] = int64(1)
+		input[101] = true
+		input[102] = int64(100)
+
+		// getKeyValue failed
+		partID, err := consumer.hashToPartition(input, 0)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), partID)
+
+		// succeed
+		input[101] = "abc"
+		partID, err = consumer.hashToPartition(input, 0)
+		assert.NoError(t, err)
+		assert.Contains(t, collectionInfo.PartitionIDs, partID)
+	})
+
+	schema.Fields[1].IsPartitionKey = false
+	schema.Fields[2].IsPartitionKey = true
+	err = collectionInfo.resetSchema(schema)
 	assert.NoError(t, err)
 
-	val, err = getPrimaryKey(obj1, fieldName, false)
-	assert.Empty(t, val)
-	assert.Error(t, err)
+	t.Run("int64 partition key", func(t *testing.T) {
+		input := make(map[int64]interface{})
+		input[100] = int64(1)
+		input[101] = "abc"
+		input[102] = 100
 
-	var obj2 interface{} = json.Number("10")
-	val, err = getPrimaryKey(obj2, fieldName, false)
-	assert.Equal(t, val, "10")
-	assert.NoError(t, err)
+		// getKeyValue failed
+		partID, err := consumer.hashToPartition(input, 0)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), partID)
 
-	val, err = getPrimaryKey(obj2, fieldName, true)
-	assert.Empty(t, val)
-	assert.Error(t, err)
+		// parse int failed
+		input[102] = json.Number("d")
+		partID, err = consumer.hashToPartition(input, 0)
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), partID)
+
+		// succeed
+		input[102] = json.Number("100")
+		partID, err = consumer.hashToPartition(input, 0)
+		assert.NoError(t, err)
+		assert.Contains(t, collectionInfo.PartitionIDs, partID)
+	})
 }
