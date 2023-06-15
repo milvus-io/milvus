@@ -260,7 +260,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
-		log.Warn("Failed to get collection id.")
+		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 	t.CollectionID = collID
@@ -268,7 +268,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, collectionName)
 	if err != nil {
-		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID))
+		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
@@ -485,7 +485,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode query result error")
+		log.Warn("QueryNode query result error", zap.Any("errorCode", result.GetStatus().GetErrorCode()), zap.String("reason", result.GetStatus().GetReason()))
 		return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 
