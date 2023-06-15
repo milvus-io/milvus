@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // DataCoord implements grpc server of DataCoord server
@@ -46,6 +47,7 @@ func NewDataCoord(ctx context.Context, factory dependency.Factory) (*DataCoord, 
 // Run starts service
 func (s *DataCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
+		log.Error("DataCoord starts error", zap.Error(err))
 		return err
 	}
 	log.Debug("DataCoord successfully started")

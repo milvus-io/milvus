@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // IndexNode implements IndexNode grpc server
@@ -48,6 +49,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 // Run starts service
 func (n *IndexNode) Run() error {
 	if err := n.svr.Run(); err != nil {
+		log.Error("IndexNode starts error", zap.Error(err))
 		return err
 	}
 	log.Debug("IndexNode successfully started")
