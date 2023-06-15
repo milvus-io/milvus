@@ -24,38 +24,40 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_NewBinlogParser(t *testing.T) {
+func Test_BinlogParserNew(t *testing.T) {
 	ctx := context.Background()
 
 	// nil schema
-	parser, err := NewBinlogParser(ctx, nil, 2, 1024, nil, nil, nil, 0, math.MaxUint64)
+	parser, err := NewBinlogParser(ctx, nil, 1024, nil, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
 	// nil chunkmanager
-	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, nil, nil, nil, 0, math.MaxUint64)
+	parser, err = NewBinlogParser(ctx, collectionInfo, 1024, nil, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
 	// nil flushfunc
-	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, nil, nil, 0, math.MaxUint64)
+	parser, err = NewBinlogParser(ctx, collectionInfo, 1024, &MockChunkManager{}, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
 	// succeed
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
-	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
+	parser, err = NewBinlogParser(ctx, collectionInfo, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// tsStartPoint larger than tsEndPoint
-	parser, err = NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 2, 1)
+	parser, err = NewBinlogParser(ctx, collectionInfo, 1024, &MockChunkManager{}, flushFunc, nil, 2, 1)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 }
@@ -63,7 +65,7 @@ func Test_NewBinlogParser(t *testing.T) {
 func Test_BinlogParserConstructHolders(t *testing.T) {
 	ctx := context.Background()
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
@@ -127,12 +129,15 @@ func Test_BinlogParserConstructHolders(t *testing.T) {
 		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
 	}
 
-	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
+	parser, err := NewBinlogParser(ctx, collectionInfo, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	holders, err := parser.constructSegmentHolders(insertPath, deltaPath)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, 2, len(holders))
 
 	// verify the first segment
@@ -178,7 +183,7 @@ func Test_BinlogParserConstructHolders(t *testing.T) {
 func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 	ctx := context.Background()
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
@@ -187,9 +192,12 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 		listResult: make(map[string][]string),
 	}
 
-	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
+	parser, err := NewBinlogParser(ctx, collectionInfo, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	insertPath := "insertPath"
 	deltaPath := "deltaPath"
@@ -229,18 +237,21 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 func Test_BinlogParserParseFilesFailed(t *testing.T) {
 	ctx := context.Background()
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
-	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
+	parser, err := NewBinlogParser(ctx, collectionInfo, 1024, &MockChunkManager{}, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = parser.parseSegmentFiles(nil)
 	assert.NotNil(t, err)
 
-	parser.collectionSchema = nil
+	parser.collectionInfo = nil
 	err = parser.parseSegmentFiles(&SegmentFilesHolder{})
 	assert.NotNil(t, err)
 }
@@ -248,7 +259,7 @@ func Test_BinlogParserParseFilesFailed(t *testing.T) {
 func Test_BinlogParserParse(t *testing.T) {
 	ctx := context.Background()
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
@@ -267,13 +278,12 @@ func Test_BinlogParserParse(t *testing.T) {
 			},
 		},
 	}
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
 
-	updateProgress := func(percent int64) {
-		assert.Greater(t, percent, int64(0))
-	}
-	parser, err := NewBinlogParser(ctx, schema, 2, 1024, chunkManager, flushFunc, updateProgress, 0, math.MaxUint64)
+	parser, err := NewBinlogParser(ctx, collectionInfo, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// zero paths
 	err = parser.Parse(nil)
@@ -284,12 +294,12 @@ func Test_BinlogParserParse(t *testing.T) {
 		"insertPath",
 	}
 	err = parser.Parse(paths)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// two empty paths
 	paths = append(paths, "deltaPath")
 	err = parser.Parse(paths)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// wrong path
 	chunkManager.listResult = make(map[string][]string)
@@ -301,18 +311,69 @@ func Test_BinlogParserParse(t *testing.T) {
 
 	// file not found
 	chunkManager.listResult["insertPath"] = []string{
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735811",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735811",
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735811",
+		"123/0/a",
+		"123/1/a",
+		"123/101/a",
 	}
 	err = parser.Parse(paths)
 	assert.NotNil(t, err)
+
+	// progress
+	rowCount := 100
+	fieldsData := createFieldsData(sampleSchema(), rowCount)
+	chunkManager.listResult["deltaPath"] = []string{}
+	chunkManager.listResult["insertPath"] = []string{
+		"123/0/a",
+		"123/1/a",
+		"123/102/a",
+		"123/103/a",
+		"123/104/a",
+		"123/105/a",
+		"123/106/a",
+		"123/107/a",
+		"123/108/a",
+		"123/109/a",
+		"123/110/a",
+		"123/111/a",
+		"123/112/a",
+	}
+	chunkManager.readBuf = map[string][]byte{
+		"123/0/a":   createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[106].([]int64)),
+		"123/1/a":   createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[106].([]int64)),
+		"123/102/a": createBinlogBuf(t, schemapb.DataType_Bool, fieldsData[102].([]bool)),
+		"123/103/a": createBinlogBuf(t, schemapb.DataType_Int8, fieldsData[103].([]int8)),
+		"123/104/a": createBinlogBuf(t, schemapb.DataType_Int16, fieldsData[104].([]int16)),
+		"123/105/a": createBinlogBuf(t, schemapb.DataType_Int32, fieldsData[105].([]int32)),
+		"123/106/a": createBinlogBuf(t, schemapb.DataType_Int64, fieldsData[106].([]int64)), // this is primary key
+		"123/107/a": createBinlogBuf(t, schemapb.DataType_Float, fieldsData[107].([]float32)),
+		"123/108/a": createBinlogBuf(t, schemapb.DataType_Double, fieldsData[108].([]float64)),
+		"123/109/a": createBinlogBuf(t, schemapb.DataType_VarChar, fieldsData[109].([]string)),
+		"123/110/a": createBinlogBuf(t, schemapb.DataType_BinaryVector, fieldsData[110].([][]byte)),
+		"123/111/a": createBinlogBuf(t, schemapb.DataType_FloatVector, fieldsData[111].([][]float32)),
+		"123/112/a": createBinlogBuf(t, schemapb.DataType_JSON, fieldsData[112].([][]byte)),
+	}
+
+	callTime := 0
+	updateProgress := func(percent int64) {
+		assert.GreaterOrEqual(t, percent, int64(0))
+		assert.LessOrEqual(t, percent, int64(100))
+		callTime++
+	}
+	collectionInfo, err = NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+	parser, err = NewBinlogParser(ctx, collectionInfo, 1024, chunkManager, flushFunc, updateProgress, 0, math.MaxUint64)
+	assert.NotNil(t, parser)
+	assert.NoError(t, err)
+
+	err = parser.Parse(paths)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callTime)
 }
 
 func Test_BinlogParserSkipFlagFile(t *testing.T) {
 	ctx := context.Background()
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
@@ -321,9 +382,12 @@ func Test_BinlogParserSkipFlagFile(t *testing.T) {
 		listResult: make(map[string][]string),
 	}
 
-	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+
+	parser, err := NewBinlogParser(ctx, collectionInfo, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
 	assert.NotNil(t, parser)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	insertPath := "insertPath"
 	deltaPath := "deltaPath"

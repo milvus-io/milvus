@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestValidateOptions(t *testing.T) {
+func Test_ValidateOptions(t *testing.T) {
 
 	assert.NoError(t, ValidateOptions([]*commonpb.KeyValuePair{}))
 	assert.NoError(t, ValidateOptions([]*commonpb.KeyValuePair{
@@ -51,9 +51,13 @@ func TestValidateOptions(t *testing.T) {
 		{Key: "start_ts", Value: "3.14"},
 		{Key: "end_ts", Value: "1666007457"},
 	}))
+	assert.Error(t, ValidateOptions([]*commonpb.KeyValuePair{
+		{Key: "start_ts", Value: "1666007457"},
+		{Key: "end_ts", Value: "3.14"},
+	}))
 }
 
-func TestParseTSFromOptions(t *testing.T) {
+func Test_ParseTSFromOptions(t *testing.T) {
 	var tsStart uint64
 	var tsEnd uint64
 	var err error
@@ -88,7 +92,7 @@ func TestParseTSFromOptions(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestIsBackup(t *testing.T) {
+func Test_IsBackup(t *testing.T) {
 	isBackup := IsBackup([]*commonpb.KeyValuePair{
 		{Key: "backup", Value: "true"},
 	})
