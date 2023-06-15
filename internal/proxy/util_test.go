@@ -1765,3 +1765,15 @@ func Test_TopKLimit(t *testing.T) {
 	assert.Error(t, validateTopKLimit(16385))
 	assert.Error(t, validateTopKLimit(0))
 }
+
+func Test_GetPartitionProgressFailed(t *testing.T) {
+	qc := types.NewMockQueryCoord(t)
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Unexpected error",
+		},
+	}, nil)
+	_, _, err := getPartitionProgress(context.TODO(), qc, &commonpb.MsgBase{}, []string{}, "", 1)
+	assert.Error(t, err)
+}
