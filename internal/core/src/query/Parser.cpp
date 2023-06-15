@@ -101,6 +101,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     switch (data_type) {
         case DataType::BOOL:
             return ParseRangeNodeImpl<bool>(field_name, body);
+
         case DataType::INT8:
             return ParseRangeNodeImpl<int8_t>(field_name, body);
         case DataType::INT16:
@@ -109,6 +110,7 @@ Parser::ParseRangeNode(const Json& out_body) {
             return ParseRangeNodeImpl<int32_t>(field_name, body);
         case DataType::INT64:
             return ParseRangeNodeImpl<int64_t>(field_name, body);
+
         case DataType::FLOAT:
             return ParseRangeNodeImpl<float>(field_name, body);
         case DataType::DOUBLE:
@@ -323,19 +325,32 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
 
         if constexpr (std::is_same_v<T, bool>) {
             Assert(item.value().is_boolean());
+            return std::make_unique<UnaryRangeExprImpl<T>>(
+                ColumnInfo(schema.get_field_id(field_name),
+                           schema[field_name].get_data_type()),
+                mapping_.at(op_name),
+                item.value(),
+                proto::plan::GenericValue::ValCase::kBoolVal);
         } else if constexpr (std::is_integral_v<T>) {
             Assert(item.value().is_number_integer());
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
+            return std::make_unique<UnaryRangeExprImpl<int64_t>>(
+                ColumnInfo(schema.get_field_id(field_name),
+                           schema[field_name].get_data_type()),
+                mapping_.at(op_name),
+                item.value(),
+                proto::plan::GenericValue::ValCase::kInt64Val);
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(item.value().is_number());
+            return std::make_unique<UnaryRangeExprImpl<T>>(
+                ColumnInfo(schema.get_field_id(field_name),
+                           schema[field_name].get_data_type()),
+                mapping_.at(op_name),
+                item.value(),
+                proto::plan::GenericValue::ValCase::kFloatVal);
         } else {
             static_assert(always_false<T>, "unsupported type");
         }
-        return std::make_unique<UnaryRangeExprImpl<T>>(
-            ColumnInfo(schema.get_field_id(field_name),
-                       schema[field_name].get_data_type()),
-            mapping_.at(op_name),
-            item.value(),
-            proto::plan::GenericValue::ValCase::VAL_NOT_SET);
     } else if (body.size() == 2) {
         bool has_lower_value = false;
         bool has_upper_value = false;

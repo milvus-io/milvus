@@ -173,18 +173,15 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
         case DataType::BOOL:
             json_opt_ = UnaryRangeExtract<bool>(expr);
             return;
+
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
         case DataType::INT8:
-            json_opt_ = UnaryRangeExtract<int8_t>(expr);
-            return;
         case DataType::INT16:
-            json_opt_ = UnaryRangeExtract<int16_t>(expr);
-            return;
         case DataType::INT32:
-            json_opt_ = UnaryRangeExtract<int32_t>(expr);
-            return;
         case DataType::INT64:
             json_opt_ = UnaryRangeExtract<int64_t>(expr);
             return;
+
         case DataType::DOUBLE:
             json_opt_ = UnaryRangeExtract<double>(expr);
             return;

@@ -55,8 +55,19 @@ Match<std::string_view>(const std::string_view& str,
 
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
 inline bool
+gt_ub(int64_t t) {
+    return t > std::numeric_limits<T>::max();
+}
+
+template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+inline bool
+lt_lb(int64_t t) {
+    return t < std::numeric_limits<T>::min();
+}
+
+template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+inline bool
 out_of_range(int64_t t) {
-    return t > std::numeric_limits<T>::max() ||
-           t < std::numeric_limits<T>::min();
+    return gt_ub<T>(t) || lt_lb<T>(t);
 }
 }  // namespace milvus::query

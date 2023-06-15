@@ -279,22 +279,16 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
                 return ExtractUnaryRangeExprImpl<bool>(
                     field_id, data_type, expr_pb);
             }
-            case DataType::INT8: {
-                return ExtractUnaryRangeExprImpl<int8_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractUnaryRangeExprImpl<int16_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractUnaryRangeExprImpl<int32_t>(
-                    field_id, data_type, expr_pb);
-            }
+
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractUnaryRangeExprImpl<int64_t>(
                     field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractUnaryRangeExprImpl<float>(
                     field_id, data_type, expr_pb);
