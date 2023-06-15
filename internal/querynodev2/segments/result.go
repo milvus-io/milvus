@@ -22,6 +22,7 @@ import (
 	"math"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -65,6 +66,14 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		log.Warn("shard leader encode search result errors", zap.Error(err))
 		return nil, err
 	}
+
+	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
+		if result.CostAggregation == nil {
+			return nil, false
+		}
+		return result.CostAggregation, true
+	})
+	searchResults.CostAggregation = mergeRequestCost(requestCosts)
 
 	return searchResults, nil
 }
@@ -273,6 +282,14 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	if skipDupCnt > 0 {
 		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
+
+	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
+		if result.CostAggregation == nil {
+			return nil, false
+		}
+		return result.CostAggregation, true
+	})
+	ret.CostAggregation = mergeRequestCost(requestCosts)
 
 	return ret, nil
 }

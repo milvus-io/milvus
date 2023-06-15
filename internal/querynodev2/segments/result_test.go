@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -572,6 +573,39 @@ func (suite *ResultSuite) TestSort() {
 	suite.Equal([]int32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[5].GetScalars().GetIntData().Data)
 	suite.InDeltaSlice([]float32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[6].GetVectors().GetFloatVector().GetData(), 10e-10)
 	suite.Equal([]byte{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[7].GetVectors().GetBinaryVector())
+}
+
+func TestResult_MergeRequestCost(t *testing.T) {
+	costs := []*internalpb.CostAggregation{
+		{
+			ResponseTime: 11,
+			ServiceTime:  12,
+			TotalNQ:      13,
+		},
+
+		{
+			ResponseTime: 21,
+			ServiceTime:  22,
+			TotalNQ:      23,
+		},
+
+		{
+			ResponseTime: 31,
+			ServiceTime:  32,
+			TotalNQ:      33,
+		},
+
+		{
+			ResponseTime: 41,
+			ServiceTime:  42,
+			TotalNQ:      43,
+		},
+	}
+
+	channelCost := mergeRequestCost(costs)
+	assert.Equal(t, int64(41), channelCost.ResponseTime)
+	assert.Equal(t, int64(42), channelCost.ServiceTime)
+	assert.Equal(t, int64(43), channelCost.TotalNQ)
 }
 
 func TestResult(t *testing.T) {

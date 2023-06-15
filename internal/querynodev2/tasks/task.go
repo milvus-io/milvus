@@ -63,8 +63,7 @@ func NewSearchTask(ctx context.Context,
 		originTopks:      []int64{req.GetReq().GetTopk()},
 		originNqs:        []int64{req.GetReq().GetNq()},
 		notifier:         make(chan error, 1),
-
-		tr: timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
+		tr:               timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 	}
 }
 
@@ -85,6 +84,8 @@ func (t *SearchTask) Execute() error {
 		zap.Int64("collectionID", t.collection.ID()),
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
+
+	executeRecord := timerecord.NewTimeRecorderWithTrace(t.ctx, "searchTaskExecute")
 
 	req := t.req
 	t.combinePlaceHolderGroups()
@@ -135,12 +136,15 @@ func (t *SearchTask) Execute() error {
 				TopK:           t.originTopks[i],
 				SlicedOffset:   1,
 				SlicedNumCount: 1,
+				CostAggregation: &internalpb.CostAggregation{
+					ServiceTime: executeRecord.ElapseSpan().Milliseconds(),
+				},
 			}
 		}
 		return nil
 	}
 
-	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "searchTaskReduce")
+	reduceRecord := timerecord.NewTimeRecorderWithTrace(t.ctx, "searchTaskReduce")
 	blobs, err := segments.ReduceSearchResultsAndFillData(
 		searchReq.Plan(),
 		results,
@@ -174,7 +178,7 @@ func (t *SearchTask) Execute() error {
 		metrics.QueryNodeReduceLatency.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
 			metrics.SearchLabel).
-			Observe(float64(tr.ElapseSpan().Milliseconds()))
+			Observe(float64(reduceRecord.ElapseSpan().Milliseconds()))
 
 		task.result = &internalpb.SearchResults{
 			Status:         util.WrapStatus(commonpb.ErrorCode_Success, ""),
@@ -184,6 +188,9 @@ func (t *SearchTask) Execute() error {
 			SlicedBlob:     bs,
 			SlicedOffset:   1,
 			SlicedNumCount: 1,
+			CostAggregation: &internalpb.CostAggregation{
+				ServiceTime: executeRecord.ElapseSpan().Milliseconds(),
+			},
 		}
 	}
 	return nil

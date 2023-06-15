@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -281,4 +282,17 @@ func fillFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath strin
 	default:
 		return fmt.Errorf("invalid data type: %s", fieldData.Type.String())
 	}
+}
+
+// mergeRequestCost merge the costs of request, the cost may came from different worker in same channel
+// or different channel in same collection, for now we just choose the part with the highest response time
+func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
+	var result *internalpb.CostAggregation
+	for _, cost := range requestCosts {
+		if result == nil || result.ResponseTime < cost.ResponseTime {
+			result = cost
+		}
+	}
+
+	return result
 }

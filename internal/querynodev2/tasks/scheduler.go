@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"go.uber.org/atomic"
 )
 
 const (
@@ -20,10 +21,8 @@ type Scheduler struct {
 	mergingSearchTasks []*SearchTask
 	mergedSearchTasks  chan *SearchTask
 
-	queryProcessQueue chan *QueryTask
-	queryWaitQueue    chan *QueryTask
-
-	pool *conc.Pool[any]
+	pool               *conc.Pool[any]
+	waitingTaskTotalNQ atomic.Int64
 }
 
 func NewScheduler() *Scheduler {
@@ -33,9 +32,9 @@ func NewScheduler() *Scheduler {
 		searchWaitQueue:    make(chan *SearchTask, maxWaitTaskNum),
 		mergingSearchTasks: make([]*SearchTask, 0),
 		mergedSearchTasks:  make(chan *SearchTask),
-		// queryProcessQueue: make(chan),
 
-		pool: conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
+		pool:               conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
+		waitingTaskTotalNQ: *atomic.NewInt64(0),
 	}
 }
 
@@ -46,6 +45,7 @@ func (s *Scheduler) Add(task Task) bool {
 		select {
 		case s.searchWaitQueue <- t:
 			collector.Counter.Inc(metricsinfo.ReadyQueueType, 1)
+			s.waitingTaskTotalNQ.Add(t.nq)
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 		default:
 			return false
@@ -165,6 +165,11 @@ func (s *Scheduler) process(t Task) {
 		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		return nil, err
 	})
+
+	switch t := t.(type) {
+	case *SearchTask:
+		s.waitingTaskTotalNQ.Sub(t.nq)
+	}
 }
 
 // mergeTasks merge the given task with one of merged tasks,
@@ -174,6 +179,7 @@ func (s *Scheduler) mergeTasks(t Task) {
 		merged := false
 		for _, task := range s.mergingSearchTasks {
 			if task.Merge(t) {
+				s.waitingTaskTotalNQ.Sub(t.nq)
 				merged = true
 				break
 			}
@@ -182,4 +188,8 @@ func (s *Scheduler) mergeTasks(t Task) {
 			s.mergingSearchTasks = append(s.mergingSearchTasks, t)
 		}
 	}
+}
+
+func (s *Scheduler) GetWaitingTaskTotalNQ() int64 {
+	return s.waitingTaskTotalNQ.Load()
 }
