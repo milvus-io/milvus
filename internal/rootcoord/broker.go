@@ -301,13 +301,24 @@ func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*inde
 }
 
 func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
+	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
+
+	log.Info("confirming if gc is finished")
+
 	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
 	resp, err := b.s.dataCoord.GcConfirm(ctx, req)
+
 	if err != nil {
+		log.Warn("gc is not finished", zap.Error(err))
 		return false
 	}
+
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("gc is not finished", zap.String("code", resp.GetStatus().GetErrorCode().String()),
+			zap.String("reason", resp.GetStatus().GetReason()))
 		return false
 	}
+
+	log.Info("received gc_confirm response", zap.Bool("finished", resp.GetGcFinished()))
 	return resp.GetGcFinished()
 }
