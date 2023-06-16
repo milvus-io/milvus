@@ -939,12 +939,33 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
 
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
-    IndexInnerType val1 = expr.lower_value_;
-    IndexInnerType val2 = expr.upper_value_;
+
+    // see also: https://github.com/milvus-io/milvus/issues/23646.
+    typedef std::conditional_t<std::is_integral_v<IndexInnerType>,
+                               int64_t,
+                               IndexInnerType>
+        HighPrecisionType;
+
+    auto val1 = static_cast<HighPrecisionType>(expr.lower_value_);
+    auto val2 = static_cast<HighPrecisionType>(expr.upper_value_);
 
     auto index_func = [&](Index* index) {
+        if constexpr (std::is_integral_v<T>) {
+            if (gt_ub<T>(val1)) {
+                return TargetBitmap(index->Size(), false);
+            } else if (lt_lb<T>(val1)) {
+                val1 = std::numeric_limits<T>::min();
+            }
+
+            if (gt_ub<T>(val2)) {
+                val2 = std::numeric_limits<T>::max();
+            } else if (lt_lb<T>(val2)) {
+                return TargetBitmap(index->Size(), false);
+            }
+        }
         return index->Range(val1, lower_inclusive, val2, upper_inclusive);
     };
+
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](MayConstRef<T> x) {
             return (val1 <= x && x <= val2);
