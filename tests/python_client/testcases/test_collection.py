@@ -3754,7 +3754,7 @@ class TestCollectionString(TestcaseBase):
         """
         target: test create collection with string field 
         method: create collection with string field, the string field primary and auto id are true
-        expected: Raise exception
+        expected: Create collection successfully
         """
         self._connect()
         int_field = cf.gen_int64_field()
@@ -3762,9 +3762,11 @@ class TestCollectionString(TestcaseBase):
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
         fields = [int_field, string_field, vec_field]
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields=fields)
-        error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
-        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
-                                             check_task=CheckTasks.err_res, check_items=error)
+#         error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
+        c_name = cf.gen_unique_str(prefix)
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property, 
+                                             check_items={exp_name: c_name, exp_schema: schema})
         
 
 class TestCollectionJSON(TestcaseBase):

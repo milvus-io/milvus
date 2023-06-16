@@ -341,11 +341,11 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 
 			// varchar field do not support autoID
 			// If autoID is required, it is recommended to use int64 field as the primary key
-			if field.DataType == schemapb.DataType_VarChar {
-				if field.AutoID {
-					return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
-				}
-			}
+			//if field.DataType == schemapb.DataType_VarChar {
+			//	if field.AutoID {
+			//		return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
+			//	}
+			//}
 
 			idx = i
 		}
@@ -551,20 +551,36 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	fieldData.Type = fieldSchema.DataType
 	switch data := data.(type) {
 	case []int64:
-		if fieldSchema.DataType != schemapb.DataType_Int64 {
-			return nil, errors.New("the data type of the data and the schema do not match")
-		}
-		fieldData.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: data,
+		switch fieldData.Type {
+		case schemapb.DataType_Int64:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: data,
+						},
 					},
 				},
-			},
+			}
+		case schemapb.DataType_VarChar:
+			strIds := make([]string, len(data))
+			for i, v := range data {
+				strIds[i] = strconv.FormatInt(v, 10)
+			}
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strIds,
+						},
+					},
+				},
+			}
+		default:
+			return nil, errors.New("currently only support autoID for int64 and varchar PrimaryField")
 		}
 	default:
-		return nil, errors.New("currently only support autoID for int64 PrimaryField")
+		return nil, errors.New("currently only int64 is supported as the data source for the autoID of a PrimaryField")
 	}
 
 	return &fieldData, nil
@@ -1050,7 +1066,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 			if typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) {
 				return nil, fmt.Errorf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
 			}
-			// if autoID == true, currently only support autoID for int64 PrimaryField
+			// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 			primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 			if err != nil {
 				log.Info("generate primary field data failed when autoID == true", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
