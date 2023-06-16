@@ -44,6 +44,10 @@ func TestDiskIndexParams(t *testing.T) {
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
+
+		searchCacheBudgetRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 0.10, searchCacheBudgetRatio)
 	})
 
 	t.Run("fill index params with auto index", func(t *testing.T) {
@@ -129,13 +133,23 @@ func TestDiskIndexParams(t *testing.T) {
 
 		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100)
+		assert.Error(t, err)
+
+		indexParams[SearchCacheBudgetRatioKey] = "0.125"
+		err = SetDiskIndexBuildParams(indexParams, 100)
 		assert.NoError(t, err)
+
+		indexParams[SearchCacheBudgetRatioKey] = "aabb"
+		err = SetDiskIndexBuildParams(indexParams, 100)
+		assert.Error(t, err)
 
 		_, ok := indexParams[PQCodeBudgetKey]
 		assert.True(t, ok)
 		_, ok = indexParams[BuildDramBudgetKey]
 		assert.True(t, ok)
 		_, ok = indexParams[NumBuildThreadKey]
+		assert.True(t, ok)
+		_, ok = indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
 	})
 
@@ -291,6 +305,16 @@ func TestBigDataIndex_parse(t *testing.T) {
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
+
+		mapString = make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1, \"search_cache_budget_gb\": 0.20}"
+		mapString[PrepareRatioKey] = "{\"num_threads\": 8}"
+		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
+		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
+		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
+		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
+		assert.Equal(t, 0.20, extraParams.SearchCacheBudgetGBRatio)
 	})
 
 	t.Run("parse with build_ratio partial or wrong", func(t *testing.T) {
@@ -319,6 +343,13 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
 		_, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.Error(t, err)
+
+		mapString = make(map[string]string)
+		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[PrepareRatioKey] = "{\"num_threads\": 8}"
+		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
+		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 	})
 
 	t.Run("parse with prepare_ratio partial or wrong", func(t *testing.T) {

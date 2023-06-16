@@ -71,14 +71,11 @@ VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */,
                "index file paths is empty when load disk ann index data");
     file_manager_->CacheIndexToDisk(index_files.value());
 
-    // todo : replace by index::load function later
-    knowhere::DataSetPtr qs = std::make_unique<knowhere::DataSet>();
-    qs->SetRows(kPrepareRows);
-    qs->SetDim(kPrepareDim);
-    qs->SetIsOwner(true);
-    auto query = new T[kPrepareRows * kPrepareDim];
-    qs->SetTensor(query);
-    index_.Search(*qs, load_config, nullptr);
+    auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to Deserialize index, " + MatchKnowhereError(stat));
 
     SetDim(index_.Dim());
 }
@@ -124,8 +121,10 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     local_chunk_manager.Write(local_data_path, offset, raw_data, data_size);
 
     knowhere::DataSet* ds_ptr = nullptr;
-    index_.Build(*ds_ptr, build_config);
-
+    auto stat = index_.Build(*ds_ptr, build_config);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
+                      "failed to build index, " + MatchKnowhereError(stat));
     local_chunk_manager.RemoveDir(
         storage::GetSegmentRawDataPathPrefix(segment_id));
     // TODO ::

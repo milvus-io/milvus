@@ -424,7 +424,7 @@ TEST_P(IndexTest, BuildAndQuery) {
             index_files.emplace_back(binary.first);
         }
         load_conf["index_files"] = index_files;
-        vec_index->Load(binary_set, load_conf);
+        ASSERT_NO_THROW(vec_index->Load(binary_set, load_conf));
         EXPECT_EQ(vec_index->Count(), NB);
 #endif
     } else {

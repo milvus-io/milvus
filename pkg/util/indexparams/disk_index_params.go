@@ -82,6 +82,8 @@ func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, er
 
 func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraParams, error) {
 	ret := &BigDataIndexExtraParams{}
+	ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+	setSearchCache := false
 	var err error
 	buildRatio, ok := value[BuildRatioKey]
 	if !ok {
@@ -93,7 +95,6 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 		if err != nil {
 			return ret, err
 		}
-
 		PQCodeBudgetGBRatio, ok := valueMap1["pq_code_budget_gb"]
 		if !ok {
 			ret.PQCodeBudgetGBRatio = DefaultPQCodeBudgetGBRatio
@@ -105,6 +106,11 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 			ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
 		} else {
 			ret.BuildNumThreadsRatio = BuildNumThreadsRatio
+		}
+		SearchCacheBudgetGBRatio, ok := valueMap1["search_cache_budget_gb"]
+		if ok {
+			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
+			setSearchCache = true
 		}
 	}
 
@@ -119,9 +125,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 			return ret, err
 		}
 		SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
-		if !ok {
-			ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
-		} else {
+		if ok && !setSearchCache {
 			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
 		}
 		LoadNumThreadRatio, ok := valueMap2["num_threads"]
@@ -142,6 +146,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 			ret.BeamWidthRatio = beamWidthRatio
 		}
 	}
+
 	return ret, nil
 }
 
@@ -152,6 +157,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	searchListSize := params.CommonCfg.SearchListSize.GetValue()
 	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
 	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio.GetValue()
+	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
@@ -176,6 +182,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	indexParams[SearchListSizeKey] = searchListSize
 	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
 	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
+	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
 
 	return nil
 }
@@ -209,12 +216,20 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 	if err != nil {
 		return err
 	}
-
+	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
+	if !ok {
+		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
+	}
+	SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
+	if err != nil {
+		return err
+	}
 	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f",
 		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(pqCodeBudgetGBRatio)/(1<<30))
 	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
-
+	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",
+		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(SearchCacheBudgetGBRatio)/(1<<30))
 	return nil
 }
 
