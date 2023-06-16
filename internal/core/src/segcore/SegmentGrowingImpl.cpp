@@ -392,13 +392,14 @@ std::vector<SegOffset>
 SegmentGrowingImpl::search_ids(const BitsetType& bitset,
                                Timestamp timestamp) const {
     std::vector<SegOffset> res_offsets;
-
-    for (int i = 0; i < bitset.size(); i++) {
-        if (bitset[i]) {
-            auto offset = SegOffset(i);
-            if (insert_record_.timestamps_[offset.get()] <= timestamp) {
-                res_offsets.push_back(offset);
-            }
+    for (int i = bitset.find_first(); i < bitset.size();
+         i = bitset.find_next(i)) {
+        if (i == BitsetType::npos) {
+            return res_offsets;
+        }
+        auto offset = SegOffset(i);
+        if (insert_record_.timestamps_[offset.get()] <= timestamp) {
+            res_offsets.push_back(offset);
         }
     }
     return res_offsets;

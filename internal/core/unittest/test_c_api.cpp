@@ -20,6 +20,7 @@
 #include <unordered_set>
 
 #include "common/LoadInfo.h"
+#include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -4458,5 +4459,85 @@ TEST(CApiTest, AssembeChunkTest) {
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 105; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
+}
+
+std::vector<SegOffset>
+search_id(const BitsetType& bitset,
+          Timestamp* timestamps,
+          Timestamp timestamp,
+          bool use_find) {
+    std::vector<SegOffset> dst_offset;
+    if (use_find) {
+        for (int i = bitset.find_first(); i < bitset.size();
+             i = bitset.find_next(i)) {
+            if (i == BitsetType::npos) {
+                return dst_offset;
+            }
+            auto offset = SegOffset(i);
+            if (timestamps[offset.get()] <= timestamp) {
+                dst_offset.push_back(offset);
+            }
+        }
+    } else {
+        for (int i = 0; i < bitset.size(); i++) {
+            if (bitset[i]) {
+                auto offset = SegOffset(i);
+                if (timestamps[offset.get()] <= timestamp) {
+                    dst_offset.push_back(offset);
+                }
+            }
+        }
+    }
+    return dst_offset;
+}
+
+TEST(CApiTest, SearchIdTest) {
+    using BitsetType = boost::dynamic_bitset<>;
+
+    auto test = [&](int NT) {
+        BitsetType bitset(1000000);
+        Timestamp* timestamps = new Timestamp[1000000];
+        srand(time(NULL));
+        for (int i = 0; i < 1000000; i++) {
+            timestamps[i] = i;
+            bitset[i] = false;
+        }
+        for (int i = 0; i < NT; i++) {
+            bitset[1000000 * ((double)rand() / RAND_MAX)] = true;
+        }
+        auto start = std::chrono::steady_clock::now();
+        auto res1 = search_id(bitset, timestamps, 1000000, true);
+        std::cout << "search id cost:"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << "us" << std::endl;
+        start = std::chrono::steady_clock::now();
+        auto res2 = search_id(bitset, timestamps, 1000000, false);
+        std::cout << "search id origin cost:"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << "us" << std::endl;
+        ASSERT_EQ(res1.size(), res2.size());
+        for (int i = 0; i < res1.size(); i++) {
+            if (res1[i].get() != res2[i].get()) {
+                std::cout << "error:" << i;
+            }
+        }
+        start = std::chrono::steady_clock::now();
+        bitset.flip();
+        std::cout << "bit set flip cost:"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << "us" << std::endl;
+        delete[] timestamps;
+    };
+
+    int test_nt[] = {10, 50, 100};
+    for (auto nt : test_nt) {
+        test(nt);
     }
 }
