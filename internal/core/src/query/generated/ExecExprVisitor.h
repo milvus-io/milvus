@@ -80,6 +80,10 @@ class ExecExprVisitor : public ExprVisitor {
     auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
+    template <typename T>
+    auto
+    ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw) -> BitsetType;
+
     template <typename ExprValueType>
     auto
     ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw) -> BitsetType;

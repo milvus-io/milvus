@@ -58,6 +58,10 @@ class ExecExprVisitor : ExprVisitor {
 
     template <typename T>
     auto
+    ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename T>
+    auto
     ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
@@ -312,7 +316,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
 auto
-ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcherImpl(UnaryRangeExpr& expr_raw) -> BitsetType {
     typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
     auto& expr = static_cast<UnaryRangeExprImpl<IndexInnerType>&>(expr_raw);
@@ -367,6 +371,57 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
     }
 }
 #pragma clang diagnostic pop
+
+template <typename T>
+auto
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
+    if constexpr (std::is_integral_v<T>) {
+        auto& expr = static_cast<UnaryRangeExprImpl<int64_t>&>(expr_raw);
+        auto val = expr.value_;
+
+        if (!out_of_range<T>(val)) {
+            return ExecUnaryRangeVisitorDispatcherImpl<T>(expr_raw);
+        }
+
+        // see also: https://github.com/milvus-io/milvus/issues/23646.
+        switch (expr.op_type_) {
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual: {
+                BitsetType r(row_count_);
+                if (lt_lb<T>(val)) {
+                    r.set();
+                }
+                return r;
+            }
+
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual: {
+                BitsetType r(row_count_);
+                if (gt_ub<T>(val)) {
+                    r.set();
+                }
+                return r;
+            }
+
+            case proto::plan::Equal: {
+                BitsetType r(row_count_);
+                r.reset();
+                return r;
+            }
+
+            case proto::plan::NotEqual: {
+                BitsetType r(row_count_);
+                r.set();
+                return r;
+            }
+
+            default: {
+                PanicInfo("unsupported range node");
+            }
+        }
+    }
+    return ExecUnaryRangeVisitorDispatcherImpl<T>(expr_raw);
+}
 
 template <typename ExprValueType>
 auto
@@ -450,13 +505,15 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcherJson(UnaryRangeExpr& expr_raw) -
 template <typename T>
 auto
 ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
-    auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<T>&>(expr_raw);
+    // see also: https://github.com/milvus-io/milvus/issues/23646.
+    typedef std::conditional_t<std::is_integral_v<T>, int64_t, T> HighPrecisionType;
+
+    auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<HighPrecisionType>&>(expr_raw);
     using Index = index::ScalarIndex<T>;
     auto arith_op = expr.arith_op_;
     auto right_operand = expr.right_operand_;
     auto op = expr.op_type_;
     auto val = expr.value_;
-    auto& nested_path = expr.column_.nested_path;
 
     switch (op) {
         case OpType::Equal: {
@@ -706,10 +763,30 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> 
 
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
-    IndexInnerType val1 = expr.lower_value_;
-    IndexInnerType val2 = expr.upper_value_;
 
-    auto index_func = [&](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
+    // see also: https://github.com/milvus-io/milvus/issues/23646.
+    typedef std::conditional_t<std::is_integral_v<IndexInnerType>, int64_t, IndexInnerType> HighPrecisionType;
+
+    auto val1 = static_cast<HighPrecisionType>(expr.lower_value_);
+    auto val2 = static_cast<HighPrecisionType>(expr.upper_value_);
+
+    auto index_func = [&](Index* index) {
+        if constexpr (std::is_integral_v<T>) {
+            if (gt_ub<T>(val1)) {
+                return TargetBitmap(index->Size(), false);
+            } else if (lt_lb<T>(val1)) {
+                val1 = std::numeric_limits<T>::min();
+            }
+
+            if (gt_ub<T>(val2)) {
+                val2 = std::numeric_limits<T>::max();
+            } else if (lt_lb<T>(val2)) {
+                return TargetBitmap(index->Size(), false);
+            }
+        }
+        return index->Range(val1, lower_inclusive, val2, upper_inclusive);
+    };
+
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
         return ExecRangeVisitorImpl<T>(expr.column_.field_id, index_func, elem_func);

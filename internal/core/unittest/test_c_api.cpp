@@ -3396,4 +3396,3 @@ TEST(CApiTest, AssembeChunkTest) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 }
-

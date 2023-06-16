@@ -21,6 +21,7 @@
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
 #include "PlanProto.h"
+#include "query/Utils.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -30,25 +31,30 @@ std::unique_ptr<TermExprImpl<T>>
 ExtractTermExprImpl(FieldId field_id, DataType data_type, const planpb::TermExpr& expr_proto) {
     static_assert(IsScalar<T>);
     auto size = expr_proto.values_size();
-    std::vector<T> terms(size);
+    std::vector<T> terms;
+    terms.reserve(size);
     auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     for (int i = 0; i < size; ++i) {
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            terms[i] = static_cast<T>(value_proto.bool_val());
+            terms.push_back(static_cast<T>(value_proto.bool_val()));
             val_case = proto::plan::GenericValue::ValCase::kBoolVal;
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            terms[i] = static_cast<T>(value_proto.int64_val());
+            auto value = value_proto.int64_val();
+            if (out_of_range<T>(value)) {
+                continue;
+            }
+            terms.push_back(static_cast<T>(value));
             val_case = proto::plan::GenericValue::ValCase::kInt64Val;
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            terms[i] = static_cast<T>(value_proto.float_val());
+            terms.push_back(static_cast<T>(value_proto.float_val()));
             val_case = proto::plan::GenericValue::ValCase::kFloatVal;
         } else if constexpr (std::is_same_v<T, std::string>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
-            terms[i] = static_cast<T>(value_proto.string_val());
+            terms.push_back(static_cast<T>(value_proto.string_val()));
             val_case = proto::plan::GenericValue::ValCase::kStringVal;
         } else {
             static_assert(always_false<T>);
@@ -233,18 +239,15 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
             case DataType::BOOL: {
                 return ExtractUnaryRangeExprImpl<bool>(field_id, data_type, expr_pb);
             }
-            case DataType::INT8: {
-                return ExtractUnaryRangeExprImpl<int8_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractUnaryRangeExprImpl<int16_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractUnaryRangeExprImpl<int32_t>(field_id, data_type, expr_pb);
-            }
+
+                // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractUnaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractUnaryRangeExprImpl<float>(field_id, data_type, expr_pb);
             }
@@ -289,18 +292,15 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
             case DataType::BOOL: {
                 return ExtractBinaryRangeExprImpl<bool>(field_id, data_type, expr_pb);
             }
-            case DataType::INT8: {
-                return ExtractBinaryRangeExprImpl<int8_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractBinaryRangeExprImpl<int16_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractBinaryRangeExprImpl<int32_t>(field_id, data_type, expr_pb);
-            }
+
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractBinaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractBinaryRangeExprImpl<float>(field_id, data_type, expr_pb);
             }
@@ -441,18 +441,14 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(const proto::plan::BinaryArithOpEva
 
     auto result = [&]() -> ExprPtr {
         switch (data_type) {
-            case DataType::INT8: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int8_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int16_t>(field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int32_t>(field_id, data_type, expr_pb);
-            }
+                // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<float>(field_id, data_type, expr_pb);
             }
