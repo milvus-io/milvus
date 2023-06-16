@@ -104,6 +104,10 @@ func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
 		assert.Equal(t, test.value, value)
 		assert.Equal(t, test.errIsNil, err == nil)
 	}
+
+	value, err := GetAttrByKeyFromRepeatedKV("key1", nil)
+	assert.Equal(t, "", value)
+	assert.Error(t, err)
 }
 
 func TestCheckCtxValid(t *testing.T) {

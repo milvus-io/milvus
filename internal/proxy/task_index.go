@@ -496,7 +496,10 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		}
 		params := indexInfo.GetUserIndexParams()
 		if params == nil {
-			params = indexInfo.GetIndexParams()
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, indexInfo.GetIndexParams())
+			if err == nil {
+				params = wrapUserIndexParams(metricType)
+			}
 		}
 		desc := &milvuspb.IndexDescription{
 			IndexName:            indexInfo.GetIndexName(),
