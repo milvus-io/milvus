@@ -433,6 +433,11 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	if err != nil {
 		return merr.Status(err), nil
 	}
+	// check metric type
+	if metricType == "" {
+		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
+		return merr.Status(err), nil
+	}
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
@@ -478,6 +483,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
+	}
+
+	// check metric type
+	if req.GetLoadMeta().GetMetricType() == "" {
+		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
+		return merr.Status(err), nil
 	}
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())

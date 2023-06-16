@@ -254,9 +254,21 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		return err
 	}
 
+	// TODO: improve this, queryCoord should keep index and schema in memory to save RPC.
+	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	if err != nil {
+		log.Warn("fail to get index meta of collection")
+		return err
+	}
+	metricType, err := getMetricType(indexInfo, schema)
+	if err != nil {
+		log.Warn("failed to get metric type", zap.Error(err))
+		return err
+	}
+
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
-		"",
+		metricType,
 		task.CollectionID(),
 		partitions...,
 	)
