@@ -67,7 +67,7 @@ class TestCollectionParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=cf.gen_all_type_fields())
     def get_unsupported_primary_field(self, request):
-        if request.param.dtype == DataType.INT64:
+        if request.param.dtype == DataType.INT64 or request.param.dtype == DataType.VARCHAR:
             pytest.skip("int64 type is valid primary key")
         yield request.param
 
@@ -332,7 +332,6 @@ class TestCollectionParams(TestcaseBase):
                                                  check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not Milvus Exception")
     @pytest.mark.parametrize("name", [[], 1, (1,), {1: 1}, "12-s"])
     def test_collection_invalid_type_field(self, name):
         """
@@ -345,7 +344,7 @@ class TestCollectionParams(TestcaseBase):
         field, _ = self.field_schema_wrap.init_field_schema(name=name, dtype=5, is_primary=True)
         vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[field, vec_field])
-        error = {ct.err_code: 1, ct.err_msg: f"expected one of: bytes, unicode"}
+        error = {ct.err_code: 1, ct.err_msg: f"bad argument type for built-in"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -606,7 +605,6 @@ class TestCollectionParams(TestcaseBase):
         assert self.collection_wrap.primary_field.name == ct.default_int64_field_name
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):
         """
         target: test collection with unsupported primary field type
@@ -616,7 +614,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         field = get_unsupported_primary_field
         vec_field = cf.gen_float_vec_field(name="vec")
-        error = {ct.err_code: 1, ct.err_msg: "Primary key type must be DataType.INT64."}
+        error = {ct.err_code: 1, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR."}
         self.collection_schema_wrap.init_collection_schema(fields=[field, vec_field], primary_field=field.name,
                                                            check_task=CheckTasks.err_res, check_items=error)
 
