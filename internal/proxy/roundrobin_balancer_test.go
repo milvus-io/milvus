@@ -38,22 +38,41 @@ func (s *RoundRobinBalancerSuite) TestRoundRobin() {
 	s.balancer.SelectNode(availableNodes, 1)
 	s.balancer.SelectNode(availableNodes, 1)
 
-	s.Equal(int64(2), s.balancer.nodeWorkload[1])
-	s.Equal(int64(2), s.balancer.nodeWorkload[2])
+	workload, ok := s.balancer.nodeWorkload.Get(1)
+	s.True(ok)
+	s.Equal(int64(2), workload.Load())
+	workload, ok = s.balancer.nodeWorkload.Get(1)
+	s.True(ok)
+	s.Equal(int64(2), workload.Load())
 
 	s.balancer.SelectNode(availableNodes, 3)
 	s.balancer.SelectNode(availableNodes, 1)
 	s.balancer.SelectNode(availableNodes, 1)
 	s.balancer.SelectNode(availableNodes, 1)
 
-	s.Equal(int64(5), s.balancer.nodeWorkload[1])
-	s.Equal(int64(5), s.balancer.nodeWorkload[2])
+	workload, ok = s.balancer.nodeWorkload.Get(1)
+	s.True(ok)
+	s.Equal(int64(5), workload.Load())
+	workload, ok = s.balancer.nodeWorkload.Get(1)
+	s.True(ok)
+	s.Equal(int64(5), workload.Load())
 }
 
 func (s *RoundRobinBalancerSuite) TestNoAvailableNode() {
 	availableNodes := []int64{}
 	_, err := s.balancer.SelectNode(availableNodes, 1)
 	s.Error(err)
+}
+
+func (s *RoundRobinBalancerSuite) TestCancelWorkload() {
+	availableNodes := []int64{101}
+	_, err := s.balancer.SelectNode(availableNodes, 5)
+	s.NoError(err)
+	workload, ok := s.balancer.nodeWorkload.Get(101)
+	s.True(ok)
+	s.Equal(int64(5), workload.Load())
+	s.balancer.CancelWorkload(101, 5)
+	s.Equal(int64(0), workload.Load())
 }
 
 func TestRoundRobinBalancerSuite(t *testing.T) {

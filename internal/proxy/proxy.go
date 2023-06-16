@@ -127,7 +127,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		searchResultCh:   make(chan *internalpb.SearchResults, n),
 		shardMgr:         mgr,
 		multiRateLimiter: NewMultiRateLimiter(),
-		lbPolicy:         NewLBPolicyImpl(NewRoundRobinBalancer(), mgr),
+		lbPolicy:         NewLBPolicyImpl(mgr),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
@@ -435,6 +435,10 @@ func (node *Proxy) Stop() error {
 
 	if node.chMgr != nil {
 		node.chMgr.removeAllDMLStream()
+	}
+
+	if node.lbPolicy != nil {
+		node.lbPolicy.Close()
 	}
 
 	// https://github.com/milvus-io/milvus/issues/12282

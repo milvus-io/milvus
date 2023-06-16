@@ -1017,6 +1017,12 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
+
+	if ret.CostAggregation != nil {
+		// update channel's response time
+		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
+		ret.CostAggregation.TotalNQ = currentTotalNQ
+	}
 	return ret, nil
 }
 

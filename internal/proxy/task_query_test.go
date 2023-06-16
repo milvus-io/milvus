@@ -58,6 +58,8 @@ func TestQueryTask_all(t *testing.T) {
 		hitNum = 10
 	)
 
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
+
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().Start().Return(nil)
 	qc.EXPECT().Stop().Return(nil)
@@ -73,12 +75,10 @@ func TestQueryTask_all(t *testing.T) {
 		},
 	}, nil).Maybe()
 
-	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
-		return qn, nil
-	}
-
-	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
-	lb := NewLBPolicyImpl(NewRoundRobinBalancer(), mgr)
+	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
+	mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
+	lb := NewLBPolicyImpl(mgr)
 
 	rc.Start()
 	defer rc.Stop()
@@ -217,10 +217,12 @@ func TestQueryTask_all(t *testing.T) {
 	task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
 	task.ctx = ctx
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
@@ -230,6 +232,7 @@ func TestQueryTask_all(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -238,6 +241,7 @@ func TestQueryTask_all(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.ExpectedCalls = nil
+	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	qn.EXPECT().Query(mock.Anything, mock.Anything).Return(result1, nil)
 	assert.NoError(t, task.Execute(ctx))
 

@@ -521,6 +521,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 	t.resultBuf.Insert(result)
+	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 
 	return nil
 }

@@ -16,38 +16,56 @@
 package proxy
 
 import (
-	"sync"
-
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/atomic"
 )
 
 type RoundRobinBalancer struct {
 	// request num send to each node
-	mutex        sync.RWMutex
-	nodeWorkload map[int64]int64
+	nodeWorkload *typeutil.ConcurrentMap[int64, *atomic.Int64]
 }
 
 func NewRoundRobinBalancer() *RoundRobinBalancer {
 	return &RoundRobinBalancer{
-		nodeWorkload: make(map[int64]int64),
+		nodeWorkload: typeutil.NewConcurrentMap[int64, *atomic.Int64](),
 	}
 }
 
-func (b *RoundRobinBalancer) SelectNode(availableNodes []int64, workload int64) (int64, error) {
+func (b *RoundRobinBalancer) SelectNode(availableNodes []int64, cost int64) (int64, error) {
 	if len(availableNodes) == 0 {
 		return -1, merr.ErrNoAvailableNode
 	}
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+
 	targetNode := int64(-1)
-	targetNodeWorkload := int64(-1)
+	var targetNodeWorkload *atomic.Int64
 	for _, node := range availableNodes {
-		if targetNodeWorkload == -1 || b.nodeWorkload[node] < targetNodeWorkload {
+		workload, ok := b.nodeWorkload.Get(node)
+
+		if !ok {
+			workload = atomic.NewInt64(0)
+			b.nodeWorkload.Insert(node, workload)
+		}
+
+		if targetNodeWorkload == nil || workload.Load() < targetNodeWorkload.Load() {
 			targetNode = node
-			targetNodeWorkload = b.nodeWorkload[node]
+			targetNodeWorkload = workload
 		}
 	}
 
-	b.nodeWorkload[targetNode] += workload
+	targetNodeWorkload.Add(cost)
 	return targetNode, nil
 }
+
+func (b *RoundRobinBalancer) CancelWorkload(node int64, nq int64) {
+	load, ok := b.nodeWorkload.Get(node)
+
+	if ok {
+		load.Sub(nq)
+	}
+}
+
+func (b *RoundRobinBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}
+
+func (b *RoundRobinBalancer) Close() {}

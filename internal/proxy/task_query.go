@@ -491,6 +491,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 
 	log.Debug("get query result")
 	t.resultBuf.Insert(result)
+	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil
 }
 
