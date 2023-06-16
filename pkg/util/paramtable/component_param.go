@@ -1192,8 +1192,8 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.Balancer = ParamItem{
 		Key:          "queryCoord.balancer",
 		Version:      "2.0.0",
-		DefaultValue: "RowCountBasedBalancer",
-		PanicIfEmpty: true,
+		DefaultValue: "ScoreBasedBalancer",
+		PanicIfEmpty: false,
 		Doc:          "auto balancer used for segments on queryNodes",
 		Export:       true,
 	}
