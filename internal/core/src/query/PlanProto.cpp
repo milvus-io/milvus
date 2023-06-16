@@ -514,22 +514,15 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(
 
     auto result = [&]() -> ExprPtr {
         switch (data_type) {
-            case DataType::INT8: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int8_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT16: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int16_t>(
-                    field_id, data_type, expr_pb);
-            }
-            case DataType::INT32: {
-                return ExtractBinaryArithOpEvalRangeExprImpl<int32_t>(
-                    field_id, data_type, expr_pb);
-            }
+            // see also: https://github.com/milvus-io/milvus/issues/23646.
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
             case DataType::INT64: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(
                     field_id, data_type, expr_pb);
             }
+
             case DataType::FLOAT: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<float>(
                     field_id, data_type, expr_pb);

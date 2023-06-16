@@ -299,18 +299,14 @@ ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
     AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.column_.data_type) {
+        // see also: https://github.com/milvus-io/milvus/issues/23646.
         case DataType::INT8:
-            json_opt_ = BinaryArithOpEvalRangeExtract<int8_t>(expr);
-            return;
         case DataType::INT16:
-            json_opt_ = BinaryArithOpEvalRangeExtract<int16_t>(expr);
-            return;
         case DataType::INT32:
-            json_opt_ = BinaryArithOpEvalRangeExtract<int32_t>(expr);
-            return;
         case DataType::INT64:
             json_opt_ = BinaryArithOpEvalRangeExtract<int64_t>(expr);
             return;
+
         case DataType::DOUBLE:
             json_opt_ = BinaryArithOpEvalRangeExtract<double>(expr);
             return;

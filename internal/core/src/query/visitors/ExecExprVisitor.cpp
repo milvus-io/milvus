@@ -585,13 +585,18 @@ template <typename T>
 auto
 ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
     BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
-    auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<T>&>(expr_raw);
+    // see also: https://github.com/milvus-io/milvus/issues/23646.
+    typedef std::conditional_t<std::is_integral_v<T>, int64_t, T>
+        HighPrecisionType;
+
+    auto& expr =
+        static_cast<BinaryArithOpEvalRangeExprImpl<HighPrecisionType>&>(
+            expr_raw);
     using Index = index::ScalarIndex<T>;
     auto arith_op = expr.arith_op_;
     auto right_operand = expr.right_operand_;
     auto op = expr.op_type_;
     auto val = expr.value_;
-    auto& nested_path = expr.column_.nested_path;
 
     switch (op) {
         case OpType::Equal: {
@@ -602,12 +607,9 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) == val;
                     };
-                    auto elem_func =
-                        [val, right_operand, &nested_path](MayConstRef<T> x) {
-                            // visit the nested field
-                            // now it must be Json
-                            return ((x + right_operand) == val);
-                        };
+                    auto elem_func = [val, right_operand](MayConstRef<T> x) {
+                        return ((x + right_operand) == val);
+                    };
                     return ExecDataRangeVisitorImpl<T>(
                         expr.column_.field_id, index_func, elem_func);
                 }
