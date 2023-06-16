@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -103,12 +104,13 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		}
 		defer restoreCfg()
 
+		Params.QuotaConfig.MaxCollectionNumPerDB = math.MaxInt64
 		Params.QuotaConfig.MaxCollectionNum = 1
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("ListAllAvailCollections",
 			mock.Anything,
 		).Return(map[int64][]int64{
-			1: {1, 2},
+			1: {1},
 		}, nil)
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
@@ -118,6 +120,16 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			},
 		}
 		err := task.validate()
+		assert.Error(t, err)
+
+		task = createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			dbID: util.DefaultDBID,
+		}
+		err = task.validate()
 		assert.Error(t, err)
 	})
 
@@ -143,6 +155,16 @@ func Test_createCollectionTask_validate(t *testing.T) {
 			},
 		}
 		err := task.validate()
+		assert.Error(t, err)
+
+		task = createCollectionTask{
+			baseTask: newBaseTask(context.TODO(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+			dbID: util.DefaultDBID,
+		}
+		err = task.validate()
 		assert.Error(t, err)
 	})
 
