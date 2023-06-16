@@ -407,8 +407,12 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
     array = []
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
+                ct.default_int32_field_name: i,
+                ct.default_int16_field_name: i,
+                ct.default_int8_field_name: i,
                 ct.default_bool_field_name: bool(i),
                 ct.default_float_field_name: i*1.0,
+                ct.default_double_field_name: i * 1.0,
                 ct.default_string_field_name: str(i),
                 ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
                                              "list": [j for j in range(i, i + ct.default_json_list_length)]},
