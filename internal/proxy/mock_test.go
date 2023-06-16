@@ -186,8 +186,12 @@ type mockDmlTask struct {
 	pchans []pChan
 }
 
-func (m *mockDmlTask) getChannels() ([]vChan, error) {
-	return m.vchans, nil
+func (m *mockDmlTask) setChannels() error {
+	return nil
+}
+
+func (m *mockDmlTask) getChannels() []vChan {
+	return m.vchans
 }
 
 func newMockDmlTask(ctx context.Context) *mockDmlTask {

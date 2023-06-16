@@ -105,7 +105,8 @@ type task interface {
 
 type dmlTask interface {
 	task
-	getChannels() ([]pChan, error)
+	setChannels() error
+	getChannels() []pChan
 }
 
 type BaseInsertTask = msgstream.InsertMsg

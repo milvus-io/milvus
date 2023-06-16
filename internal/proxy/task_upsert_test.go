@@ -315,8 +315,9 @@ func TestUpsertTask(t *testing.T) {
 			},
 			chMgr: chMgr,
 		}
-		resChannels, err := ut.getChannels()
+		err := ut.setChannels()
 		assert.NoError(t, err)
+		resChannels := ut.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, ut.pChannels)
 
@@ -324,8 +325,7 @@ func TestUpsertTask(t *testing.T) {
 			return nil, fmt.Errorf("mock err")
 		}
 		// get channels again, should return task's pChannels, so getChannelsFunc should not invoke again
-		resChannels, err = ut.getChannels()
-		assert.NoError(t, err)
+		resChannels = ut.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 	})
 }

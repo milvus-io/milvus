@@ -19,7 +19,6 @@ package proxy
 import (
 	"container/list"
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -228,12 +227,11 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	//	1) Protect member pChanStatisticsInfos
 	//	2) Serialize the timestamp allocation for dml tasks
 
-	//1. preAdd will check whether provided task is valid or addable
-	//and get the current pChannels for this dmTask
+	//1. set the current pChannels for this dmTask
 	dmt := t.(dmlTask)
-	pChannels, err := dmt.getChannels()
+	err := dmt.setChannels()
 	if err != nil {
-		log.Warn("getChannels failed when Enqueue", zap.Any("tID", t.ID()), zap.Error(err))
+		log.Warn("setChannels failed when Enqueue", zap.Int64("taskID", t.ID()), zap.Error(err))
 		return err
 	}
 
@@ -244,7 +242,8 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	if err != nil {
 		return err
 	}
-	//3. if preAdd succeed, commit will use pChannels got previously when preAdding and will definitely succeed
+	//3. commit will use pChannels got previously when preAdding and will definitely succeed
+	pChannels := dmt.getChannels()
 	queue.commitPChanStats(dmt, pChannels)
 	//there's indeed a possibility that the collection info cache was expired after preAddPChanStats
 	//but considering root coord knows everything about meta modification, invalid stats appended after the meta changed
@@ -304,12 +303,7 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 }
 
 func (queue *dmTaskQueue) popPChanStats(t task) {
-	channels, err := t.(dmlTask).getChannels()
-	if err != nil {
-		err = fmt.Errorf("get channels failed when popPChanStats, err=%w", err)
-		log.Error(err.Error())
-		panic(err)
-	}
+	channels := t.(dmlTask).getChannels()
 	taskTs := t.BeginTs()
 	for _, cName := range channels {
 		info, ok := queue.pChanStatisticsInfos[cName]
