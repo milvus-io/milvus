@@ -190,7 +190,7 @@ proxy:
 queryCoord:
   autoHandoff: true # Enable auto handoff
   autoBalance: true # Enable auto balance
-  balancer: RowCountBasedBalancer # Balancer to use
+  balancer: ScoreBasedBalancer # Balancer to use
   globalRowCountFactor: 0.1 # expert parameters, only used by scoreBasedBalancer
   scoreUnbalanceTolerationFactor: 0.05 # expert parameters, only used by scoreBasedBalancer
   reverseUnBalanceTolerationFactor: 1.3 #expert parameters, only used by scoreBasedBalancer
