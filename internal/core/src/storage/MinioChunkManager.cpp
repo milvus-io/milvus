@@ -95,6 +95,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     if (initCount == 0) {
         // sdk_options_.httpOptions.installSigPipeHandler = true;
         struct sigaction psa;
+        memset(&psa, 0, sizeof psa);
         psa.sa_handler = SwallowHandler;
         psa.sa_flags = psa.sa_flags | SA_ONSTACK;
         sigaction(SIGPIPE, &psa, 0);
