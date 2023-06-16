@@ -36,6 +36,8 @@ type SearchTask struct {
 	segmentManager   *segments.Manager
 	req              *querypb.SearchRequest
 	result           *internalpb.SearchResults
+	merged           bool
+	groupSize        int64
 	topk             int64
 	nq               int64
 	placeholderGroup []byte
@@ -57,6 +59,8 @@ func NewSearchTask(ctx context.Context,
 		collection:       collection,
 		segmentManager:   manager,
 		req:              req,
+		merged:           false,
+		groupSize:        1,
 		topk:             req.GetReq().GetTopk(),
 		nq:               req.GetReq().GetNq(),
 		placeholderGroup: req.GetReq().GetPlaceholderGroup(),
@@ -200,8 +204,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	var (
 		nq        = t.nq
 		topk      = t.topk
-		otherNq   = other.req.GetReq().GetNq()
-		otherTopk = other.req.GetReq().GetTopk()
+		otherNq   = other.nq
+		otherTopk = other.topk
 	)
 
 	diffTopk := topk != otherTopk
@@ -225,19 +229,21 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	}
 
 	// Merge
+	t.groupSize += other.groupSize
 	t.topk = maxTopk
 	t.nq += otherNq
 	t.originTopks = append(t.originTopks, other.originTopks...)
 	t.originNqs = append(t.originNqs, other.originNqs...)
 	t.others = append(t.others, other)
+	other.merged = true
 
 	return true
 }
 
 func (t *SearchTask) Done(err error) {
 	collector.Counter.Dec(metricsinfo.ExecuteQueueType, 1)
-	if len(t.others) > 0 {
-		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(len(t.others) + 1))
+	if !t.merged {
+		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.groupSize))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.nq))
 		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(t.topk))
 	}
