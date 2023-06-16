@@ -111,8 +111,6 @@ Delete(CSegmentInterface c_segment,
        const uint64_t ids_size,
        const uint64_t* timestamps);
 
-int64_t
-PreDelete(CSegmentInterface c_segment, int64_t size);
 #ifdef __cplusplus
 }
 #endif

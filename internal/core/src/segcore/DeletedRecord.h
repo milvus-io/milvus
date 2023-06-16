@@ -12,10 +12,15 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "AckResponder.h"
 #include "common/Schema.h"
+#include "common/Types.h"
 #include "segcore/Record.h"
 #include "ConcurrentVector.h"
 
@@ -76,15 +81,55 @@ struct DeletedRecord {
         lru_ = std::move(new_entry);
     }
 
- public:
-    std::atomic<int64_t> reserved = 0;
-    AckResponder ack_responder_;
-    ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<PkType> pks_;
+    void
+    push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        std::lock_guard lck(buffer_mutex_);
+
+        auto size = pks.size();
+        ssize_t divide_point = 0;
+        auto n = n_.load();
+        // Truncate the overlapping prefix
+        if (n > 0) {
+            auto last = timestamps_[n - 1];
+            divide_point =
+                std::lower_bound(timestamps, timestamps + size, last + 1) -
+                timestamps;
+        }
+
+        // All these delete records have been applied
+        if (divide_point == size) {
+            return;
+        }
+
+        size -= divide_point;
+        pks_.set_data_raw(n, pks.data() + divide_point, size);
+        timestamps_.set_data_raw(n, timestamps + divide_point, size);
+        n_ += size;
+    }
+
+    const ConcurrentVector<Timestamp>&
+    timestamps() const {
+        return timestamps_;
+    }
+
+    const ConcurrentVector<PkType>&
+    pks() const {
+        return pks_;
+    }
+
+    int64_t
+    size() const {
+        return n_.load();
+    }
 
  private:
     std::shared_ptr<TmpBitmap> lru_;
     std::shared_mutex shared_mutex_;
+
+    std::shared_mutex buffer_mutex_;
+    std::atomic<int64_t> n_ = 0;
+    ConcurrentVector<Timestamp> timestamps_;
+    ConcurrentVector<PkType> pks_;
 };
 
 inline auto

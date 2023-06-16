@@ -101,8 +101,8 @@ get_deleted_bitmap(int64_t del_barrier,
     // Avoid invalid calculations when there are a lot of repeated delete pks
     std::unordered_map<PkType, Timestamp> delete_timestamps;
     for (auto del_index = start; del_index < end; ++del_index) {
-        auto pk = delete_record.pks_[del_index];
-        auto timestamp = delete_record.timestamps_[del_index];
+        auto pk = delete_record.pks()[del_index];
+        auto timestamp = delete_record.timestamps()[del_index];
 
         delete_timestamps[pk] = timestamp > delete_timestamps[pk]
                                     ? timestamp

@@ -207,7 +207,7 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 
 CStatus
 Delete(CSegmentInterface c_segment,
-       int64_t reserved_offset,
+       int64_t reserved_offset,  // deprecated
        int64_t size,
        const uint8_t* ids,
        const uint64_t ids_size,
@@ -223,13 +223,6 @@ Delete(CSegmentInterface c_segment,
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
-}
-
-int64_t
-PreDelete(CSegmentInterface c_segment, int64_t size) {
-    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-
-    return segment->PreDelete(size);
 }
 
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////

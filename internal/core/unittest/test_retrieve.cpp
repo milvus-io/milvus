@@ -389,7 +389,7 @@ TEST(Retrieve, Delete) {
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
     std::vector<idx_t> new_timestamps{10, 10, 10, 10, 10, 10};
-    auto reserved_offset = segment->PreDelete(new_count);
+    auto reserved_offset = segment->get_deleted_count();
     ASSERT_EQ(reserved_offset, row_count);
     segment->Delete(reserved_offset,
                     new_count,

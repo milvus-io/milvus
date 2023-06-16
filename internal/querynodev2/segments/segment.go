@@ -524,19 +524,6 @@ func (s *LocalSegment) preInsert(numOfRecords int) (int64, error) {
 	return offset, nil
 }
 
-func (s *LocalSegment) preDelete(numOfRecords int) int64 {
-	/*
-		long int
-		PreDelete(CSegmentInterface c_segment, long int size);
-	*/
-	var offset C.int64_t
-	GetPool().Submit(func() (any, error) {
-		offset = C.PreDelete(s.ptr, C.int64_t(int64(numOfRecords)))
-		return nil, nil
-	}).Await()
-	return int64(offset)
-}
-
 func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.typ.String())
@@ -608,9 +595,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 		return WrapSegmentReleased(s.segmentID)
 	}
 
-	offset := s.preDelete(len(primaryKeys))
-
-	var cOffset = C.int64_t(offset)
+	var cOffset = C.int64_t(0) // depre
 	var cSize = C.int64_t(len(primaryKeys))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 

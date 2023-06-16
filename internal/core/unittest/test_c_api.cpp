@@ -356,8 +356,7 @@ TEST(CApiTest, DeleteTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = PreDelete(segment, 3);
-
+    auto offset = 0;
     auto del_res = Delete(segment,
                           offset,
                           3,
@@ -398,7 +397,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    offset = PreDelete(segment, 1);
+    offset = 0;
     auto del_res = Delete(segment,
                           offset,
                           1,
@@ -420,10 +419,10 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
+    auto max_ts = dataset.timestamps_[N - 1] + 10;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -440,8 +439,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
         retrive_pks,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
                                        retrieve_result.proto_size);
@@ -455,7 +453,8 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
-    offset = PreDelete(segment, 1);
+    delete_timestamps[0]++;
+    offset = 0;
     del_res = Delete(segment,
                      offset,
                      1,
@@ -465,8 +464,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {2}
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
                                        retrieve_result.proto_size);
@@ -535,7 +533,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    auto offset = PreDelete(segment, 1);
+    auto offset = 0;
     auto del_res = Delete(segment,
                           offset,
                           1,
@@ -557,10 +555,10 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
+    auto max_ts = dataset.timestamps_[N - 1] + 10;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
@@ -577,8 +575,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         retrive_pks,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
                                        retrieve_result.proto_size);
@@ -592,7 +589,8 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
-    offset = PreDelete(segment, 1);
+    delete_timestamps[0]++;
+    offset = 0;
     del_res = Delete(segment,
                      offset,
                      1,
@@ -602,8 +600,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {2}
-    res = Retrieve(
-        segment, plan.get(), {}, dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), {}, max_ts, &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob,
                                        retrieve_result.proto_size);
@@ -683,7 +680,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = PreDelete(segment, 3);
+    offset = 0;
     auto del_res = Delete(segment,
                           offset,
                           3,
@@ -788,7 +785,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    auto offset = PreDelete(segment, 3);
+    auto offset = 0;
 
     auto del_res = Delete(segment,
                           offset,
@@ -846,7 +843,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = PreDelete(segment, 3);
+    offset = 0;
 
     auto del_res = Delete(segment,
                           offset,
@@ -967,7 +964,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
 
-    auto offset = PreDelete(segment, 3);
+    auto offset = 0;
 
     auto del_res = Delete(segment,
                           offset,
@@ -1232,7 +1229,7 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = PreDelete(segment, 3);
+    auto offset = 0;
 
     auto del_res = Delete(segment,
                           offset,
@@ -1309,7 +1306,7 @@ TEST(CApiTest, GetRealCount) {
                                     dataset.timestamps_[N - 1] + 2,
                                     dataset.timestamps_[N - 1] + 3};
 
-    auto del_offset = PreDelete(segment, 3);
+    auto del_offset = 0;
 
     auto del_res = Delete(segment,
                           del_offset,
