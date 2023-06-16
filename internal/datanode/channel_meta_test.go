@@ -1201,16 +1201,22 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 	s.Run("transient_error", func() {
 		defer s.SetupTest()
 		ch := make(chan struct{})
-		counter := 0
+		done := func() bool {
+			select {
+			case <-ch:
+				return true
+			default:
+				return false
+			}
+		}
 		s.cm.EXPECT().MultiRead(mock.Anything, []string{"rootPath/stats/1/0/100/10001"}).Call.
 			Return(func(_ context.Context, arg []string) [][]byte {
-				if counter == 0 {
+				if !done() {
 					return nil
 				}
 				return [][]byte{}
 			}, func(_ context.Context, arg []string) error {
-				if counter == 0 {
-					counter++
+				if !done() {
 					return errors.New("transient error")
 				}
 				return nil
