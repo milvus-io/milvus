@@ -4,6 +4,8 @@ def get_chart_version(repo = "milvus/milvus", app_version="2.2.0"):
     """
     Get helm chart version by app version
     """
+    if app_version.startswith("v"):
+        app_version = app_version[1:]
     cmd = f"helm search repo {repo} -l -o json"
     result = subprocess.check_output(cmd, shell=True)
     result = json.loads(result)
