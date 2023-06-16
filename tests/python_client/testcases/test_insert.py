@@ -916,6 +916,28 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.insert(data1)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_dataframe_using_default_value(self):
+        """
+        target: test insert with dataframe
+        method: insert with invalid dataframe
+        expected: insert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        # None/[] is not allowed when using dataframe
+        # To use default value, delete the whole item
+        df = pd.DataFrame({
+            "int64": pd.Series(data=[i for i in range(0, ct.default_nb)]),
+            "float_vector": vectors,
+            "float": pd.Series(data=[float(i) for i in range(ct.default_nb)], dtype="float32")
+        })
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
 
 class TestInsertAsync(TestcaseBase):
     """
@@ -1159,6 +1181,42 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "<_MultiThreadedRendezvous of RPC that terminated with:"
                                              "status = StatusCode.RESOURCE_EXHAUSTED"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_insert_array_using_default_value(self, default_value):
+        """
+        target: test insert with array
+        method: insert with invalid array
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        data = [{"int64": 1, "float_vector": vectors[1], "varchar": default_value, "float": np.float32(1.0)}]
+        collection_w.insert(data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_insert_tuple_using_default_value(self, default_value):
+        """
+        target: test insert with tuple
+        method: insert with invalid tuple
+        expected: insert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(),
+                  cf.gen_string_field(), cf.gen_float_field(default_value=np.float32(3.14))]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        int_values = [i for i in range(0, ct.default_nb)]
+        string_values = ["abc" for i in range(ct.default_nb)]
+        data = (int_values, vectors, string_values, default_value)
+        collection_w.insert(data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
 
 
 class TestInsertInvalidBinary(TestcaseBase):
@@ -1635,6 +1693,102 @@ class TestUpsertValid(TestcaseBase):
         res = collection_w.query(expr="", output_fields=["count(*)"])[0]
         assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_upsert_one_field_using_default_value(self, default_value):
+        """
+        target: test insert with one field using default value
+        method: 1. create a collection with one field using default value
+                2. insert using []/None to replace the field value
+        expected: insert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        cf.insert_data(collection_w, with_json=False)
+        data = [
+            [i for i in range(ct.default_nb)],
+            [np.float32(i) for i in range(ct.default_nb)],
+            default_value,
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        collection_w.upsert(data)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_upsert_multi_fields_using_default_value(self, default_value):
+        """
+        target: test insert with multi fields using default value
+        method: 1. default value fields before vector, insert [], None, fail
+                2. default value fields all after vector field, insert empty, succeed
+        expected: report error and insert successfully
+        """
+        # 1. default value fields before vector, insert [], None, fail
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float_field(default_value=np.float32(1.0)),
+            cf.gen_string_field(default_value="abc"),
+            cf.gen_float_vec_field()
+        ]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        cf.insert_data(collection_w, with_json=False)
+        data = [
+            [i for i in range(ct.default_nb)],
+            default_value,
+            # if multi default_value fields before vector field, every field must use []/None
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        collection_w.upsert(data,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "The data type of field varchar doesn't match"})
+
+        # 2. default value fields all after vector field, insert empty, succeed
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_float_field(default_value=np.float32(1.0)),
+            cf.gen_string_field(default_value="abc")
+        ]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [
+            [i for i in range(ct.default_nb)],
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        data1 = [
+            [i for i in range(ct.default_nb)],
+            cf.gen_vectors(ct.default_nb, ct.default_dim),
+            [np.float32(i) for i in range(ct.default_nb)]
+        ]
+        collection_w.upsert(data)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.upsert(data1)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_upsert_dataframe_using_default_value(self):
+        """
+        target: test upsert with dataframe
+        method: upsert with invalid dataframe
+        expected: upsert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        # None/[] is not allowed when using dataframe
+        # To use default value, delete the whole item
+        df = pd.DataFrame({
+            "int64": pd.Series(data=[i for i in range(0, ct.default_nb)]),
+            "float_vector": vectors,
+            "float": pd.Series(data=[float(i) for i in range(ct.default_nb)], dtype="float32")
+        })
+        collection_w.upsert(df)
+        assert collection_w.num_entities == ct.default_nb
+
 
 class TestUpsertInvalid(TestcaseBase):
     """ Invalid test case of Upsert interface """
@@ -1800,3 +1954,39 @@ class TestUpsertInvalid(TestcaseBase):
         data = [[np.float32(i) for i in range(ct.default_nb)], [str(i) for i in range(ct.default_nb)],
                 float_vec_values]
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_upsert_array_using_default_value(self, default_value):
+        """
+        target: test upsert with array
+        method: upsert with invalid array
+        expected: raise exception
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
+                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        data = [{"int64": 1, "float_vector": vectors[1], "varchar": default_value, "float": np.float32(1.0)}]
+        collection_w.upsert(data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], None])
+    def test_upsert_tuple_using_default_value(self, default_value):
+        """
+        target: test upsert with tuple
+        method: upsert with invalid tuple
+        expected: upsert successfully
+        """
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14)),
+                  cf.gen_string_field(), cf.gen_float_vec_field()]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        int_values = [i for i in range(0, ct.default_nb)]
+        string_values = ["abc" for i in range(ct.default_nb)]
+        data = (int_values, default_value, string_values, vectors)
+        collection_w.upsert(data, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1, ct.err_msg: "Field varchar don't match in entities[0]"})

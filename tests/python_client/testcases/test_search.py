@@ -3912,6 +3912,52 @@ class TestCollectionSearch(TestcaseBase):
         t.join()
         assert [res1[i].ids for i in range(nq)] == [res2[i].ids for i in range(nq)]
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_using_all_types_of_default_value(self, auto_id):
+        """
+        target: test create collection with default_value
+        method: create a schema with all fields using default value and search
+        expected: search results are as expected
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_int8_field(default_value=numpy.int8(8)),
+            cf.gen_int16_field(default_value=numpy.int16(16)),
+            cf.gen_int32_field(default_value=numpy.int32(32)),
+            cf.gen_int64_field(default_value=numpy.int64(64)),
+            cf.gen_float_field(default_value=numpy.float32(3.14)),
+            cf.gen_double_field(default_value=numpy.double(3.1415)),
+            cf.gen_bool_field(default_value=False),
+            cf.gen_string_field(default_value="abc")
+        ]
+        schema = cf.gen_collection_schema(fields, auto_id=auto_id)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [
+            [i for i in range(ct.default_nb)],
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        if auto_id:
+            del data[0]
+        collection_w.insert(data)
+        collection_w.create_index(field_name, default_index_params)
+        collection_w.load()
+        res = collection_w.search(vectors[:1], default_search_field, default_search_params,
+                                  default_limit, default_search_exp,
+                                  output_fields=["*"],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": 1,
+                                               "limit": default_limit})[0]
+        res = res[0][0].entity._row_data
+        assert res[ct.default_int8_field_name] == 8
+        assert res[ct.default_int16_field_name] == 16
+        assert res[ct.default_int32_field_name] == 32
+        assert res[ct.default_int64_field_name] == 64
+        assert res[ct.default_float_field_name] == numpy.float32(3.14)
+        assert res[ct.default_double_field_name] == 3.1415
+        assert res[ct.default_bool_field_name] is False
+        assert res[ct.default_string_field_name] == "abc"
+
 
 class TestSearchBase(TestcaseBase):
     @pytest.fixture(
