@@ -142,7 +142,7 @@ func (mc *mockCompactor) complete() {
 	mc.done <- struct{}{}
 }
 
-func (mc *mockCompactor) injectDone() {
+func (mc *mockCompactor) injectDone(success bool) {
 
 }
 

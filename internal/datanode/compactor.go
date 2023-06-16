@@ -60,7 +60,7 @@ type iterator = storage.Iterator
 type compactor interface {
 	complete()
 	compact() (*datapb.CompactionResult, error)
-	injectDone()
+	injectDone(success bool)
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -126,7 +126,7 @@ func (t *compactionTask) complete() {
 func (t *compactionTask) stop() {
 	t.cancel()
 	<-t.done
-	t.injectDone()
+	t.injectDone(true)
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -759,10 +759,10 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	return pack, nil
 }
 
-func (t *compactionTask) injectDone() {
+func (t *compactionTask) injectDone(success bool) {
 	if t.inject != nil {
 		uninjectStart := time.Now()
-		t.inject.injectDone(true)
+		t.inject.injectDone(success)
 		uninjectEnd := time.Now()
 		log.Info("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
 	}

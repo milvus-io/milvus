@@ -58,11 +58,12 @@ func (c *compactionExecutor) toCompleteState(task compactor) {
 	task.complete()
 	c.executing.Delete(task.getPlanID())
 }
-func (c *compactionExecutor) injectDone(planID UniqueID) {
+
+func (c *compactionExecutor) injectDone(planID UniqueID, success bool) {
 	c.completed.Delete(planID)
 	task, loaded := c.completedCompactor.LoadAndDelete(planID)
 	if loaded {
-		task.(compactor).injectDone()
+		task.(compactor).injectDone(success)
 	}
 }
 
@@ -128,7 +129,7 @@ func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string
 	// remove all completed plans for vChannelName
 	c.completed.Range(func(key interface{}, value interface{}) bool {
 		if value.(*datapb.CompactionResult).GetChannel() == vChannelName {
-			c.injectDone(key.(UniqueID))
+			c.injectDone(key.(UniqueID), true)
 			log.Info("remove compaction results for dropped channel",
 				zap.String("channel", vChannelName),
 				zap.Int64("planID", key.(UniqueID)))

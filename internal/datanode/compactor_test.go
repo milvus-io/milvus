@@ -863,7 +863,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			assert.Equal(t, 0, mockfm.injectCount())
-			task.injectDone()
+			task.injectDone(true)
 			time.Sleep(500 * time.Millisecond)
 			assert.Equal(t, 1, mockfm.injectCount())
 		}
@@ -958,7 +958,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.NotEmpty(t, result.Field2StatslogPaths)
 
 		assert.Equal(t, 0, mockfm.injectCount())
-		task.injectDone()
+		task.injectDone(true)
 		time.Sleep(500 * time.Millisecond)
 		assert.Equal(t, 1, mockfm.injectCount())
 	})
