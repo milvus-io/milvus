@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/interceptor"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -271,7 +272,9 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
+			interceptor.ClusterValidationUnaryServerInterceptor(),
 		)),
+		grpc.StreamInterceptor(interceptor.ClusterValidationStreamServerInterceptor()),
 	)
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcInternalServer, s)

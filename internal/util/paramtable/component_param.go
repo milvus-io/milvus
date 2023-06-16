@@ -128,7 +128,7 @@ func (p *ComponentParam) KafkaEnable() bool {
 type commonConfig struct {
 	Base *BaseTable
 
-	ClusterPrefix string
+	clusterPrefix atomic.Value
 
 	ProxySubName string
 
@@ -247,7 +247,19 @@ func (p *commonConfig) initClusterPrefix() {
 	if err != nil {
 		panic(err)
 	}
-	p.ClusterPrefix = str
+	p.clusterPrefix.Store(str)
+}
+
+func (p *commonConfig) SetClusterPrefix(cluster string) {
+	p.clusterPrefix.Store(cluster)
+}
+
+func (p *commonConfig) GetClusterPrefix() string {
+	val := p.clusterPrefix.Load()
+	if val != nil {
+		return val.(string)
+	}
+	return ""
 }
 
 func (p *commonConfig) initChanNamePrefix(keys []string) string {
@@ -255,7 +267,7 @@ func (p *commonConfig) initChanNamePrefix(keys []string) string {
 	if err != nil {
 		panic(err)
 	}
-	s := []string{p.ClusterPrefix, value}
+	s := []string{p.GetClusterPrefix(), value}
 	return strings.Join(s, "-")
 }
 
