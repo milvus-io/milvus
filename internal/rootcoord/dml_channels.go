@@ -24,9 +24,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/metrics"
-
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -224,14 +224,21 @@ func (d *dmlChannels) getChannelNum() int {
 	return len(d.listChannels())
 }
 
+func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
+	v, ok := d.pool.Load(chanName)
+	if !ok {
+		log.Error("invalid channel name", zap.String("chanName", chanName))
+		return nil, errors.Newf("invalid channel name: %s", chanName)
+	}
+	return v.(*dmlMsgStream), nil
+}
+
 func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) error {
 	for _, chanName := range chanNames {
-		v, ok := d.pool.Load(chanName)
-		if !ok {
-			log.Error("invalid channel name", zap.String("chanName", chanName))
-			panic("invalid channel name: " + chanName)
+		dms, err := d.getMsgStreamByName(chanName)
+		if err != nil {
+			return err
 		}
-		dms := v.(*dmlMsgStream)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
@@ -249,12 +256,10 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	for _, chanName := range chanNames {
-		v, ok := d.pool.Load(chanName)
-		if !ok {
-			log.Error("invalid channel name", zap.String("chanName", chanName))
-			panic("invalid channel name: " + chanName)
+		dms, err := d.getMsgStreamByName(chanName)
+		if err != nil {
+			return result, err
 		}
-		dms := v.(*dmlMsgStream)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
@@ -278,12 +283,10 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 
 func (d *dmlChannels) addChannels(names ...string) {
 	for _, name := range names {
-		v, ok := d.pool.Load(name)
-		if !ok {
-			log.Error("invalid channel name", zap.String("chanName", name))
-			panic("invalid channel name: " + name)
+		dms, err := d.getMsgStreamByName(name)
+		if err != nil {
+			continue
 		}
-		dms := v.(*dmlMsgStream)
 
 		d.mut.Lock()
 		dms.IncRefcnt()
@@ -294,12 +297,10 @@ func (d *dmlChannels) addChannels(names ...string) {
 
 func (d *dmlChannels) removeChannels(names ...string) {
 	for _, name := range names {
-		v, ok := d.pool.Load(name)
-		if !ok {
-			log.Error("invalid channel name", zap.String("chanName", name))
-			panic("invalid channel name: " + name)
+		dms, err := d.getMsgStreamByName(name)
+		if err != nil {
+			continue
 		}
-		dms := v.(*dmlMsgStream)
 
 		d.mut.Lock()
 		dms.DecRefCnt()

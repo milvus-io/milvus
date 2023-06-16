@@ -697,6 +697,7 @@ func (s *Server) processSessionEvent(ctx context.Context, role string, event *se
 		if err := retry.Do(ctx, func() error {
 			return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
 		}, retry.Attempts(100)); err != nil {
+			log.Error("release segments lock failed", zap.Error(err))
 			panic(err)
 		}
 	}
