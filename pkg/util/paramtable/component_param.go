@@ -2131,6 +2131,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 type dataNodeConfig struct {
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
+	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
 
 	// segment
 	FlushInsertBufferSize  ParamItem `refreshable:"true"`
@@ -2175,6 +2176,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlowGraphMaxParallelism.Init(base.mgr)
+
+	p.MaxParallelSyncTaskNum = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncTaskNum",
+		Version:      "2.3.0",
+		DefaultValue: "2",
+		Doc:          "Maximum number of sync tasks executed in parallel in each flush manager",
+		Export:       true,
+	}
+	p.MaxParallelSyncTaskNum.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",

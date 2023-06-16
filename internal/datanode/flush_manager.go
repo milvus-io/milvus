@@ -51,6 +51,8 @@ type flushManager interface {
 	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *msgpb.MsgPosition) (*storage.PrimaryKeyStats, error)
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *msgpb.MsgPosition) error
+	// isFull return true if the task pool is full
+	isFull() bool
 	// injectFlush injects compaction or other blocking task before flush sync
 	injectFlush(injection *taskInjection, segments ...UniqueID)
 	// startDropping changes flush manager into dropping mode
@@ -150,7 +152,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskR
 // postTask handles clean up work after a task is done
 func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInjectionFunc) {
 	// delete task from working map
-	q.working.Delete(string(pack.pos.MsgID))
+	q.working.Delete(getSyncTaskID(pack.pos))
 	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
 	q.runningTasks--
@@ -415,6 +417,20 @@ func (m *rendezvousFlushManager) serializePkStatsLog(segmentID int64, flushed bo
 	}
 
 	return blob, stats, nil
+}
+
+// isFull return true if the task pool is full
+func (m *rendezvousFlushManager) isFull() bool {
+	var num int
+	m.dispatcher.Range(func(_, q any) bool {
+		queue := q.(*orderFlushQueue)
+		queue.working.Range(func(_, _ any) bool {
+			num++
+			return true
+		})
+		return true
+	})
+	return num >= Params.DataNodeCfg.MaxParallelSyncTaskNum.GetAsInt()
 }
 
 // flushBufferData notifies flush manager insert buffer data.
@@ -945,6 +961,8 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		dsService.flushingSegCache.Remove(req.GetSegmentID())
 		dsService.channel.evictHistoryInsertBuffer(req.GetSegmentID(), pack.pos)
 		dsService.channel.evictHistoryDeleteBuffer(req.GetSegmentID(), pack.pos)
+		segment := dsService.channel.getSegment(req.GetSegmentID())
+		segment.setSyncing(false)
 		// dsService.channel.saveBinlogPath(fieldStats)
 	}
 }

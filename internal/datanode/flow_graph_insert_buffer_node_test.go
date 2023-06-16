@@ -263,6 +263,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 
 	// test flushBufferData failed
+	segment := channel.getSegment(UniqueID(1))
+	segment.setSyncing(false)
 	setFlowGraphRetryOpt(retry.Attempts(1))
 	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	iBNode.flushManager = &mockFlushManager{returnError: true}
@@ -1143,4 +1145,58 @@ func TestInsertBufferNode_collectSegmentsToSync(t *testing.T) {
 			assert.Equal(t, test.expectedOutNum, len(flushedSegs))
 		})
 	}
+}
+
+func TestInsertBufferNode_task_pool_is_full(t *testing.T) {
+	ctx := context.Background()
+	flushCh := make(chan flushMsg, 100)
+
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer func() {
+		err := cm.RemoveWithPrefix(ctx, cm.RootPath())
+		assert.NoError(t, err)
+	}()
+
+	channelName := "test_task_pool_is_full_mock_ch1"
+	collection := UniqueID(0)
+	segmentID := UniqueID(100)
+
+	channel := newChannel(channelName, collection, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
+	err := channel.addSegment(addSegmentReq{
+		segType:  datapb.SegmentType_New,
+		segID:    segmentID,
+		collID:   collection,
+		startPos: new(msgpb.MsgPosition),
+		endPos:   new(msgpb.MsgPosition),
+	})
+	assert.NoError(t, err)
+	channel.setCurInsertBuffer(segmentID, &BufferData{size: 100})
+
+	fManager := &mockFlushManager{
+		full: true,
+	}
+
+	dManager := &DeltaBufferManager{
+		channel:    channel,
+		delBufHeap: &PriorityQueue{},
+	}
+
+	node := &insertBufferNode{
+		flushChan:        flushCh,
+		channelName:      channelName,
+		channel:          channel,
+		flushManager:     fManager,
+		delBufferManager: dManager,
+	}
+	inMsg := genFlowGraphInsertMsg(channelName)
+	inMsg.BaseMsg = flowgraph.NewBaseMsg(true) // trigger sync task
+
+	segmentsToSync := node.Sync(&inMsg, []UniqueID{segmentID}, nil)
+	assert.Len(t, segmentsToSync, 0)
+
+	fManager.full = false
+	segment := channel.getSegment(segmentID)
+	segment.setSyncing(true)
+	segmentsToSync = node.Sync(&inMsg, []UniqueID{segmentID}, nil)
+	assert.Len(t, segmentsToSync, 0)
 }
