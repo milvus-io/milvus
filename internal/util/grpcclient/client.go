@@ -20,9 +20,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -39,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/generic"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -194,8 +198,14 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
 				grpc.UseCompressor(compress),
 			),
-			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
-			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),
+			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
+				otelgrpc.UnaryClientInterceptor(opts...),
+				interceptor.ClusterInjectionUnaryClientInterceptor(),
+			)),
+			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
+				otelgrpc.StreamClientInterceptor(opts...),
+				interceptor.ClusterInjectionStreamClientInterceptor(),
+			)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -225,8 +235,14 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
 				grpc.UseCompressor(compress),
 			),
-			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
-			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),
+			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
+				otelgrpc.UnaryClientInterceptor(opts...),
+				interceptor.ClusterInjectionUnaryClientInterceptor(),
+			)),
+			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
+				otelgrpc.StreamClientInterceptor(opts...),
+				interceptor.ClusterInjectionStreamClientInterceptor(),
+			)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -274,6 +290,14 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		// start bg check in case of https://github.com/milvus-io/milvus/issues/22435
 		go c.bgHealthCheck(client)
 		return generic.Zero[T](), err
+	}
+	if IsCrossClusterRoutingErr(err) {
+		log.Warn("CrossClusterRoutingErr, start to reset connection",
+			zap.String("role", c.GetRole()),
+			zap.Error(err),
+		)
+		c.resetConnection(client)
+		return ret, merr.ErrServiceUnavailable // For concealing ErrCrossClusterRouting from the client
 	}
 	if !funcutil.IsGrpcErr(err) {
 		log.Ctx(ctx).Warn("ClientBase:isNotGrpcErr", zap.Error(err))
@@ -364,4 +388,10 @@ func (c *ClientBase[T]) SetNodeID(nodeID int64) {
 // GetNodeID returns ID of client
 func (c *ClientBase[T]) GetNodeID() int64 {
 	return c.NodeID.Load()
+}
+
+func IsCrossClusterRoutingErr(err error) bool {
+	// GRPC utilizes `status.Status` to encapsulate errors,
+	// hence it is not viable to employ the `errors.Is` for assessment.
+	return strings.Contains(err.Error(), merr.ErrCrossClusterRouting.Error())
 }
