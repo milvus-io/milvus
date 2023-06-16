@@ -142,7 +142,9 @@ func (mt *MetaTable) reload() error {
 	}
 
 	log.Info("recover databases", zap.Int("num of dbs", len(dbs)))
-	maps.Copy(mt.dbName2Meta, dbs)
+	for _, db := range dbs {
+		mt.dbName2Meta[db.Name] = db
+	}
 	dbNames := maps.Keys(mt.dbName2Meta)
 	// create default database.
 	if !funcutil.SliceContain(dbNames, util.DefaultDBName) {
@@ -167,10 +169,10 @@ func (mt *MetaTable) reload() error {
 		if err != nil {
 			return err
 		}
-		for collName, collection := range collections {
+		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
-			mt.names.insert(dbName, collName, collection.CollectionID)
 			if collection.Available() {
+				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				collectionNum++
 				partitionNum += int64(collection.GetPartitionNum(true))
 			}
@@ -209,8 +211,8 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 
 	for _, collection := range oldCollections {
 		mt.collID2Meta[collection.CollectionID] = collection
-		mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 		if collection.Available() {
+			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 			collectionNum++
 			partitionNum += int64(collection.GetPartitionNum(true))
 		}
@@ -642,22 +644,21 @@ func (mt *MetaTable) listCollectionFromCache(dbName string, onlyAvail bool) ([]*
 		dbName = util.DefaultDBName
 	}
 
-	collectionIDs, err := mt.names.listCollectionID(dbName)
-	if err != nil {
-		return nil, err
+	db, ok := mt.dbName2Meta[dbName]
+	if !ok {
+		return nil, fmt.Errorf("database:%s not found", dbName)
 	}
 
-	collectionFromCache := make([]*model.Collection, 0, len(collectionIDs))
-	for _, colID := range collectionIDs {
-		meta, ok := mt.collID2Meta[colID]
-		if !ok {
-			return nil, fmt.Errorf("collectionID:%d  not existwithin db:%s", colID, dbName)
-		}
+	collectionFromCache := make([]*model.Collection, 0, len(mt.collID2Meta))
+	for _, collMeta := range mt.collID2Meta {
+		if (collMeta.DBID != util.NonDBID && db.ID == collMeta.DBID) ||
+			(collMeta.DBID == util.NonDBID && dbName == util.DefaultDBName) {
+			if onlyAvail && !collMeta.Available() {
+				continue
+			}
 
-		if onlyAvail && !meta.Available() {
-			continue
+			collectionFromCache = append(collectionFromCache, collMeta)
 		}
-		collectionFromCache = append(collectionFromCache, meta)
 	}
 	return collectionFromCache, nil
 }

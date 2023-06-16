@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
@@ -538,17 +539,17 @@ func TestTableCatalog_ListCollections(t *testing.T) {
 	// collection basic info
 	require.Equal(t, nil, gotErr)
 	require.Equal(t, 1, len(res))
-	require.Equal(t, coll.TenantID, res[coll.CollectionName].TenantID)
-	require.Equal(t, coll.CollectionID, res[coll.CollectionName].CollectionID)
-	require.Equal(t, coll.CollectionName, res[coll.CollectionName].Name)
-	require.Equal(t, coll.AutoID, res[coll.CollectionName].AutoID)
-	require.Equal(t, coll.Ts, res[coll.CollectionName].CreateTime)
-	require.Empty(t, res[coll.CollectionName].StartPositions)
+	require.Equal(t, coll.TenantID, res[0].TenantID)
+	require.Equal(t, coll.CollectionID, res[0].CollectionID)
+	require.Equal(t, coll.CollectionName, res[0].Name)
+	require.Equal(t, coll.AutoID, res[0].AutoID)
+	require.Equal(t, coll.Ts, res[0].CreateTime)
+	require.Empty(t, res[0].StartPositions)
 	// partitions/fields/channels
-	require.NotEmpty(t, res[coll.CollectionName].Partitions)
-	require.NotEmpty(t, res[coll.CollectionName].Fields)
-	require.NotEmpty(t, res[coll.CollectionName].VirtualChannelNames)
-	require.NotEmpty(t, res[coll.CollectionName].PhysicalChannelNames)
+	require.NotEmpty(t, res[0].Partitions)
+	require.NotEmpty(t, res[0].Fields)
+	require.NotEmpty(t, res[0].VirtualChannelNames)
+	require.NotEmpty(t, res[0].PhysicalChannelNames)
 }
 
 func TestTableCatalog_CollectionExists(t *testing.T) {

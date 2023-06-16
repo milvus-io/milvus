@@ -16,13 +16,14 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type Catalog struct {
@@ -48,9 +49,9 @@ func (tc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Tim
 
 }
 
-func (tc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Database, error) {
+func (tc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
 	//TODO
-	return make(map[string]*model.Database), nil
+	return make([]*model.Database, 0), nil
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
@@ -253,7 +254,7 @@ func (tc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 // [collection3, t3, is_deleted=false]
 // t1, t2, t3 are the largest timestamp that less than or equal to @param ts
 // the final result will only return collection2 and collection3 since collection1 is deleted
-func (tc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
+func (tc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
 	tenantID := contextutil.TenantID(ctx)
 
 	// 1. find each collection_id with latest ts <= @param ts
@@ -262,7 +263,7 @@ func (tc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		return nil, err
 	}
 	if len(cidTsPairs) == 0 {
-		return map[string]*model.Collection{}, nil
+		return make([]*model.Collection, 0), nil
 	}
 
 	// 2. populate each collection
@@ -287,13 +288,7 @@ func (tc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		log.Error("list collections by collection_id & ts pair failed", zap.Uint64("ts", ts), zap.Error(err))
 		return nil, err
 	}
-
-	r := map[string]*model.Collection{}
-	for _, c := range collections {
-		r[c.Name] = c
-	}
-
-	return r, nil
+	return collections, nil
 }
 
 func (tc *Catalog) CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {

@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -75,6 +76,18 @@ func TestCatalog_ListCollections(t *testing.T) {
 				{},
 			},
 		},
+		State: pb.CollectionState_CollectionCreated,
+	}
+
+	coll3 := &pb.CollectionInfo{
+		ID: 3,
+		Schema: &schemapb.CollectionSchema{
+			Name: "c1",
+			Fields: []*schemapb.FieldSchema{
+				{},
+			},
+		},
+		State: pb.CollectionState_CollectionDropping,
 	}
 
 	targetErr := errors.New("fail")
@@ -155,8 +168,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ret))
-		modCol := ret["c1"]
-		assert.Equal(t, coll1.ID, modCol.CollectionID)
+		assert.Equal(t, coll1.ID, ret[0].CollectionID)
 	})
 
 	t.Run("list collection with db", func(t *testing.T) {
@@ -201,8 +213,12 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
+
+		aColl, err := proto.Marshal(coll3)
+		assert.NoError(t, err)
+
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
-			Return([]string{"key"}, []string{string(bColl)}, nil)
+			Return([]string{"key", "key2"}, []string{string(bColl), string(aColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
 		pm, err := proto.Marshal(partitionMeta)
@@ -228,7 +244,9 @@ func TestCatalog_ListCollections(t *testing.T) {
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
-		assert.Equal(t, 1, len(ret))
+		assert.Equal(t, 2, len(ret))
+		assert.Equal(t, int64(2), ret[0].CollectionID)
+		assert.Equal(t, int64(3), ret[1].CollectionID)
 	})
 }
 
