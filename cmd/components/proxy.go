@@ -19,14 +19,13 @@ package components
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // Proxy implements Proxy grpc server
@@ -50,7 +49,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 // Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
-		log.Warn("failed to start Proxy", zap.Error(err))
+		log.Error("Proxy starts error", zap.Error(err))
 		return err
 	}
 	log.Info("Proxy successfully started")

@@ -19,14 +19,14 @@ package components
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
-	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 )
 
 // QueryNode implements QueryNode grpc server
@@ -52,7 +52,8 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) (*QueryNode, 
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
-		panic(err)
+		log.Error("QueryNode starts error", zap.Error(err))
+		return err
 	}
 	log.Debug("QueryNode successfully started")
 	return nil
