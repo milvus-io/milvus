@@ -183,7 +183,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 
 	dbuff.accumulateEntriesNum(dbuff.delData.RowCount)
 	log.Info("mergeDeltalogs end",
-		zap.Int("number of pks to compact in insert logs", len(pk2ts)),
+		zap.Int("number of deleted pks to compact in insert logs", len(pk2ts)),
 		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))
 
 	return pk2ts, dbuff, nil
@@ -320,21 +320,21 @@ func (t *compactionTask) merge(
 		downloadStart := time.Now()
 		data, err := t.download(ctxTimeout, path)
 		if err != nil {
-			log.Warn("download insertlogs wrong", zap.Error(err))
+			log.Warn("download insertlogs wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
 		}
 		downloadTimeCost += time.Since(downloadStart)
 
 		iter, err := storage.NewInsertBinlogIterator(data, pkID, pkType)
 		if err != nil {
-			log.Warn("new insert binlogs Itr wrong", zap.Error(err))
+			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, nil, 0, err
 		}
 		for iter.HasNext() {
 			vInter, _ := iter.Next()
 			v, ok := vInter.(*storage.Value)
 			if !ok {
-				log.Warn("transfer interface to Value wrong")
+				log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
 				return nil, nil, 0, errors.New("unexpected error")
 			}
 
@@ -351,7 +351,7 @@ func (t *compactionTask) merge(
 
 			row, ok := v.Value.(map[UniqueID]interface{})
 			if !ok {
-				log.Warn("transfer interface to map wrong")
+				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
 				return nil, nil, 0, errors.New("unexpected error")
 			}
 
@@ -573,7 +573,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		dmu    sync.Mutex
 	)
 
-	allPs := make([][]string, 0)
+	allPath := make([][]string, 0)
 
 	downloadStart := time.Now()
 	g, gCtx := errgroup.WithContext(ctxTimeout)
@@ -598,7 +598,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			for _, f := range s.GetFieldBinlogs() {
 				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 			}
-			allPs = append(allPs, ps)
+			allPath = append(allPath, ps)
 		}
 
 		segID := s.GetSegmentID()
@@ -608,7 +608,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 				g.Go(func() error {
 					bs, err := t.download(gCtx, []string{path})
 					if err != nil {
-						log.Warn("download deltalogs wrong")
+						log.Warn("download deltalogs wrong", zap.String("path", path), zap.Error(err))
 						return err
 					}
 
@@ -638,7 +638,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPs, targetSegID, partID, meta, deltaPk2Ts)
+	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
