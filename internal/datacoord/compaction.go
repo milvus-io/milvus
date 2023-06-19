@@ -312,7 +312,10 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		if ok {
 			if state == commonpb.CompactionState_Completed {
 				log.Info("compaction completed", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID))
-				c.completeCompaction(stateResult.GetResult())
+				err := c.completeCompaction(stateResult.GetResult())
+				if err != nil {
+					log.Warn("fail to complete compaction", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID), zap.Error(err))
+				}
 				continue
 			}
 			// check wether the CompactionPlan is timeout

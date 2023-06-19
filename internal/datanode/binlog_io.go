@@ -73,12 +73,13 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 		vs  [][]byte
 	)
 
+	log.Debug("down load", zap.Strings("path", paths))
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		for err != nil {
 			select {
 			case <-gCtx.Done():
-				log.Warn("ctx done when downloading kvs from blob storage")
+				log.Warn("ctx done when downloading kvs from blob storage", zap.Strings("paths", paths))
 				return errDownloadFromBlobStorage
 
 			default:

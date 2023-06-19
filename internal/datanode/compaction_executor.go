@@ -87,7 +87,7 @@ func (c *compactionExecutor) executeTask(task compactor) {
 		c.toCompleteState(task)
 	}()
 
-	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()))
+	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()), zap.Int64("Collection", task.getCollection()), zap.String("channel", task.getChannelName()))
 
 	result, err := task.compact()
 	if err != nil {
