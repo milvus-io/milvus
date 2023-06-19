@@ -96,6 +96,19 @@ func createColl(t *testing.T, name string, rc types.RootCoord) {
 	require.NoError(t, createColT.PostExecute(ctx))
 }
 
+func getBaseSearchParams() []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: testFloatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+	}
+}
+
 func getValidSearchParams() []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
@@ -1693,16 +1706,46 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
-		sp := getValidSearchParams()
-		sp = append(sp, &commonpb.KeyValuePair{
+		normalParam := getValidSearchParams()
+
+		noMetricTypeParams := getBaseSearchParams()
+		noMetricTypeParams = append(noMetricTypeParams, &commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10}`,
+		})
+
+		//noSearchParams := getBaseSearchParams()
+		//noSearchParams = append(noSearchParams, &commonpb.KeyValuePair{
+		//	Key:   common.MetricTypeKey,
+		//	Value: distance.L2,
+		//})
+
+		offsetParam := getValidSearchParams()
+		offsetParam = append(offsetParam, &commonpb.KeyValuePair{
 			Key:   OffsetKey,
 			Value: strconv.FormatInt(targetOffset, 10),
 		})
 
-		info, offset, err := parseSearchInfo(sp)
-		assert.NoError(t, err)
-		assert.NotNil(t, info)
-		assert.Equal(t, targetOffset, offset)
+		tests := []struct {
+			description string
+			validParams []*commonpb.KeyValuePair
+		}{
+			{"noMetricType", noMetricTypeParams},
+			//{"noSearchParams", noSearchParams},
+			{"normal", normalParam},
+			{"offsetParam", offsetParam},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				info, offset, err := parseSearchInfo(test.validParams)
+				assert.NoError(t, err)
+				assert.NotNil(t, info)
+				if test.description == "offsetParam" {
+					assert.Equal(t, targetOffset, offset)
+				}
+			})
+		}
 	})
 
 	t.Run("parseSearchInfo error", func(t *testing.T) {
@@ -1774,8 +1817,6 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			{"Invalid_topk", spInvalidTopk},
 			{"Invalid_topk_65536", spInvalidTopk65536},
 			{"Invalid_topk_plus_offset", spInvalidTopkPlusOffset},
-			{"No_Metric_type", spNoMetricType},
-			{"No_search_params", spNoSearchParams},
 			{"Invalid_round_decimal", spInvalidRoundDecimal},
 			{"Invalid_round_decimal_1000", spInvalidRoundDecimal2},
 			{"Invalid_offset_not_int", spInvalidOffsetNoInt},

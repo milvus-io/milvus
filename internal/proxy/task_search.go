@@ -141,7 +141,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, errors.New(common.MetricTypeKey + " not found in search_params")
+		metricType = ""
 	}
 
 	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, searchParamsPair)
