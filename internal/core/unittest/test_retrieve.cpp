@@ -67,9 +67,7 @@ TEST(Retrieve, AutoID) {
         values.emplace_back(i64_col[choose(i)]);
     }
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -121,9 +119,7 @@ TEST(Retrieve, AutoID2) {
         values.emplace_back(i64_col[choose(i)]);
     }
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -228,9 +224,7 @@ TEST(Retrieve, NotExist) {
     }
 
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -274,9 +268,7 @@ TEST(Retrieve, Empty) {
         values.emplace_back(choose(i));
     }
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -317,9 +309,7 @@ TEST(Retrieve, LargeTimestamp) {
         values.emplace_back(i64_col[choose(i)]);
     }
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -377,9 +367,7 @@ TEST(Retrieve, Delete) {
         values.emplace_back(i64_col[choose(i)]);
     }
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
-        milvus::query::ColumnInfo(
-            fid_64, DataType::INT64, std::vector<std::string>()),
-        values,
+        milvus::query::ColumnInfo(fid_64, DataType::INT64, std::vector<std::string>()), values,
         proto::plan::GenericValue::kInt64Val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
