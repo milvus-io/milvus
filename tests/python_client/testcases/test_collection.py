@@ -1796,6 +1796,50 @@ class TestCreateCollectionInvalid(TestcaseBase):
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "default value type mismatches field schema type"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_collection_with_pk_field_using_default_value(self):
+        """
+        target: test create collection with pk field using default value
+        method: create a pk field and set default value
+        expected: report error
+        """
+        # 1. pk int64
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True, default_value=np.int64(1)),
+            cf.gen_float_vec_field(), cf.gen_string_field(max_length=2)
+        ]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        collection_w.insert([[], [vectors[0]], ["a"]],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "pk field schema can not set default value"})
+        # 2. pk string
+        fields = [
+            cf.gen_string_field(name='pk', is_primary=True, default_value="a"),
+            cf.gen_float_vec_field(), cf.gen_string_field(max_length=2)
+        ]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        collection_w.insert([[], [vectors[0]], ["a"]],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "pk field schema can not set default value"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_collection_with_json_field_using_default_value(self):
+        """
+        target: test create collection with json field using default value
+        method: create a json field and set default value
+        expected: report error
+        """
+        json_default_value = {"number": 1, "float": 2.0, "string": "abc", "bool": True,
+                              "list": [i for i in range(5)]}
+        cf.gen_json_field(default_value=json_default_value,
+                          check_task=CheckTasks.err_res,
+                          check_items={ct.err_code: 1,
+                                       ct.err_msg: "Default value unsupported data type: 999"})
+
 
 class TestDropCollection(TestcaseBase):
     """

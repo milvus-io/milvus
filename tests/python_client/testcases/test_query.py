@@ -1578,6 +1578,46 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_using_all_types_of_default_value(self):
+        """
+        target: test create collection with default_value
+        method: create a schema with all fields using default value and query
+        expected: query results are as expected
+        """
+        fields = [
+            cf.gen_int64_field(name='pk', is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_int8_field(default_value=np.int8(8)),
+            cf.gen_int16_field(default_value=np.int16(16)),
+            cf.gen_int32_field(default_value=np.int32(32)),
+            cf.gen_int64_field(default_value=np.int64(64)),
+            cf.gen_float_field(default_value=np.float32(3.14)),
+            cf.gen_double_field(default_value=np.double(3.1415)),
+            cf.gen_bool_field(default_value=False),
+            cf.gen_string_field(default_value="abc")
+        ]
+        schema = cf.gen_collection_schema(fields)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [
+            [i for i in range(ct.default_nb)],
+            cf.gen_vectors(ct.default_nb, ct.default_dim)
+        ]
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name)
+        collection_w.load()
+        expr = "pk in [0, 1]"
+        res = collection_w.query(expr, output_fields=["*"])[0][0]
+        log.info(res)
+        assert res[ct.default_int8_field_name] == 8
+        assert res[ct.default_int16_field_name] == 16
+        assert res[ct.default_int32_field_name] == 32
+        assert res[ct.default_int64_field_name] == 64
+        assert res[ct.default_float_field_name] == np.float32(3.14)
+        assert res[ct.default_double_field_name] == 3.1415
+        assert res[ct.default_bool_field_name] is False
+        assert res[ct.default_string_field_name] == "abc"
+
 
 class TestQueryString(TestcaseBase):
     """
