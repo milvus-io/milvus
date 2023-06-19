@@ -217,7 +217,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
     InitSDKAPI(storageType);
 
-    Aws::Client::ClientConfiguration config;
+    // The ClientConfiguration default constructor will take a long time.
+    // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
+    static Aws::Client::ClientConfiguration g_config;
+    Aws::Client::ClientConfiguration config = g_config;
     config.endpointOverride = ConvertToAwsString(storage_config.address);
 
     if (storage_config.useSSL) {
