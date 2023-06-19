@@ -481,18 +481,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID())), nil
 	}
 
-	if req.GetLoadScope() == querypb.LoadScope_Delta {
-		return node.loadDeltaLogs(ctx, req), nil
-	}
-
-	// check metric type
-	if req.GetLoadMeta().GetMetricType() == "" {
-		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
-		return merr.Status(err), nil
-	}
-
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
-
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
@@ -511,6 +499,17 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 		return util.SuccessStatus(), nil
 	}
+
+	if req.GetLoadScope() == querypb.LoadScope_Delta {
+		return node.loadDeltaLogs(ctx, req), nil
+	}
+	// check metric type
+	if req.GetLoadMeta().GetMetricType() == "" {
+		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
+		return merr.Status(err), nil
+	}
+
+	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
 
 	// Actual load segment
 	log.Info("start to load segments...")
