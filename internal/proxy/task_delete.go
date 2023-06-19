@@ -312,10 +312,10 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 
 	log.Debug("send delete request to virtual channels",
-		zap.String("collection", dt.deleteMsg.GetCollectionName()),
-		zap.Int64("collection_id", collID),
+		zap.String("collectionName", dt.deleteMsg.GetCollectionName()),
+		zap.Int64("collectionID", collID),
 		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", dt.ID()),
+		zap.Int64("taskID", dt.ID()),
 		zap.Duration("prepare duration", tr.RecordSpan()))
 
 	err = stream.Produce(msgPack)

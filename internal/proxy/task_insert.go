@@ -110,13 +110,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.insertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Info("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
-		log.Error("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 	it.schema = schema
@@ -161,7 +161,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.insertMsg, true)
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {
-		log.Error("check primary field data and hash primary key failed",
+		log.Warn("check primary field data and hash primary key failed",
 			zap.Error(err))
 		return err
 	}
@@ -183,7 +183,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.insertMsg)
 		if err != nil {
-			log.Info("get partition keys from insert request failed", zap.String("collection name", collectionName), zap.Error(err))
+			log.Warn("get partition keys from insert request failed", zap.String("collection name", collectionName), zap.Error(err))
 			return err
 		}
 	} else {
@@ -196,7 +196,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 
 		if err := validatePartitionTag(partitionTag, true); err != nil {
-			log.Info("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			log.Warn("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 			return err
 		}
 	}
@@ -233,7 +233,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Ctx(ctx).Error("get vChannels failed",
+		log.Ctx(ctx).Warn("get vChannels failed",
 			zap.Int64("collectionID", collID),
 			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -242,9 +242,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 
 	log.Ctx(ctx).Debug("send insert request to virtual channels",
-		zap.String("collection", it.insertMsg.GetCollectionName()),
+		zap.String("collectionName", it.insertMsg.GetCollectionName()),
 		zap.String("partition", it.insertMsg.GetPartitionName()),
-		zap.Int64("collection_id", collID),
+		zap.Int64("collectionID", collID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", it.ID()),
 		zap.Duration("get cache duration", getCacheDur),
@@ -258,7 +258,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
 	}
 	if err != nil {
-		log.Error("assign segmentID and repack insert data failed",
+		log.Warn("assign segmentID and repack insert data failed",
 			zap.Int64("collectionID", collID),
 			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError

@@ -259,16 +259,6 @@ func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, collecti
 	}
 }
 
-// printRates logs the rate info.
-func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
-	//fmt.Printf("RateLimiter set rates:\n---------------------------------\n")
-	//for _, r := range rates {
-	//	fmt.Printf("%s -> %v\n", r.GetRt().String(), r.GetR())
-	//}
-	//fmt.Printf("---------------------------------\n")
-	log.Debug("RateLimiter setRates", zap.Any("rates", rates))
-}
-
 // registerLimiters register limiter for all rate types.
 func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 	log := log.Ctx(context.TODO()).WithRateGroup("proxy.rateLimiter", 1.0, 60.0)

@@ -372,7 +372,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
+		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.String("collectionName", collectionName))
 		ret := make(map[string]typeutil.UniqueID)
 		partInfo := m.collInfo[collectionName].partInfo
 		for k, v := range partInfo {
@@ -414,7 +414,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
+		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.String("collectionName", collectionName))
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
 			return nil, merr.WrapErrPartitionNotFound(partitionName)

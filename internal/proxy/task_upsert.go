@@ -176,14 +176,14 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.IDs, err = checkPrimaryFieldData(it.schema, it.result, it.upsertMsg.InsertMsg, false)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
-		log.Error("check primary field data and hash primary key failed when upsert",
+		log.Warn("check primary field data and hash primary key failed when upsert",
 			zap.Error(err))
 		return err
 	}
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
-		log.Error("insert set fieldID to fieldData failed when upsert",
+		log.Warn("insert set fieldID to fieldData failed when upsert",
 			zap.Error(err))
 		return err
 	}
@@ -192,7 +192,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
-			log.Info("get partition keys from insert request failed",
+			log.Warn("get partition keys from insert request failed",
 				zap.String("collectionName", collectionName),
 				zap.Error(err))
 			return err
@@ -200,7 +200,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	} else {
 		partitionTag := it.upsertMsg.InsertMsg.PartitionName
 		if err = validatePartitionTag(partitionTag, true); err != nil {
-			log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			log.Warn("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 			return err
 		}
 	}
@@ -241,12 +241,12 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := it.upsertMsg.DeleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
+			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, collName, partName)
 		if err != nil {
-			log.Info("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
+			log.Warn("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		it.upsertMsg.DeleteMsg.PartitionID = partID
@@ -279,7 +279,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
-		log.Info("Failed to get collection schema",
+		log.Warn("Failed to get collection schema",
 			zap.String("collectionName", collectionName),
 			zap.Error(err))
 		return err
@@ -337,20 +337,20 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	err = it.insertPreExecute(ctx)
 	if err != nil {
-		log.Info("Fail to insertPreExecute", zap.Error(err))
+		log.Warn("Fail to insertPreExecute", zap.Error(err))
 		return err
 	}
 
 	err = it.deletePreExecute(ctx)
 	if err != nil {
-		log.Info("Fail to deletePreExecute", zap.Error(err))
+		log.Warn("Fail to deletePreExecute", zap.Error(err))
 		return err
 	}
 
 	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
 	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
 	if it.result.DeleteCnt != it.result.InsertCnt {
-		log.Error("DeleteCnt and InsertCnt are not the same when upsert",
+		log.Info("DeleteCnt and InsertCnt are not the same when upsert",
 			zap.Int64("DeleteCnt", it.result.DeleteCnt),
 			zap.Int64("InsertCnt", it.result.InsertCnt))
 	}
@@ -380,7 +380,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 	getMsgStreamDur := tr.RecordSpan()
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("get vChannels failed when insertExecute",
+		log.Warn("get vChannels failed when insertExecute",
 			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -404,7 +404,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		insertMsgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner)
 	}
 	if err != nil {
-		log.Error("assign segmentID and repack insert data failed when insertExecute",
+		log.Warn("assign segmentID and repack insert data failed when insertExecute",
 			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -519,13 +519,13 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	}
 	err = it.insertExecute(ctx, msgPack)
 	if err != nil {
-		log.Info("Fail to insertExecute", zap.Error(err))
+		log.Warn("Fail to insertExecute", zap.Error(err))
 		return err
 	}
 
 	err = it.deleteExecute(ctx, msgPack)
 	if err != nil {
-		log.Info("Fail to deleteExecute", zap.Error(err))
+		log.Warn("Fail to deleteExecute", zap.Error(err))
 		return err
 	}
 

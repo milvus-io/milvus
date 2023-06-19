@@ -140,28 +140,26 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	// check if collection/partitions are loaded into query node
 	loaded, unloaded, err := checkFullLoaded(ctx, g.qc, g.collectionName, partIDs)
+	log := log.Ctx(ctx)
 	if err != nil {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = partIDs
-		log.Ctx(ctx).Debug("checkFullLoaded failed, try get statistics from DataCoord",
-			zap.Error(err))
+		log.Info("checkFullLoaded failed, try get statistics from DataCoord", zap.Error(err))
 		return nil
 	}
 	if len(unloaded) > 0 {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = unloaded
-		log.Debug("some partitions has not been loaded, try get statistics from DataCoord",
+		log.Info("some partitions has not been loaded, try get statistics from DataCoord",
 			zap.String("collection", g.collectionName),
-			zap.Int64s("unloaded partitions", unloaded),
-			zap.Error(err))
+			zap.Int64s("unloaded partitions", unloaded))
 	}
 	if len(loaded) > 0 {
 		g.fromQueryNode = true
 		g.loadedPartitionIDs = loaded
-		log.Debug("some partitions has been loaded, try get statistics from QueryNode",
+		log.Info("some partitions has been loaded, try get statistics from QueryNode",
 			zap.String("collection", g.collectionName),
-			zap.Int64s("loaded partitions", loaded),
-			zap.Error(err))
+			zap.Int64s("loaded partitions", loaded))
 	}
 	return nil
 }
@@ -228,8 +226,7 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		Stats:  result,
 	}
 
-	log.Info("get statistics post execute done",
-		zap.Any("result", result))
+	log.Debug("get statistics post execute done", zap.Any("result", result))
 	return nil
 }
 

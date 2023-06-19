@@ -878,21 +878,8 @@ func reduceSearchResultData(ctx context.Context, subSearchResultData []*schemapb
 			ret.Results.Scores[k] *= -1
 		}
 	}
-	// printSearchResultData(ret.Results, "proxy reduce result")
 	return ret, nil
 }
-
-// func printSearchResultData(data *schemapb.SearchResultData, header string) {
-//     size := len(data.GetIds().GetIntId().GetData())
-//     if size != len(data.Scores) {
-//         log.Error("SearchResultData length mis-match")
-//     }
-//     log.Debug("==== SearchResultData ====",
-//         zap.String("header", header), zap.Int64("nq", data.NumQueries), zap.Int64("topk", data.TopK))
-//     for i := 0; i < size; i++ {
-//         log.Debug("", zap.Int("i", i), zap.Int64("id", data.GetIds().GetIntId().Data[i]), zap.Float32("score", data.Scores[i]))
-//     }
-// }
 
 func (t *searchTask) TraceCtx() context.Context {
 	return t.ctx

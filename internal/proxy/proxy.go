@@ -189,7 +189,6 @@ func (node *Proxy) Init() error {
 	log.Info("init session for Proxy done")
 
 	node.factory.Init(Params)
-	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.GetAll()))
 
 	accesslog.SetupAccseeLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	log.Debug("init access log for Proxy done")
@@ -200,67 +199,58 @@ func (node *Proxy) Init() error {
 	}
 	log.Info("Proxy init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
 
-	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create id allocator",
-			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
+			zap.Error(err))
 		return err
 	}
 	node.rowIDAllocator = idAllocator
 	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 	tsoAllocator, err := newTimestampAllocator(node.rootCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create timestamp allocator",
-			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
+			zap.Error(err))
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
 	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	log.Debug("create segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		log.Warn("failed to create segment id assigner",
-			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
+			zap.Error(err))
 		return err
 	}
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = paramtable.GetNodeID()
 	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, node.factory)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("create task scheduler", zap.String("role", typeutil.ProxyRole))
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
 	if err != nil {
-		log.Warn("failed to create task scheduler", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to create task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("create task scheduler done", zap.String("role", typeutil.ProxyRole))
 
 	syncTimeTickInterval := Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond) / 2
-	log.Debug("create channels time ticker",
-		zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
 	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
-	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole))
+	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
 
-	log.Debug("create metrics cache manager", zap.String("role", typeutil.ProxyRole))
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("init meta cache", zap.String("role", typeutil.ProxyRole))
 	if err := InitMetaCache(node.ctx, node.rootCoord, node.queryCoord, node.shardMgr); err != nil {
-		log.Warn("failed to init meta cache", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to init meta cache", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
@@ -351,30 +341,26 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
-	log.Debug("start task scheduler", zap.String("role", typeutil.ProxyRole))
 	if err := node.sched.Start(); err != nil {
-		log.Warn("failed to start task scheduler", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("start task scheduler done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("start id allocator", zap.String("role", typeutil.ProxyRole))
 	if err := node.rowIDAllocator.Start(); err != nil {
-		log.Warn("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to start id allocator", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("start id allocator done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("start segment id assigner", zap.String("role", typeutil.ProxyRole))
 	if err := node.segAssigner.Start(); err != nil {
-		log.Warn("failed to start segment id assigner", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to start segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("start segment id assigner done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("start channels time ticker", zap.String("role", typeutil.ProxyRole))
 	if err := node.chTicker.start(); err != nil {
-		log.Warn("failed to start channels time ticker", zap.Error(err), zap.String("role", typeutil.ProxyRole))
+		log.Warn("failed to start channels time ticker", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
 	log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))

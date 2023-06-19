@@ -449,7 +449,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}()
 	if err != nil {
 		span.RecordError(err)
-		log.Ctx(ctx).Error("Failed to pre-execute task: " + err.Error())
+		log.Ctx(ctx).Warn("Failed to pre-execute task: " + err.Error())
 		return
 	}
 
@@ -457,7 +457,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.Execute(ctx)
 	if err != nil {
 		span.RecordError(err)
-		log.Ctx(ctx).Error("Failed to execute task: ", zap.Error(err))
+		log.Ctx(ctx).Warn("Failed to execute task: ", zap.Error(err))
 		return
 	}
 
@@ -466,7 +466,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 
 	if err != nil {
 		span.RecordError(err)
-		log.Ctx(ctx).Error("Failed to post-execute task: ", zap.Error(err))
+		log.Ctx(ctx).Warn("Failed to post-execute task: ", zap.Error(err))
 		return
 	}
 }
