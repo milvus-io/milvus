@@ -441,6 +441,45 @@ MinioChunkManager::PutObjectBuffer(const std::string& bucket_name,
     return true;
 }
 
+class AwsStreambuf : public std::streambuf {
+ public:
+    AwsStreambuf(char* buffer, std::streamsize buffer_size) {
+        setp(buffer, buffer + buffer_size - 1);
+    }
+
+ protected:
+    int_type
+    overflow(int_type ch) override {
+        if (ch != traits_type::eof()) {
+            *pptr() = ch;
+            pbump(1);
+        }
+        return ch;
+    }
+};
+
+class AwsResponseStream : public Aws::IOStream {
+ public:
+    /**
+     * Creates a stream for get response from server
+     * @param buffer the buffer address from user space
+     * @param size length of the underlying buffer.
+     */
+    AwsResponseStream(char* buffer, int64_t size)
+        : Aws::IOStream(&aws_streambuf), aws_streambuf(buffer, size) {
+    }
+
+ private:
+    AwsResponseStream(const AwsResponseStream&) = delete;
+    AwsResponseStream(AwsResponseStream&&) = delete;
+    AwsResponseStream&
+    operator=(const AwsResponseStream&) = delete;
+    AwsResponseStream&
+    operator=(AwsResponseStream&&) = delete;
+
+    AwsStreambuf aws_streambuf;
+};
+
 uint64_t
 MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
                                    const std::string& object_name,
@@ -451,9 +490,15 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
     request.SetKey(object_name.c_str());
 
     request.SetResponseStreamFactory([buf, size]() {
+    // For macOs, pubsetbuf interface not implemented
+#ifdef __linux__
         std::unique_ptr<Aws::StringStream> stream(
             Aws::New<Aws::StringStream>(""));
         stream->rdbuf()->pubsetbuf(static_cast<char*>(buf), size);
+#else
+        std::unique_ptr<Aws::IOStream> stream(Aws::New<AwsResponseStream>(
+            "AwsResponseStream", static_cast<char*>(buf), size));
+#endif
         return stream.release();
     });
     auto outcome = client_->GetObject(request);
