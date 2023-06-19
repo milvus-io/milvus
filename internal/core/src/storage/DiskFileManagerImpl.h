@@ -34,7 +34,7 @@ namespace milvus::storage {
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
     explicit DiskFileManagerImpl(const FieldDataMeta& field_meta,
-                                 const IndexMeta& index_meta,
+                                 IndexMeta index_meta,
                                  const StorageConfig& storage_config);
 
     virtual ~DiskFileManagerImpl();
@@ -77,13 +77,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     std::string
-    GenerateRemoteIndexFile(std::string file_name, int64_t slice_num) const {
+    GenerateRemoteIndexFile(const std::string& file_name,
+                            int64_t slice_num) const {
         return GetRemoteIndexObjectPrefix() + "/" + file_name + "_" +
                std::to_string(slice_num);
     }
 
     void
-    CacheIndexToDisk(std::vector<std::string> remote_files);
+    CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
     uint64_t
     CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,

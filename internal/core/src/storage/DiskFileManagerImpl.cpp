@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <mutex>
+#include <utility>
 
 #include "common/Common.h"
 #include "common/Slice.h"
@@ -63,9 +64,9 @@ using WriteLock = std::lock_guard<std::shared_mutex>;
 namespace milvus::storage {
 
 DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_meta,
-                                         const IndexMeta& index_meta,
+                                         IndexMeta index_meta,
                                          const StorageConfig& storage_config)
-    : field_meta_(field_meta), index_meta_(index_meta) {
+    : field_meta_(field_meta), index_meta_(std::move(index_meta)) {
     remote_root_path_ = storage_config.remote_root_path;
     rcm_ = std::make_unique<MinioChunkManager>(storage_config);
 }
@@ -86,7 +87,7 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
                           const std::string& file,
                           int64_t offset,
                           int64_t batch_size,
-                          IndexMeta index_meta,
+                          const IndexMeta& index_meta,
                           FieldDataMeta field_meta,
                           std::string object_key) {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
@@ -104,7 +105,7 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
     auto serialized_index_size = serialized_index_data.size();
     remote_chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
-    return std::pair<std::string, size_t>(object_key, serialized_index_size);
+    return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
 bool
@@ -191,7 +192,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 }
 
 void
-DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
+DiskFileManagerImpl::CacheIndexToDisk(
+    const std::vector<std::string>& remote_files) {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
 
     std::map<std::string, std::vector<int>> index_slices;
@@ -214,20 +216,19 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
         auto prefix = slices.first;
         auto local_index_file_name =
             GetLocalIndexObjectPrefix() +
-            prefix.substr(prefix.find_last_of("/") + 1);
+            prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager.CreateFile(local_index_file_name);
         int64_t offset = 0;
         std::vector<std::string> batch_remote_files;
         uint64_t max_parallel_degree = INT_MAX;
-        for (auto iter = slices.second.begin(); iter != slices.second.end();
-             iter++) {
+        for (int& iter : slices.second) {
             if (batch_remote_files.size() == max_parallel_degree) {
                 auto next_offset = CacheBatchIndexFilesToDisk(
                     batch_remote_files, local_index_file_name, offset);
                 offset = next_offset;
                 batch_remote_files.clear();
             }
-            auto origin_file = prefix + "_" + std::to_string(*iter);
+            auto origin_file = prefix + "_" + std::to_string(iter);
             if (batch_remote_files.size() == 0) {
                 // Use first file size as average size to estimate
                 max_parallel_degree = EstimateParallelDegree(origin_file);
@@ -246,7 +247,7 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
 
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteIndexfile(RemoteChunkManager* remote_chunk_manager,
-                                 std::string file) {
+                                 const std::string& file) {
     auto fileSize = remote_chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     remote_chunk_manager->Read(file, buf.get(), fileSize);

@@ -23,7 +23,7 @@ namespace milvus::storage {
 PayloadReader::PayloadReader(std::shared_ptr<PayloadInputStream> input,
                              DataType data_type)
     : column_type_(data_type) {
-    init(input);
+    init(std::move(input));
 }
 
 PayloadReader::PayloadReader(const uint8_t* data,

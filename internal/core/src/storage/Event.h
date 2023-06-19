@@ -34,8 +34,7 @@ struct EventHeader {
     int32_t event_length_;
     int32_t next_position_;
 
-    EventHeader() {
-    }
+    EventHeader() = default;
     explicit EventHeader(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
@@ -51,8 +50,7 @@ struct DescriptorEventDataFixPart {
     Timestamp end_timestamp;
     milvus::proto::schema::DataType data_type;
 
-    DescriptorEventDataFixPart() {
-    }
+    DescriptorEventDataFixPart() = default;
     explicit DescriptorEventDataFixPart(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
@@ -66,8 +64,7 @@ struct DescriptorEventData {
     std::unordered_map<std::string, std::string> extras;
     std::vector<uint8_t> post_header_lengths;
 
-    DescriptorEventData() {
-    }
+    DescriptorEventData() = default;
     explicit DescriptorEventData(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
@@ -79,8 +76,7 @@ struct BaseEventData {
     Timestamp end_timestamp;
     FieldDataPtr field_data;
 
-    BaseEventData() {
-    }
+    BaseEventData() = default;
     explicit BaseEventData(BinlogReaderPtr reader,
                            int event_length,
                            DataType data_type);
@@ -93,8 +89,7 @@ struct DescriptorEvent {
     EventHeader event_header;
     DescriptorEventData event_data;
 
-    DescriptorEvent() {
-    }
+    DescriptorEvent() = default;
     explicit DescriptorEvent(BinlogReaderPtr reader);
 
     std::vector<uint8_t>
@@ -105,8 +100,7 @@ struct BaseEvent {
     EventHeader event_header;
     BaseEventData event_data;
 
-    BaseEvent() {
-    }
+    BaseEvent() = default;
     explicit BaseEvent(BinlogReaderPtr reader, DataType data_type);
 
     std::vector<uint8_t>
@@ -149,8 +143,7 @@ struct LocalIndexEvent {
     uint32_t degree;
     FieldDataPtr field_data;
 
-    LocalIndexEvent() {
-    }
+    LocalIndexEvent() = default;
     explicit LocalIndexEvent(BinlogReaderPtr reader);
 
     std::vector<uint8_t>

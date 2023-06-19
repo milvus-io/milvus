@@ -30,7 +30,7 @@ namespace milvus::storage {
 class DataCodec {
  public:
     explicit DataCodec(FieldDataPtr data, CodecType type)
-        : field_data_(data), codec_type_(type) {
+        : field_data_(std::move(data)), codec_type_(type) {
     }
 
     virtual ~DataCodec() = default;
