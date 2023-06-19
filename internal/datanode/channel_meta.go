@@ -156,6 +156,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
 			syncMemoryTooHigh(),
+			syncCPLagTooBehind(),
 		},
 
 		metaService:  metaService,

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
@@ -91,6 +92,73 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 			}
 			segs := policy(segments, 0, atomic.NewBool(test.needToSync))
 			assert.ElementsMatch(t, segs, test.shouldSyncSegs)
+		})
+	}
+}
+
+func TestSyncCpLagBehindTooMuch(t *testing.T) {
+	nowTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+	laggedTs := tsoutil.AddPhysicalDurationOnTs(nowTs, -2*Params.DataNodeCfg.CpLagPeriod.GetAsDuration(time.Second))
+	tests := []struct {
+		testName  string
+		segments  []*Segment
+		idsToSync []int64
+	}{
+		{"test_current_buf_lag_behind",
+			[]*Segment{
+				{
+					segmentID: 1,
+					curInsertBuf: &BufferData{
+						startPos: &msgpb.MsgPosition{
+							Timestamp: laggedTs,
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					curDeleteBuf: &DelDataBuf{
+						startPos: &msgpb.MsgPosition{
+							Timestamp: laggedTs,
+						},
+					},
+				},
+			},
+			[]int64{1, 2},
+		},
+		{"test_history_buf_lag_behind",
+			[]*Segment{
+				{
+					segmentID: 1,
+					historyInsertBuf: []*BufferData{
+						{
+							startPos: &msgpb.MsgPosition{
+								Timestamp: laggedTs,
+							},
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &msgpb.MsgPosition{
+								Timestamp: laggedTs,
+							},
+						},
+					},
+				},
+				{
+					segmentID: 3,
+				},
+			},
+			[]int64{1, 2},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			policy := syncCPLagTooBehind()
+			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
+			assert.ElementsMatch(t, test.idsToSync, ids)
 		})
 	}
 }
