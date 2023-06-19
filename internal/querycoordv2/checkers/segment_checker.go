@@ -91,6 +91,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetReason("lacks of segment", tasks...)
 	ret = append(ret, tasks...)
 
+	redundancies = c.filterSegmentInUse(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_All)
 	task.SetReason("segment not exists in target", tasks...)
 	ret = append(ret, tasks...)
@@ -122,46 +123,49 @@ func (c *SegmentChecker) getStreamingSegmentDiff(targetMgr *meta.TargetManager,
 		log.Info("replica does not exist, skip it")
 		return
 	}
-	dist := c.getStreamingSegmentsDist(distMgr, replica)
-	distMap := typeutil.NewUniqueSet()
-	for _, s := range dist {
-		distMap.Insert(s.GetID())
-	}
 
-	nextTargetSegmentIDs := targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.NextTarget)
-	currentTargetSegmentIDs := targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.CurrentTarget)
-	currentTargetChannelMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.SegmentChecker", 60, 1).With(
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("replicaID", replica.ID))
 
-	// get segment which exist on dist, but not on current target and next target
-	for _, segment := range dist {
-		if !currentTargetSegmentIDs.Contain(segment.GetID()) && !nextTargetSegmentIDs.Contain(segment.GetID()) {
-			if channel, ok := currentTargetChannelMap[segment.InsertChannel]; ok {
-				timestampInSegment := segment.GetStartPosition().GetTimestamp()
-				timestampInTarget := channel.GetSeekPosition().GetTimestamp()
-				// filter toRelease which seekPosition is newer than next target dmChannel
-				if timestampInSegment < timestampInTarget {
-					log.Info("growing segment not exist in target, so release it",
-						zap.Int64("segmentID", segment.GetID()),
-					)
-					toRelease = append(toRelease, segment)
+	leaders := distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
+	for leader, node := range leaders {
+		view := distMgr.LeaderViewManager.GetLeaderShardView(node, leader)
+		targetVersion := targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
+		if view.TargetVersion != targetVersion {
+			// before shard delegator update it's readable version, skip release segment
+			log.RatedInfo(20, "before shard delegator update it's readable version, skip release segment",
+				zap.String("channelName", leader),
+				zap.Int64("nodeID", node),
+				zap.Int64("leaderVersion", view.TargetVersion),
+				zap.Int64("currentVersion", targetVersion),
+			)
+			continue
+		}
+
+		nextTargetSegmentIDs := targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.NextTarget)
+		currentTargetSegmentIDs := targetMgr.GetStreamingSegmentsByCollection(collectionID, meta.CurrentTarget)
+		currentTargetChannelMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+
+		// get segment which exist on leader view, but not on current target and next target
+		for _, segment := range view.GrowingSegments {
+			if !currentTargetSegmentIDs.Contain(segment.GetID()) && !nextTargetSegmentIDs.Contain(segment.GetID()) {
+				if channel, ok := currentTargetChannelMap[segment.InsertChannel]; ok {
+					timestampInSegment := segment.GetStartPosition().GetTimestamp()
+					timestampInTarget := channel.GetSeekPosition().GetTimestamp()
+					// filter toRelease which seekPosition is newer than next target dmChannel
+					if timestampInSegment < timestampInTarget {
+						log.Info("growing segment not exist in target, so release it",
+							zap.Int64("segmentID", segment.GetID()),
+						)
+						toRelease = append(toRelease, segment)
+					}
 				}
 			}
 		}
 	}
 
 	return
-}
-
-func (c *SegmentChecker) getStreamingSegmentsDist(distMgr *meta.DistributionManager, replica *meta.Replica) map[int64]*meta.Segment {
-	segments := make(map[int64]*meta.Segment, 0)
-	for _, node := range replica.GetNodes() {
-		segmentsOnNodes := distMgr.LeaderViewManager.GetGrowingSegmentDistByCollectionAndNode(replica.CollectionID, node)
-		for k, v := range segmentsOnNodes {
-			segments[k] = v
-		}
-	}
-
-	return segments
 }
 
 // GetHistoricalSegmentDiff get historical segment diff between target and dist
@@ -248,17 +252,31 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 		if !ok {
 			continue
 		}
-		onLeader := false
-		leaderViews := c.dist.LeaderViewManager.GetLeaderView(leaderID)
-		for _, view := range leaderViews {
-			version, ok := view.Segments[s.GetID()]
-			if ok && version.NodeID == s.Node {
-				onLeader = true
-				break
-			}
-		}
-		if onLeader {
+
+		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		seg, ok := view.Segments[s.GetID()]
+		if ok && seg.NodeID == s.Node {
 			// if this segment is serving on leader, do not remove it for search available
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
+}
+
+func (c *SegmentChecker) filterSegmentInUse(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+	filtered := make([]*meta.Segment, 0, len(segments))
+	for _, s := range segments {
+		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
+		if !ok {
+			continue
+		}
+
+		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(s.CollectionID, meta.CurrentTarget)
+		partition := c.meta.CollectionManager.GetPartition(s.PartitionID)
+		if partition != nil && view.TargetVersion != currentTargetVersion {
+			// leader view version hasn't been updated, segment maybe still in use
 			continue
 		}
 		filtered = append(filtered, s)

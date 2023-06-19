@@ -18,6 +18,7 @@ package meta
 
 import (
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -320,6 +321,25 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 	}
 
 	return suite.Len(set, 0)
+}
+
+func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
+	t1 := time.Now().UnixNano()
+	target := NewCollectionTarget(nil, nil)
+	t2 := time.Now().UnixNano()
+
+	version := target.GetTargetVersion()
+	suite.True(t1 <= version)
+	suite.True(t2 >= version)
+
+	collectionID := int64(1)
+	t3 := time.Now().UnixNano()
+	suite.mgr.updateCollectionNextTarget(collectionID)
+	t4 := time.Now().UnixNano()
+
+	collectionVersion := suite.mgr.GetCollectionTargetVersion(collectionID, NextTarget)
+	suite.True(t3 <= collectionVersion)
+	suite.True(t4 >= collectionVersion)
 }
 
 func TestTargetManager(t *testing.T) {

@@ -77,7 +77,7 @@ func newLifetime() *lifetime {
 type ShardDelegator interface {
 	Collection() int64
 	Version() int64
-	GetSegmentInfo() (sealed []SnapshotItem, growing []SegmentEntry)
+	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
@@ -89,6 +89,8 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
+	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64)
+	GetTargetVersion() int64
 
 	// control
 	Serviceable() bool
@@ -164,8 +166,8 @@ func (sd *shardDelegator) Version() int64 {
 }
 
 // GetSegmentInfo returns current segment distribution snapshot.
-func (sd *shardDelegator) GetSegmentInfo() ([]SnapshotItem, []SegmentEntry) {
-	return sd.distribution.Peek()
+func (sd *shardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []SegmentEntry) {
+	return sd.distribution.PeekSegments(readable)
 }
 
 // SyncDistribution revises distribution.
@@ -227,7 +229,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
@@ -286,7 +288,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version := sd.distribution.GetCurrent(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version := sd.distribution.GetSegments(true, req.GetReq().GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
 	existPartitions := sd.collection.GetPartitions()
 	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
@@ -340,7 +342,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, version := sd.distribution.GetCurrent(req.Req.GetPartitionIDs()...)
+	sealed, growing, version := sd.distribution.GetSegments(true, req.Req.GetPartitionIDs()...)
 	defer sd.distribution.FinishUsage(version)
 
 	tasks, err := organizeSubTask(req, sealed, growing, sd.workerManager, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {

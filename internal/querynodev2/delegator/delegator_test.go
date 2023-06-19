@@ -174,7 +174,7 @@ func (s *DelegatorSuite) TestBasicInfo() {
 }
 
 func (s *DelegatorSuite) TestGetSegmentInfo() {
-	sealed, growing := s.delegator.GetSegmentInfo()
+	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Equal(0, len(sealed))
 	s.Equal(0, len(growing))
 
@@ -185,7 +185,7 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 		Version:     2001,
 	})
 
-	sealed, growing = s.delegator.GetSegmentInfo()
+	sealed, growing = s.delegator.GetSegmentInfo(false)
 	s.EqualValues([]SnapshotItem{
 		{
 			NodeID: 1,
@@ -241,6 +241,7 @@ func (s *DelegatorSuite) TestSearch() {
 			Version:     2001,
 		},
 	)
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -493,6 +494,7 @@ func (s *DelegatorSuite) TestQuery() {
 			Version:     2001,
 		},
 	)
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -712,6 +714,8 @@ func (s *DelegatorSuite) TestGetStats() {
 			Version:     2001,
 		},
 	)
+
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil

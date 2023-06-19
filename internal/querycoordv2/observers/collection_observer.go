@@ -38,6 +38,7 @@ type CollectionObserver struct {
 	meta                 *meta.Meta
 	targetMgr            *meta.TargetManager
 	targetObserver       *TargetObserver
+	leaderObserver       *LeaderObserver
 	checkerController    *checkers.CheckerController
 	partitionLoadedCount map[int64]int
 
@@ -49,6 +50,7 @@ func NewCollectionObserver(
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
 	targetObserver *TargetObserver,
+	leaderObserver *LeaderObserver,
 	checherController *checkers.CheckerController,
 ) *CollectionObserver {
 	return &CollectionObserver{
@@ -57,6 +59,7 @@ func NewCollectionObserver(
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		targetObserver:       targetObserver,
+		leaderObserver:       leaderObserver,
 		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 	}
@@ -203,7 +206,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if loadPercentage == 100 && ob.targetObserver.Check(partition.GetCollectionID()) {
+	if loadPercentage == 100 && ob.targetObserver.Check(partition.GetCollectionID()) && ob.leaderObserver.CheckTargetVersion(partition.GetCollectionID()) {
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
 	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(partition.PartitionID, loadPercentage)

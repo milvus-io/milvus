@@ -86,10 +86,11 @@ func (sd *shardDelegator) newGrowing(segmentID int64, insertData *InsertData) se
 
 	sd.segmentManager.Put(segments.SegmentTypeGrowing, segment)
 	sd.addGrowing(SegmentEntry{
-		NodeID:      paramtable.GetNodeID(),
-		SegmentID:   segmentID,
-		PartitionID: insertData.PartitionID,
-		Version:     0,
+		NodeID:        paramtable.GetNodeID(),
+		SegmentID:     segmentID,
+		PartitionID:   insertData.PartitionID,
+		Version:       0,
+		TargetVersion: initialTargetVersion,
 	})
 	return segment
 }
@@ -173,7 +174,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 
-	sealed, growing, version := sd.distribution.GetCurrent()
+	sealed, growing, version := sd.distribution.GetSegments(false)
 
 	eg, ctx := errgroup.WithContext(context.Background())
 	for _, entry := range sealed {
@@ -296,10 +297,11 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
 		return SegmentEntry{
-			NodeID:      paramtable.GetNodeID(),
-			SegmentID:   segment.ID(),
-			PartitionID: segment.Partition(),
-			Version:     version,
+			NodeID:        paramtable.GetNodeID(),
+			SegmentID:     segment.ID(),
+			PartitionID:   segment.Partition(),
+			Version:       version,
+			TargetVersion: sd.distribution.getTargetVersion(),
 		}
 	})...)
 	return nil
@@ -351,37 +353,14 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// alter distribution
 	entries := lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) SegmentEntry {
 		return SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
+			SegmentID:     info.GetSegmentID(),
+			PartitionID:   info.GetPartitionID(),
+			NodeID:        req.GetDstNodeID(),
+			Version:       req.GetVersion(),
+			TargetVersion: sd.distribution.getTargetVersion(),
 		}
 	})
-	removed, signal := sd.distribution.AddDistributions(entries...)
-
-	// release possible matched growing segments async
-	if len(removed) > 0 {
-		go func() {
-			<-signal
-			worker, err := sd.workerManager.GetWorker(paramtable.GetNodeID())
-			if err != nil {
-				log.Warn("failed to get local worker when try to release related growing", zap.Error(err))
-				return
-			}
-			err = worker.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(paramtable.GetNodeID())),
-				CollectionID: sd.collectionID,
-				NodeID:       paramtable.GetNodeID(),
-				Scope:        querypb.DataScope_Streaming,
-				SegmentIDs:   removed,
-				Shard:        sd.vchannelName,
-				NeedTransfer: false,
-			})
-			if err != nil {
-				log.Warn("failed to call release segments(local)", zap.Error(err))
-			}
-		}()
-	}
+	sd.distribution.AddDistributions(entries...)
 
 	return nil
 }
@@ -614,4 +593,12 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	}
 
 	return nil
+}
+
+func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
+	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget)
+}
+
+func (sd *shardDelegator) GetTargetVersion() int64 {
+	return sd.distribution.getTargetVersion()
 }

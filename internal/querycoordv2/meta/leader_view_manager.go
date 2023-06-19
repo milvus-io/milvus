@@ -31,6 +31,7 @@ type LeaderView struct {
 	Version         int64
 	Segments        map[int64]*querypb.SegmentDist
 	GrowingSegments map[int64]*Segment
+	TargetVersion   int64
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -51,6 +52,7 @@ func (view *LeaderView) Clone() *LeaderView {
 		Version:         view.Version,
 		Segments:        segments,
 		GrowingSegments: growings,
+		TargetVersion:   view.TargetVersion,
 	}
 }
 

@@ -80,7 +80,9 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 
 	log.Debug("finish to update current target for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
-		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
+		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
+		zap.Int64("version", newTarget.GetTargetVersion()),
+	)
 	return true
 }
 
@@ -455,6 +457,18 @@ func (mgr *TargetManager) GetHistoricalSegment(collectionID int64, id int64, sco
 		return nil
 	}
 	return collectionTarget.GetAllSegments()[id]
+}
+
+func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope TargetScope) int64 {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return 0
+	}
+	return collectionTarget.GetTargetVersion()
 }
 
 func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {

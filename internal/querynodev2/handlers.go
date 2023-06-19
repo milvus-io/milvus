@@ -271,7 +271,7 @@ func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.Se
 	switch plan.GetNode().(type) {
 	case *planpb.PlanNode_VectorAnns:
 		// ignore growing ones for now since they will always be brute force
-		sealed, _ := deleg.GetSegmentInfo()
+		sealed, _ := deleg.GetSegmentInfo(true)
 		sealedNum := lo.Reduce(sealed, func(sum int, item delegator.SnapshotItem, _ int) int {
 			return sum + len(item.Segments)
 		}, 0)

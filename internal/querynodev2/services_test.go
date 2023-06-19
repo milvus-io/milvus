@@ -1368,7 +1368,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 
 	delegator, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.True(ok)
-	sealedSegments, _ := delegator.GetSegmentInfo()
+	sealedSegments, _ := delegator.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 3)
 
 	// data
@@ -1392,7 +1392,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo()
+	sealedSegments, _ = delegator.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 3)
 
 	releaseAction = &querypb.SyncAction{
@@ -1406,7 +1406,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo()
+	sealedSegments, _ = delegator.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 2)
 }
 

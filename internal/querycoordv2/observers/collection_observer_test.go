@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -63,6 +64,7 @@ type CollectionObserverSuite struct {
 	meta              *meta.Meta
 	targetMgr         *meta.TargetManager
 	targetObserver    *TargetObserver
+	leaderObserver    *LeaderObserver
 	checkerController *checkers.CheckerController
 
 	// Test object
@@ -192,12 +194,19 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	)
 	suite.checkerController = &checkers.CheckerController{}
 
+	mockCluster := session.NewMockCluster(suite.T())
+	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster)
+	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil).Maybe()
+
 	// Test object
 	suite.ob = NewCollectionObserver(
 		suite.dist,
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.leaderObserver,
 		suite.checkerController,
 	)
 
@@ -205,6 +214,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	}
 	suite.targetObserver.Start(context.Background())
+	suite.leaderObserver.Start(context.TODO())
 	suite.ob.Start(context.Background())
 	suite.loadAll()
 }
