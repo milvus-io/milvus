@@ -14,6 +14,10 @@ spec:
       value: "true"
     - name: DOCKER_VOLUME_DIRECTORY
       value: "/mnt/disk/.docker"
+    - name: DOCKER_CLIENT_TIMEOUT
+      value: 120
+    - name: COMPOSE_HTTP_TIMEOUT
+      value: 120
     tty: true
     securityContext:
       privileged: true
