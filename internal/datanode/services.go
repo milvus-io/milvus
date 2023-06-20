@@ -399,9 +399,10 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	ds.fg.Blockall()
 	defer ds.fg.Unblock()
 	if err := channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+		node.compactionExecutor.injectDone(req.GetPlanID(), false)
 		return merr.Status(err), nil
 	}
-	node.compactionExecutor.injectDone(req.GetPlanID())
+	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Status(nil), nil
 }
 
