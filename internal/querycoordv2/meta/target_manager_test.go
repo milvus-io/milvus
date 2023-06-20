@@ -219,7 +219,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 
 	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then back to getRecoveryInfo succeed
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, status.Errorf(codes.NotFound, "fake not found"))
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, status.Errorf(codes.Unimplemented, "fake not found"))
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
 	err := suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))

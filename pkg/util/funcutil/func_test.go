@@ -349,6 +349,18 @@ func TestIsGrpcErr(t *testing.T) {
 		errWrap := fmt.Errorf("wrap grpc error %w", err)
 		assert.True(t, IsGrpcErr(errWrap))
 	})
+
+	t.Run("codes_match", func(t *testing.T) {
+		err := grpcStatus.Error(grpcCodes.Unavailable, "test")
+		errWrap := fmt.Errorf("wrap grpc error %w", err)
+		assert.True(t, IsGrpcErr(errWrap, grpcCodes.Unimplemented, grpcCodes.Unavailable))
+	})
+
+	t.Run("codes_not_match", func(t *testing.T) {
+		err := grpcStatus.Error(grpcCodes.Unavailable, "test")
+		errWrap := fmt.Errorf("wrap grpc error %w", err)
+		assert.False(t, IsGrpcErr(errWrap, grpcCodes.Unimplemented))
+	})
 }
 
 func TestIsEmptyString(t *testing.T) {

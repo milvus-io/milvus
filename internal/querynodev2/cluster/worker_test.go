@@ -238,7 +238,7 @@ func (s *RemoteWorkerSuite) TestSearch() {
 		var result *internalpb.SearchResults
 		var err error
 
-		grpcErr := status.Error(codes.NotFound, "method not implemented")
+		grpcErr := status.Error(codes.Unimplemented, "method not implemented")
 		s.mockClient.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Return(result, grpcErr)
 		s.mockClient.EXPECT().Search(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
@@ -317,7 +317,7 @@ func (s *RemoteWorkerSuite) TestQuery() {
 		var result *internalpb.RetrieveResults
 		var err error
 
-		grpcErr := status.Error(codes.NotFound, "method not implemented")
+		grpcErr := status.Error(codes.Unimplemented, "method not implemented")
 		s.mockClient.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Return(result, grpcErr)
 		s.mockClient.EXPECT().Query(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).

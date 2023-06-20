@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
@@ -279,14 +281,15 @@ func ReadBinary(endian binary.ByteOrder, bs []byte, receiver interface{}) error 
 }
 
 // IsGrpcErr checks whether err is instance of grpc status error.
-func IsGrpcErr(err error) bool {
+func IsGrpcErr(err error, targets ...codes.Code) bool {
+	set := typeutil.NewSet[codes.Code](targets...)
 	for {
 		if err == nil {
 			return false
 		}
-		_, ok := grpcStatus.FromError(err)
+		s, ok := grpcStatus.FromError(err)
 		if ok {
-			return true
+			return set.Len() == 0 || set.Contain(s.Code())
 		}
 		err = errors.Unwrap(err)
 	}
