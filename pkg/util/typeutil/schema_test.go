@@ -1077,7 +1077,7 @@ func TestCalcColumnSize(t *testing.T) {
 func TestGetDataAndGetDataSize(t *testing.T) {
 	const (
 		Dim       = 8
-		fieldName = "filed-0"
+		fieldName = "field-0"
 		fieldID   = 0
 	)
 

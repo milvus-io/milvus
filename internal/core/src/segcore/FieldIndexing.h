@@ -237,7 +237,7 @@ class IndexingRecord {
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     continue;
                 }
-                //Small-Index disabled, create index for vector filed only
+                //Small-Index disabled, create index for vector field only
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
                     index_meta_->HasFiled(field_id)) {
                     field_indexings_.try_emplace(

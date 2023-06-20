@@ -369,7 +369,7 @@ func (m *rendezvousFlushManager) serializePkStatsLog(segmentID int64, flushed bo
 
 	pkField := getPKField(inCodec.Schema)
 	if pkField == nil {
-		log.Error("No pk filed in schema", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", inCodec.Schema.GetID()))
+		log.Error("No pk field in schema", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", inCodec.Schema.GetID()))
 		return nil, nil, fmt.Errorf("no primary key in meta")
 	}
 

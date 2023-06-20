@@ -120,7 +120,7 @@ TEST(Sealed, without_predicate) {
     load_info.index = std::move(indexing);
     load_info.index_params["metric_type"] = "L2";
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
@@ -236,7 +236,7 @@ TEST(Sealed, with_predicate) {
     load_info.index = std::move(indexing);
     load_info.index_params["metric_type"] = "L2";
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(fake_id);
     sealed_segment->LoadIndex(load_info);
@@ -329,7 +329,7 @@ TEST(Sealed, with_predicate_filter_all) {
     load_info.index = std::move(ivf_indexing);
     load_info.index_params["metric_type"] = "L2";
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto ivf_sealed_segment = SealedCreator(schema, dataset);
     ivf_sealed_segment->DropFieldData(fake_id);
     ivf_sealed_segment->LoadIndex(load_info);
@@ -361,7 +361,7 @@ TEST(Sealed, with_predicate_filter_all) {
     hnsw_load_info.index = std::move(hnsw_indexing);
     hnsw_load_info.index_params["metric_type"] = "L2";
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto hnsw_sealed_segment = SealedCreator(schema, dataset);
     hnsw_sealed_segment->DropFieldData(fake_id);
     hnsw_sealed_segment->LoadIndex(hnsw_load_info);
