@@ -998,7 +998,7 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
     Test connect server with user and password , the result should be failed
     """
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("port", ["19530"])
     def test_connect_without_user_password_after_authorization_enabled(self, host, port):
         """
@@ -1010,7 +1010,7 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
                                            check_items={ct.err_code: 1})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["alice3333"])
     def test_connect_with_invalid_user_connection(self, host, port, user):
         """
@@ -1023,7 +1023,7 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
                                            check_items={ct.err_code: 1})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["anny015"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_connect_with_password_invalid(self, host, port, user, connect_name):
