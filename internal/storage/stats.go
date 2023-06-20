@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -254,7 +255,10 @@ func (sr *StatsReader) GetPrimaryKeyStats() (*PrimaryKeyStats, error) {
 	stats := &PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrParameterInvalid(
+			"valid JSON",
+			string(sr.buffer),
+			err.Error())
 	}
 
 	return stats, nil
@@ -265,7 +269,10 @@ func (sr *StatsReader) GetPrimaryKeyStatsList() ([]*PrimaryKeyStats, error) {
 	stats := []*PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrParameterInvalid(
+			"valid JSON",
+			string(sr.buffer),
+			err.Error())
 	}
 
 	return stats, nil
