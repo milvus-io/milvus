@@ -20,7 +20,7 @@ default_string_expr = "varchar in [ \"0\"]"
 default_invaild_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
-default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+default_search_params = ct.default_search_params
 
 
 class TestDeleteParams(TestcaseBase):
@@ -353,7 +353,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "L2", "params": {"nlist": 64}}
+                        "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
         collection_w.release()
@@ -391,7 +391,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "L2", "params": {"nlist": 64}}
+                        "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
 
@@ -1211,7 +1211,7 @@ class TestDeleteString(TestcaseBase):
 
         # create index
         index_params_one = {"index_type": "IVF_SQ8",
-                            "metric_type": "L2", "params": {"nlist": 64}}
+                            "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
         index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
@@ -1255,7 +1255,7 @@ class TestDeleteString(TestcaseBase):
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "L2", "params": {"nlist": 64}}
+                        "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
 
@@ -1824,7 +1824,6 @@ class TestDeleteString(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res = df.iloc[:1, 2:3].to_dict('records')
-        default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
         collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})

@@ -53,7 +53,7 @@ class TestQueryParams(TestcaseBase):
         method: query with invalid term expr
         expected: raise exception
         """
-        collection_w, entities = self.init_collection_general(prefix, insert_data=True)[0:2]
+        collection_w, entities = self.init_collection_general(prefix, insert_data=True, nb=10)[0:2]
         term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
         error = {ct.err_code: 1, ct.err_msg: "unexpected token Identifier"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)

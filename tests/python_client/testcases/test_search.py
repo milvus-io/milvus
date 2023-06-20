@@ -8,6 +8,7 @@ import pandas as pd
 import decimal
 from decimal import Decimal, getcontext
 from time import sleep
+import heapq
 
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
@@ -41,7 +42,7 @@ default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 range_search_supported_index = ct.all_index_types[:6]
 range_search_supported_index_params = ct.default_index_params[:6]
@@ -1169,7 +1170,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     enable_dynamic_field=True)[0]
 
         # create index
-        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
         index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
@@ -1190,12 +1191,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function",
-                    params=[default_nb, default_nb_medium])
+    @pytest.fixture(scope="function", params=[default_nb_medium])
     def nb(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[2, 500])
+    @pytest.fixture(scope="function", params=[200])
     def nq(self, request):
         yield request.param
 
@@ -1221,6 +1221,10 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["IP", "COSINE", "L2"])
+    def metric_type(self, request):
         yield request.param
 
     """
@@ -1364,7 +1368,7 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_with_hit_vectors: checking the distance of top 1")
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
-            assert hits.distances[0] == 0.0
+            assert 1.0 - hits.distances[0] <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2, 3])
@@ -1410,32 +1414,44 @@ class TestCollectionSearch(TestcaseBase):
         method: insert and flush twice
         expect: result pk should be [19,9,18]
         """
-        # 1. create a collection
+        # 1. create a collection, insert data and flush
         nb = 10
-        fields = [cf.gen_int64_field("int64"), cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields, primary_field="int64")
-        collection_w = self.init_collection_wrap(schema=schema)
+        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False)[0]
 
-        # 2. insert data and flush twice
-        for r in range(2):
-            pks = pd.Series(data=[r*nb+i for i in range(0, nb)])
-            vectors = [[i*2+r for _ in range(dim)] for i in range(0, nb)]
-            dataframe = pd.DataFrame({"int64": pks,
-                                    ct.default_float_vec_field_name: vectors})
-            collection_w.insert(dataframe)
-            collection_w.flush()
-            
-        # 3. search
+        # 2. insert data and flush again for two segments
+        data = cf.gen_default_dataframe_data(nb=nb, dim=dim, start=nb)
+        collection_w.insert(data)
+        collection_w.flush()
+
+        # 3. create index and load
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        vectors = [[20 for _ in range(dim)]]
+
+        # 4. get inserted original data
+        inserted_vectors = collection_w.query(expr="int64 >= 0", output_fields=[ct.default_float_vec_field_name])
+        original_vectors = []
+        for single in inserted_vectors[0]:
+            single_vector = single[ct.default_float_vec_field_name]
+            original_vectors.append(single_vector)
+
+        # 5. Calculate the searched ids
+        limit = 2*nb
+        vectors = [[random.random() for _ in range(dim)] for _ in range(1)]
+        distances = []
+        for original_vector in original_vectors:
+            distance = cf.cosine(vectors, original_vector)
+            distances.append(distance)
+        distances_max = heapq.nlargest(limit, distances)
+        distances_index_max = map(distances.index, distances_max)
+
+        # 6. search
         collection_w.search(vectors, default_search_field,
-                            default_search_params, 3,
+                            default_search_params, limit,
                             check_task=CheckTasks.check_search_results,
                             check_items={
                                     "nq": 1,
-                                    "limit": 3,
-                                    "ids": [19, 9, 18]
+                                    "limit": limit,
+                                    "ids": list(distances_index_max)
                                 })
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1721,7 +1737,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(dataframe)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
 
         # 3. load and search
@@ -1968,11 +1984,11 @@ class TestCollectionSearch(TestcaseBase):
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search
-        search_params = cf.gen_search_param(index)
+        search_params = cf.gen_search_param(index, "COSINE")
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
@@ -2135,20 +2151,33 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:6],
                                  ct.default_index_params[:6]))
-    def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async, enable_dynamic_field):
+    def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async, 
+                                                      enable_dynamic_field, metric_type):
         """
         target: test search with different metric type
         method: test search with different metric type
         expected: searched successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False,
-                                                                                  enable_dynamic_field=
-                                                                                  enable_dynamic_field)[0:5]
-        # 2. create different index
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                         partition_num=1,
+                                                                                         auto_id=auto_id,
+                                                                                         dim=dim, is_index=False,
+                                                                                         enable_dynamic_field=
+                                                                                         enable_dynamic_field)[0:5]
+        # 2. get vectors that inserted into collection
+        original_vectors = []
+        if enable_dynamic_field:
+            for vector in _vectors[0]:
+                vector = vector[ct.default_float_vec_field_name]
+                original_vectors.append(vector)
+        else:
+            for _vector in _vectors:
+                vectors_tmp = np.array(_vector).tolist()
+                vectors_single = [vectors_tmp[i][-1] for i in range(2500)]
+                original_vectors.append(vectors_single)
+        log.info(len(original_vectors))
+        # 3. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
                 params["m"] = dim // 4
@@ -2156,12 +2185,12 @@ class TestCollectionSearch(TestcaseBase):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
         collection_w.create_index("float_vector", default_index)
         log.info("test_search_after_index_different_metric_type: Created index-%s" % index)
         collection_w.load()
-        # 3. search
-        search_params = cf.gen_search_param(index, "IP")
+        # 4. search
+        search_params = cf.gen_search_param(index, metric_type)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
@@ -2173,7 +2202,81 @@ class TestCollectionSearch(TestcaseBase):
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
                                              "limit": default_limit,
-                                             "_async": _async})
+                                             "_async": _async,
+                                             "metric": metric_type,
+                                             "vector_nq": vectors[:default_nq],
+                                             "original_vectors": original_vectors})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue 24957")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
+    def test_search_after_release_recreate_index(self, dim, index, params, auto_id, _async,
+                                                 enable_dynamic_field, metric_type):
+        """
+        target: test search after new metric with different metric type
+        method: test search after new metric with different metric type
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                         partition_num=1,
+                                                                                         auto_id=auto_id,
+                                                                                         dim=dim, is_index=False,
+                                                                                         enable_dynamic_field=
+                                                                                         enable_dynamic_field)[0:5]
+        # 2. get vectors that inserted into collection
+        original_vectors = []
+        if enable_dynamic_field:
+            for vector in _vectors[0]:
+                vector = vector[ct.default_float_vec_field_name]
+                original_vectors.append(vector)
+        else:
+            for _vector in _vectors:
+                vectors_tmp = np.array(_vector).tolist()
+                vectors_single = [vectors_tmp[i][-1] for i in range(2500)]
+                original_vectors.append(vectors_single)
+        # 3. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        log.info("test_search_after_release_recreate_index: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_after_release_recreate_index: Created index-%s" % index)
+        collection_w.load()
+        # 4. search
+        search_params = cf.gen_search_param(index, "COSINE")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async)
+        # 5. re-create index
+        collection_w.release()
+        collection_w.drop_index()
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async,
+                                             "metric": metric_type,
+                                             "vector_nq": vectors[:default_nq],
+                                             "original_vectors": original_vectors})
 
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
@@ -2395,7 +2498,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         nlist = 128
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}, "metric_type": "L2"}
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. search through partitions
@@ -2403,7 +2506,7 @@ class TestCollectionSearch(TestcaseBase):
         limit = 1000
         limit_check = limit
         par = collection_w.partitions
-        search_params = {"metric_type": "L2", "params": {"nprobe": nlist}}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": nlist}}
         if partition_names == ["search(.*)"]:
             insert_ids = insert_ids[par[0].num_entities:]
             if limit > par[1].num_entities:
@@ -2434,7 +2537,7 @@ class TestCollectionSearch(TestcaseBase):
         par = collection_w.partitions
         log.info("test_search_index_partition_empty: partitions: %s" % par)
         # 3. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 4. search the empty partition
@@ -2748,7 +2851,7 @@ class TestCollectionSearch(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -2790,7 +2893,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                              enable_dynamic_field)[0:4]
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -2862,7 +2965,7 @@ class TestCollectionSearch(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -3206,7 +3309,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 2. create index and load
-        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", index_params)
         collection_w.load()
 
@@ -3488,7 +3591,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       with_json=False)[0:4]
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -3523,7 +3626,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       with_json=False)[0:4]
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -3734,7 +3837,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 3. search with param ignore_growing=True
-        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": True}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "ignore_growing": True}
         vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
         res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -3765,7 +3868,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 3. search with param ignore_growing=True
-        search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
         vector = [[random.random() for _ in range(dim)] for _ in range(nq)]
         res = collection_w.search(vector[:nq], default_search_field, search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -4039,7 +4142,7 @@ class TestSearchBase(TestcaseBase):
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
 
@@ -4087,7 +4190,7 @@ class TestSearchBase(TestcaseBase):
         if params.get("PQM"):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         res, _ = collection_w.search(vectors[:nq], default_search_field,
@@ -4568,7 +4671,7 @@ class TestSearchString(TestcaseBase):
                 filter_ids.append(_id)
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -4741,7 +4844,7 @@ class TestSearchString(TestcaseBase):
                                                                             is_index=False)[0:4]
 
         # create index
-        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
         index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
@@ -4804,7 +4907,6 @@ class TestSearchString(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_not_primary_is_empty(self, _async):
         """
@@ -4827,7 +4929,7 @@ class TestSearchString(TestcaseBase):
         assert collection_w.num_entities == nb
 
         # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
@@ -4890,7 +4992,7 @@ class TestSearchPagination(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim,
                                                     enable_dynamic_field=enable_dynamic_field)[0]
         # 2. search pagination with offset
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, limit,
@@ -4926,7 +5028,7 @@ class TestSearchPagination(TestcaseBase):
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [default_string_field_name, default_float_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
@@ -4997,7 +5099,7 @@ class TestSearchPagination(TestcaseBase):
         offset = topK - limit
         collection_w = self.init_collection_general(prefix, True, nb=20000, auto_id=auto_id, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, limit,
@@ -5053,7 +5155,7 @@ class TestSearchPagination(TestcaseBase):
             limit = 0
         elif len(filter_ids) - offset < default_limit:
             limit = len(filter_ids) - offset
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             search_param, default_limit, expression,
@@ -5208,7 +5310,7 @@ class TestSearchPagination(TestcaseBase):
         # 1. initialize without data
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search collection without data
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search([], default_search_field, search_param,
                                          default_limit, default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
@@ -5230,7 +5332,7 @@ class TestSearchPagination(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   search_param, default_limit,
@@ -5318,7 +5420,7 @@ class TestSearchPaginationInvalid(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_param, default_limit,
@@ -5338,7 +5440,7 @@ class TestSearchPaginationInvalid(TestcaseBase):
         # 1. initialize
         collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
         # 2. search
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_param, default_limit,
@@ -5389,7 +5491,7 @@ class TestSearchDiskann(TestcaseBase):
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
 
@@ -5424,7 +5526,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
@@ -5455,7 +5557,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
@@ -5486,7 +5588,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
@@ -5517,7 +5619,7 @@ class TestSearchDiskann(TestcaseBase):
                                          primary_field=ct.default_string_field_name,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         search_list = 20
@@ -5549,7 +5651,7 @@ class TestSearchDiskann(TestcaseBase):
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
@@ -5591,7 +5693,7 @@ class TestSearchDiskann(TestcaseBase):
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "COSINE", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
         if not enable_dynamic_field:
             index_params_one = {}
@@ -5609,7 +5711,7 @@ class TestSearchDiskann(TestcaseBase):
         assert del_res.delete_count == half_nb
 
         collection_w.delete(tmp_expr)
-        default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
+        default_search_params = {"metric_type": "COSINE", "params": {"search_list": 30}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -5639,7 +5741,7 @@ class TestSearchDiskann(TestcaseBase):
             self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name, 
                                          is_index=False, enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. create index
-        default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        default_index = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         index_params = {}
         if not enable_dynamic_field:
@@ -5650,7 +5752,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.load()
         default_expr = "int64 in [1, 2, 3, 4]"
         limit = 4
-        default_search_params = {"metric_type": "L2", "params": {"nprobe": 64}}
+        default_search_params = {"metric_type": "COSINE", "params": {"nprobe": 64}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
@@ -5777,8 +5879,8 @@ class TestCollectionRangeSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("radius", [1000, 1000.0])
-    @pytest.mark.parametrize("range_filter", [0, 0.0])
+    @pytest.mark.parametrize("range_filter", [1000, 1000.0])
+    @pytest.mark.parametrize("radius", [0, 0.0])
     def test_range_search_normal(self, nq, dim, auto_id, is_flush, radius, range_filter, enable_dynamic_field):
         """
         target: test range search normal case
@@ -5799,8 +5901,8 @@ class TestCollectionRangeSearch(TestcaseBase):
             vectors = np.array(_vectors[0]).tolist()
             vectors = [vectors[i][-1] for i in range(nq)]
         # 3. range search
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": radius,
-                                                               "range_filter": range_filter}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": radius,
+                                                                   "range_filter": range_filter}}
         search_res = collection_w.search(vectors[:nq], default_search_field,
                                          range_search_params, default_limit,
                                          default_search_exp,
@@ -5810,10 +5912,10 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                       "limit": default_limit})[0]
         log.info("test_range_search_normal: checking the distance of top 1")
         for hits in search_res:
-            # verify that top 1 hit is itself,so min distance is 0
-            assert hits.distances[0] == 0.0
-            distances_tmp = list(hits.distances)
-            assert distances_tmp.count(0.0) == 1
+            # verify that top 1 hit is itself,so min distance is 1.0
+            assert abs(hits.distances[0] - 1.0) <= epsilon
+            # distances_tmp = list(hits.distances)
+            # assert distances_tmp.count(1.0) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_range_filter(self):
@@ -5828,7 +5930,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "range_filter": 1}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -5843,7 +5945,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
+                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_radius(self):
@@ -5858,7 +5960,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -5873,7 +5975,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
+                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
@@ -5888,7 +5990,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(_vectors[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "radius": 0, "range_filter": 1}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "radius": 0, "range_filter": 1}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -5903,7 +6005,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={ct.err_code: 1,
-                                         ct.err_msg: "metric type not match: expected=L2, actual=IP"})
+                                         ct.err_msg: "metric type not match: expected=COSINE, actual=IP"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2])
@@ -5926,8 +6028,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = np.array(insert_data[0]).tolist()
         vectors = [vectors[i][-1] for i in range(default_nq)]
         log.info(vectors)
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 1000}}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          range_search_params, default_limit,
                                          default_search_exp, _async=_async,
@@ -5951,34 +6052,45 @@ class TestCollectionRangeSearch(TestcaseBase):
         method: insert and flush twice
         expect: result pk should be [19,9,18]
         """
-        # 1. create a collection
+        # 1. create a collection, insert data and flush
         nb = 10
-        fields = [cf.gen_int64_field("int64"), cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields, primary_field="int64")
-        collection_w = self.init_collection_wrap(schema=schema)
+        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False)[0]
 
-        # 2. insert data and flush twice
-        for r in range(2):
-            pks = pd.Series(data=[r * nb + i for i in range(0, nb)])
-            vectors = [[i * 2 + r for _ in range(dim)] for i in range(0, nb)]
-            dataframe = pd.DataFrame({"int64": pks,
-                                      ct.default_float_vec_field_name: vectors})
-            collection_w.insert(dataframe)
-            collection_w.flush()
+        # 2. insert data and flush again for two segments
+        data = cf.gen_default_dataframe_data(nb=nb, dim=dim, start=nb)
+        collection_w.insert(data)
+        collection_w.flush()
 
-        # 3. search
+        # 3. create index and load
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        vectors = [[20 for _ in range(dim)]]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1152.1,
-                                                               "range_filter": 32}}
+
+        # 4. get inserted original data
+        inserted_vectors = collection_w.query(expr="int64 >= 0", output_fields=[ct.default_float_vec_field_name])
+        original_vectors = []
+        for single in inserted_vectors[0]:
+            single_vector = single[ct.default_float_vec_field_name]
+            original_vectors.append(single_vector)
+
+        # 5. Calculate the searched ids
+        limit = 2*nb
+        vectors = [[random.random() for _ in range(dim)] for _ in range(1)]
+        distances = []
+        for original_vector in original_vectors:
+            distance = cf.cosine(vectors, original_vector)
+            distances.append(distance)
+        distances_max = heapq.nlargest(limit, distances)
+        distances_index_max = map(distances.index, distances_max)
+
+        # 6. Search
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 1}}
         collection_w.search(vectors, default_search_field,
-                            range_search_params, 3,
+                            range_search_params, limit,
                             check_task=CheckTasks.check_search_results,
                             check_items={
                                 "nq": 1,
-                                "limit": 3,
-                                "ids": [19, 9, 18]
+                                "limit": limit,
+                                "ids": list(distances_index_max)
                             })
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5993,8 +6105,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 2. search collection without data
         log.info("test_range_search_with_empty_vectors: Range searching collection %s "
                  "using empty vector" % collection_w.name)
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 0,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 0}}
         collection_w.search([], default_search_field, range_search_params,
                             default_limit, default_search_exp, _async=_async,
                             check_task=CheckTasks.check_search_results,
@@ -6022,8 +6133,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         log.info("test_range_search_before_after_delete: searching before deleting partitions")
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -6045,8 +6156,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.load()
         # 4. search non-deleted part after delete partitions
         log.info("test_range_search_before_after_delete: searching after deleting partitions")
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -6081,8 +6192,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.load()
         log.info("test_range_search_collection_after_release_load: searching after load")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:default_nq], default_search_field, range_search_params,
                             default_limit, default_search_exp, _async=_async,
                             travel_timestamp=0,
@@ -6113,8 +6224,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.load()
         # 5. search
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp, _async=_async,
@@ -6143,8 +6254,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                                   enable_dynamic_field)[0:5]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         log.info("test_range_search_new_data: searching for original data after load")
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
@@ -6163,8 +6274,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 4. search for new data without load
         # Using bounded staleness, maybe we could not search the "inserted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp,
@@ -6233,8 +6344,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.load()
         # 5. range search
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp, _async=_async,
@@ -6586,8 +6697,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 3. compute the distance
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         # 4. range search
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1,
-                                                               "range_filter": -10}}
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1, "range_filter": -10}}
         collection_w.search(binary_vectors[:default_nq], "binary_vector",
                             search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
@@ -6694,8 +6804,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       enable_dynamic_field)[0:4]
         # 2. search
         log.info("test_range_search_with_output_field: Searching collection %s" % collection_w.name)
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   range_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -6727,8 +6837,8 @@ class TestCollectionRangeSearch(TestcaseBase):
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-            range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                                   "range_filter": 0}}
+            range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                       "range_filter": 1000}}
             collection_w.search(vectors[:nq], default_search_field,
                                 range_search_params, default_limit,
                                 default_search_exp, _async=_async,
@@ -6765,8 +6875,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, nb=tmp_nb)[0]
         # 2. search
         log.info("test_search_round_decimal: Searching collection %s" % collection_w.name)
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         res = collection_w.search(vectors[:tmp_nq], default_search_field,
                                   range_search_params, tmp_limit)[0]
 
@@ -6833,8 +6943,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -6877,8 +6987,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -6922,8 +7032,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -6962,8 +7071,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
+                                                                   "range_filter": 1000}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,

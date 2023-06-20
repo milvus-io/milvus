@@ -249,6 +249,7 @@ class ResponseChecker:
         else:
             log.info("search_results_check: Numbers of query searched is correct")
         for hits in search_res:
+            searched_original_vectors = []
             if (len(hits) != check_items["limit"]) \
                     or (len(hits.ids) != check_items["limit"]):
                 log.error("search_results_check: limit(topK) searched (%d) "
@@ -263,10 +264,22 @@ class ResponseChecker:
                     if not ids_match:
                         log.error("search_results_check: ids searched not match")
                         assert ids_match
+                elif check_items.get("metric", None) is not None:
+                    if check_items.get("vector_nq") is None:
+                        raise Exception("vector for searched (nq) is needed for distance check")
+                    if check_items.get("original_vectors") is None:
+                        raise Exception("inserted vectors are needed for distance check")
+                    for id in hits.ids:
+                        searched_original_vectors.append(check_items["original_vectors"][id])
+                    cf.compare_distance_vector_and_vector_list(check_items["vector_nq"][i],
+                                                               searched_original_vectors,
+                                                               check_items["metric"], hits.distances)
+                    log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
                     pass    # just check nq and topk, not specific ids need check
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
+
         return True
 
     @staticmethod

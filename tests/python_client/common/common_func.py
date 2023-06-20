@@ -779,6 +779,10 @@ def ip(x, y):
     return np.inner(np.array(x), np.array(y))
 
 
+def cosine(x, y):
+    return np.dot(x, y)/(np.linalg.norm(x)*np.linalg.norm(y))
+
+
 def jaccard(x, y):
     x = np.asarray(x, np.bool_)
     y = np.asarray(y, np.bool_)
@@ -842,6 +846,31 @@ def compare_distance_2d_vector(x, y, distance, metric, sqrt):
     return True
 
 
+def compare_distance_vector_and_vector_list(x, y, metric, distance):
+    """
+    target: compare the distance between x and y[i] with the expected distance array
+    method: compare the distance between x and y[i] with the expected distance array
+    expected: return true if all distances are matched
+    """
+    if not isinstance(y, list):
+        log.error("%s is not a list." % str(y))
+        assert False
+    for i in range(len(y)):
+        if metric == "L2":
+            distance_i = l2(x, y[i])
+        elif metric == "IP":
+            distance_i = ip(x, y[i])
+        elif metric == "COSINE":
+            distance_i = cosine(x, y[i])
+        else:
+            raise Exception("metric type is invalid")
+        if abs(distance_i - distance[i]) > ct.epsilon:
+            log.error("The distance between %f and %f is not equal with %f" % (x, y[i], distance[i]))
+            assert abs(distance_i - distance[i]) < ct.epsilon
+
+    return True
+
+
 def modify_file(file_path_list, is_modify=False, input_content=""):
     """
     file_path_list : file list -> list[<file_path>]
@@ -899,7 +928,7 @@ def gen_partitions(collection_w, partition_num=1):
     log.info("gen_partitions: created partitions %s" % par)
 
 
-def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
+def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
                 auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True):
     """
     target: insert non-binary/binary data
