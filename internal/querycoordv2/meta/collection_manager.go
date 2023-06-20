@@ -44,11 +44,11 @@ type Collection struct {
 	refreshNotifier chan struct{}
 }
 
-func (collection *Collection) SetRefreshNotifier(notifer chan struct{}) {
+func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
 	collection.mut.Lock()
 	defer collection.mut.Unlock()
 
-	collection.refreshNotifier = notifer
+	collection.refreshNotifier = notifier
 }
 
 func (collection *Collection) IsRefreshed() bool {
@@ -62,12 +62,6 @@ func (collection *Collection) IsRefreshed() bool {
 
 	select {
 	case <-notifier:
-		collection.mut.Lock()
-		defer collection.mut.Unlock()
-		// Only clear the notifier if the current notifier is which we got
-		if collection.refreshNotifier == notifier {
-			collection.refreshNotifier = nil
-		}
 		return true
 
 	default:
