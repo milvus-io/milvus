@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
@@ -154,4 +155,13 @@ func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		common.Endian.PutUint64(buffer, uint64(id))
 		assert.True(t, unmarshaledStats.BF.Test(buffer))
 	}
+}
+
+func TestDeserializeStatsFailed(t *testing.T) {
+	blob := &Blob{
+		Value: []byte("abc"),
+	}
+
+	_, err := DeserializeStatsList(blob)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
