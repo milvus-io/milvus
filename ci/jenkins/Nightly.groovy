@@ -208,7 +208,7 @@ pipeline {
                                                     tag="L0 L1 L2 ClusterOnly"
                                                     e2e_timeout_seconds = 6 * 60 * 60
                                                 } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
-                                                    tag="L3"
+                                                    tag="RBAC"
                                                     e2e_timeout_seconds = 1 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {

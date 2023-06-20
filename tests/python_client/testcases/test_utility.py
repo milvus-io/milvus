@@ -2126,7 +2126,7 @@ class TestUtilityAdvanced(TestcaseBase):
 class TestUtilityUserPassword(TestcaseBase):
     """ Test case of user interface """
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_create_user_with_user_password(self, host, port):
         """
         target: test the user creation with user and password
@@ -2143,7 +2143,7 @@ class TestUtilityUserPassword(TestcaseBase):
                                      check_task=ct.CheckTasks.ccr)
         self.utility_wrap.list_collections()
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("old_password", ["abc1234"])
     @pytest.mark.parametrize("new_password", ["abc12345"])
     def test_reset_password_with_user_and_old_password(self, host, port, old_password, new_password):
@@ -2159,7 +2159,7 @@ class TestUtilityUserPassword(TestcaseBase):
         self.utility_wrap.reset_password(user=user, old_password=old_password, new_password=new_password)
         self.utility_wrap.list_collections()
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("old_password", ["abc1234"])
     @pytest.mark.parametrize("new_password", ["abc12345"])
     def test_update_password_with_user_and_old_password(self, host, port, old_password, new_password):
@@ -2178,7 +2178,7 @@ class TestUtilityUserPassword(TestcaseBase):
                                      password=new_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.list_collections()
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_list_usernames(self, host, port):
         """
         target: test the user list created successfully
@@ -2197,7 +2197,7 @@ class TestUtilityUserPassword(TestcaseBase):
         res = self.utility_wrap.list_usernames()[0]
         assert "user1" and "user2" in res
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_delete_user_with_username(self, host, port, connect_name):
         """
@@ -2216,7 +2216,7 @@ class TestUtilityUserPassword(TestcaseBase):
         self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
                                            check_items={ct.err_code: 1})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_delete_user_with_invalid_username(self, host, port):
         """
         target: test the nonexistant user when deleting credential
@@ -2227,7 +2227,7 @@ class TestUtilityUserPassword(TestcaseBase):
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.delete_user(user="asdfghj")
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_delete_all_users(self, host, port):
         """
         target: delete the users that created for test
@@ -2247,7 +2247,7 @@ class TestUtilityUserPassword(TestcaseBase):
 class TestUtilityInvalidUserPassword(TestcaseBase):
     """ Test invalid case of user interface """
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["qwertyuiopasdfghjklzxcvbnmqwertyui", "@*-.-*", "alisd/"])
     def test_create_user_with_invalid_username(self, host, port, user):
         """
@@ -2261,7 +2261,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                       check_task=ct.CheckTasks.err_res,
                                       check_items={ct.err_code: 5})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["alice123w"])
     def test_create_user_with_existed_username(self, host, port, user):
         """
@@ -2280,7 +2280,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
         self.utility_wrap.create_user(user=user, password=ct.default_password,
                                       check_task=ct.CheckTasks.err_res, check_items={ct.err_code: 29})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("password", ["12345"])
     def test_create_user_with_invalid_password(self, host, port, password):
         """
@@ -2294,7 +2294,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
         self.utility_wrap.create_user(user=user, password=password,
                                       check_task=ct.CheckTasks.err_res, check_items={ct.err_code: 5})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["hobo89"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     def test_reset_password_with_invalid_username(self, host, port, user, old_password):
@@ -2315,7 +2315,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                          check_task=ct.CheckTasks.err_res,
                                          check_items={ct.err_code: 30})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["demo"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     @pytest.mark.parametrize("new_password", ["12345"])
@@ -2337,7 +2337,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                          check_task=ct.CheckTasks.err_res,
                                          check_items={ct.err_code: 5})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["genny"])
     def test_reset_password_with_invalid_old_password(self, host, port, user):
         """
@@ -2352,7 +2352,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                          check_task=ct.CheckTasks.err_res,
                                          check_items={ct.err_code: 30})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["hobo89"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     def test_update_password_with_invalid_username(self, host, port, user, old_password):
@@ -2373,7 +2373,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                           check_task=ct.CheckTasks.err_res,
                                           check_items={ct.err_code: 30})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["demo"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     @pytest.mark.parametrize("new_password", ["12345"])
@@ -2395,7 +2395,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                           check_task=ct.CheckTasks.err_res,
                                           check_items={ct.err_code: 5})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["genny"])
     def test_update_password_with_invalid_old_password(self, host, port, user):
         """
@@ -2410,7 +2410,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                           check_task=ct.CheckTasks.err_res,
                                           check_items={ct.err_code: 30})
 
-    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_delete_user_root(self, host, port):
         """
         target: test deleting user root when deleting credential
@@ -2424,7 +2424,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
 
 
 class TestUtilityRBAC(TestcaseBase):
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_clear_roles(self, host, port):
         """
         target: check get roles list and clear them
@@ -2464,7 +2464,7 @@ class TestUtilityRBAC(TestcaseBase):
         role_groups, _ = self.utility_wrap.list_roles(False)
         assert len(role_groups.groups) == 2
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_list_user_with_root_user(self, host, port):
         """
         target: check list user
@@ -2479,7 +2479,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert user_item.roles == ()
         assert user_item.username == "root"
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_list_users(self, host, port):
         """
         target: check list users
@@ -2512,7 +2512,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert root_exist
         assert new_user_exist
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_create_role(self, host, port):
         """
         target: test create role
@@ -2528,7 +2528,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.create_role()
         assert self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_drop_role(self, host, port):
         """
         target: test drop role
@@ -2543,7 +2543,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
         assert not self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_add_user_to_role(self, host, port):
         """
         target: test add user to role
@@ -2566,7 +2566,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert r_name in user_item.roles
         assert user in users
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_user_from_role(self, host, port):
         """
         target: test remove user from role
@@ -2587,7 +2587,7 @@ class TestUtilityRBAC(TestcaseBase):
         users, _ = self.utility_wrap.role_get_users()
         assert len(users) == 0
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_is_exist(self, host, port):
         """
         target: test role is existed
@@ -2604,7 +2604,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.init_role(r_not_exist)
         assert not self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_grant_collection_insert(self, host, port):
         """
         target: test grant role collection insert privilege
@@ -2659,7 +2659,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w2 = self.init_collection_wrap(name=c_name_2)
         collection_w2.insert(data=data, check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_revoke_public_role_privilege(self, host, port):
         """
         target: revoke public role privilege
@@ -2690,7 +2690,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.init_role("public")
         self.utility_wrap.role_grant("Collection", c_name, "Insert")
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_revoke_collection_privilege(self, host, port):
         """
         target: test revoke role collection privilege,
@@ -2736,7 +2736,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.insert(data=data, check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_revoke_global_privilege(self, host, port):
         """
         target: test revoke role global privilege,
@@ -2779,7 +2779,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name_2,
                                                  check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_revoke_user_privilege(self, host, port):
         """
         target: test revoke role user privilege,
@@ -2812,7 +2812,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.reset_password(user=user_test, old_password=password_test, new_password=password,
                                          check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_role_list_grants(self, host, port):
         """
         target: test grant role privileges and list them
@@ -2843,7 +2843,7 @@ class TestUtilityRBAC(TestcaseBase):
         g_list, _ = self.utility_wrap.role_list_grants()
         assert len(g_list.groups) == len(grant_list)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_drop_role_which_bind_user(self, host, port):
         """
         target: drop role which bind user
@@ -2864,7 +2864,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
         assert not self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_add_user_to_default_role(self, name, host, port):
         """
@@ -2886,7 +2886,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert name in user_item.roles
         assert user in users
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_add_root_to_new_role(self, host, port):
         """
         target: add root to new role
@@ -2907,7 +2907,7 @@ class TestUtilityRBAC(TestcaseBase):
         assert "root" in users
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_collection_grands_by_role_and_object(self, host, port):
         """
         target: list grants by role and object
@@ -2934,7 +2934,7 @@ class TestUtilityRBAC(TestcaseBase):
             self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_global_grands_by_role_and_object(self, host, port):
         """
         target: list grants by role and object
@@ -2959,7 +2959,7 @@ class TestUtilityRBAC(TestcaseBase):
             self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_admin_role_privilege(self, host, port):
         """
         target: verify admin role privilege
@@ -2987,7 +2987,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.release()
         collection_w.drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_collection_load_privilege(self, host, port):
         """
         target: verify grant collection load privilege
@@ -3014,7 +3014,7 @@ class TestUtilityRBAC(TestcaseBase):
 
         collection_w.load()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_collection_release_privilege(self, host, port):
         """
         target: verify grant collection release privilege
@@ -3042,7 +3042,7 @@ class TestUtilityRBAC(TestcaseBase):
 
         collection_w.release()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/19012")
     def test_verify_grant_collection_compaction_privilege(self, host, port):
         """
@@ -3068,7 +3068,7 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=password, check_task=ct.CheckTasks.ccr)
         collection_w.compact()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_collection_insert_privilege(self, host, port):
         """
         target: verify grant collection insert privilege
@@ -3094,7 +3094,7 @@ class TestUtilityRBAC(TestcaseBase):
         data = cf.gen_default_list_data(ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_collection_delete_privilege(self, host, port):
         """
         target: verify grant collection delete privilege
@@ -3121,7 +3121,7 @@ class TestUtilityRBAC(TestcaseBase):
         tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
         collection_w.delete(tmp_expr)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_create_index_privilege(self, host, port):
         """
         target: verify grant create index privilege
@@ -3147,7 +3147,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name,
                                    default_index_params)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_drop_index_privilege(self, host, port):
         """
         target: verify grant drop index privilege
@@ -3173,7 +3173,7 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=password, check_task=ct.CheckTasks.ccr)
         self.index_wrap.drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_collection_search_privilege(self, host, port):
         """
         target: verify grant collection search privilege
@@ -3205,7 +3205,7 @@ class TestUtilityRBAC(TestcaseBase):
                             check_items={"nq": ct.default_nq,
                                          "limit": ct.default_limit})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_collection_flush_privilege(self, host, port):
         """
         target: verify grant collection flush privilege
@@ -3229,7 +3229,7 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=password, check_task=ct.CheckTasks.ccr)
         collection_w.flush()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_collection_query_privilege(self, host, port):
         """
         target: verify grant collection query privilege
@@ -3258,7 +3258,7 @@ class TestUtilityRBAC(TestcaseBase):
         res, _ = collection_w.query(default_term_expr)
         assert len(res) == 2
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_all_privilege(self, host, port):
         """
         target: verify grant global all privilege
@@ -3296,7 +3296,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.delete_user(user=user_test)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_create_collection_privilege(self, host, port):
         """
         target: verify grant global create collection privilege
@@ -3320,7 +3320,7 @@ class TestUtilityRBAC(TestcaseBase):
 
         self.init_collection_wrap(name=c_name)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_drop_collection_privilege(self, host, port):
         """
         target: verify grant global drop collection privilege
@@ -3344,7 +3344,7 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=password, check_task=ct.CheckTasks.ccr)
         collection_w.drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_create_ownership_privilege(self, host, port):
         """
         target: verify grant global create ownership privilege
@@ -3372,7 +3372,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.init_role(r_test)
         self.utility_wrap.create_role()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_drop_ownership_privilege(self, host, port):
         """
         target: verify grant global drop ownership privilege
@@ -3404,7 +3404,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_drop()
         self.utility_wrap.delete_user(user=user_test)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_select_ownership_privilege(self, host, port):
         """
         target: verify grant global select ownership privilege
@@ -3430,7 +3430,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_list_grants()
         self.utility_wrap.list_roles(False)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_global_manage_ownership_privilege(self, host, port):
         """
         target: verify grant global manage ownership privilege
@@ -3466,7 +3466,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.role_grant("Collection", c_name, "Search")
         self.utility_wrap.role_revoke("Collection", c_name, "Search")
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_user_update_privilege(self, host, port):
         """
         target: verify grant user update privilege
@@ -3497,7 +3497,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.reset_password(user=user_test, old_password=password_test, new_password=password)
         self.utility_wrap.update_password(user=user_test, old_password=password, new_password=password_test)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_select_user_privilege(self, host, port):
         """
         target: verify grant select user privilege
@@ -3529,7 +3529,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.list_user(username=user_test, include_role_info=False)
         self.utility_wrap.list_users(include_role_info=False)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_privilege_with_wildcard_object_name(self, host, port):
         """
         target: verify grant privilege with wildcard instead of object name
@@ -3558,7 +3558,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.load()
         collection_w2.load()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_verify_grant_privilege_with_wildcard_privilege(self, host, port):
         """
         target: verify grant privilege with wildcard instead of privilege
@@ -3601,7 +3601,7 @@ class TestUtilityRBAC(TestcaseBase):
         default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
         collection_w.query(default_term_expr)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_new_user_default_owns_public_role_permission(self, host, port):
         """
         target: new user owns public role privilege
@@ -3673,7 +3673,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.list_collections()
         self.utility_wrap.has_collection(c_name)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_remove_user_from_default_role(self, name, host, port):
         """
@@ -3699,7 +3699,7 @@ class TestUtilityRBAC(TestcaseBase):
         users, _ = self.utility_wrap.role_get_users()
         assert user not in users
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_root_from_new_role(self, host, port):
         """
         target: remove root from new role
@@ -3727,7 +3727,7 @@ class TestUtilityRBAC(TestcaseBase):
 
 
 class TestUtilityNegativeRbac(TestcaseBase):
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
                                       "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
                                       "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
@@ -3759,7 +3759,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         role_groups, _ = self.utility_wrap.list_roles(False)
         assert len(role_groups.groups) == 2
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_create_exist_role(self, host, port):
         """
         target: check create an exist role fail
@@ -3779,7 +3779,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_drop()
         assert not self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_drop_admin_and_public_role(self, name, host, port):
         """
@@ -3797,7 +3797,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_drop(check_task=CheckTasks.err_res, check_items=error)
         assert self.utility_wrap.role_is_exist()[0]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_drop_role_which_not_exist(self, host, port):
         """
         target: drop role which not exist fail
@@ -3813,7 +3813,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "the role isn\'t existed"}
         self.utility_wrap.role_drop(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_add_user_not_exist_role(self, host, port):
         """
         target: add user to not exist role
@@ -3834,7 +3834,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "fail to check the role name"}
         self.utility_wrap.role_add_user(user, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_add_not_exist_user_to_role(self, host, port):
         """
         target: add not exist user to role
@@ -3855,7 +3855,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_add_user(user, check_task=CheckTasks.err_res, check_items=error)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["admin", "public"])
     def test_remove_root_from_default_role(self, name, host, port):
         """
@@ -3871,7 +3871,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "fail to operate user to role"}
         self.utility_wrap.role_remove_user("root", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_user_from_unbind_role(self, host, port):
         """
         target: remove user from unbind role
@@ -3894,7 +3894,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_remove_user(user, check_task=CheckTasks.err_res, check_items=error)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_user_from_empty_role(self, host, port):
         """
         target: remove not exist user from role
@@ -3917,7 +3917,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         users, _ = self.utility_wrap.role_get_users()
         assert user not in users
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_remove_not_exist_user_from_role(self, host, port):
         """
         target: remove not exist user from role
@@ -3940,7 +3940,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         assert user not in users
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_drop_role_with_bind_privilege(self, host, port):
         """
         target: drop role with bind privilege
@@ -3959,7 +3959,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"}
         self.utility_wrap.role_drop(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_grant_by_not_exist_role(self, host, port):
         """
         target: list grants by not exist role
@@ -3974,7 +3974,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "there is no value on key = by-dev/meta/root-coord/credential/roles/%s" % r_name}
         self.utility_wrap.role_list_grants(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_grant_by_role_and_not_exist_object(self, host, port):
         """
         target: list grants by role and not exist object
@@ -3992,7 +3992,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         self.utility_wrap.role_list_grant(o_name, "*", check_task=CheckTasks.err_res, check_items=error)
         self.utility_wrap.role_drop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_grant_privilege_with_object_not_exist(self, host, port):
         """
         target: grant privilege with not exist object
@@ -4009,7 +4009,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "the object type in the object entity[name: %s] is invalid" % o_name}
         self.utility_wrap.role_grant(o_name, "*", "*", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_grant_privilege_with_privilege_not_exist(self, host, port):
         """
         target: grant privilege with not exist privilege
@@ -4025,7 +4025,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
         error = {"err_code": 41, "err_msg": "the privilege name[%s] in the privilege entity is invalid" % p_name}
         self.utility_wrap.role_grant("Global", "*", p_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_revoke_privilege_with_object_not_exist(self, host, port):
         """
         target: revoke privilege with not exist object
@@ -4042,7 +4042,7 @@ class TestUtilityNegativeRbac(TestcaseBase):
                  "err_msg": "the object type in the object entity[name: %s] is invalid" % o_name}
         self.utility_wrap.role_revoke(o_name, "*", "*", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_revoke_privilege_with_privilege_not_exist(self, host, port):
         """
         target: revoke privilege with not exist privilege
