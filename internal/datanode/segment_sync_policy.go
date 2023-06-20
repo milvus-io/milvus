@@ -46,8 +46,7 @@ func syncPeriodically() segmentSyncPolicy {
 			}
 		}
 		if len(segsToSync) > 0 {
-			log.Debug("sync segment periodically",
-				zap.Int64s("segmentID", segsToSync))
+			log.Info("sync segment periodically", zap.Int64s("segmentID", segsToSync))
 		}
 		return segsToSync
 	}
@@ -74,5 +73,47 @@ func syncMemoryTooHigh() segmentSyncPolicy {
 				zap.Int64("memorySize", segments[i].memorySize))
 		}
 		return syncSegments
+	}
+}
+
+// syncCPLagTooBehind force sync the segments lagging too behind the channel checkPoint
+func syncCPLagTooBehind() segmentSyncPolicy {
+	segmentMinTs := func(segment *Segment) uint64 {
+		var minTs uint64 = math.MaxUint64
+		if segment.curInsertBuf != nil && segment.curInsertBuf.startPos != nil && segment.curInsertBuf.startPos.Timestamp < minTs {
+			minTs = segment.curInsertBuf.startPos.Timestamp
+		}
+		if segment.curDeleteBuf != nil && segment.curDeleteBuf.startPos != nil && segment.curDeleteBuf.startPos.Timestamp < minTs {
+			minTs = segment.curDeleteBuf.startPos.Timestamp
+		}
+		for _, ib := range segment.historyInsertBuf {
+			if ib != nil && ib.startPos != nil && ib.startPos.Timestamp < minTs {
+				minTs = ib.startPos.Timestamp
+			}
+		}
+		for _, db := range segment.historyDeleteBuf {
+			if db != nil && db.startPos != nil && db.startPos.Timestamp < minTs {
+				minTs = db.startPos.Timestamp
+			}
+		}
+		return minTs
+	}
+
+	return func(segments []*Segment, ts Timestamp, _ *atomic.Bool) []UniqueID {
+		segmentsToSync := make([]UniqueID, 0)
+		for _, segment := range segments {
+			segmentMinTs := segmentMinTs(segment)
+			segmentStartTime := tsoutil.PhysicalTime(segmentMinTs)
+			cpLagDuration := tsoutil.PhysicalTime(ts).Sub(segmentStartTime)
+			shouldSync := cpLagDuration > Params.DataNodeCfg.CpLagPeriod.GetAsDuration(time.Second) && !segment.isBufferEmpty()
+			if shouldSync {
+				segmentsToSync = append(segmentsToSync, segment.segmentID)
+			}
+		}
+		if len(segmentsToSync) > 0 {
+			log.Info("sync segment for cp lag behind too much",
+				zap.Int64s("segmentID", segmentsToSync))
+		}
+		return segmentsToSync
 	}
 }

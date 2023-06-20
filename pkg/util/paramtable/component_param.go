@@ -2138,6 +2138,7 @@ type dataNodeConfig struct {
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
+	CpLagPeriod            ParamItem `refreshable:"true"`
 
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
@@ -2257,6 +2258,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SyncPeriod.Init(base.mgr)
+
+	p.CpLagPeriod = ParamItem{
+		Key:          "datanode.segment.cpLagPeriod",
+		Version:      "2.2.0",
+		DefaultValue: "600",
+		Doc:          "The period to sync segments if buffer is not empty.",
+		Export:       true,
+	}
+	p.CpLagPeriod.Init(base.mgr)
 
 	p.WatchEventTicklerInterval = ParamItem{
 		Key:          "datanode.segment.watchEventTicklerInterval",
