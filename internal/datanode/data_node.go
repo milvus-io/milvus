@@ -954,9 +954,10 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	if err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
 		status.Reason = err.Error()
+		node.compactionExecutor.injectDone(req.GetPlanID(), false)
 		return status, nil
 	}
-	node.compactionExecutor.injectDone(req.GetPlanID())
+	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
 }
