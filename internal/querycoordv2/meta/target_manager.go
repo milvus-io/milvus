@@ -87,9 +87,6 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTargetWithPartitions(collectionID int64, partitionIDs ...int64) error {
-	mgr.rwMutex.Lock()
-	defer mgr.rwMutex.Unlock()
-
 	if len(partitionIDs) == 0 {
 		msg := "failed to update collection next target, due to no partition specified"
 		log.Warn(msg,
@@ -105,9 +102,6 @@ func (mgr *TargetManager) UpdateCollectionNextTargetWithPartitions(collectionID 
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
-	mgr.rwMutex.Lock()
-	defer mgr.rwMutex.Unlock()
-
 	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
@@ -128,6 +122,8 @@ func (mgr *TargetManager) updateCollectionNextTarget(collectionID int64, partiti
 		return err
 	}
 
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
 	mgr.next.updateCollectionTarget(collectionID, newTarget)
 
 	log.Debug("finish to update next targets for collection",
