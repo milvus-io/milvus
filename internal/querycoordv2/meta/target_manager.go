@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
+	"google.golang.org/grpc/codes"
 )
 
 type TargetScope = int32
@@ -206,7 +207,7 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, pa
 		segments := make(map[int64]*datapb.SegmentInfo, 0)
 		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID, partitionIDs...)
 		if err != nil {
-			if funcutil.IsGrpcErr(err) {
+			if funcutil.IsGrpcErr(err, codes.Unimplemented) {
 				// for rolling  upgrade, when call GetRecoveryInfoV2 failed, back to retry GetRecoveryInfo
 				target, err = mgr.PullNextTargetV1(broker, collectionID, partitionIDs...)
 				return err

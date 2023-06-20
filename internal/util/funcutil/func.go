@@ -33,6 +33,7 @@ import (
 
 	"github.com/go-basic/ipv4"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
@@ -380,14 +382,15 @@ func ReadBinary(endian binary.ByteOrder, bs []byte, receiver interface{}) error 
 }
 
 // IsGrpcErr checks whether err is instance of grpc status error.
-func IsGrpcErr(err error) bool {
+func IsGrpcErr(err error, targets ...codes.Code) bool {
+	set := typeutil.NewSet[codes.Code](targets...)
 	for {
 		if err == nil {
 			return false
 		}
-		_, ok := grpcStatus.FromError(err)
+		s, ok := grpcStatus.FromError(err)
 		if ok {
-			return true
+			return set.Len() == 0 || set.Contain(s.Code())
 		}
 		err = errors.Unwrap(err)
 	}
