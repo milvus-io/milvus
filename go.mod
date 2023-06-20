@@ -185,7 +185,7 @@ require github.com/cockroachdb/errors v1.2.4
 
 require (
 	github.com/aliyun/credentials-go v1.2.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.2.10-dev.3
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.2.10
 )
 
 require (
