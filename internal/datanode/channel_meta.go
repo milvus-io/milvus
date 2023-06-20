@@ -247,6 +247,9 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 }
 
 func (c *ChannelMeta) getSegment(segID UniqueID) *Segment {
+	c.segMu.RLock()
+	defer c.segMu.RUnlock()
+
 	seg, ok := c.segments[segID]
 	if !ok {
 		return nil
