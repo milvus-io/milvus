@@ -431,7 +431,10 @@ template <typename T>
 auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
     -> BitsetType {
-    if constexpr (std::is_integral_v<T>) {
+    // bool type is integral but will never be overflowed,
+    // the check method may evaluate it out of range with bool type,
+    // exclude bool type here
+    if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
         auto& expr = static_cast<UnaryRangeExprImpl<int64_t>&>(expr_raw);
         auto val = expr.value_;
 
