@@ -18,7 +18,7 @@ from pymilvus.exceptions import MilvusException
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
 default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
@@ -43,6 +43,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_search_ip_params = ct.default_search_ip_params
 default_search_binary_params = ct.default_search_binary_params
+default_nb = ct.default_nb
 
 
 @pytest.mark.tags(CaseLabel.GPU)
