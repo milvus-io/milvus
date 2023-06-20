@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -76,16 +77,6 @@ func (t *createCollectionTask) validate() error {
 	}
 
 	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
-	totalCollections := 0
-	for _, collIDs := range db2CollIDs {
-		totalCollections += len(collIDs)
-	}
-
-	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum
-	if totalCollections >= maxCollectionNum {
-		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
-		return fmt.Errorf("exceeded the limit number of collections, limit={%d}", maxCollectionNum)
-	}
 
 	collIDs, ok := db2CollIDs[t.dbID]
 	if !ok {
@@ -99,6 +90,15 @@ func (t *createCollectionTask) validate() error {
 		return fmt.Errorf("exceeded the limit number of collections per DB, maxCollectionNumPerDB={%d}", maxColNumPerDB)
 	}
 
+	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum
+	totalCollections := 0
+	for _, collIDs := range db2CollIDs {
+		totalCollections += len(collIDs)
+	}
+	if totalCollections >= maxCollectionNum {
+		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		return fmt.Errorf("exceeded the limit number of collections, limit={%d}", maxCollectionNum)
+	}
 	return nil
 }
 
