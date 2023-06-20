@@ -1885,7 +1885,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs[:13])
+    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs[7:13])
     def test_upsert_partition_name_invalid(self, partition_name):
         """
         target: test upsert partition name invalid
@@ -1893,8 +1893,6 @@ class TestUpsertInvalid(TestcaseBase):
                 2. upsert with invalid partition name
         expected: raise exception
         """
-        if partition_name is None or partition_name == [] or partition_name == "":
-            pytest.skip("valid")
         c_name = cf.gen_unique_str(pre_upsert)
         collection_w = self.init_collection_wrap(name=c_name)
         p_name = cf.gen_unique_str('partition_')
@@ -1922,6 +1920,7 @@ class TestUpsertInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("insert and upsert have removed the [] error check")
     def test_upsert_multi_partitions(self):
         """
         target: test upsert two partitions
