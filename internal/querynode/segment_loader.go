@@ -526,6 +526,10 @@ func (loader *segmentLoader) submitLazyLoadTask(s *Segment, statslogs []string) 
 			err := loader.loadStatslog(context.Background(), s, statslogs)
 			if err != nil {
 				// non-retryable
+				if !s.healthy() {
+					log.Warn("stop loading stats: segment released")
+					return nil, fmt.Errorf("stop loading stats: segment released")
+				}
 				if errors.Is(err, storage.ErrNoSuchKey) || errors.Is(err, errBinlogCorrupted) {
 					log.Warn("failed to lazy load statslog with non-retryable error", zap.Int64("segment", s.segmentID), zap.Error(err))
 					return nil, err

@@ -1075,6 +1075,7 @@ func (s *SegmentLoaderMockSuite) TestSkipBFLoad() {
 			lazyLoading: atomic.NewBool(false),
 			destroyed:   atomic.NewBool(false),
 		}
+		defer segment.setUnhealthy()
 		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
 		s.NoError(err)
 
