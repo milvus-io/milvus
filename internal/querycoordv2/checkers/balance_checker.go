@@ -100,14 +100,14 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 
 	//iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
-	hasUnBalancedCollections := false
+	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
 			log.Debug("ScoreBasedBalancer has balanced collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}
-		hasUnBalancedCollections = true
+		hasUnbalancedCollection = true
 		b.normalBalanceCollectionsCurrentRound.Insert(cid)
 		for _, replica := range b.meta.ReplicaManager.GetByCollection(cid) {
 			normalReplicasToBalance = append(normalReplicasToBalance, replica.GetID())
@@ -115,9 +115,9 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		break
 	}
 
-	if !hasUnBalancedCollections {
+	if !hasUnbalancedCollection {
 		b.normalBalanceCollectionsCurrentRound.Clear()
-		log.Debug("ScoreBasedBalancer has balanced all " +
+		log.RatedDebug(10, "ScoreBasedBalancer has balanced all "+
 			"collections in one round, clear collectionIDs for this round")
 	}
 	return normalReplicasToBalance
