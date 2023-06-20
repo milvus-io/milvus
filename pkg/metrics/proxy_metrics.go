@@ -247,6 +247,16 @@ var (
 			Name:      "user_rpc_count",
 			Help:      "the rpc count of a user",
 		}, []string{usernameLabelName})
+
+	// ProxyWorkLoadScore record the score that measured query node's workload.
+	ProxyWorkLoadScore = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "workload_score",
+			Help:      "score that measured query node's workload",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -284,6 +294,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyLimiterRate)
 	registry.MustRegister(ProxyHookFunc)
 	registry.MustRegister(UserRPCCounter)
+
+	registry.MustRegister(ProxyWorkLoadScore)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

@@ -16,6 +16,8 @@
 package proxy
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -33,7 +35,7 @@ func NewRoundRobinBalancer() *RoundRobinBalancer {
 	}
 }
 
-func (b *RoundRobinBalancer) SelectNode(availableNodes []int64, cost int64) (int64, error) {
+func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
 	if len(availableNodes) == 0 {
 		return -1, merr.ErrNoAvailableNode
 	}
@@ -67,5 +69,7 @@ func (b *RoundRobinBalancer) CancelWorkload(node int64, nq int64) {
 }
 
 func (b *RoundRobinBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}
+
+func (b *RoundRobinBalancer) Start(ctx context.Context) {}
 
 func (b *RoundRobinBalancer) Close() {}

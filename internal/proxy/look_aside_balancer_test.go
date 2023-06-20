@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ type LookAsideBalancerSuite struct {
 func (suite *LookAsideBalancerSuite) SetupTest() {
 	suite.clientMgr = NewMockShardClientManager(suite.T())
 	suite.balancer = NewLookAsideBalancer(suite.clientMgr)
+	suite.balancer.Start(context.Background())
 
 	qn := types.NewMockQueryNode(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(1)).Return(qn, nil).Maybe()
@@ -118,6 +120,18 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 	}
 
 	cases := []testcase{
+		{
+			name: "qn with empty metrics",
+			costMetrics: map[int64]*internalpb.CostAggregation{
+				1: {},
+				2: {},
+				3: {},
+			},
+
+			executingNQ:  map[int64]int64{},
+			requestCount: 100,
+			result:       map[int64]int64{1: 34, 2: 33, 3: 33},
+		},
 		{
 			name: "each qn has same cost metrics",
 			costMetrics: map[int64]*internalpb.CostAggregation{
@@ -219,18 +233,6 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 			requestCount: 100,
 			result:       map[int64]int64{1: 40, 2: 40, 3: 20},
 		},
-		{
-			name: "qn with empty metrics",
-			costMetrics: map[int64]*internalpb.CostAggregation{
-				1: {},
-				2: {},
-				3: {},
-			},
-
-			executingNQ:  map[int64]int64{1: 0, 2: 0, 3: 0},
-			requestCount: 100,
-			result:       map[int64]int64{1: 34, 2: 33, 3: 33},
-		},
 	}
 
 	for _, c := range cases {
@@ -242,10 +244,9 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 			for node, executingNQ := range c.executingNQ {
 				suite.balancer.executingTaskTotalNQ.Insert(node, atomic.NewInt64(executingNQ))
 			}
-
 			counter := make(map[int64]int64)
 			for i := 0; i < c.requestCount; i++ {
-				node, err := suite.balancer.SelectNode([]int64{1, 2, 3}, 1)
+				node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 				suite.NoError(err)
 				counter[node]++
 			}
@@ -258,7 +259,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 }
 
 func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
-	node, err := suite.balancer.SelectNode([]int64{1, 2, 3}, 10)
+	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
 	suite.NoError(err)
 	suite.balancer.CancelWorkload(node, 10)
 
@@ -281,9 +282,38 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	suite.Eventually(func() bool {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
 	}, 2*time.Second, 100*time.Millisecond)
+	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
+	suite.NoError(err)
+	suite.Equal(int64(-1), targetNode)
 
 	suite.Eventually(func() bool {
 		return !suite.balancer.unreachableQueryNodes.Contain(2)
+	}, 3*time.Second, 100*time.Millisecond)
+}
+
+func (suite *LookAsideBalancerSuite) TestNodeRecover() {
+	// mock qn down for a while and then recover
+	qn3 := types.NewMockQueryNode(suite.T())
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
+	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Abnormal,
+		},
+	}, nil).Times(3)
+
+	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+	}, nil)
+
+	suite.balancer.metricsUpdateTs.Insert(3, time.Now().UnixMilli())
+	suite.Eventually(func() bool {
+		return suite.balancer.unreachableQueryNodes.Contain(3)
+	}, 2*time.Second, 100*time.Millisecond)
+
+	suite.Eventually(func() bool {
+		return !suite.balancer.unreachableQueryNodes.Contain(3)
 	}, 3*time.Second, 100*time.Millisecond)
 }
 

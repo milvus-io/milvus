@@ -22,6 +22,38 @@ func (_m *MockLBPolicy) EXPECT() *MockLBPolicy_Expecter {
 	return &MockLBPolicy_Expecter{mock: &_m.Mock}
 }
 
+// Close provides a mock function with given fields:
+func (_m *MockLBPolicy) Close() {
+	_m.Called()
+}
+
+// MockLBPolicy_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockLBPolicy_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockLBPolicy_Expecter) Close() *MockLBPolicy_Close_Call {
+	return &MockLBPolicy_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockLBPolicy_Close_Call) Run(run func()) *MockLBPolicy_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLBPolicy_Close_Call) Return() *MockLBPolicy_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLBPolicy_Close_Call) RunAndReturn(run func()) *MockLBPolicy_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Execute provides a mock function with given fields: ctx, workload
 func (_m *MockLBPolicy) Execute(ctx context.Context, workload CollectionWorkLoad) error {
 	ret := _m.Called(ctx, workload)
@@ -104,6 +136,39 @@ func (_c *MockLBPolicy_ExecuteWithRetry_Call) Return(_a0 error) *MockLBPolicy_Ex
 }
 
 func (_c *MockLBPolicy_ExecuteWithRetry_Call) RunAndReturn(run func(context.Context, ChannelWorkload) error) *MockLBPolicy_ExecuteWithRetry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Start provides a mock function with given fields: ctx
+func (_m *MockLBPolicy) Start(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockLBPolicy_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockLBPolicy_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockLBPolicy_Expecter) Start(ctx interface{}) *MockLBPolicy_Start_Call {
+	return &MockLBPolicy_Start_Call{Call: _e.mock.On("Start", ctx)}
+}
+
+func (_c *MockLBPolicy_Start_Call) Run(run func(ctx context.Context)) *MockLBPolicy_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockLBPolicy_Start_Call) Return() *MockLBPolicy_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLBPolicy_Start_Call) RunAndReturn(run func(context.Context)) *MockLBPolicy_Start_Call {
 	_c.Call.Return(run)
 	return _c
 }

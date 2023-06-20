@@ -16,6 +16,7 @@
 package proxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -29,14 +30,15 @@ type RoundRobinBalancerSuite struct {
 
 func (s *RoundRobinBalancerSuite) SetupTest() {
 	s.balancer = NewRoundRobinBalancer()
+	s.balancer.Start(context.Background())
 }
 
 func (s *RoundRobinBalancerSuite) TestRoundRobin() {
 	availableNodes := []int64{1, 2}
-	s.balancer.SelectNode(availableNodes, 1)
-	s.balancer.SelectNode(availableNodes, 1)
-	s.balancer.SelectNode(availableNodes, 1)
-	s.balancer.SelectNode(availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
 
 	workload, ok := s.balancer.nodeWorkload.Get(1)
 	s.True(ok)
@@ -45,10 +47,10 @@ func (s *RoundRobinBalancerSuite) TestRoundRobin() {
 	s.True(ok)
 	s.Equal(int64(2), workload.Load())
 
-	s.balancer.SelectNode(availableNodes, 3)
-	s.balancer.SelectNode(availableNodes, 1)
-	s.balancer.SelectNode(availableNodes, 1)
-	s.balancer.SelectNode(availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 3)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
+	s.balancer.SelectNode(context.TODO(), availableNodes, 1)
 
 	workload, ok = s.balancer.nodeWorkload.Get(1)
 	s.True(ok)
@@ -60,13 +62,13 @@ func (s *RoundRobinBalancerSuite) TestRoundRobin() {
 
 func (s *RoundRobinBalancerSuite) TestNoAvailableNode() {
 	availableNodes := []int64{}
-	_, err := s.balancer.SelectNode(availableNodes, 1)
+	_, err := s.balancer.SelectNode(context.TODO(), availableNodes, 1)
 	s.Error(err)
 }
 
 func (s *RoundRobinBalancerSuite) TestCancelWorkload() {
 	availableNodes := []int64{101}
-	_, err := s.balancer.SelectNode(availableNodes, 5)
+	_, err := s.balancer.SelectNode(context.TODO(), availableNodes, 5)
 	s.NoError(err)
 	workload, ok := s.balancer.nodeWorkload.Get(101)
 	s.True(ok)

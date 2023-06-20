@@ -54,6 +54,7 @@ type LBPolicy interface {
 	Execute(ctx context.Context, workload CollectionWorkLoad) error
 	ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error
 	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
+	Start(ctx context.Context)
 	Close()
 }
 
@@ -81,6 +82,10 @@ func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
 	}
 }
 
+func (lb *LBPolicyImpl) Start(ctx context.Context) {
+	lb.balancer.Start(ctx)
+}
+
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
 	log := log.With(
@@ -102,7 +107,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 	}
 
 	availableNodes := lo.Filter(workload.shardLeaders, filterAvailableNodes)
-	targetNode, err := lb.balancer.SelectNode(availableNodes, workload.nq)
+	targetNode, err := lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
 	if err != nil {
 		globalMetaCache.DeprecateShardCache(workload.db, workload.collection)
 		nodes, err := getShardLeaders()
@@ -120,7 +125,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 			return -1, merr.WrapErrNoAvailableNode("all available nodes has been excluded")
 		}
 
-		targetNode, err = lb.balancer.SelectNode(availableNodes, workload.nq)
+		targetNode, err = lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
 		if err != nil {
 			log.Warn("failed to select shard",
 				zap.Error(err))
