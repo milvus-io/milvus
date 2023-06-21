@@ -746,7 +746,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	result := task.Result()
 	if result.CostAggregation != nil {
 		// update channel's response time
-		result.CostAggregation.ResponseTime = int64(latency)
+		result.CostAggregation.ResponseTime = latency.Milliseconds()
 	}
 	return result, nil
 }
