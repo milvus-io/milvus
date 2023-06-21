@@ -31,12 +31,6 @@ class BinlogReader {
         : data_(binlog_data), size_(length), tell_(0) {
     }
 
-    explicit BinlogReader(const uint8_t* binlog_data, int64_t length)
-        : size_(length), tell_(0) {
-        data_ = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
-        std::memcpy(data_.get(), binlog_data, length);
-    }
-
     Status
     Read(int64_t nbytes, void* out);
 

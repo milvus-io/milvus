@@ -736,6 +736,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 				if segIdx.IndexState == commonpb.IndexState_Finished {
 					indexFilePaths := metautil.BuildSegmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
 						segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+					indexParams := s.meta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+					indexParams = append(indexParams, s.meta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
 							SegmentID:      segID,
@@ -743,7 +745,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexID:        segIdx.IndexID,
 							BuildID:        segIdx.BuildID,
 							IndexName:      s.meta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
-							IndexParams:    s.meta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
+							IndexParams:    indexParams,
 							IndexFilePaths: indexFilePaths,
 							SerializedSize: segIdx.IndexSize,
 							IndexVersion:   segIdx.IndexVersion,

@@ -11,10 +11,14 @@
 
 #include <gtest/gtest.h>
 #include "common/SystemProperty.h"
+#include "test_utils/Constants.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
+    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
+        TestLocalPath);
 
     return RUN_ALL_TESTS();
 }

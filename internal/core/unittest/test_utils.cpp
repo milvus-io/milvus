@@ -63,9 +63,9 @@ TEST(Util, GetDeleteBitmap) {
         insert_record.insert_pk(1, i);
     }
     auto insert_offset = insert_record.reserved.fetch_add(N);
-    insert_record.timestamps_.fill_chunk_data(tss.data(), N);
+    insert_record.timestamps_.set_data_raw(insert_offset, tss.data(), N);
     auto field_data = insert_record.get_field_data_base(i64_fid);
-    field_data->fill_chunk_data(age_data.data(), N);
+    field_data->set_data_raw(insert_offset, age_data.data(), N);
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     // test case delete pk1(ts = 0) -> insert repeated pk1 (ts = {1 ... N}) -> query (ts = N)

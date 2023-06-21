@@ -23,6 +23,8 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -110,6 +112,77 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + size);
+}
+
+void
+SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
+    // schema don't include system field
+    AssertInfo(infos.field_infos.size() == schema_->size() + 2,
+               "lost some field data when load for growing segment");
+    AssertInfo(infos.field_infos.find(TimestampFieldID.get()) !=
+                   infos.field_infos.end(),
+               "timestamps field data should be included");
+    AssertInfo(
+        infos.field_infos.find(RowFieldID.get()) != infos.field_infos.end(),
+        "rowID field data should be included");
+    auto primary_field_id =
+        schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
+    AssertInfo(infos.field_infos.find(primary_field_id.get()) !=
+                   infos.field_infos.end(),
+               "primary field data should be included");
+
+    int64_t num_rows = 0;
+    for (auto& field : infos.field_infos) {
+        num_rows = field.second.row_count;
+        break;
+    }
+    auto reserved_offset = PreInsert(num_rows);
+    for (auto& [id, info] : infos.field_infos) {
+        auto field_id = FieldId(id);
+        auto insert_files = info.insert_files;
+        auto field_datas = LoadFieldDatasFromRemote(insert_files);
+        AssertInfo(
+            num_rows == storage::GetTotalNumRowsForFieldDatas(field_datas),
+            "inconsistent num row between multi fields");
+
+        if (field_id == TimestampFieldID) {
+            // step 2: sort timestamp
+            // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
+
+            // step 3: fill into Segment.ConcurrentVector
+            insert_record_.timestamps_.set_data_raw(reserved_offset,
+                                                    field_datas);
+            continue;
+        }
+
+        if (field_id == RowFieldID) {
+            insert_record_.row_ids_.set_data_raw(reserved_offset, field_datas);
+            continue;
+        }
+
+        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+            insert_record_.get_field_data_base(field_id)->set_data_raw(
+                reserved_offset, field_datas);
+        }
+        if (segcore_config_.get_enable_growing_segment_index()) {
+            auto offset = reserved_offset;
+            for (auto data : field_datas) {
+                auto row_count = data->get_num_rows();
+                indexing_record_.AppendingIndex(
+                    offset, row_count, field_id, data, insert_record_);
+                offset += row_count;
+            }
+        }
+
+        if (field_id == primary_field_id) {
+            insert_record_.insert_pks(field_datas);
+        }
+    }
+
+    // step 5: update small indexes
+    insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                             reserved_offset + num_rows);
 }
 
 Status

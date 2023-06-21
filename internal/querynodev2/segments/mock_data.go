@@ -629,7 +629,8 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join(defaultLocalStorage, "insert-log", k)
+		//key := path.Join(defaultLocalStorage, "insert-log", k)
+		key := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "insert-log", k)
 		kvs[key] = blob.Value
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -651,7 +652,8 @@ func SaveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join(defaultLocalStorage, "stats-log", k)
+		//key := path.Join(defaultLocalStorage, "stats-log", k)
+		key := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "stats-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -828,8 +830,8 @@ func SaveDeltaLog(collectionID int64,
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
-	key += "delta" // append suffix 'delta' to avoid conflicts against binlog
-	keyPath := path.Join(defaultLocalStorage, key)
+	//keyPath := path.Join(defaultLocalStorage, "delta-log", key)
+	keyPath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "delta-log", key)
 	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
@@ -843,7 +845,7 @@ func SaveDeltaLog(collectionID int64,
 func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm storage.ChunkManager) (*querypb.FieldIndexInfo, error) {
 	typeParams, indexParams := genIndexParams(indexType, metricType)
 
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams, genStorageConfig())
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
@@ -880,7 +882,9 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
+		//indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
+		indexPath := filepath.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), "index_files",
+			strconv.Itoa(int(segmentID)), index.Key)
 		indexPaths = append(indexPaths, indexPath)
 		err := cm.Write(context.Background(), indexPath, index.Value)
 		if err != nil {
@@ -942,6 +946,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 		IAMEndpoint:     paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
 		UseSSL:          paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
 		UseIAM:          paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
+		StorageType:     paramtable.Get().CommonCfg.StorageType.GetValue(),
 	}
 }
 

@@ -138,7 +138,7 @@ func (i *IndexNode) Register() error {
 	return nil
 }
 
-func (i *IndexNode) initKnowhere() {
+func (i *IndexNode) initSegcore() {
 	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
 	C.IndexBuilderInit(cEasyloggingYaml)
 	C.free(unsafe.Pointer(cEasyloggingYaml))
@@ -159,7 +159,7 @@ func (i *IndexNode) initKnowhere() {
 	C.InitCpuNum(cCPUNum)
 
 	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
-	initcore.InitLocalStorageConfig(localDataRootPath)
+	initcore.InitLocalChunkManager(localDataRootPath)
 }
 
 func (i *IndexNode) initSession() error {
@@ -193,7 +193,7 @@ func (i *IndexNode) Init() error {
 
 		log.Info("IndexNode NewMinIOKV succeeded")
 
-		i.initKnowhere()
+		i.initSegcore()
 	})
 
 	log.Info("Init IndexNode finished", zap.Error(initErr))

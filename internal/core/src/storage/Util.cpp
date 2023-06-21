@@ -19,14 +19,17 @@
 #include "arrow/type_fwd.h"
 #include "exceptions/EasyAssert.h"
 #include "common/Consts.h"
-#include "config/ConfigChunkManager.h"
-#include "storage/parquet_c.h"
-
-#ifdef BUILD_DISK_ANN
+#include "storage/FieldData.h"
+#include "storage/ThreadPool.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/MinioChunkManager.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
-#endif
 
 namespace milvus::storage {
+
+std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
+    {"local", ChunkManagerType::Local}, {"minio", ChunkManagerType::Minio}};
 
 StorageType
 ReadMediumType(BinlogReaderPtr reader) {
@@ -274,6 +277,21 @@ CreateArrowSchema(DataType data_type, int dim) {
 }
 
 int
+GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
+                             DataType data_type) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT: {
+            return schema->type_length() / sizeof(float);
+        }
+        case DataType::VECTOR_BINARY: {
+            return schema->type_length() * 8;
+        }
+        default:
+            PanicInfo("unsupported data type");
+    }
+}
+
+int
 GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
                            DataType data_type) {
     switch (data_type) {
@@ -299,58 +317,242 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
 }
 
 std::string
-GenLocalIndexPathPrefix(int64_t build_id, int64_t index_version) {
-    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" +
-           std::string(INDEX_ROOT_PATH) + "/" + std::to_string(build_id) + "/" +
-           std::to_string(index_version) + "/";
+GenIndexPathPrefix(ChunkManagerPtr cm,
+                   int64_t build_id,
+                   int64_t index_version) {
+    return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+           std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
 }
 
 std::string
-GetLocalIndexPathPrefixWithBuildID(int64_t build_id) {
-    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" +
-           std::string(INDEX_ROOT_PATH) + "/" + std::to_string(build_id);
+GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+    return cm->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+           std::to_string(build_id);
 }
 
 std::string
-GenFieldRawDataPathPrefix(int64_t segment_id, int64_t field_id) {
-    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" +
-           std::string(RAWDATA_ROOT_PATH) + "/" + std::to_string(segment_id) +
-           "/" + std::to_string(field_id) + "/";
+GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
+                          int64_t segment_id,
+                          int64_t field_id) {
+    return cm->GetRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
+           std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
 }
 
 std::string
-GetSegmentRawDataPathPrefix(int64_t segment_id) {
-    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" +
-           std::string(RAWDATA_ROOT_PATH) + "/" + std::to_string(segment_id);
+GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
+    return cm->GetRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
+           std::to_string(segment_id);
 }
 
-std::vector<IndexType>
-DISK_LIST() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_DISKANN,
-    };
-    return ret;
+std::unique_ptr<DataCodec>
+DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
+                            const std::string& file) {
+    auto fileSize = chunk_manager->Size(file);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+    chunk_manager->Read(file, buf.get(), fileSize);
+
+    return DeserializeFileData(buf, fileSize);
 }
 
-bool
-is_in_disk_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, DISK_LIST);
+std::pair<std::string, size_t>
+EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
+                          uint8_t* buf,
+                          int64_t batch_size,
+                          IndexMeta index_meta,
+                          FieldDataMeta field_meta,
+                          std::string object_key) {
+    auto field_data = CreateFieldData(DataType::INT8);
+    field_data->FillFieldData(buf, batch_size);
+    auto indexData = std::make_shared<IndexData>(field_data);
+    indexData->set_index_meta(index_meta);
+    indexData->SetFieldDataMeta(field_meta);
+    auto serialized_index_data = indexData->serialize_to_remote_file();
+    auto serialized_index_size = serialized_index_data.size();
+    chunk_manager->Write(
+        object_key, serialized_index_data.data(), serialized_index_size);
+    return std::make_pair(std::move(object_key), serialized_index_size);
+}
+
+// /**
+//  * Returns the current resident set size (physical memory use) measured
+//  * in bytes, or zero if the value cannot be determined on this OS.
+//  */
+// size_t
+// getCurrentRSS() {
+// #if defined(_WIN32)
+//     /* Windows -------------------------------------------------- */
+//     PROCESS_MEMORY_COUNTERS info;
+//     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
+//     return (size_t)info.WorkingSetSize;
+
+// #elif defined(__APPLE__) && defined(__MACH__)
+//     /* OSX ------------------------------------------------------ */
+//     struct mach_task_basic_info info;
+//     mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+//     if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS)
+//         return (size_t)0L; /* Can't access? */
+//     return (size_t)info.resident_size;
+
+// #elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+//     /* Linux ---------------------------------------------------- */
+//     long rss = 0L;
+//     FILE* fp = NULL;
+//     if ((fp = fopen("/proc/self/statm", "r")) == NULL)
+//         return (size_t)0L; /* Can't open? */
+//     if (fscanf(fp, "%*s%ld", &rss) != 1) {
+//         fclose(fp);
+//         return (size_t)0L; /* Can't read? */
+//     }
+//     fclose(fp);
+//     return (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
+
+// #else
+//     /* AIX, BSD, Solaris, and Unknown OS ------------------------ */
+//     return (size_t)0L; /* Unsupported. */
+// #endif
+// }
+
+std::vector<FieldDataPtr>
+GetObjectData(ChunkManager* remote_chunk_manager,
+              const std::vector<std::string>& remote_files) {
+    auto& pool = ThreadPool::GetInstance();
+    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    for (auto& file : remote_files) {
+        futures.emplace_back(pool.Submit(
+            DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
+    }
+
+    std::vector<FieldDataPtr> datas;
+    for (int i = 0; i < futures.size(); ++i) {
+        auto res = futures[i].get();
+        datas.emplace_back(res->GetFieldData());
+    }
+
+    ReleaseArrowUnused();
+    return datas;
+}
+
+std::map<std::string, int64_t>
+PutIndexData(ChunkManager* remote_chunk_manager,
+             const std::vector<const uint8_t*>& data_slices,
+             const std::vector<int64_t>& slice_sizes,
+             const std::vector<std::string>& slice_names,
+             FieldDataMeta& field_meta,
+             IndexMeta& index_meta) {
+    auto& pool = ThreadPool::GetInstance();
+    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    AssertInfo(data_slices.size() == slice_sizes.size(),
+               "inconsistent size of data slices with slice sizes!");
+    AssertInfo(data_slices.size() == slice_names.size(),
+               "inconsistent size of data slices with slice names!");
+
+    for (int64_t i = 0; i < data_slices.size(); ++i) {
+        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
+                                      remote_chunk_manager,
+                                      const_cast<uint8_t*>(data_slices[i]),
+                                      slice_sizes[i],
+                                      index_meta,
+                                      field_meta,
+                                      slice_names[i]));
+    }
+
+    std::map<std::string, int64_t> remote_paths_to_size;
+    for (auto& future : futures) {
+        auto res = future.get();
+        remote_paths_to_size[res.first] = res.second;
+    }
+
+    ReleaseArrowUnused();
+    return remote_paths_to_size;
+}
+
+int64_t
+GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
+    int64_t count = 0;
+    for (auto& field_data : field_datas) {
+        count += field_data->get_num_rows();
+    }
+
+    return count;
+}
+
+void
+ReleaseArrowUnused() {
+    static std::mutex release_mutex;
+
+    // While multiple threads are releasing memory,
+    // we don't need everyone do releasing,
+    // just let some of them do this also works well
+    if (release_mutex.try_lock()) {
+        arrow::default_memory_pool()->ReleaseUnused();
+        release_mutex.unlock();
+    }
+}
+
+ChunkManagerPtr
+CreateChunkManager(const StorageConfig& storage_config) {
+    auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
+
+    switch (storage_type) {
+        case ChunkManagerType::Local: {
+            return std::make_shared<LocalChunkManager>(
+                storage_config.root_path);
+        }
+        case ChunkManagerType::Minio: {
+            return std::make_shared<MinioChunkManager>(storage_config);
+        }
+        default: {
+            PanicInfo("unsupported");
+        }
+    }
 }
 
 FileManagerImplPtr
 CreateFileManager(IndexType index_type,
                   const FieldDataMeta& field_meta,
                   const IndexMeta& index_meta,
-                  const StorageConfig& storage_config) {
-    // TODO :: switch case index type to create file manager
-#ifdef BUILD_DISK_ANN
+                  ChunkManagerPtr cm) {
     if (is_in_disk_list(index_type)) {
         return std::make_shared<DiskFileManagerImpl>(
-            field_meta, index_meta, storage_config);
+            field_meta, index_meta, cm);
     }
-#endif
 
-    return nullptr;
+    return std::make_shared<MemFileManagerImpl>(field_meta, index_meta, cm);
+}
+
+FieldDataPtr
+CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
+    switch (type) {
+        case DataType::BOOL:
+            return std::make_shared<FieldData<bool>>(type, total_num_rows);
+        case DataType::INT8:
+            return std::make_shared<FieldData<int8_t>>(type, total_num_rows);
+        case DataType::INT16:
+            return std::make_shared<FieldData<int16_t>>(type, total_num_rows);
+        case DataType::INT32:
+            return std::make_shared<FieldData<int32_t>>(type, total_num_rows);
+        case DataType::INT64:
+            return std::make_shared<FieldData<int64_t>>(type, total_num_rows);
+        case DataType::FLOAT:
+            return std::make_shared<FieldData<float>>(type, total_num_rows);
+        case DataType::DOUBLE:
+            return std::make_shared<FieldData<double>>(type, total_num_rows);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_shared<FieldData<std::string>>(type,
+                                                            total_num_rows);
+        case DataType::JSON:
+            return std::make_shared<FieldData<Json>>(type, total_num_rows);
+        case DataType::VECTOR_FLOAT:
+            return std::make_shared<FieldData<FloatVector>>(
+                dim, type, total_num_rows);
+        case DataType::VECTOR_BINARY:
+            return std::make_shared<FieldData<BinaryVector>>(
+                dim, type, total_num_rows);
+        default:
+            throw NotSupportedDataTypeException(
+                "CreateFieldData not support data type " + datatype_name(type));
+    }
 }
 
 }  // namespace milvus::storage

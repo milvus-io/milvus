@@ -62,6 +62,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
 
+    void
+    LoadFieldData(const LoadFieldDataInfo& info) override;
+
     std::string
     debug() const override;
 

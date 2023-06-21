@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -44,6 +44,7 @@ type SegmentLoaderSuite struct {
 	partitionID  int64
 	segmentID    int64
 	schema       *schemapb.CollectionSchema
+	segmentNum   int
 }
 
 func (suite *SegmentLoaderSuite) SetupSuite() {
@@ -51,16 +52,21 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 	suite.collectionID = rand.Int63()
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
+	suite.segmentNum = 5
 	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
 }
 
 func (suite *SegmentLoaderSuite) SetupTest() {
 	// Dependencies
 	suite.manager = NewManager()
-	suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
-		fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
-
+	ctx := context.Background()
+	// TODO:: cpp chunk manager not support local chunk manager
+	//suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
+	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
 	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
@@ -73,15 +79,25 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.manager.Collection.Put(suite.collectionID, schema, indexMeta, loadMeta)
 }
 
+func (suite *SegmentLoaderSuite) TearDownTest() {
+	ctx := context.Background()
+	for i := 0; i < suite.segmentNum; i++ {
+		suite.manager.Segment.Remove(suite.segmentID+int64(i), querypb.DataScope_All)
+	}
+	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+}
+
 func (suite *SegmentLoaderSuite) TestLoad() {
 	ctx := context.Background()
+
+	msgLength := 4
 
 	// Load sealed
 	binlogs, statsLogs, err := SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID,
-		4,
+		msgLength,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -93,6 +109,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 		CollectionID: suite.collectionID,
 		BinlogPaths:  binlogs,
 		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
 	})
 	suite.NoError(err)
 
@@ -101,7 +118,7 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID+1,
-		4,
+		msgLength,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -113,23 +130,24 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 		CollectionID: suite.collectionID,
 		BinlogPaths:  binlogs,
 		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
 	})
 	suite.NoError(err)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
-	const SegmentNum = 5
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, SegmentNum)
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
+	msgLength := 100
 	// Load sealed
-	for i := 0; i < SegmentNum; i++ {
+	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
 		binlogs, statsLogs, err := SaveBinLog(ctx,
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
-			100,
+			msgLength,
 			suite.schema,
 			suite.chunkManager,
 		)
@@ -140,6 +158,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 			CollectionID: suite.collectionID,
 			BinlogPaths:  binlogs,
 			Statslogs:    statsLogs,
+			NumOfRows:    int64(msgLength),
 		})
 	}
 
@@ -156,13 +175,13 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 
 	// Load growing
 	loadInfos = loadInfos[:0]
-	for i := 0; i < SegmentNum; i++ {
-		segmentID := suite.segmentID + SegmentNum + int64(i)
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(suite.segmentNum) + int64(i)
 		binlogs, statsLogs, err := SaveBinLog(ctx,
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
-			100,
+			msgLength,
 			suite.schema,
 			suite.chunkManager,
 		)
@@ -173,6 +192,7 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 			CollectionID: suite.collectionID,
 			BinlogPaths:  binlogs,
 			Statslogs:    statsLogs,
+			NumOfRows:    int64(msgLength),
 		})
 	}
 
@@ -190,17 +210,17 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 
 func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 	ctx := context.Background()
-	const SegmentNum = 5
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, SegmentNum)
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
+	msgLength := 100
 	// Load sealed
-	for i := 0; i < SegmentNum; i++ {
+	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
 		binlogs, statsLogs, err := SaveBinLog(ctx,
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
-			100,
+			msgLength,
 			suite.schema,
 			suite.chunkManager,
 		)
@@ -212,7 +232,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			suite.partitionID,
 			segmentID,
 			vecFields[0],
-			100,
+			msgLength,
 			IndexFaissIVFFlat,
 			L2,
 			suite.chunkManager,
@@ -225,6 +245,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			BinlogPaths:  binlogs,
 			Statslogs:    statsLogs,
 			IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:    int64(msgLength),
 		})
 	}
 
@@ -239,17 +260,17 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	ctx := context.Background()
-	const SegmentNum = 5
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, SegmentNum)
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
+	msgLength := 100
 	// Load sealed
-	for i := 0; i < SegmentNum; i++ {
+	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
 		binlogs, statsLogs, err := SaveBinLog(ctx,
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
-			100,
+			msgLength,
 			suite.schema,
 			suite.chunkManager,
 		)
@@ -261,6 +282,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 			CollectionID: suite.collectionID,
 			BinlogPaths:  binlogs,
 			Statslogs:    statsLogs,
+			NumOfRows:    int64(msgLength),
 		})
 	}
 
@@ -277,17 +299,17 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 
 func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 	ctx := context.Background()
-	const SegmentNum = 5
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, SegmentNum)
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
+	msgLength := 100
 	// Load sealed
-	for i := 0; i < SegmentNum; i++ {
+	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
 		binlogs, statsLogs, err := SaveBinLog(ctx,
 			suite.collectionID,
 			suite.partitionID,
 			segmentID,
-			100,
+			msgLength,
 			suite.schema,
 			suite.chunkManager,
 		)
@@ -308,6 +330,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 			BinlogPaths:  binlogs,
 			Statslogs:    statsLogs,
 			Deltalogs:    deltaLogs,
+			NumOfRows:    int64(msgLength),
 		})
 	}
 
@@ -332,12 +355,13 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	defer paramtable.Get().Reset(key)
 	ctx := context.Background()
 
+	msgLength := 100
 	// Load sealed
 	binlogs, statsLogs, err := SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
 		suite.segmentID,
-		100,
+		msgLength,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -349,6 +373,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 		CollectionID: suite.collectionID,
 		BinlogPaths:  binlogs,
 		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
 	})
 	suite.NoError(err)
 }
@@ -356,12 +381,13 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 	ctx := context.Background()
 
+	msgLength := 100
 	segmentID := suite.segmentID
 	binlogs, statsLogs, err := SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
 		segmentID,
-		100,
+		msgLength,
 		suite.schema,
 		suite.chunkManager,
 	)
@@ -373,7 +399,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 		suite.partitionID,
 		segmentID,
 		vecFields[0],
-		100,
+		msgLength,
 		IndexFaissIVFFlat,
 		L2,
 		suite.chunkManager,
@@ -386,6 +412,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 		BinlogPaths:  binlogs,
 		Statslogs:    statsLogs,
 		IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
+		NumOfRows:    int64(msgLength),
 	}
 
 	// mock legacy binlog entry num is zero case

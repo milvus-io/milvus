@@ -140,6 +140,9 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	}))
 
 	if cluster.factory == nil {
+		params.Save(params.LocalStorageCfg.Path.Key, "/tmp/milvus/")
+		params.Save(params.CommonCfg.StorageType.Key, "local")
+		params.Save(params.MinioCfg.RootPath.Key, "/tmp/milvus/")
 		cluster.factory = dependency.NewDefaultFactory(true)
 		chunkManager, err := cluster.factory.NewPersistentStorageChunkManager(cluster.ctx)
 		if err != nil {

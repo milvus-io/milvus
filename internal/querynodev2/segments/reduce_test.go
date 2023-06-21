@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -36,6 +37,7 @@ import (
 
 type ReduceSuite struct {
 	suite.Suite
+	chunkManager storage.ChunkManager
 
 	collectionID int64
 	partitionID  int64
@@ -50,6 +52,13 @@ func (suite *ReduceSuite) SetupSuite() {
 
 func (suite *ReduceSuite) SetupTest() {
 	var err error
+	ctx := context.Background()
+	msgLength := 100
+
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
 	suite.collectionID = 100
 	suite.partitionID = 10
 	suite.segmentID = 1
@@ -71,14 +80,17 @@ func (suite *ReduceSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	insertData, err := genInsertData(100, suite.collection.Schema())
+	binlogs, _, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		schema,
+		suite.chunkManager,
+	)
 	suite.Require().NoError(err)
-
-	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
-	suite.Require().NoError(err)
-	numRows := insertRecord.NumRows
-	for _, fieldData := range insertRecord.FieldsData {
-		err = suite.segment.LoadField(numRows, fieldData)
+	for _, binlog := range binlogs {
+		err = suite.segment.LoadFieldData(binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 }
@@ -86,6 +98,8 @@ func (suite *ReduceSuite) SetupTest() {
 func (suite *ReduceSuite) TearDownTest() {
 	DeleteSegment(suite.segment)
 	DeleteCollection(suite.collection)
+	ctx := context.Background()
+	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
 }
 
 func (suite *ReduceSuite) TestReduceParseSliceInfo() {

@@ -21,18 +21,12 @@
 #include <shared_mutex>
 
 #include "common/type_c.h"
-#include "config/ConfigChunkManager.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "index/VectorIndex.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
 #include "storage/FileManager.h"
-
-#ifdef BUILD_DISK_ANN
-#include "storage/LocalChunkManager.h"
-#include "storage/MinioChunkManager.h"
-#endif
 
 namespace milvus::index {
 
@@ -61,14 +55,16 @@ class IndexFactory {
                       storage::FileManagerImplPtr file_manager);
 
     IndexBasePtr
-    CreateScalarIndex(const CreateIndexInfo& create_index_info);
+    CreateScalarIndex(const CreateIndexInfo& create_index_info,
+                      storage::FileManagerImplPtr file_manager = nullptr);
 
     // IndexBasePtr
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     template <typename T>
     ScalarIndexPtr<T>
-    CreateScalarIndex(const IndexType& index_type);
+    CreateScalarIndex(const IndexType& index_type,
+                      storage::FileManagerImplPtr file_manager = nullptr);
 };
 
 }  // namespace milvus::index

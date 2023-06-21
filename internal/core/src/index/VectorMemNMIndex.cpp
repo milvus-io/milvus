@@ -38,7 +38,7 @@ VectorMemNMIndex::Serialize(const Config& config) {
     auto raw_data = std::shared_ptr<uint8_t[]>(
         static_cast<uint8_t*>(raw_data_.data()), deleter);
     ret.Append(RAW_DATA, raw_data, raw_data_.size());
-    milvus::Disassemble(ret);
+    Disassemble(ret);
 
     return ret;
 }
@@ -50,6 +50,17 @@ VectorMemNMIndex::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("store_raw_data", 1);
     store_raw_data(dataset);
     rc.ElapseFromBegin("Done");
+}
+
+void
+VectorMemNMIndex::LoadWithoutAssemble(const BinarySet& binary_set,
+                                      const Config& config) {
+    VectorMemIndex::LoadWithoutAssemble(binary_set, config);
+    if (binary_set.Contains(RAW_DATA)) {
+        std::call_once(raw_data_loaded_, [&]() {
+            LOG_SEGCORE_INFO_ << "NM index load raw data done!";
+        });
+    }
 }
 
 void

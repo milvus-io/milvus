@@ -20,6 +20,16 @@
 
 namespace milvus {
 
+// used for disassemble and assemble index data
+const char INDEX_FILE_SLICE_META[] = "SLICE_META";
+const char META[] = "meta";
+const char NAME[] = "name";
+const char SLICE_NUM[] = "slice_num";
+const char TOTAL_LEN[] = "total_len";
+
+std::string
+GenSlicedFileName(const std::string& prefix, size_t slice_num);
+
 void
 Assemble(BinarySet& binarySet);
 

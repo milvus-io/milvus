@@ -441,7 +441,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 		if err := loader.loadFieldsIndex(ctx, segment, indexedFieldInfos); err != nil {
 			return err
 		}
-		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo); err != nil {
+		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -450,7 +450,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := loader.loadGrowingSegmentFields(ctx, segment, loadInfo.BinlogPaths); err != nil {
+		if err := segment.LoadMultiFieldData(loadInfo.GetNumOfRows(), loadInfo.BinlogPaths); err != nil {
 			return err
 		}
 	}
@@ -489,72 +489,13 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segment *LocalSegment, fieldBinlogs []*datapb.FieldBinlog) error {
-	if len(fieldBinlogs) <= 0 {
-		return nil
-	}
-
-	segmentType := segment.Type()
-	iCodec := storage.InsertCodec{}
-
-	// change all field bin log loading into concurrent
-	loadFutures := make([]*conc.Future[*storage.Blob], 0, len(fieldBinlogs))
-	for _, fieldBinlog := range fieldBinlogs {
-		futures := loader.loadFieldBinlogsAsync(ctx, fieldBinlog)
-		loadFutures = append(loadFutures, futures...)
-	}
-
-	// wait for async load results
-	blobs := make([]*storage.Blob, len(loadFutures))
-	for index, future := range loadFutures {
-		if !future.OK() {
-			return future.Err()
-		}
-
-		blobs[index] = future.Value()
-	}
-	log.Info("log field binlogs done",
-		zap.Int64("collection", segment.collectionID),
-		zap.Int64("segment", segment.segmentID),
-		zap.Any("field", fieldBinlogs),
-		zap.String("segmentType", segmentType.String()))
-
-	_, _, insertData, err := iCodec.Deserialize(blobs)
-	if err != nil {
-		log.Warn("failed to deserialize", zap.Int64("segment", segment.segmentID), zap.Error(err))
-		return err
-	}
-
-	switch segmentType {
-	case SegmentTypeGrowing:
-		tsData, ok := insertData.Data[common.TimeStampField]
-		if !ok {
-			return errors.New("cannot get timestamps from insert data")
-		}
-		utss := make([]uint64, tsData.RowNum())
-		for i := 0; i < tsData.RowNum(); i++ {
-			utss[i] = uint64(tsData.GetRow(i).(int64))
-		}
-
-		rowIDData, ok := insertData.Data[common.RowIDField]
-		if !ok {
-			return errors.New("cannot get row ids from insert data")
-		}
-
-		return loader.insertIntoSegment(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
-
-	default:
-		err := fmt.Errorf("illegal segmentType=%s when load segment, collectionID=%v", segmentType.String(), segment.collectionID)
-		return err
-	}
-}
-
-func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) error {
-	runningGroup, groupCtx := errgroup.WithContext(ctx)
+func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
+	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
+		fieldID := field.FieldID
 		runningGroup.Go(func() error {
-			return loader.loadSealedField(groupCtx, segment, fieldBinLog, loadInfo)
+			return segment.LoadFieldData(fieldID, rowCount, fieldBinLog)
 		})
 	}
 	err := runningGroup.Wait()
@@ -569,36 +510,6 @@ func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segmen
 		zap.String("segmentType", segment.Type().String()))
 
 	return nil
-}
-
-// async load field of sealed segment
-func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *LocalSegment, field *datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) error {
-	iCodec := storage.InsertCodec{}
-
-	// Avoid consuming too much memory if no CPU worker ready,
-	// acquire a CPU worker before load field binlogs
-	futures := loader.loadFieldBinlogsAsync(ctx, field)
-
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		return err
-	}
-
-	blobs := make([]*storage.Blob, len(futures))
-	for index, future := range futures {
-		blobs[index] = future.Value()
-	}
-
-	insertData := storage.InsertData{
-		Data: make(map[int64]storage.FieldData),
-	}
-	_, _, _, err = iCodec.DeserializeInto(blobs, int(loadInfo.GetNumOfRows()), &insertData)
-	if err != nil {
-		log.Warn("failed to load sealed field", zap.Int64("SegmentId", segment.segmentID), zap.Error(err))
-		return err
-	}
-
-	return loader.loadSealedSegments(segment, &insertData)
 }
 
 // Load binlogs concurrently into memory from KV storage asyncly
@@ -647,80 +558,22 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context, segment *Local
 }
 
 func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-	futures := make([]*conc.Future[*storage.Blob], 0, len(indexInfo.IndexFilePaths))
-	indexCodec := storage.NewIndexFileBinlogCodec()
 
-	// TODO, remove the load index info froam
 	for _, indexPath := range indexInfo.IndexFilePaths {
-		// get index params when detecting indexParamPrefix
-		if path.Base(indexPath) == storage.IndexParamsKey {
-			log.Info("load index params file", zap.String("path", indexPath))
-			indexParamsBlob, err := loader.cm.Read(ctx, indexPath)
-			if err != nil {
-				return err
-			}
-
-			_, indexParams, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: indexParamsBlob}})
-			if err != nil {
-				return err
-			}
-
-			// update index params(dim...)
-			newIndexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-			for key, value := range indexParams {
-				newIndexParams[key] = value
-			}
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(newIndexParams)
-			continue
+		if path.Base(indexPath) != storage.IndexParamsKey {
+			filteredPaths = append(filteredPaths, indexPath)
 		}
-
-		filteredPaths = append(filteredPaths, indexPath)
 	}
 
-	// 2. use index bytes and index path to update segment
+	// 2. use index path to update segment
 	indexInfo.IndexFilePaths = filteredPaths
 	fieldType, err := loader.getFieldType(segment, indexInfo.FieldID)
 	if err != nil {
 		return err
 	}
 
-	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	// load on disk index
-	if indexParams[common.IndexTypeKey] == indexparamcheck.IndexDISKANN {
-		return segment.LoadIndex(nil, indexInfo, fieldType)
-	}
-	// load in memory index
-	for _, p := range indexInfo.IndexFilePaths {
-		indexPath := p
-		indexFuture := loader.ioPool.Submit(func() (*storage.Blob, error) {
-			log.Info("load index file", zap.String("path", indexPath))
-			data, err := loader.cm.Read(ctx, indexPath)
-			if err != nil {
-				log.Warn("failed to load index file", zap.String("path", indexPath), zap.Error(err))
-				return nil, err
-			}
-			blobs, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(indexPath), Value: data}})
-			if err != nil {
-				return nil, err
-			}
-			return blobs[0], nil
-		})
-
-		futures = append(futures, indexFuture)
-	}
-
-	err = conc.AwaitAll(futures...)
-	if err != nil {
-		return err
-	}
-
-	for _, index := range futures {
-		indexBuffer = append(indexBuffer, index.Value().GetValue())
-	}
-
-	return segment.LoadIndex(indexBuffer, indexInfo, fieldType)
+	return segment.LoadIndexData(indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) insertIntoSegment(segment *LocalSegment,
@@ -772,22 +625,6 @@ func (loader *segmentLoader) insertIntoSegment(segment *LocalSegment,
 		return err
 	}
 	log.Info("Do insert done for growing segment", zap.Int("rowNum", rowNum))
-	return nil
-}
-
-func (loader *segmentLoader) loadSealedSegments(segment *LocalSegment, insertData *storage.InsertData) error {
-	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
-	if err != nil {
-		return err
-	}
-	numRows := insertRecord.NumRows
-	for _, fieldData := range insertRecord.FieldsData {
-		err := segment.LoadField(numRows, fieldData)
-		if err != nil {
-			// TODO: return or continue?
-			return err
-		}
-	}
 	return nil
 }
 
@@ -983,7 +820,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 	usedMemAfterLoad := usedMem
 	maxSegmentSize := uint64(0)
 
-	localUsedSize, err := GetLocalUsedSize()
+	localUsedSize, err := GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}

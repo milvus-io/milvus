@@ -189,17 +189,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 
 // SetDiskIndexBuildParams set index build params with ratio params on indexNode
 // IndexNode cal build param with ratio params and cpu count, memory count...
-func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error {
-	dimStr, ok := indexParams[common.DimKey]
-	if !ok {
-		// type param dim has been put into index params before build index
-		return fmt.Errorf("type param dim not exist")
-	}
-	dim, err := strconv.ParseInt(dimStr, 10, 64)
-	if err != nil {
-		return err
-	}
-
+func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64) error {
 	pqCodeBudgetGBRatioStr, ok := indexParams[PQCodeBudgetRatioKey]
 	if !ok {
 		return fmt.Errorf("index param pqCodeBudgetGBRatio not exist")
@@ -216,6 +206,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 	if err != nil {
 		return err
 	}
+
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
 	if !ok {
 		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
@@ -224,12 +215,10 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 	if err != nil {
 		return err
 	}
-	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f",
-		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(pqCodeBudgetGBRatio)/(1<<30))
+	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(pqCodeBudgetGBRatio)/(1<<30))
 	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
-	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",
-		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(SearchCacheBudgetGBRatio)/(1<<30))
+	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f", float32(fieldDataSize)*float32(SearchCacheBudgetGBRatio)/(1<<30))
 	return nil
 }
 

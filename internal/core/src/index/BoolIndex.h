@@ -22,12 +22,10 @@
 
 namespace milvus::index {
 
-//// TODO: optimize here.
-class BoolIndex : public ScalarIndexSort<bool> {};
-using BoolIndexPtr = std::shared_ptr<BoolIndex>;
+using BoolIndexPtr = std::shared_ptr<ScalarIndexSort<bool>>;
 
 inline BoolIndexPtr
-CreateBoolIndex() {
-    return std::make_unique<BoolIndex>();
+CreateBoolIndex(storage::FileManagerImplPtr file_manager = nullptr) {
+    return std::make_unique<ScalarIndexSort<bool>>(file_manager);
 }
 }  // namespace milvus::index

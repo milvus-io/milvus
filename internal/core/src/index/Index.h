@@ -34,6 +34,9 @@ class IndexBase {
     Load(const BinarySet& binary_set, const Config& config = {}) = 0;
 
     virtual void
+    Load(const Config& config = {}) = 0;
+
+    virtual void
     BuildWithRawData(size_t n,
                      const void* values,
                      const Config& config = {}) = 0;
@@ -41,8 +44,14 @@ class IndexBase {
     virtual void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) = 0;
 
+    virtual void
+    Build(const Config& config = {}) = 0;
+
     virtual int64_t
     Count() = 0;
+
+    virtual BinarySet
+    Upload(const Config& config = {}) = 0;
 
  protected:
     IndexType index_type_ = "";

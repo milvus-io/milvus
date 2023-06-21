@@ -652,17 +652,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadField(rowCount int64, data *schemapb.FieldData) error {
-	/*
-		CStatus
-		LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
-	*/
-	if s.Type() != SegmentTypeSealed {
-		return fmt.Errorf("segmentLoadFieldData failed, illegal segment type=%s, segmentID=%d",
-			s.Type().String(),
-			s.ID(),
-		)
-	}
+func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.FieldBinlog) error {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
@@ -676,30 +666,81 @@ func (s *LocalSegment) LoadField(rowCount int64, data *schemapb.FieldData) error
 		zap.Int64("segmentID", s.ID()),
 	)
 
-	fieldID := data.GetFieldId()
-	dataBlob, err := proto.Marshal(data)
+	loadFieldDataInfo, err := newLoadFieldDataInfo()
+	defer deleteFieldDataInfo(loadFieldDataInfo)
 	if err != nil {
 		return err
 	}
 
-	var mmapDirPath *C.char = nil
-	path := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	if len(path) > 0 {
-		mmapDirPath = C.CString(path)
-		defer C.free(unsafe.Pointer(mmapDirPath))
-	}
+	for _, field := range fields {
+		fieldID := field.FieldID
+		err = loadFieldDataInfo.appendLoadFieldInfo(fieldID, rowCount)
+		if err != nil {
+			return err
+		}
 
-	loadInfo := C.CLoadFieldDataInfo{
-		field_id:      C.int64_t(fieldID),
-		blob:          (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		blob_size:     C.uint64_t(len(dataBlob)),
-		row_count:     C.int64_t(rowCount),
-		mmap_dir_path: mmapDirPath,
+		for _, binlog := range field.Binlogs {
+			err = loadFieldDataInfo.appendLoadFieldDataPath(fieldID, binlog.GetLogPath())
+			if err != nil {
+				return err
+			}
+		}
+
+		loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	}
 
 	var status C.CStatus
 	GetPool().Submit(func() (any, error) {
-		status = C.LoadFieldData(s.ptr, loadInfo)
+		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
+		return nil, nil
+	}).Await()
+	if err := HandleCStatus(&status, "LoadMultiFieldData failed"); err != nil {
+		return err
+	}
+
+	log.Info("load mutil field done",
+		zap.Int64("row count", rowCount),
+		zap.Int64("segmentID", s.ID()))
+
+	return nil
+}
+
+func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	if s.ptr == nil {
+		return WrapSegmentReleased(s.segmentID)
+	}
+
+	log := log.With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+	)
+
+	loadFieldDataInfo, err := newLoadFieldDataInfo()
+	defer deleteFieldDataInfo(loadFieldDataInfo)
+	if err != nil {
+		return err
+	}
+
+	err = loadFieldDataInfo.appendLoadFieldInfo(fieldID, rowCount)
+	if err != nil {
+		return err
+	}
+
+	for _, binlog := range field.Binlogs {
+		err = loadFieldDataInfo.appendLoadFieldDataPath(fieldID, binlog.GetLogPath())
+		if err != nil {
+			return err
+		}
+	}
+	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
+
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.LoadFieldData(s.ptr, loadFieldDataInfo.cLoadFieldDataInfo)
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(&status, "LoadFieldData failed"); err != nil {
@@ -708,8 +749,8 @@ func (s *LocalSegment) LoadField(rowCount int64, data *schemapb.FieldData) error
 
 	log.Info("load field done",
 		zap.Int64("fieldID", fieldID),
-		zap.Int64("rowCount", rowCount),
-	)
+		zap.Int64("row count", rowCount),
+		zap.Int64("segmentID", s.ID()))
 
 	return nil
 }
@@ -797,6 +838,54 @@ func (s *LocalSegment) LoadIndex(bytesIndex [][]byte, indexInfo *querypb.FieldIn
 	}
 
 	err = loadIndexInfo.appendLoadIndexInfo(bytesIndex, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
+	if err != nil {
+		if loadIndexInfo.cleanLocalData() != nil {
+			log.Warn("failed to clean cached data on disk after append index failed",
+				zap.Int64("buildID", indexInfo.BuildID),
+				zap.Int64("index version", indexInfo.IndexVersion))
+		}
+		return err
+	}
+	if s.Type() != SegmentTypeSealed {
+		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	if s.ptr == nil {
+		return WrapSegmentReleased(s.segmentID)
+	}
+
+	log := log.With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+	)
+
+	var status C.CStatus
+	GetPool().Submit(func() (any, error) {
+		status = C.UpdateSealedSegmentIndex(s.ptr, loadIndexInfo.cLoadIndexInfo)
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
+		return err
+	}
+
+	log.Info("updateSegmentIndex done", zap.Int64("fieldID", indexInfo.FieldID))
+
+	return nil
+}
+
+func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+	loadIndexInfo, err := newLoadIndexInfo()
+	defer deleteLoadIndexInfo(loadIndexInfo)
+	if err != nil {
+		return err
+	}
+
+	err = loadIndexInfo.appendLoadIndexInfo(nil, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData() != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",

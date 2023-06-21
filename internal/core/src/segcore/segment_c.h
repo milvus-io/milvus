@@ -22,6 +22,7 @@ extern "C" {
 #include "common/type_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
+#include "segcore/load_field_data_c.h"
 
 typedef void* CSegmentInterface;
 typedef void* CSearchResult;
@@ -87,6 +88,12 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 CStatus
 LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
+
+CStatus
+LoadFieldRawData(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 const void* data,
+                 int64_t row_count);
 
 CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,

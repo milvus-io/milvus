@@ -40,7 +40,7 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
     switch (header.event_type_) {
         case EventType::InsertEvent: {
             auto event_data_length =
-                header.event_length_ - header.next_position_;
+                header.event_length_ - GetEventHeaderSize(header);
             auto insert_event_data =
                 InsertEventData(reader, event_data_length, data_type);
             auto insert_data =
@@ -52,11 +52,26 @@ DeserializeRemoteFileData(BinlogReaderPtr reader) {
         }
         case EventType::IndexFileEvent: {
             auto event_data_length =
-                header.event_length_ - header.next_position_;
+                header.event_length_ - GetEventHeaderSize(header);
             auto index_event_data =
                 IndexEventData(reader, event_data_length, data_type);
-            auto index_data =
-                std::make_unique<IndexData>(index_event_data.field_data);
+            auto field_data = index_event_data.field_data;
+            // for compatible with golang indexcode.Serialize, which set dataType to String
+            if (data_type == DataType::STRING) {
+                AssertInfo(field_data->get_data_type() == DataType::STRING,
+                           "wrong index type in index binlog file");
+                AssertInfo(
+                    field_data->get_num_rows() == 1,
+                    "wrong length of string num in old index binlog file");
+                auto new_field_data = CreateFieldData(DataType::INT8);
+                new_field_data->FillFieldData(
+                    (*static_cast<const std::string*>(field_data->RawValue(0)))
+                        .c_str(),
+                    field_data->Size());
+                field_data = new_field_data;
+            }
+
+            auto index_data = std::make_unique<IndexData>(field_data);
             index_data->SetFieldDataMeta(data_meta);
             IndexMeta index_meta;
             index_meta.segment_id = data_meta.segment_id;

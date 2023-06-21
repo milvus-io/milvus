@@ -67,37 +67,10 @@ find_file(const path& dir, const std::string& file_name, path& path_found) {
 
 StorageConfig
 get_default_storage_config() {
-    char testPath[100];
-    auto pwd = std::string(getcwd(testPath, sizeof(testPath)));
-    path filepath;
-    auto currentPath = path(pwd);
-    while (!find_file(currentPath, "milvus.yaml", filepath)) {
-        currentPath = currentPath.append("../");
-    }
-    auto configPath = filepath.string();
-    YAML::Node config;
-    config = YAML::LoadFile(configPath);
-    auto minioConfig = config["minio"];
-    auto address = minioConfig["address"].as<std::string>();
-    auto port = minioConfig["port"].as<std::string>();
-    auto endpoint = address + ":" + port;
-    auto accessKey = minioConfig["accessKeyID"].as<std::string>();
-    auto accessValue = minioConfig["secretAccessKey"].as<std::string>();
-    auto rootPath = minioConfig["rootPath"].as<std::string>();
-    auto useSSL = minioConfig["useSSL"].as<bool>();
-    auto useIam = minioConfig["useIAM"].as<bool>();
-    auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
-    auto bucketName = minioConfig["bucketName"].as<std::string>();
-
-    return StorageConfig{endpoint,
-                         bucketName,
-                         accessKey,
-                         accessValue,
-                         rootPath,
-                         "minio",
-                         iamEndPoint,
-                         useSSL,
-                         useIam};
+    StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestRemotePath;
+    return storage_config;
 }
 
 void
@@ -106,7 +79,7 @@ delete_cstorage_config(CStorageConfig config) {
     delete[] config.bucket_name;
     delete[] config.access_key_id;
     delete[] config.access_key_value;
-    delete[] config.remote_root_path;
+    delete[] config.root_path;
     delete[] config.storage_type;
     delete[] config.iam_endpoint;
 }
@@ -165,22 +138,22 @@ class TestConfigWrapper {
         auto bucketName = minioConfig["bucketName"].as<std::string>();
         std::string storage_type = "minio";
 
-        config_.address = new char[address.length() + 1];
+        config_.address = new char[endpoint.length() + 1];
         config_.bucket_name = new char[bucketName.length() + 1];
         config_.access_key_id = new char[accessKey.length() + 1];
         config_.access_key_value = new char[accessValue.length() + 1];
-        config_.remote_root_path = new char[rootPath.length() + 1];
+        config_.root_path = new char[rootPath.length() + 1];
         config_.storage_type = new char[storage_type.length() + 1];
         config_.iam_endpoint = new char[iamEndPoint.length() + 1];
         config_.useSSL = useSSL;
         config_.useIAM = useIam;
 
-        strcpy(const_cast<char*>(config_.address), address.c_str());
+        strcpy(const_cast<char*>(config_.address), endpoint.c_str());
         strcpy(const_cast<char*>(config_.bucket_name), bucketName.c_str());
         strcpy(const_cast<char*>(config_.access_key_id), accessKey.c_str());
         strcpy(const_cast<char*>(config_.access_key_value),
                accessValue.c_str());
-        strcpy(const_cast<char*>(config_.remote_root_path), rootPath.c_str());
+        strcpy(const_cast<char*>(config_.root_path), rootPath.c_str());
         strcpy(const_cast<char*>(config_.storage_type), storage_type.c_str());
         strcpy(const_cast<char*>(config_.iam_endpoint), iamEndPoint.c_str());
     }
@@ -249,6 +222,7 @@ generate_build_conf(const milvus::IndexType& index_type,
             {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(128)},
             {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
             {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(32)},
+            {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
         };
     }
     return knowhere::Json();
@@ -262,6 +236,7 @@ generate_load_conf(const milvus::IndexType& index_type,
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
+            {milvus::index::DISK_ANN_LOAD_THREAD_NUM, std::to_string(2)},
             {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET,
              std::to_string(0.0002)},
         };
@@ -287,8 +262,8 @@ generate_search_conf(const milvus::IndexType& index_type,
         {knowhere::meta::METRIC_TYPE, metric_type},
     };
 
-    if (milvus::index::is_in_list<milvus::IndexType>(index_type,
-                                                     search_with_nprobe_list)) {
+    if (milvus::is_in_list<milvus::IndexType>(index_type,
+                                              search_with_nprobe_list)) {
         conf[knowhere::indexparam::NPROBE] = 4;
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;
@@ -313,8 +288,8 @@ generate_range_search_conf(const milvus::IndexType& index_type,
         conf[knowhere::meta::RANGE_FILTER] = 0.1;
     }
 
-    if (milvus::index::is_in_list<milvus::IndexType>(index_type,
-                                                     search_with_nprobe_list)) {
+    if (milvus::is_in_list<milvus::IndexType>(index_type,
+                                              search_with_nprobe_list)) {
         conf[knowhere::indexparam::NPROBE] = 4;
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;

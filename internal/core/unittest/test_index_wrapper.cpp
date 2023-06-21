@@ -36,6 +36,17 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         metric_type = param.second;
         std::tie(type_params, index_params) =
             generate_params(index_type, metric_type);
+
+        for (auto i = 0; i < type_params.params_size(); ++i) {
+            const auto& p = type_params.params(i);
+            config[p.key()] = p.value();
+        }
+
+        for (auto i = 0; i < index_params.params_size(); ++i) {
+            const auto& p = index_params.params(i);
+            config[p.key()] = p.value();
+        }
+
         bool ok;
         ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                          &type_params_str);
@@ -58,9 +69,10 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
 
         is_binary = is_binary_map[index_type];
         if (is_binary) {
-            vec_field_data_type = CDataType::FloatVector;
+            vec_field_data_type = DataType::VECTOR_FLOAT;
+            ;
         } else {
-            vec_field_data_type = CDataType::BinaryVector;
+            vec_field_data_type = DataType::VECTOR_BINARY;
         }
 
         auto dataset = GenDataset(NB, metric_type, is_binary);
@@ -86,9 +98,10 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::string type_params_str, index_params_str;
+    Config config;
     milvus::Config search_conf;
     bool is_binary;
-    CDataType vec_field_data_type;
+    DataType vec_field_data_type;
     knowhere::DataSetPtr xb_dataset;
     std::vector<float> xb_data;
     std::vector<uint8_t> xb_bin_data;
@@ -118,10 +131,7 @@ INSTANTIATE_TEST_CASE_P(
 
 TEST_P(IndexWrapperTest, BuildAndQuery) {
     auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-        vec_field_data_type,
-        type_params_str.c_str(),
-        index_params_str.c_str(),
-        storage_config_);
+        vec_field_data_type, config, nullptr);
 
     auto dataset = GenDataset(NB, metric_type, is_binary);
     knowhere::DataSetPtr xb_dataset;
@@ -139,10 +149,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     auto binary_set = index->Serialize();
     auto copy_index =
         milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-            vec_field_data_type,
-            type_params_str.c_str(),
-            index_params_str.c_str(),
-            storage_config_);
+            vec_field_data_type, config, nullptr);
     auto vec_index =
         static_cast<milvus::indexbuilder::VecIndexCreator*>(copy_index.get());
     ASSERT_EQ(vec_index->dim(), DIM);

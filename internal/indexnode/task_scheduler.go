@@ -214,7 +214,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	sched.IndexBuildQueue.AddActiveTask(t)
 	defer sched.IndexBuildQueue.PopActiveTask(t.Name())
 	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()))
-	pipelines := []func(context.Context) error{t.Prepare, t.LoadData, t.BuildIndex, t.SaveIndexFiles}
+	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			if err == errCancel {

@@ -16,46 +16,72 @@
 
 #include "storage/PayloadReader.h"
 #include "exceptions/EasyAssert.h"
-#include "storage/FieldDataFactory.h"
 #include "storage/Util.h"
+#include "parquet/column_reader.h"
+#include "arrow/io/api.h"
+#include "arrow/status.h"
+#include "parquet/arrow/reader.h"
 
 namespace milvus::storage {
-PayloadReader::PayloadReader(std::shared_ptr<PayloadInputStream> input,
-                             DataType data_type)
-    : column_type_(data_type) {
-    init(std::move(input));
-}
 
 PayloadReader::PayloadReader(const uint8_t* data,
                              int length,
                              DataType data_type)
     : column_type_(data_type) {
-    auto input = std::make_shared<storage::PayloadInputStream>(data, length);
+    auto input = std::make_shared<arrow::io::BufferReader>(data, length);
     init(input);
 }
 
 void
-PayloadReader::init(std::shared_ptr<PayloadInputStream> input) {
-    auto mem_pool = arrow::default_memory_pool();
-    // TODO :: Stream read file data, avoid copying
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto st = parquet::arrow::OpenFile(input, mem_pool, &reader);
-    AssertInfo(st.ok(), "failed to get arrow file reader");
-    std::shared_ptr<arrow::Table> table;
-    st = reader->ReadTable(&table);
-    AssertInfo(st.ok(), "failed to get reader data to arrow table");
-    auto column = table->column(0);
-    AssertInfo(column != nullptr, "returned arrow column is null");
-    AssertInfo(column->chunks().size() == 1,
-               "arrow chunk size in arrow column should be 1");
-    auto array = column->chunk(0);
-    AssertInfo(array != nullptr, "empty arrow array of PayloadReader");
+PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
+    arrow::MemoryPool* pool = arrow::default_memory_pool();
+
+    // Configure general Parquet reader settings
+    auto reader_properties = parquet::ReaderProperties(pool);
+    reader_properties.set_buffer_size(4096 * 4);
+    reader_properties.enable_buffered_stream();
+
+    // Configure Arrow-specific Parquet reader settings
+    auto arrow_reader_props = parquet::ArrowReaderProperties();
+    arrow_reader_props.set_batch_size(128 * 1024);  // default 64 * 1024
+    arrow_reader_props.set_pre_buffer(false);
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto st = reader_builder.Open(input, reader_properties);
+    AssertInfo(st.ok(), "file to read file");
+    reader_builder.memory_pool(pool);
+    reader_builder.properties(arrow_reader_props);
+
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    st = reader_builder.Build(&arrow_reader);
+    AssertInfo(st.ok(), "build file reader");
+
+    int64_t column_index = 0;
+    auto file_meta = arrow_reader->parquet_reader()->metadata();
+    // LOG_SEGCORE_INFO_ << "serialized parquet metadata, num row group  " <<
+    // std::to_string(file_meta->num_row_groups())
+    //                   << ", num column " << std::to_string(file_meta->num_columns()) << ", num rows "
+    //                   << std::to_string(file_meta->num_rows()) << ", type width "
+    //                   << std::to_string(file_meta->schema()->Column(column_index)->type_length());
     dim_ = datatype_is_vector(column_type_)
-               ? GetDimensionFromArrowArray(array, column_type_)
+               ? GetDimensionFromFileMetaData(
+                     file_meta->schema()->Column(column_index), column_type_)
                : 1;
-    field_data_ =
-        FieldDataFactory::GetInstance().CreateFieldData(column_type_, dim_);
-    field_data_->FillFieldData(array);
+    auto total_num_rows = file_meta->num_rows();
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    st = arrow_reader->GetRecordBatchReader(&rb_reader);
+    AssertInfo(st.ok(), "get record batch reader");
+
+    field_data_ = CreateFieldData(column_type_, dim_, total_num_rows);
+    for (arrow::Result<std::shared_ptr<arrow::RecordBatch>> maybe_batch :
+         *rb_reader) {
+        AssertInfo(maybe_batch.ok(), "get batch record success");
+        auto array = maybe_batch.ValueOrDie()->column(column_index);
+        field_data_->FillFieldData(array);
+    }
+    AssertInfo(field_data_->IsFull(), "field data hasn't been filled done");
+    // LOG_SEGCORE_INFO_ << "Peak arrow memory pool size " << pool->max_memory();
 }
 
 }  // namespace milvus::storage

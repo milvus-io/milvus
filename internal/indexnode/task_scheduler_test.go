@@ -164,11 +164,9 @@ func TestIndexTaskScheduler(t *testing.T) {
 
 	tasks = append(tasks,
 		newTask(fakeTaskEnqueued, nil, commonpb.IndexState_Failed),
-		newTask(fakeTaskLoadedData, nil, commonpb.IndexState_Failed),
 		newTask(fakeTaskPrepared, nil, commonpb.IndexState_Failed),
 		newTask(fakeTaskBuiltIndex, nil, commonpb.IndexState_Failed),
 		newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished),
-		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskLoadedData: ErrNoSuchKey}, commonpb.IndexState_Failed),
 		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, commonpb.IndexState_Retry))
 
 	for _, task := range tasks {
@@ -178,12 +176,11 @@ func TestIndexTaskScheduler(t *testing.T) {
 	scheduler.Close()
 	scheduler.wg.Wait()
 
-	for _, task := range tasks[:len(tasks)-2] {
+	for _, task := range tasks[:len(tasks)-1] {
 		assert.Equal(t, task.GetState(), task.(*fakeTask).expectedState)
 		assert.Equal(t, task.Ctx().(*stagectx).curstate, task.Ctx().(*stagectx).state2cancel)
 	}
-	assert.Equal(t, tasks[len(tasks)-2].GetState(), tasks[len(tasks)-2].(*fakeTask).expectedState)
-	assert.Equal(t, tasks[len(tasks)-2].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskLoadedData))
+
 	assert.Equal(t, tasks[len(tasks)-1].GetState(), tasks[len(tasks)-1].(*fakeTask).expectedState)
 	assert.Equal(t, tasks[len(tasks)-1].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskSavedIndexes))
 

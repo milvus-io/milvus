@@ -73,7 +73,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	// init node
-	factory := dependency.NewDefaultFactory(true)
+	factory := dependency.MockDefaultFactory(true, paramtable.Get())
 	suite.node = NewQueryNode(suite.ctx, factory)
 	//	init etcd
 	suite.etcdClient, err = etcd.GetEtcdClient(

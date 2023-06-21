@@ -174,7 +174,7 @@ func (node *QueryNode) Register() error {
 }
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
-func (node *QueryNode) InitSegcore() {
+func (node *QueryNode) InitSegcore() error {
 	cEasyloggingYaml := C.CString(path.Join(paramtable.Get().BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
 	C.SegcoreInit(cEasyloggingYaml)
 	C.free(unsafe.Pointer(cEasyloggingYaml))
@@ -211,7 +211,7 @@ func (node *QueryNode) InitSegcore() {
 	C.InitCpuNum(cCPUNum)
 
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalStorageConfig(localDataRootPath)
+	initcore.InitLocalChunkManager(localDataRootPath)
 
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 	if len(mmapDirPath) > 0 {
@@ -219,6 +219,7 @@ func (node *QueryNode) InitSegcore() {
 	}
 
 	initcore.InitTraceConfig(paramtable.Get())
+	return initcore.InitRemoteChunkManager(paramtable.Get())
 }
 
 // Init function init historical and streaming module to manage segments
@@ -309,7 +310,12 @@ func (node *QueryNode) Init() error {
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
 
-		node.InitSegcore()
+		err = node.InitSegcore()
+		if err != nil {
+			log.Error("QueryNode init segcore failed", zap.Error(err))
+			initError = err
+			return
+		}
 		if paramtable.Get().QueryNodeCfg.GCEnabled.GetAsBool() {
 			if paramtable.Get().QueryNodeCfg.GCHelperEnabled.GetAsBool() {
 				action := func(GOGC uint32) {
@@ -364,6 +370,9 @@ func (node *QueryNode) Stop() error {
 		if node.dispClient != nil {
 			node.dispClient.Close()
 		}
+
+		// safe stop
+		initcore.CleanRemoteChunkManager()
 	})
 	return nil
 }

@@ -25,6 +25,9 @@
 #include <google/protobuf/text_format.h>
 #include "exceptions/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
+#include "common/Slice.h"
+#include "storage/Util.h"
+
 namespace milvus::index {
 
 size_t
@@ -51,14 +54,6 @@ BIN_List() {
     return ret;
 }
 
-std::vector<IndexType>
-DISK_LIST() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_DISKANN,
-    };
-    return ret;
-}
-
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations() {
     static std::vector<std::tuple<IndexType, MetricType>> ret{
@@ -76,11 +71,6 @@ is_in_bin_list(const IndexType& index_type) {
 bool
 is_in_nm_list(const IndexType& index_type) {
     return is_in_list<IndexType>(index_type, NM_List);
-}
-
-bool
-is_in_disk_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, DISK_LIST);
 }
 
 bool
@@ -195,6 +185,38 @@ ParseConfigFromIndexParams(
     }
 
     return config;
+}
+
+void
+AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas) {
+    if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
+        auto slice_meta = index_datas.at(INDEX_FILE_SLICE_META);
+        Config meta_data = Config::parse(std::string(
+            static_cast<const char*>(slice_meta->Data()), slice_meta->Size()));
+
+        for (auto& item : meta_data[META]) {
+            std::string prefix = item[NAME];
+            int slice_num = item[SLICE_NUM];
+            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+
+            auto new_field_data =
+                storage::CreateFieldData(DataType::INT8, 1, total_len);
+
+            for (auto i = 0; i < slice_num; ++i) {
+                std::string file_name = GenSlicedFileName(prefix, i);
+                AssertInfo(index_datas.find(file_name) != index_datas.end(),
+                           "lost index slice data");
+                auto data = index_datas.at(file_name);
+                auto len = data->Size();
+                new_field_data->FillFieldData(data->Data(), len);
+                index_datas.erase(file_name);
+            }
+            AssertInfo(
+                new_field_data->IsFull(),
+                "index len is inconsistent after disassemble and assemble");
+            index_datas[prefix] = new_field_data;
+        }
+    }
 }
 
 }  // namespace milvus::index

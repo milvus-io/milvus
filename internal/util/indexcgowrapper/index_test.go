@@ -119,7 +119,7 @@ func TestCIndex_New(t *testing.T) {
 	for _, c := range generateTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
 
-		index, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.Equal(t, err, nil)
 		assert.NotEqual(t, index, nil)
 
@@ -132,7 +132,7 @@ func TestCIndex_BuildFloatVecIndex(t *testing.T) {
 	for _, c := range generateFloatVectorTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
 
-		index, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.Equal(t, err, nil)
 		assert.NotEqual(t, index, nil)
 
@@ -149,7 +149,7 @@ func TestCIndex_BuildBinaryVecIndex(t *testing.T) {
 	for _, c := range generateBinaryVectorTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
 
-		index, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.Equal(t, err, nil)
 		assert.NotEqual(t, index, nil)
 
@@ -166,7 +166,7 @@ func TestCIndex_Codec(t *testing.T) {
 	for _, c := range generateTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
 
-		index, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.Equal(t, err, nil)
 		assert.NotEqual(t, index, nil)
 
@@ -183,7 +183,7 @@ func TestCIndex_Codec(t *testing.T) {
 		blobs, err := index.Serialize()
 		assert.Equal(t, err, nil)
 
-		copyIndex, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		copyIndex, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.NotEqual(t, copyIndex, nil)
 		assert.Equal(t, err, nil)
 		err = copyIndex.Load(blobs)
@@ -205,7 +205,7 @@ func TestCIndex_Delete(t *testing.T) {
 	for _, c := range generateTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
 
-		index, err := NewCgoIndex(c.dtype, typeParams, indexParams, genStorageConfig())
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
 		assert.Equal(t, err, nil)
 		assert.NotEqual(t, index, nil)
 
@@ -218,7 +218,7 @@ func TestCIndex_Error(t *testing.T) {
 	indexParams := make(map[string]string)
 	indexParams[common.IndexTypeKey] = "IVF_FLAT"
 	indexParams[common.MetricTypeKey] = "L2"
-	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, indexParams, genStorageConfig())
+	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, indexParams)
 	assert.NoError(t, err)
 
 	t.Run("Serialize error", func(t *testing.T) {

@@ -206,6 +206,7 @@ MinioChunkManager::BuildGoogleCloudClient(
 
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name) {
+    remote_root_path_ = storage_config.root_path;
     RemoteStorageType storageType;
     if (storage_config.address.find("google") != std::string::npos) {
         storageType = RemoteStorageType::GOOGLE_CLOUD;

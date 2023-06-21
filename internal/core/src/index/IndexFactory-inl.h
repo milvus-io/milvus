@@ -23,8 +23,9 @@ namespace milvus::index {
 
 template <typename T>
 inline ScalarIndexPtr<T>
-IndexFactory::CreateScalarIndex(const IndexType& index_type) {
-    return CreateScalarIndexSort<T>();
+IndexFactory::CreateScalarIndex(const IndexType& index_type,
+                                storage::FileManagerImplPtr file_manager) {
+    return CreateScalarIndexSort<T>(file_manager);
 }
 
 // template <>
@@ -35,9 +36,10 @@ IndexFactory::CreateScalarIndex(const IndexType& index_type) {
 
 template <>
 inline ScalarIndexPtr<std::string>
-IndexFactory::CreateScalarIndex(const IndexType& index_type) {
+IndexFactory::CreateScalarIndex(const IndexType& index_type,
+                                storage::FileManagerImplPtr file_manager) {
 #if defined(__linux__) || defined(__APPLE__)
-    return CreateStringIndexMarisa();
+    return CreateStringIndexMarisa(file_manager);
 #else
     throw std::runtime_error("unsupported platform");
 #endif

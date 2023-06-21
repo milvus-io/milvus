@@ -1,3 +1,4 @@
+
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -14,16 +15,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#include <string>
+#include <stdlib.h>
 
-namespace milvus::ChunkMangerConfig {
+#include "common/type_c.h"
+
+typedef void* CLoadFieldDataInfo;
+
+CStatus
+NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info);
 
 void
-SetLocalRootPath(const std::string_view path_prefix);
+DeleteLoadFieldDataInfo(CLoadFieldDataInfo c_load_field_data_info);
 
-std::string
-GetLocalRootPath();
+CStatus
+AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
+                    int64_t field_id,
+                    int64_t row_count);
 
-}  // namespace milvus::ChunkMangerConfig
+CStatus
+AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
+                        int64_t field_id,
+                        const char* file_path);
+
+void
+AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
+                  const char* dir_path);
+
+#ifdef __cplusplus
+}
+#endif

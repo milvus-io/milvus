@@ -11,3 +11,5 @@
 
 #pragma once
 constexpr int64_t TestChunkSize = 32 * 1024;
+constexpr char TestLocalPath[] = "/tmp/milvus/local_data/";
+constexpr char TestRemotePath[] = "/tmp/milvus/remote_data";

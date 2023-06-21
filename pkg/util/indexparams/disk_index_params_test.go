@@ -128,15 +128,8 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[PQCodeBudgetRatioKey] = "0.125"
 		indexParams[NumBuildThreadRatioKey] = "1.0"
 
-		err := SetDiskIndexBuildParams(indexParams, 100)
-		assert.Error(t, err)
-
-		indexParams[common.DimKey] = "128"
-		err = SetDiskIndexBuildParams(indexParams, 100)
-		assert.Error(t, err)
-
 		indexParams[SearchCacheBudgetRatioKey] = "0.125"
-		err = SetDiskIndexBuildParams(indexParams, 100)
+		err := SetDiskIndexBuildParams(indexParams, 100)
 		assert.NoError(t, err)
 
 		indexParams[SearchCacheBudgetRatioKey] = "aabb"

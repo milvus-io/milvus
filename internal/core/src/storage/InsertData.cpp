@@ -47,20 +47,6 @@ InsertData::serialize_to_remote_file() {
     AssertInfo(field_data_meta_.has_value(), "field data not exist");
     AssertInfo(field_data_ != nullptr, "empty field data");
 
-    // create insert event
-    InsertEvent insert_event;
-    auto& insert_event_data = insert_event.event_data;
-    insert_event_data.start_timestamp = time_range_.first;
-    insert_event_data.end_timestamp = time_range_.second;
-    insert_event_data.field_data = field_data_;
-
-    auto& insert_event_header = insert_event.event_header;
-    // TODO :: set timestamps
-    insert_event_header.timestamp_ = 0;
-    insert_event_header.event_type_ = EventType::InsertEvent;
-
-    // serialize insert event
-    auto insert_event_bytes = insert_event.Serialize();
     DataType data_type = field_data_->get_data_type();
 
     // create descriptor event
@@ -89,6 +75,22 @@ InsertData::serialize_to_remote_file() {
 
     // serialize descriptor event data
     auto des_event_bytes = descriptor_event.Serialize();
+
+    // create insert event
+    InsertEvent insert_event;
+    insert_event.event_offset = des_event_bytes.size();
+    auto& insert_event_data = insert_event.event_data;
+    insert_event_data.start_timestamp = time_range_.first;
+    insert_event_data.end_timestamp = time_range_.second;
+    insert_event_data.field_data = field_data_;
+
+    auto& insert_event_header = insert_event.event_header;
+    // TODO :: set timestamps
+    insert_event_header.timestamp_ = 0;
+    insert_event_header.event_type_ = EventType::InsertEvent;
+
+    // serialize insert event
+    auto insert_event_bytes = insert_event.Serialize();
 
     des_event_bytes.insert(des_event_bytes.end(),
                            insert_event_bytes.begin(),

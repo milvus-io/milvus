@@ -23,13 +23,15 @@
 #include <boost/dynamic_bitset.hpp>
 #include "knowhere/factory.h"
 #include "index/VectorIndex.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 
 class VectorMemIndex : public VectorIndex {
  public:
     explicit VectorMemIndex(const IndexType& index_type,
-                            const MetricType& metric_type);
+                            const MetricType& metric_type,
+                            storage::FileManagerImplPtr file_manager = nullptr);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -38,8 +40,14 @@ class VectorMemIndex : public VectorIndex {
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     void
+    Load(const Config& config = {}) override;
+
+    void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override;
+
+    void
+    Build(const Config& config = {}) override;
 
     void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) override;
@@ -60,9 +68,17 @@ class VectorMemIndex : public VectorIndex {
     const std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
+    BinarySet
+    Upload(const Config& config = {}) override;
+
+ protected:
+    virtual void
+    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
+
  protected:
     Config config_;
     knowhere::Index<knowhere::IndexNode> index_;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 };
 
 using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex>;

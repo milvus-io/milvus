@@ -304,7 +304,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 
 func TestCgoIndex(t *testing.T) {
 	for _, testCase := range genIndexCase() {
-		index, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams, genStorageConfig())
+		index, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams)
 		assert.NoError(t, err, testCase)
 
 		dataset := GenDataset(genFieldData(testCase.dtype, nb, dim))
@@ -313,7 +313,7 @@ func TestCgoIndex(t *testing.T) {
 		blobs, err := index.Serialize()
 		assert.NoError(t, err, testCase)
 
-		copyIndex, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams, genStorageConfig())
+		copyIndex, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams)
 		assert.NoError(t, err, testCase)
 
 		assert.NoError(t, copyIndex.Load(blobs), testCase)

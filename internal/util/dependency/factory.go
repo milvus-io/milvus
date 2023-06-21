@@ -44,6 +44,15 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	}
 }
 
+// Only for test
+func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *DefaultFactory {
+	return &DefaultFactory{
+		standAlone:          standAlone,
+		msgStreamFactory:    smsgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/"),
+		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
+	}
+}
+
 // NewFactory creates a new instance of the DefaultFactory type.
 // If standAlone is true, the factory will operate in standalone mode.
 func NewFactory(standAlone bool) *DefaultFactory {

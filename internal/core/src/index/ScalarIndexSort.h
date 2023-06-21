@@ -21,22 +21,28 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <map>
+
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 
 template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
  public:
-    ScalarIndexSort();
-    ScalarIndexSort(size_t n, const T* values);
+    explicit ScalarIndexSort(
+        storage::FileManagerImplPtr file_manager = nullptr);
 
     BinarySet
     Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_binary, const Config& config = {}) override;
+
+    void
+    Load(const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -45,6 +51,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     void
     Build(size_t n, const T* values) override;
+
+    void
+    Build(const Config& config = {}) override;
 
     const TargetBitmap
     In(size_t n, const T* values) override;
@@ -69,6 +78,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return (int64_t)data_.size();
     }
 
+    BinarySet
+    Upload(const Config& config = {}) override;
+
  public:
     const std::vector<IndexStructure<T>>&
     GetData() {
@@ -80,11 +92,15 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return is_built_;
     }
 
+    void
+    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
+
  private:
     bool is_built_;
     Config config_;
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
     std::vector<IndexStructure<T>> data_;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 };
 
 template <typename T>
@@ -97,7 +113,7 @@ using ScalarIndexSortPtr = std::unique_ptr<ScalarIndexSort<T>>;
 namespace milvus::index {
 template <typename T>
 inline ScalarIndexSortPtr<T>
-CreateScalarIndexSort() {
-    return std::make_unique<ScalarIndexSort<T>>();
+CreateScalarIndexSort(storage::FileManagerImplPtr file_manager = nullptr) {
+    return std::make_unique<ScalarIndexSort<T>>(file_manager);
 }
 }  // namespace milvus::index
