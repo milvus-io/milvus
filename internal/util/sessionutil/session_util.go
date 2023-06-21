@@ -359,7 +359,16 @@ func (s *Session) getSessionKey() string {
 }
 
 func (s *Session) initWatchSessionCh() {
-	getResp, err := s.etcdCli.Get(context.Background(), s.getSessionKey())
+	var (
+		err     error
+		getResp *clientv3.GetResponse
+	)
+
+	err = retry.Do(context.Background(), func() error {
+		getResp, err = s.etcdCli.Get(context.Background(), s.getSessionKey())
+		log.Warn("fail to get the session key from the etcd", zap.Error(err))
+		return err
+	}, retry.Attempts(100))
 	if err != nil {
 		panic(err)
 	}

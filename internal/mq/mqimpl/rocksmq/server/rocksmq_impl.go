@@ -1051,7 +1051,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 		consumers, ok := vals.([]*Consumer)
 		if !ok || len(consumers) == 0 {
 			log.Error("update ack with no consumer", zap.String("topic", topicName))
-			panic("update ack with no consumer")
+			return nil
 		}
 
 		// find min id of all consumer

@@ -138,10 +138,13 @@ func TestDmlChannels(t *testing.T) {
 	assert.Equal(t, 0, len(chanNames))
 
 	randStr := funcutil.RandomString(8)
-	assert.Panics(t, func() { dml.addChannels(randStr) })
-	assert.Panics(t, func() { dml.broadcast([]string{randStr}, nil) })
-	assert.Panics(t, func() { dml.broadcastMark([]string{randStr}, nil) })
-	assert.Panics(t, func() { dml.removeChannels(randStr) })
+	dml.addChannels(randStr)
+	assert.Error(t, dml.broadcast([]string{randStr}, nil))
+	{
+		_, err := dml.broadcastMark([]string{randStr}, nil)
+		assert.Error(t, err)
+	}
+	dml.removeChannels(randStr)
 
 	chans0 := dml.getChannelNames(2)
 	dml.addChannels(chans0...)

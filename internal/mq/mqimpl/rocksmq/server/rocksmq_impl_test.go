@@ -1229,7 +1229,7 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 		rmq.DestroyConsumerGroup(topicName, groupName+strconv.Itoa(i))
 	}
 	// update acked for topic without any consumer
-	assert.Panics(t, func() { rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]) })
+	assert.Nil(t, rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]))
 }
 
 func TestRocksmq_Info(t *testing.T) {
