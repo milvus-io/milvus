@@ -43,12 +43,12 @@ class TestAllCollection(TestcaseBase):
         log.info(f"assert create collection: {tt}, init_entities: {entities}")
 
         # insert
-        insert_batch = 3000
+        offset = -3000
         with_json = False
         for field in collection_w.schema.fields:
             if field.dtype.name == "JSON":
                 with_json = True
-        data = cf.gen_default_list_data(start=-insert_batch, with_json=with_json)
+        data = cf.gen_default_list_data(start=offset, with_json=with_json)
         t0 = time.time()
         _, res = collection_w.insert(data)
         tt = time.time() - t0
@@ -94,12 +94,12 @@ class TestAllCollection(TestcaseBase):
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
         # query
-        term_expr = f'{ct.default_int64_field_name} in {[i for i in range(-insert_batch, 0)]}'
+        term_expr = f'{ct.default_int64_field_name} in {[i for i in range(offset, 0)]}'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
-        assert len(res) >= insert_batch
+        assert len(res) >= len(data[0])
         collection_w.release()
 
         # insert data
