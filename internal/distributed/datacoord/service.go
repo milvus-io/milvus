@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -151,10 +152,14 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
-			logutil.UnaryTraceLoggerInterceptor)),
+			logutil.UnaryTraceLoggerInterceptor,
+			interceptor.ClusterValidationUnaryServerInterceptor(),
+		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
-			logutil.StreamTraceLoggerInterceptor)))
+			logutil.StreamTraceLoggerInterceptor,
+			interceptor.ClusterValidationStreamServerInterceptor(),
+		)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)

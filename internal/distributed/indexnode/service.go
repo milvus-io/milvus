@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -107,10 +108,14 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
-			logutil.UnaryTraceLoggerInterceptor)),
+			logutil.UnaryTraceLoggerInterceptor,
+			interceptor.ClusterValidationUnaryServerInterceptor(),
+		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
-			logutil.StreamTraceLoggerInterceptor)))
+			logutil.StreamTraceLoggerInterceptor,
+			interceptor.ClusterValidationStreamServerInterceptor(),
+		)))
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {

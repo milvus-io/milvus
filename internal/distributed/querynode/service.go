@@ -27,6 +27,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -180,10 +181,14 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
-			logutil.UnaryTraceLoggerInterceptor)),
+			logutil.UnaryTraceLoggerInterceptor,
+			interceptor.ClusterValidationUnaryServerInterceptor(),
+		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			otelgrpc.StreamServerInterceptor(opts...),
-			logutil.StreamTraceLoggerInterceptor)))
+			logutil.StreamTraceLoggerInterceptor,
+			interceptor.ClusterValidationStreamServerInterceptor(),
+		)))
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 
 	ctx, cancel := context.WithCancel(s.ctx)
