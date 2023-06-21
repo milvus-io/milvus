@@ -181,7 +181,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	// finish rocks mq store initialization, rocks mq store has to set the prefix extractor
 	optsStore := gorocksdb.NewDefaultOptions()
 	// share block cache with kv
-	optsKV.SetNumLevels(3)
+	optsStore.SetNumLevels(3)
 	optsStore.SetCompressionPerLevel([]gorocksdb.CompressionType{0, 7, 7})
 	optsStore.SetBlockBasedTableFactory(bbto)
 	optsStore.SetTargetFileSizeMultiplier(2)
