@@ -293,7 +293,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 		req := &indexpb.CreateJobRequest{
-			ClusterID:       Params.CommonCfg.ClusterPrefix,
+			ClusterID:       Params.CommonCfg.GetClusterPrefix(),
 			IndexFilePrefix: path.Join(ib.ic.chunkManager.RootPath(), common.SegmentIndexPath),
 			BuildID:         buildID,
 			DataPaths:       binLogs,
@@ -390,7 +390,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
 		defer cancel()
 		response, err := client.QueryJobs(ctx1, &indexpb.QueryJobsRequest{
-			ClusterID: Params.CommonCfg.ClusterPrefix,
+			ClusterID: Params.CommonCfg.GetClusterPrefix(),
 			BuildIDs:  []int64{buildID},
 		})
 		if err != nil {
@@ -439,7 +439,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
 		defer cancel()
 		status, err := client.DropJobs(ctx1, &indexpb.DropJobsRequest{
-			ClusterID: Params.CommonCfg.ClusterPrefix,
+			ClusterID: Params.CommonCfg.GetClusterPrefix(),
 			BuildIDs:  []UniqueID{buildID},
 		})
 		if err != nil {
