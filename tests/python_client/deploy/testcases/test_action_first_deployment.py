@@ -57,7 +57,7 @@ class TestActionFirstDeployment(TestDeployBase):
             is_binary = True
         collection_w = \
             self.init_collection_general(insert_data=False, is_binary=is_binary, name=name, enable_dynamic_field=False,
-                                         with_json=False)[0]
+                                         with_json=False, is_index=False)[0]
         if collection_w.has_index():
             index_names = [index.index_name for index in collection_w.indexes]
             for index_name in index_names:
