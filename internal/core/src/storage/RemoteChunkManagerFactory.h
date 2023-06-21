@@ -68,6 +68,7 @@ class RemoteChunkManagerFactory {
 
     RemoteChunkManagerPtr
     GetRemoteChunkManager() {
+        std::shared_lock lck(mutex_);
         return rcm_;
     }
 
