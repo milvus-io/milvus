@@ -1551,6 +1551,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 
 		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
 			SegmentID: 1,
+			Channel:   "test",
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_MetaFailed, resp.GetErrorCode())

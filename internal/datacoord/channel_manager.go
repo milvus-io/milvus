@@ -506,6 +506,7 @@ func (c *ChannelManager) GetBufferChannels() *NodeChannelInfo {
 }
 
 // Match checks and returns whether the node ID and channel match.
+// use vchannel
 func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

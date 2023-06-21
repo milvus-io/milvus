@@ -909,6 +909,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			StartPositions: startPos,
 			Flushed:        pack.flushed,
 			Dropped:        pack.dropped,
+			Channel:        dsService.vchannelName,
 		}
 		err := retry.Do(context.Background(), func() error {
 			rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)

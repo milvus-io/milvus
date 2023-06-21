@@ -642,6 +642,11 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		// if lag behind, log every 1 mins about
 		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
 	}
+	// ignore report from a different node
+	if !s.cluster.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
+		log.Warn("node is not matched with channel", zap.String("channel", ch), zap.Int64("nodeID", ttMsg.GetBase().GetSourceID()))
+		return nil
+	}
 
 	sub := tsoutil.SubByNow(ts)
 	pChannelName := funcutil.ToPhysicalChannel(ch)
