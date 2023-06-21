@@ -154,7 +154,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-306-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-308-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -211,6 +211,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/NicoYuan1986"><img src="https://avatars.githubusercontent.com/u/109071306?v=4" width="30px" /></a>
 <a href="https://github.com/NotRyan"><img src="https://avatars.githubusercontent.com/u/5742796?v=4" width="30px" /></a>
 <a href="https://github.com/PahudPlus"><img src="https://avatars.githubusercontent.com/u/64403786?v=4" width="30px" /></a>
+<a href="https://github.com/PowderLi"><img src="https://avatars.githubusercontent.com/u/135960789?v=4" width="30px" /></a>
 <a href="https://github.com/Presburger"><img src="https://avatars.githubusercontent.com/u/49336176?v=4" width="30px" /></a>
 <a href="https://github.com/QipengZhou"><img src="https://avatars.githubusercontent.com/u/5410298?v=4" width="30px" /></a>
 <a href="https://github.com/RafaelDSS"><img src="https://avatars.githubusercontent.com/u/27598602?v=4" width="30px" /></a>
@@ -319,6 +320,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/huanghaoyuanhhy"><img src="https://avatars.githubusercontent.com/u/103482615?v=4" width="30px" /></a>
 <a href="https://github.com/huangjincheng2022"><img src="https://avatars.githubusercontent.com/u/98305308?v=4" width="30px" /></a>
 <a href="https://github.com/ibrahimhaddad"><img src="https://avatars.githubusercontent.com/u/1656002?v=4" width="30px" /></a>
+<a href="https://github.com/im-ajaymeena"><img src="https://avatars.githubusercontent.com/u/19550841?v=4" width="30px" /></a>
 <a href="https://github.com/ireneontheway5"><img src="https://avatars.githubusercontent.com/u/75291211?v=4" width="30px" /></a>
 <a href="https://github.com/iynewz"><img src="https://avatars.githubusercontent.com/u/81401074?v=4" width="30px" /></a>
 <a href="https://github.com/izapolsk"><img src="https://avatars.githubusercontent.com/u/21039333?v=4" width="30px" /></a>
