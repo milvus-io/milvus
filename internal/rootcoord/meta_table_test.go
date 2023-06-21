@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
@@ -803,7 +804,7 @@ func TestMetaTable_reload(t *testing.T) {
 		catalog.On("ListDatabases",
 			mock.Anything,
 			mock.Anything,
-		).Return(make(map[string]*model.Database), nil)
+		).Return(make([]*model.Database, 0), nil)
 		catalog.On("CreateDatabase",
 			mock.Anything,
 			mock.Anything,
@@ -864,7 +865,7 @@ func TestMetaTable_reload(t *testing.T) {
 					mock.Anything,
 					mock.Anything,
 				).Return(
-					map[string]*model.Collection{"test": {CollectionID: 100, Name: "test"}},
+					[]*model.Collection{{CollectionID: 100, Name: "test"}},
 					nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
@@ -887,7 +888,7 @@ func TestMetaTable_reload(t *testing.T) {
 					mock.Anything,
 					mock.Anything,
 					mock.Anything,
-				).Return(map[string]*model.Collection{}, nil)
+				).Return(make([]*model.Collection, 0), nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
 				catalog.On("ListAliases",
@@ -915,15 +916,13 @@ func TestMetaTable_reload(t *testing.T) {
 		catalog.On("ListDatabases",
 			mock.Anything,
 			mock.Anything,
-		).Return(map[string]*model.Database{
-			util.DefaultDBName: model.NewDefaultDatabase(),
-		}, nil)
+		).Return([]*model.Database{model.NewDefaultDatabase()}, nil)
 		catalog.On("ListCollections",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 		).Return(
-			map[string]*model.Collection{"test": {CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+			[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
 			nil)
 		catalog.On("ListAliases",
 			mock.Anything,
@@ -953,7 +952,7 @@ func TestMetaTable_reload(t *testing.T) {
 					mock.Anything,
 					mock.Anything,
 				).Return(
-					map[string]*model.Collection{"test": {CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+					[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
 					nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
@@ -1453,19 +1452,41 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 	t.Run("listCollectionFromCache with empty db", func(t *testing.T) {
 		mt := &MetaTable{
 			names: newNameDb(),
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated),
+			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {
 					CollectionID: 1,
 					State:        pb.CollectionState_CollectionCreated,
 				},
+				2: {
+					CollectionID: 2,
+					State:        pb.CollectionState_CollectionDropping,
+					DBID:         util.DefaultDBID,
+				},
+				3: {
+					CollectionID: 3,
+					State:        pb.CollectionState_CollectionCreated,
+					DBID:         2,
+				},
 			},
 		}
 
-		mt.names.insert(util.DefaultDBName, "name", 1)
-		ret, err := mt.listCollectionFromCache("", false)
+		ret, err := mt.listCollectionFromCache("none", false)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+
+		ret, err = mt.listCollectionFromCache("", false)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(ret))
+		assert.Equal(t, []int64{ret[0].CollectionID, ret[1].CollectionID}, []int64{1, 2})
+
+		ret, err = mt.listCollectionFromCache("db2", false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ret))
-		assert.Equal(t, int64(1), ret[0].CollectionID)
+		assert.Equal(t, int64(3), ret[0].CollectionID)
 	})
 
 	t.Run("CreateAlias with empty db", func(t *testing.T) {

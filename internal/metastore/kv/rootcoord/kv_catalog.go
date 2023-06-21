@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -113,20 +114,20 @@ func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Tim
 	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{key}, ts)
 }
 
-func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Database, error) {
+func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
 	_, vals, err := kc.Snapshot.LoadWithPrefix(DBInfoMetaPrefix, ts)
 	if err != nil {
 		return nil, err
 	}
 
-	dbs := make(map[string]*model.Database)
+	dbs := make([]*model.Database, 0, len(vals))
 	for _, val := range vals {
 		dbMeta := &pb.DatabaseInfo{}
 		err := proto.Unmarshal([]byte(val), dbMeta)
 		if err != nil {
 			return nil, err
 		}
-		dbs[dbMeta.Name] = model.UnmarshalDatabaseModel(dbMeta)
+		dbs = append(dbs, model.UnmarshalDatabaseModel(dbMeta))
 	}
 	return dbs, nil
 }
@@ -575,7 +576,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collecti
 	return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s, at timestamp = %d", collectionName, ts))
 }
 
-func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
+func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
 	_, vals, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
 	if err != nil {
@@ -586,7 +587,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		return nil, err
 	}
 
-	colls := make(map[string]*model.Collection)
+	colls := make([]*model.Collection, 0, len(vals))
 	for _, val := range vals {
 		collMeta := pb.CollectionInfo{}
 		err := proto.Unmarshal([]byte(val), &collMeta)
@@ -598,7 +599,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		if err != nil {
 			return nil, err
 		}
-		colls[collMeta.Schema.Name] = collection
+		colls = append(colls, collection)
 	}
 
 	return colls, nil

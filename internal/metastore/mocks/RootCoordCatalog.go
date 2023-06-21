@@ -396,15 +396,15 @@ func (_m *RootCoordCatalog) ListAliases(ctx context.Context, dbID int64, ts uint
 }
 
 // ListCollections provides a mock function with given fields: ctx, dbID, ts
-func (_m *RootCoordCatalog) ListCollections(ctx context.Context, dbID int64, ts uint64) (map[string]*model.Collection, error) {
+func (_m *RootCoordCatalog) ListCollections(ctx context.Context, dbID int64, ts uint64) ([]*model.Collection, error) {
 	ret := _m.Called(ctx, dbID, ts)
 
-	var r0 map[string]*model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) map[string]*model.Collection); ok {
+	var r0 []*model.Collection
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) []*model.Collection); ok {
 		r0 = rf(ctx, dbID, ts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]*model.Collection)
+			r0 = ret.Get(0).([]*model.Collection)
 		}
 	}
 
@@ -442,15 +442,15 @@ func (_m *RootCoordCatalog) ListCredentials(ctx context.Context) ([]string, erro
 }
 
 // ListDatabases provides a mock function with given fields: ctx, ts
-func (_m *RootCoordCatalog) ListDatabases(ctx context.Context, ts uint64) (map[string]*model.Database, error) {
+func (_m *RootCoordCatalog) ListDatabases(ctx context.Context, ts uint64) ([]*model.Database, error) {
 	ret := _m.Called(ctx, ts)
 
-	var r0 map[string]*model.Database
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) map[string]*model.Database); ok {
+	var r0 []*model.Database
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) []*model.Database); ok {
 		r0 = rf(ctx, ts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]*model.Database)
+			r0 = ret.Get(0).([]*model.Database)
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -15,12 +16,12 @@ import (
 type RootCoordCatalog interface {
 	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
 	DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error
-	ListDatabases(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Database, error)
+	ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error)
 
 	CreateCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error)
 	GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
-	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) (map[string]*model.Collection, error)
+	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
 	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp) error
