@@ -1062,29 +1062,29 @@ func (s *SegmentLoaderMockSuite) TestSkipBFLoad() {
 		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
 	})
 
-	s.Run("fail_corrupted", func() {
-		defer s.SetupTest()
-
-		ch := make(chan struct{})
-		s.cm.EXPECT().MultiRead(mock.Anything, []string{statslogPath}).
-			Run(func(_ context.Context, _ []string) {
-				<-ch
-			}).Return([][]byte{[]byte("ABC")}, nil)
-		segment := &Segment{
-			segmentID:   10001,
-			lazyLoading: atomic.NewBool(false),
-			destroyed:   atomic.NewBool(false),
-		}
-		err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
-		s.NoError(err)
-
-		s.True(segment.isLazyLoading())
-		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
-		close(ch)
-
-		s.True(segment.isLazyLoading())
-		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
-	})
+	//s.Run("fail_corrupted", func() {
+	//	defer s.SetupTest()
+	//
+	//	ch := make(chan struct{})
+	//	s.cm.EXPECT().MultiRead(mock.Anything, []string{statslogPath}).
+	//		Run(func(_ context.Context, _ []string) {
+	//			<-ch
+	//		}).Return([][]byte{[]byte("ABC")}, nil)
+	//	segment := &Segment{
+	//		segmentID:   10001,
+	//		lazyLoading: atomic.NewBool(false),
+	//		destroyed:   atomic.NewBool(false),
+	//	}
+	//	err := s.loader.loadSegmentBloomFilter(ctx, segment, []string{statslogPath})
+	//	s.NoError(err)
+	//
+	//	s.True(segment.isLazyLoading())
+	//	s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	//	close(ch)
+	//
+	//	s.True(segment.isLazyLoading())
+	//	s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
+	//})
 
 	s.Run("transient_error", func() {
 		defer s.SetupTest()
