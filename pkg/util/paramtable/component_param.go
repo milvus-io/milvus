@@ -1783,6 +1783,7 @@ type dataCoordConfig struct {
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
+	SegmentSealSize                ParamItem `refreshable:"false"`
 	SegAssignmentExpiration        ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
@@ -1853,7 +1854,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
-		DefaultValue: "512",
+		DefaultValue: "2048",
 		Doc:          "Maximum size of a segment in MB",
 		Export:       true,
 	}
@@ -1875,6 +1876,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
+
+	p.SegmentSealSize = ParamItem{
+		Key:          "dataCoord.segment.sealSize",
+		Version:      "2.0.0",
+		DefaultValue: "200",
+		Doc:          "The size in MB of the growing segment to trigger seal",
+		Export:       true,
+	}
+	p.SegmentSealSize.Init(base.mgr)
 
 	p.SegAssignmentExpiration = ParamItem{
 		Key:          "dataCoord.segment.assignmentExpiration",

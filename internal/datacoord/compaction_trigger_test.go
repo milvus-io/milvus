@@ -1560,13 +1560,23 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
 	assert.True(t, couldDo)
 
-	// if only 10 bin logs, then disk index won't trigger compaction
-	info.Statslogs = binlogs[0:20]
+	// if isDiskIndex, then maxSize = 32 ( DiskSegmentMaxSize / BinLogMaxSize )
+	// if not isDiskIndex, then maxSize = 80 ( SegmentMaxSize / BinLogMaxSize )
+	// if only 40 bin logs, then disk index won't trigger compaction
+	info.Statslogs = binlogs[0:40]                                                                        // statSize = 40
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0}) // maxSize = 80
+	assert.False(t, couldDo)
+
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0}) // maxSize = 32
+	assert.False(t, couldDo)
+
+	info.Statslogs = binlogs[0:80]
 	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
 	assert.True(t, couldDo)
 
 	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
-	assert.False(t, couldDo)
+	assert.True(t, couldDo)
+
 	//Test too many stats log but compacted
 	info.CompactionFrom = []int64{0, 1}
 	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})

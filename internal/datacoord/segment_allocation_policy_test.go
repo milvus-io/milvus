@@ -178,6 +178,33 @@ func TestSealSegmentPolicy(t *testing.T) {
 		shouldSeal = p(segment, tsoutil.ComposeTS(sealTs, 0))
 		assert.True(t, shouldSeal)
 	})
+
+	t.Run("test seal segment by sizeFactor", func(t *testing.T) {
+		sizeFactor := 0.5
+		p := getSegmentCapacityPolicy(sizeFactor)
+
+		segment := &SegmentInfo{
+			currRows: 10,
+			SegmentInfo: &datapb.SegmentInfo{
+				MaxRowNum: 20,
+			},
+		}
+
+		shouldSeal := p(segment, 0)
+		assert.True(t, shouldSeal)
+		segment.MaxRowNum++
+
+		shouldSeal = p(segment, 0)
+		assert.False(t, shouldSeal)
+
+		p = getSegmentCapacityPolicy(2)
+		shouldSeal = p(segment, 0)
+		assert.False(t, shouldSeal)
+
+		segment.currRows = segment.MaxRowNum
+		shouldSeal = p(segment, 0)
+		assert.True(t, shouldSeal)
+	})
 }
 
 func Test_sealLongTimeIdlePolicy(t *testing.T) {

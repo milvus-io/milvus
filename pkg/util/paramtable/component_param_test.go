@@ -350,6 +350,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
+		assert.Equal(t, Params.SegmentMaxSize.GetAsFloat(), float64(2048))
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 	})
 

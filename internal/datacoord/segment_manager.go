@@ -185,10 +185,14 @@ func defaultAllocatePolicy() AllocatePolicy {
 }
 
 func defaultSegmentSealPolicy() []segmentSealPolicy {
+	sizeFactor := Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()
+	if sealSizeFactor := Params.DataCoordCfg.SegmentSealSize.GetAsFloat() / Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(); sealSizeFactor < sizeFactor {
+		sizeFactor = sealSizeFactor
+	}
 	return []segmentSealPolicy{
 		sealByMaxBinlogFileNumberPolicy(Params.DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()),
 		sealByLifetimePolicy(Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)),
-		getSegmentCapacityPolicy(Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()),
+		getSegmentCapacityPolicy(sizeFactor),
 		sealLongTimeIdlePolicy(Params.DataCoordCfg.SegmentMaxIdleTime.GetAsDuration(time.Second), Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsFloat(), Params.DataCoordCfg.SegmentMaxSize.GetAsFloat()),
 	}
 }

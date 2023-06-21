@@ -289,9 +289,10 @@ dataCoord:
     balanceSilentDuration: 300 # The duration before the channelBalancer on datacoord to run
     balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
   segment:
-    maxSize: 512 # Maximum size of a segment in MB
+    maxSize: 2048 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.23
+    sealSize: 200 # The size in MB of the growing segment to trigger seal
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than

@@ -109,9 +109,12 @@ type segmentSealPolicy func(segment *SegmentInfo, ts Timestamp) bool
 // getSegmentCapacityPolicy get segmentSealPolicy with segment size factor policy
 func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
-		var allocSize int64
-		for _, allocation := range segment.allocations {
-			allocSize += allocation.NumOfRows
+		//var allocSize int64
+		//for _, allocation := range segment.allocations {
+		//	allocSize += allocation.NumOfRows
+		//}
+		if sizeFactor > 1 {
+			sizeFactor = 1
 		}
 		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())
 	}
