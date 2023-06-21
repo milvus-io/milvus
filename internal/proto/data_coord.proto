@@ -298,6 +298,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog deltalogs = 9;
   bool dropped = 10;
   bool importing = 11;
+  string channel = 12; // report channel name for verification
 }
 
 message CheckPoint {

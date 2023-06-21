@@ -285,7 +285,7 @@ indexNode:
 
 dataCoord:
   channel:
-    watchTimeoutInterval: 120 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
+    watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
     balanceSilentDuration: 300 # The duration before the channelBalancer on datacoord to run
     balanceInterval: 360 #The interval for the channelBalancer on datacoord to check balance status
   segment:
