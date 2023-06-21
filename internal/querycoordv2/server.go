@@ -440,7 +440,7 @@ func (s *Server) Stop() error {
 		s.session.Stop()
 	}
 
-	if s.session != nil {
+	if s.cluster != nil {
 		log.Info("stop cluster...")
 		s.cluster.Stop()
 	}
