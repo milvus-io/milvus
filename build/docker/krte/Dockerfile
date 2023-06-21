@@ -99,6 +99,10 @@ RUN echo "Installing Packages ..." \
     && echo "Installing KinD ..." \
         && curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-amd64" \
         && chmod +x /usr/local/bin/kind \
+    && echo "Installing yq ..." \
+        && apt-get install wget -y \
+        && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
+        && chmod +x /usr/bin/yq \
     && echo "Ensuring Legacy Iptables ..." \
         && update-alternatives --set iptables /usr/sbin/iptables-legacy \
         && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
