@@ -784,16 +784,16 @@ func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) 
 		return nil
 	}
 
+	return s.deleteImpl(entityIDs, timestamps)
+}
+
+func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
 		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
-	return s.deleteImpl(entityIDs, timestamps)
-}
-
-func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 	offset := C.PreDelete(s.segmentPtr, cSize)
