@@ -225,7 +225,6 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 func (kc *Consumer) Close() {
 	kc.closeOnce.Do(func() {
 		close(kc.closeCh)
-		kc.wg.Wait() // wait work goroutine exit
-		kc.c.Close()
+		kc.wg.Wait() // wait work goroutine exit, wait worker close the client
 	})
 }
