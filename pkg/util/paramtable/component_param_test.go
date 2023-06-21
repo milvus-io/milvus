@@ -175,6 +175,12 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("AccessLog.MaxDays: %d", Params.AccessLog.RotatedTime.GetAsInt64())
 
 		t.Logf("ShardLeaderCacheInterval: %d", Params.ShardLeaderCacheInterval.GetAsInt64())
+
+		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
+		params.Save(Params.ReplicaSelectionPolicy.Key, "round_robin")
+		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "round_robin")
+		params.Save(Params.ReplicaSelectionPolicy.Key, "look_aside")
+		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
