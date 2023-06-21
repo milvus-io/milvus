@@ -80,7 +80,7 @@ insert_performance:
    The other parts in the test yaml is the params pass to the runner, such as:
    - The field `collection_name` means which kind of collection will be created in milvus
    - The field `ni_per` means the batch size
-   - The filed `build_index` means that whether to create index during inserting
+   - The field `build_index` means that whether to create index during inserting
 
 While using argo workflow as benchmark pipeline, the test suite is made of both `client` and `server` configmap, an example:
 

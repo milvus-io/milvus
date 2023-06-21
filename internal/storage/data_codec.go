@@ -52,7 +52,7 @@ type (
 	// UniqueID is type alias of typeutil.UniqueID
 	UniqueID = typeutil.UniqueID
 
-	// FieldID represent the identity number of filed in collection and its type is UniqueID
+	// FieldID represent the identity number of field in collection and its type is UniqueID
 	FieldID = typeutil.UniqueID
 
 	// Timestamp is type alias of typeutil.Timestamp
@@ -266,7 +266,7 @@ func (data *FloatVectorFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + 4
 }
 
-// system filed id:
+// system field id:
 // 0: unique row id
 // 1: timestamp
 // 100: first user field id

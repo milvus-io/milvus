@@ -2002,7 +2002,7 @@ func TestSearchTask_Requery(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("Test get pk filed data failed", func(t *testing.T) {
+	t.Run("Test get pk field data failed", func(t *testing.T) {
 		schema := constructCollectionSchema(pkField, vecField, dim, collection)
 		node := mocks.NewProxy(t)
 		node.EXPECT().Query(mock.Anything, mock.Anything).

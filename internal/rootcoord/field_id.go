@@ -18,7 +18,7 @@ package rootcoord
 
 import "github.com/milvus-io/milvus/pkg/common"
 
-// system filed id:
+// system field id:
 // 0: unique row id
 // 1: timestamp
 // 100: first user field id
@@ -26,7 +26,7 @@ import "github.com/milvus-io/milvus/pkg/common"
 // 102: ...
 
 const (
-	// StartOfUserFieldID id of user defined filed begin from here
+	// StartOfUserFieldID id of user defined field begin from here
 	StartOfUserFieldID = common.StartOfUserFieldID
 
 	// RowIDField id of row ID field

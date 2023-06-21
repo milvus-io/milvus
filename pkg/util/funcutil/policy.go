@@ -52,7 +52,7 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 	}, nil
 }
 
-// GetObjectName get object name from the grpc message according to the filed index. The filed is a string.
+// GetObjectName get object name from the grpc message according to the field index. The field is a string.
 func GetObjectName(m proto.GeneratedMessage, index int32) string {
 	if index <= 0 {
 		return util.AnyWord
@@ -71,7 +71,7 @@ func GetObjectName(m proto.GeneratedMessage, index int32) string {
 	return value.String()
 }
 
-// GetObjectNames get object names from the grpc message according to the filed index. The filed is an array.
+// GetObjectNames get object names from the grpc message according to the field index. The field is an array.
 func GetObjectNames(m proto.GeneratedMessage, index int32) []string {
 	if index <= 0 {
 		return []string{}

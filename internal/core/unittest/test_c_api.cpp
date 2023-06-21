@@ -1917,7 +1917,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2064,7 +2064,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2227,7 +2227,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2403,7 +2403,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2563,7 +2563,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2732,7 +2732,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -2893,7 +2893,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -3068,7 +3068,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -3229,7 +3229,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -3420,7 +3420,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
@@ -3643,7 +3643,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     status = LoadFieldData(segment, c_ts_field_data);
     ASSERT_EQ(status.error_code, Success);
 
-    // load index for vec field, load raw data for scalar filed
+    // load index for vec field, load raw data for scalar field
     auto sealed_segment = SealedCreator(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);

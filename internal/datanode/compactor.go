@@ -353,7 +353,7 @@ func (t *compactionTask) merge(
 	}
 
 	if pkField == nil {
-		log.Warn("failed to get pk filed from schema")
+		log.Warn("failed to get pk field from schema")
 		return nil, nil, 0, fmt.Errorf("no pk field in schema")
 	}
 
