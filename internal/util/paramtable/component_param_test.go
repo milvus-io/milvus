@@ -413,6 +413,9 @@ func TestComponentParam(t *testing.T) {
 		maxParallelism := Params.FlowGraphMaxParallelism
 		t.Logf("flowGraphMaxParallelism: %d", maxParallelism)
 
+		maxParallelSyncTaskNum := Params.MaxParallelSyncTaskNum
+		t.Logf("maxParallelSyncTaskNum: %d", maxParallelSyncTaskNum)
+
 		size := Params.FlushInsertBufferSize
 		t.Logf("FlushInsertBufferSize: %d", size)
 

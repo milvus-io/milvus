@@ -70,6 +70,7 @@ type Channel interface {
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
 	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
+	getSegment(segID UniqueID) *Segment
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
@@ -249,6 +250,17 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	c.segments[req.segID] = seg
 	c.segMu.Unlock()
 	return nil
+}
+
+func (c *ChannelMeta) getSegment(segID UniqueID) *Segment {
+	c.segMu.RLock()
+	defer c.segMu.RUnlock()
+
+	seg, ok := c.segments[segID]
+	if !ok {
+		return nil
+	}
+	return seg
 }
 
 func (c *ChannelMeta) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
