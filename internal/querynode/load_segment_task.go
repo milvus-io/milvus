@@ -19,6 +19,7 @@ package querynode
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -31,8 +32,9 @@ import (
 
 type loadSegmentsTask struct {
 	baseTask
-	req  *queryPb.LoadSegmentsRequest
-	node *QueryNode
+	req     *queryPb.LoadSegmentsRequest
+	node    *QueryNode
+	startTs time.Time
 }
 
 // loadSegmentsTask
@@ -68,14 +70,14 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 }
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
-	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
-
 	if len(l.req.Infos) == 0 {
 		log.Info("all segments loaded", zap.Int64("msgID", l.req.GetBase().GetMsgID()))
 		return nil
 	}
-
 	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
+	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID),
+		zap.Int64("collectionID", l.req.CollectionID), zap.Int64s("segmentID", segmentIDs), zap.Duration("time in que", time.Since(l.startTs)))
+
 	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
 	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
 	loadDoneSegmentIDs, loadErr := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
@@ -110,25 +112,27 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 		err = runningGroup.Wait()
 		if err != nil {
+			log.Warn("failed to load delete data while load segment, begin rollback", zap.Int64("collectionID", l.req.CollectionID),
+				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
 			for _, segment := range l.req.Infos {
 				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
 			}
 			for _, vchannel := range vchanName {
 				l.node.dataSyncService.removeEmptyFlowGraphByChannel(l.req.CollectionID, vchannel)
 			}
-			log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
+			log.Warn("failed to load delete data while load segment, finish rollback", zap.Int64("collectionID", l.req.CollectionID),
 				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
 			return err
 		}
 	}
 	if loadErr != nil {
 		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(loadErr))
+			zap.Int64("replicaID", l.req.ReplicaID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(loadErr))
 		return loadErr
 	}
 
 	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),
-		zap.Int64("replicaID", l.req.ReplicaID), zap.Int64("msgID", l.req.Base.MsgID))
+		zap.Int64("replicaID", l.req.ReplicaID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("msgID", l.req.Base.MsgID))
 	return nil
 }
 

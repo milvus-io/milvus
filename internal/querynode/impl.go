@@ -476,8 +476,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 			ctx:  ctx,
 			done: make(chan error),
 		},
-		req:  in,
-		node: node,
+		req:     in,
+		node:    node,
+		startTs: time.Now(),
 	}
 
 	segmentIDs := make([]UniqueID, 0, len(in.GetInfos()))
@@ -488,26 +489,24 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 		return segmentIDs[i] < segmentIDs[j]
 	})
 
-	startTs := time.Now()
 	log.Info("loadSegmentsTask init", zap.Int64("collectionID", in.CollectionID),
 		zap.Int64s("segmentIDs", segmentIDs),
-		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int64("msg", in.Base.MsgID))
 
-	// TODO remove concurrent load segment for now, unless we solve the memory issue
-	log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
-		zap.Int64s("segmentIDs", segmentIDs),
-		zap.Duration("timeInQueue", time.Since(startTs)))
 	err := node.scheduler.queue.Enqueue(task)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Warn("failed to load segment", zap.Int64("collectionID", in.CollectionID),
+			zap.Int64s("segmentIDs", segmentIDs),
+			zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Error(err))
 		return status, nil
 	}
 
-	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID),
+		zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = task.WaitToFinish()
@@ -519,7 +518,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 			if errors.Is(err, ErrInsufficientMemory) {
 				status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
 			}
-			log.Warn(err.Error())
+			log.Warn("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
 			return status, nil
 		}
 		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))

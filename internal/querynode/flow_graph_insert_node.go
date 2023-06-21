@@ -332,7 +332,7 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	}
 	var resultSegmentIDs []UniqueID
 	resultSegmentIDs, err = replica.getSegmentIDsByVChannel(partitionIDs, vchannelName, segType)
-	log.Warn("processDeleteMessage", zap.String("vchannel", vchannelName), zap.Int64s("segmentIDs", resultSegmentIDs), zap.Int64s("paritions", partitionIDs))
+	log.Debug("processDeleteMessage", zap.String("vchannel", vchannelName), zap.Int64s("segmentIDs", resultSegmentIDs), zap.Int64s("paritions", partitionIDs))
 	if err != nil {
 		if !errors.Is(err, ErrPartitionNotFound) {
 			return err
