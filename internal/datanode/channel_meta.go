@@ -343,9 +343,10 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 			if err != nil {
 				// TODO if not retryable, add rebuild statslog logic
 				log.Warn("failed to lazy load statslog for segment", zap.Int64("segment", s.segmentID), zap.Error(err))
-				if c.retryableLoadError(err) {
+				if c.retryableLoadError(err) && !s.isReleased() {
 					time.Sleep(100 * time.Millisecond)
 					log.Warn("failed to lazy load statslog for segment, retrying...", zap.Int64("segment", s.segmentID), zap.Error(err))
+
 					c.submitLoadStatsTask(s, statsBinlogs, ts)
 				}
 				return struct{}{}, err
@@ -565,6 +566,7 @@ func (c *ChannelMeta) removeSegments(segIDs ...UniqueID) {
 			seg.curDeleteBuf = nil
 			seg.historyInsertBuf = nil
 			seg.historyDeleteBuf = nil
+			seg.setReleased(true)
 		}
 
 		delete(c.segments, segID)
