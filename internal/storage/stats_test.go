@@ -165,3 +165,12 @@ func TestDeserializeStatsFailed(t *testing.T) {
 	_, err := DeserializeStatsList(blob)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
+
+func TestDeserializeEmptyStats(t *testing.T) {
+	blob := &Blob{
+		Value: []byte{},
+	}
+
+	_, err := DeserializeStats([]*Blob{blob})
+	assert.NoError(t, err)
+}
