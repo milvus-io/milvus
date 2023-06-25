@@ -20,11 +20,10 @@
 
 namespace milvus {
 
-static const char* INDEX_FILE_SLICE_META = "SLICE_META";
-static const char* META = "meta";
-static const char* NAME = "name";
-static const char* SLICE_NUM = "slice_num";
-static const char* TOTAL_LEN = "total_len";
+std::string
+GenSlicedFileName(const std::string& prefix, size_t slice_num) {
+    return prefix + "_" + std::to_string(slice_num);
+}
 
 void
 Slice(const std::string& prefix,
@@ -42,8 +41,7 @@ Slice(const std::string& prefix,
         auto size = static_cast<size_t>(ri - i);
         auto slice_i = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
         memcpy(slice_i.get(), data_src->data.get() + i, size);
-        binarySet.Append(
-            prefix + "_" + std::to_string(slice_num), slice_i, ri - i);
+        binarySet.Append(GenSlicedFileName(prefix, slice_num), slice_i, ri - i);
         i = ri;
     }
     ret[NAME] = prefix;
@@ -68,7 +66,7 @@ Assemble(BinarySet& binarySet) {
         auto p_data = std::shared_ptr<uint8_t[]>(new uint8_t[total_len]);
         int64_t pos = 0;
         for (auto i = 0; i < slice_num; ++i) {
-            auto slice_i_sp = binarySet.Erase(prefix + "_" + std::to_string(i));
+            auto slice_i_sp = binarySet.Erase(GenSlicedFileName(prefix, i));
             memcpy(p_data.get() + pos,
                    slice_i_sp->data.get(),
                    static_cast<size_t>(slice_i_sp->size));
@@ -90,17 +88,15 @@ Disassemble(BinarySet& binarySet) {
         }
     }
 
-    const int64_t slice_size_in_byte = index_file_slice_size << 20;
     std::vector<std::string> slice_key_list;
     for (auto& kv : binarySet.binary_map_) {
-        if (kv.second->size > slice_size_in_byte) {
+        if (kv.second->size > FILE_SLICE_SIZE) {
             slice_key_list.push_back(kv.first);
         }
     }
     for (auto& key : slice_key_list) {
         Config slice_i;
-        Slice(
-            key, binarySet.Erase(key), slice_size_in_byte, binarySet, slice_i);
+        Slice(key, binarySet.Erase(key), FILE_SLICE_SIZE, binarySet, slice_i);
         meta_info[META].emplace_back(slice_i);
     }
     if (!slice_key_list.empty()) {

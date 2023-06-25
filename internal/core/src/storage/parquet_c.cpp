@@ -21,23 +21,11 @@
 #include "storage/PayloadWriter.h"
 #include "storage/FieldData.h"
 #include "common/CGoHelper.h"
+#include "storage/Util.h"
 
 using Payload = milvus::storage::Payload;
 using PayloadWriter = milvus::storage::PayloadWriter;
 using PayloadReader = milvus::storage::PayloadReader;
-
-void
-ReleaseArrowUnused() {
-    static std::mutex release_mutex;
-
-    // While multiple threads are releasing memory,
-    // we don't need everyone do releasing,
-    // just let some of them do this also works well
-    if (release_mutex.try_lock()) {
-        arrow::default_memory_pool()->ReleaseUnused();
-        release_mutex.unlock();
-    }
-}
 
 extern "C" CPayloadWriter
 NewPayloadWriter(int columnType) {
@@ -227,7 +215,7 @@ ReleasePayloadWriter(CPayloadWriter handler) {
     auto p = reinterpret_cast<PayloadWriter*>(handler);
     if (p != nullptr) {
         delete p;
-        ReleaseArrowUnused();
+        milvus::storage::ReleaseArrowUnused();
     }
 }
 
@@ -378,8 +366,9 @@ GetOneStringFromPayload(CPayloadReader payloadReader,
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto field_data = p->get_field_data();
-        *cstr = (char*)(const_cast<void*>(field_data->RawValue(idx)));
-        *str_size = field_data->get_element_size(idx);
+        auto str = const_cast<void*>(field_data->RawValue(idx));
+        *cstr = (char*)(*static_cast<std::string*>(str)).c_str();
+        *str_size = field_data->Size(idx);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -434,7 +423,8 @@ ReleasePayloadReader(CPayloadReader payloadReader) {
                    "released payloadReader should not be null pointer");
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         delete (p);
-        ReleaseArrowUnused();
+
+        milvus::storage::ReleaseArrowUnused();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

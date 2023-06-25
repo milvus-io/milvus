@@ -33,12 +33,30 @@
 namespace milvus::index {
 
 VectorMemIndex::VectorMemIndex(const IndexType& index_type,
-                               const MetricType& metric_type)
+                               const MetricType& metric_type,
+                               storage::FileManagerImplPtr file_manager)
     : VectorIndex(index_type, metric_type) {
     AssertInfo(!is_unsupported(index_type, metric_type),
                index_type + " doesn't support metric: " + metric_type);
-
+    if (file_manager != nullptr) {
+        file_manager_ = std::dynamic_pointer_cast<storage::MemFileManagerImpl>(
+            file_manager);
+    }
     index_ = knowhere::IndexFactory::Instance().Create(GetIndexType());
+}
+
+BinarySet
+VectorMemIndex::Upload(const Config& config) {
+    auto binary_set = Serialize(config);
+    file_manager_->AddFile(binary_set);
+
+    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    BinarySet ret;
+    for (auto& file : remote_paths_to_size) {
+        ret.Append(file.first, nullptr, file.second);
+    }
+
+    return ret;
 }
 
 BinarySet
@@ -48,20 +66,45 @@ VectorMemIndex::Serialize(const Config& config) {
     if (stat != knowhere::Status::success)
         PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
                       "failed to serialize index, " + MatchKnowhereError(stat));
-    milvus::Disassemble(ret);
+    Disassemble(ret);
 
     return ret;
 }
 
 void
-VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
-    milvus::Assemble(const_cast<BinarySet&>(binary_set));
+VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
+                                    const Config& config) {
     auto stat = index_.Deserialize(binary_set);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,
             "failed to Deserialize index, " + MatchKnowhereError(stat));
     SetDim(index_.Dim());
+}
+
+void
+VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
+    milvus::Assemble(const_cast<BinarySet&>(binary_set));
+    LoadWithoutAssemble(binary_set, config);
+}
+
+void
+VectorMemIndex::Load(const Config& config) {
+    auto index_files =
+        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+    AssertInfo(index_files.has_value(),
+               "index file paths is empty when load index");
+    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    AssembleIndexDatas(index_datas);
+    BinarySet binary_set;
+    for (auto& [key, data] : index_datas) {
+        auto size = data->Size();
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto buf = std::shared_ptr<uint8_t[]>(
+            (uint8_t*)const_cast<void*>(data->Data()), deleter);
+        binary_set.Append(key, buf, size);
+    }
+    LoadWithoutAssemble(binary_set, config);
 }
 
 void
@@ -79,6 +122,43 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
                       "failed to build index, " + MatchKnowhereError(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
+}
+
+void
+VectorMemIndex::Build(const Config& config) {
+    auto insert_files =
+        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
+    AssertInfo(insert_files.has_value(),
+               "insert file paths is empty when build disk ann index");
+    auto field_datas =
+        file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    int64_t total_size = 0;
+    int64_t total_num_rows = 0;
+    int64_t dim = 0;
+    for (auto data : field_datas) {
+        total_size += data->Size();
+        total_num_rows += data->get_num_rows();
+        AssertInfo(dim == 0 || dim == data->get_dim(),
+                   "inconsistent dim value between field datas!");
+        dim = data->get_dim();
+    }
+
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+    int64_t offset = 0;
+    for (auto data : field_datas) {
+        std::memcpy(buf.get() + offset, data->Data(), data->Size());
+        offset += data->Size();
+        data.reset();
+    }
+    field_datas.clear();
+
+    Config build_config;
+    build_config.update(config);
+    build_config.erase("insert_files");
+
+    auto dataset = GenDataset(total_num_rows, dim, buf.get());
+    BuildWithDataset(dataset, build_config);
 }
 
 void

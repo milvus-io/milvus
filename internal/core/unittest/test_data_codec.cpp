@@ -19,7 +19,7 @@
 #include "storage/DataCodec.h"
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
-#include "storage/FieldDataFactory.h"
+#include "storage/Util.h"
 #include "common/Consts.h"
 #include "utils/Json.h"
 
@@ -27,9 +27,7 @@ using namespace milvus;
 
 TEST(storage, InsertDataBool) {
     FixedVector<bool> data = {true, false, true, false, true};
-    auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::BOOL);
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::BOOL);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -55,9 +53,7 @@ TEST(storage, InsertDataBool) {
 
 TEST(storage, InsertDataInt8) {
     FixedVector<int8_t> data = {1, 2, 3, 4, 5};
-    auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::INT8);
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::INT8);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -84,8 +80,7 @@ TEST(storage, InsertDataInt8) {
 TEST(storage, InsertDataInt16) {
     FixedVector<int16_t> data = {1, 2, 3, 4, 5};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::INT16);
+        milvus::storage::CreateFieldData(storage::DataType::INT16);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -112,8 +107,7 @@ TEST(storage, InsertDataInt16) {
 TEST(storage, InsertDataInt32) {
     FixedVector<int32_t> data = {true, false, true, false, true};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::INT32);
+        milvus::storage::CreateFieldData(storage::DataType::INT32);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -140,8 +134,7 @@ TEST(storage, InsertDataInt32) {
 TEST(storage, InsertDataInt64) {
     FixedVector<int64_t> data = {1, 2, 3, 4, 5};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::INT64);
+        milvus::storage::CreateFieldData(storage::DataType::INT64);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -169,8 +162,7 @@ TEST(storage, InsertDataString) {
     FixedVector<std::string> data = {
         "test1", "test2", "test3", "test4", "test5"};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::VARCHAR);
+        milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -191,8 +183,9 @@ TEST(storage, InsertDataString) {
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     FixedVector<std::string> new_data(data.size());
     for (int i = 0; i < data.size(); ++i) {
-        new_data[i] = reinterpret_cast<const char*>(new_payload->RawValue(i));
-        ASSERT_EQ(new_payload->get_element_size(i), data[i].size());
+        new_data[i] =
+            *static_cast<const std::string*>(new_payload->RawValue(i));
+        ASSERT_EQ(new_payload->Size(i), data[i].size());
     }
     ASSERT_EQ(data, new_data);
 }
@@ -200,8 +193,7 @@ TEST(storage, InsertDataString) {
 TEST(storage, InsertDataFloat) {
     FixedVector<float> data = {1, 2, 3, 4, 5};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::FLOAT);
+        milvus::storage::CreateFieldData(storage::DataType::FLOAT);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -228,8 +220,7 @@ TEST(storage, InsertDataFloat) {
 TEST(storage, InsertDataDouble) {
     FixedVector<double> data = {1.0, 2.0, 3.0, 4.2, 5.3};
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::DOUBLE);
+        milvus::storage::CreateFieldData(storage::DataType::DOUBLE);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertData insert_data(field_data);
@@ -257,9 +248,8 @@ TEST(storage, InsertDataFloatVector) {
     std::vector<float> data = {1, 2, 3, 4, 5, 6, 7, 8};
     int DIM = 2;
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::VECTOR_FLOAT, DIM);
-    field_data->FillFieldData(data.data(), data.size());
+        milvus::storage::CreateFieldData(storage::DataType::VECTOR_FLOAT, DIM);
+    field_data->FillFieldData(data.data(), data.size() / DIM);
 
     storage::InsertData insert_data(field_data);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
@@ -288,9 +278,8 @@ TEST(storage, InsertDataBinaryVector) {
     std::vector<uint8_t> data = {1, 2, 3, 4, 5, 6, 7, 8};
     int DIM = 16;
     auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::VECTOR_BINARY, DIM);
-    field_data->FillFieldData(data.data(), data.size());
+        milvus::storage::CreateFieldData(storage::DataType::VECTOR_BINARY, DIM);
+    field_data->FillFieldData(data.data(), data.size() * 8 / DIM);
 
     storage::InsertData insert_data(field_data);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
@@ -315,9 +304,7 @@ TEST(storage, InsertDataBinaryVector) {
 
 TEST(storage, IndexData) {
     std::vector<uint8_t> data = {1, 2, 3, 4, 5, 6, 7, 8};
-    auto field_data =
-        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-            storage::DataType::INT8);
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::INT8);
     field_data->FillFieldData(data.data(), data.size());
 
     storage::IndexData index_data(field_data);

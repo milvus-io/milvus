@@ -139,7 +139,7 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 
 	wg.Add(1)
 	go func() {
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		qn, err = grpcquerynode.NewServer(ctx, factory)
 		if err != nil {
@@ -183,7 +183,7 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	wg.Add(1)
 	go func() {
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		dn, err = grpcdatanode.NewServer(ctx, factory)
 		if err != nil {
@@ -207,7 +207,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 
 	wg.Add(1)
 	go func() {
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.MockDefaultFactory(localMsg, Params)
 		var err error
 		in, err = grpcindexnode.NewServer(ctx, factory)
 		if err != nil {
@@ -347,7 +347,7 @@ func TestProxy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")
 	localMsg := true
-	factory := dependency.NewDefaultFactory(localMsg)
+	factory := dependency.MockDefaultFactory(localMsg, Params)
 	alias := "TestProxy"
 
 	log.Info("Initialize parameter table of Proxy")

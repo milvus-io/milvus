@@ -577,6 +577,106 @@ SearchResultToJson(const SearchResult& sr) {
     return json{results};
 };
 
+inline storage::FieldDataPtr
+CreateFieldDataFromDataArray(ssize_t raw_count,
+                             const DataArray* data,
+                             const FieldMeta& field_meta) {
+    int64_t dim = 1;
+    storage::FieldDataPtr field_data = nullptr;
+
+    auto createFieldData = [&field_data, &raw_count](const void* raw_data,
+                                                     DataType data_type,
+                                                     int64_t dim) {
+        field_data = storage::CreateFieldData(data_type, dim);
+        field_data->FillFieldData(raw_data, raw_count);
+    };
+
+    if (field_meta.is_vector()) {
+        switch (field_meta.get_data_type()) {
+            case DataType::VECTOR_FLOAT: {
+                auto raw_data = data->vectors().float_vector().data().data();
+                dim = field_meta.get_dim();
+                createFieldData(raw_data, DataType::VECTOR_FLOAT, dim);
+                break;
+            }
+            case DataType::VECTOR_BINARY: {
+                auto raw_data = data->vectors().binary_vector().data();
+                dim = field_meta.get_dim();
+                AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
+                createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                break;
+            }
+            default: {
+                PanicInfo("unsupported");
+            }
+        }
+    } else {
+        switch (field_meta.get_data_type()) {
+            case DataType::BOOL: {
+                auto raw_data = data->scalars().bool_data().data().data();
+                createFieldData(raw_data, DataType::BOOL, dim);
+                break;
+            }
+            case DataType::INT8: {
+                auto src_data = data->scalars().int_data().data();
+                std::vector<int8_t> data_raw(src_data.size());
+                std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+                createFieldData(data_raw.data(), DataType::INT8, dim);
+                break;
+            }
+            case DataType::INT16: {
+                auto src_data = data->scalars().int_data().data();
+                std::vector<int16_t> data_raw(src_data.size());
+                std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+                createFieldData(data_raw.data(), DataType::INT16, dim);
+                break;
+            }
+            case DataType::INT32: {
+                auto raw_data = data->scalars().int_data().data().data();
+                createFieldData(raw_data, DataType::INT32, dim);
+                break;
+            }
+            case DataType::INT64: {
+                auto raw_data = data->scalars().long_data().data().data();
+                createFieldData(raw_data, DataType::INT64, dim);
+                break;
+            }
+            case DataType::FLOAT: {
+                auto raw_data = data->scalars().float_data().data().data();
+                createFieldData(raw_data, DataType::FLOAT, dim);
+                break;
+            }
+            case DataType::DOUBLE: {
+                auto raw_data = data->scalars().double_data().data().data();
+                createFieldData(raw_data, DataType::DOUBLE, dim);
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto begin = data->scalars().string_data().data().begin();
+                auto end = data->scalars().string_data().data().end();
+                std::vector<std::string> data_raw(begin, end);
+                createFieldData(data_raw.data(), DataType::VARCHAR, dim);
+                break;
+            }
+            case DataType::JSON: {
+                auto src_data = data->scalars().json_data().data();
+                std::vector<Json> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = Json(simdjson::padded_string(str));
+                }
+                createFieldData(data_raw.data(), DataType::JSON, dim);
+                break;
+            }
+            default: {
+                PanicInfo("unsupported");
+            }
+        }
+    }
+
+    return field_data;
+}
+
 inline void
 SealedLoadFieldData(const GeneratedData& dataset,
                     SegmentSealed& seg,
@@ -584,39 +684,48 @@ SealedLoadFieldData(const GeneratedData& dataset,
                     bool with_mmap = false) {
     auto row_count = dataset.row_ids_.size();
     {
-        LoadFieldDataInfo info;
-        FieldMeta field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(
-            dataset.row_ids_.data(), row_count, field_meta);
-        info.field_data = array.get();
-        info.row_count = dataset.row_ids_.size();
-        info.field_id = RowFieldID.get();  // field id for RowId
-        seg.LoadFieldData(info);
+        auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
+            DataType::INT64);
+        field_data->FillFieldData(dataset.row_ids_.data(), row_count);
+        auto field_data_info = FieldDataInfo{
+            RowFieldID.get(),
+            int64_t(row_count),
+            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+        seg.LoadFieldData(RowFieldID, field_data_info);
     }
     {
-        LoadFieldDataInfo info;
-        FieldMeta field_meta(
-            FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(
-            dataset.timestamps_.data(), row_count, field_meta);
-        info.field_data = array.get();
-        info.row_count = dataset.timestamps_.size();
-        info.field_id = TimestampFieldID.get();
-        seg.LoadFieldData(info);
+        auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
+            DataType::INT64);
+        field_data->FillFieldData(dataset.timestamps_.data(), row_count);
+        auto field_data_info = FieldDataInfo{
+            TimestampFieldID.get(),
+            int64_t(row_count),
+            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+        seg.LoadFieldData(TimestampFieldID, field_data_info);
     }
+    for (auto& iter : dataset.schema_->get_fields()) {
+        int64_t field_id = iter.first.get();
+        if (exclude_fields.find(field_id) != exclude_fields.end()) {
+            continue;
+        }
+    }
+    auto fields = dataset.schema_->get_fields();
     for (auto field_data : dataset.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
         if (exclude_fields.find(field_id) != exclude_fields.end()) {
             continue;
         }
-        LoadFieldDataInfo info;
+        FieldDataInfo info;
         if (with_mmap) {
             info.mmap_dir_path = "./data/mmap-test";
         }
         info.field_id = field_data.field_id();
         info.row_count = row_count;
-        info.field_data = &field_data;
-        seg.LoadFieldData(info);
+        auto field_meta = fields.at(FieldId(field_id));
+        info.datas.emplace_back(
+            CreateFieldDataFromDataArray(row_count, &field_data, field_meta));
+
+        seg.LoadFieldData(FieldId(field_id), info);
     }
 }
 

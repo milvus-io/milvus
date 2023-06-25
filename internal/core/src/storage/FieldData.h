@@ -27,8 +27,9 @@ template <typename Type>
 class FieldData : public FieldDataImpl<Type, true> {
  public:
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
-    explicit FieldData(DataType data_type)
-        : FieldDataImpl<Type, true>::FieldDataImpl(1, data_type) {
+    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+        : FieldDataImpl<Type, true>::FieldDataImpl(
+              1, data_type, buffered_num_rows) {
     }
 };
 
@@ -36,23 +37,39 @@ template <>
 class FieldData<std::string> : public FieldDataStringImpl {
  public:
     static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
-    explicit FieldData(DataType data_type) : FieldDataStringImpl(data_type) {
+    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+        : FieldDataStringImpl(data_type, buffered_num_rows) {
+    }
+};
+
+template <>
+class FieldData<Json> : public FieldDataJsonImpl {
+ public:
+    static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);
+    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+        : FieldDataJsonImpl(data_type, buffered_num_rows) {
     }
 };
 
 template <>
 class FieldData<FloatVector> : public FieldDataImpl<float, false> {
  public:
-    explicit FieldData(int64_t dim, DataType data_type)
-        : FieldDataImpl<float, false>::FieldDataImpl(dim, data_type) {
+    explicit FieldData(int64_t dim,
+                       DataType data_type,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<float, false>::FieldDataImpl(
+              dim, data_type, buffered_num_rows) {
     }
 };
 
 template <>
 class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
  public:
-    explicit FieldData(int64_t dim, DataType data_type)
-        : binary_dim_(dim), FieldDataImpl(dim / 8, data_type) {
+    explicit FieldData(int64_t dim,
+                       DataType data_type,
+                       int64_t buffered_num_rows = 0)
+        : binary_dim_(dim),
+          FieldDataImpl(dim / 8, data_type, buffered_num_rows) {
         Assert(dim % 8 == 0);
     }
 
@@ -66,4 +83,5 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
 };
 
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
+
 }  // namespace milvus::storage

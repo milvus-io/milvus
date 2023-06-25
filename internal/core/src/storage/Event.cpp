@@ -15,10 +15,8 @@
 // limitations under the License.
 
 #include "storage/Event.h"
-#include "storage/Util.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
-#include "storage/FieldDataFactory.h"
 #include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 #include "common/Consts.h"
@@ -219,19 +217,42 @@ BaseEventData::Serialize() {
     } else {
         payload_writer = std::make_unique<PayloadWriter>(data_type);
     }
-    if (datatype_is_string(data_type)) {
-        for (size_t offset = 0; offset < field_data->get_num_rows(); ++offset) {
-            payload_writer->add_one_string_payload(
-                reinterpret_cast<const char*>(field_data->RawValue(offset)),
-                field_data->get_element_size(offset));
+    switch (data_type) {
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            for (size_t offset = 0; offset < field_data->get_num_rows();
+                 ++offset) {
+                auto str = static_cast<const std::string*>(
+                    field_data->RawValue(offset));
+                payload_writer->add_one_string_payload(str->c_str(),
+                                                       str->size());
+            }
+            break;
         }
-    } else {
-        auto payload = Payload{data_type,
-                               static_cast<const uint8_t*>(field_data->Data()),
-                               field_data->get_num_rows(),
-                               field_data->get_dim()};
-        payload_writer->add_payload(payload);
+        case DataType::ARRAY:
+        case DataType::JSON: {
+            for (size_t offset = 0; offset < field_data->get_num_rows();
+                 ++offset) {
+                auto string_view =
+                    static_cast<const Json*>(field_data->RawValue(offset))
+                        ->data();
+                payload_writer->add_one_binary_payload(
+                    reinterpret_cast<const uint8_t*>(
+                        std::string(string_view).c_str()),
+                    string_view.size());
+            }
+            break;
+        }
+        default: {
+            auto payload =
+                Payload{data_type,
+                        static_cast<const uint8_t*>(field_data->Data()),
+                        field_data->get_num_rows(),
+                        field_data->get_dim()};
+            payload_writer->add_payload(payload);
+        }
     }
+
     payload_writer->finish();
     auto payload_buffer = payload_writer->get_payload_buffer();
     auto len =
@@ -250,7 +271,7 @@ BaseEventData::Serialize() {
 BaseEvent::BaseEvent(BinlogReaderPtr reader, DataType data_type) {
     event_header = EventHeader(reader);
     auto event_data_length =
-        event_header.event_length_ - event_header.next_position_;
+        event_header.event_length_ - GetEventHeaderSize(event_header);
     event_data = BaseEventData(reader, event_data_length, data_type);
 }
 
@@ -259,8 +280,8 @@ BaseEvent::Serialize() {
     auto data = event_data.Serialize();
     int data_size = data.size();
 
-    event_header.next_position_ = GetEventHeaderSize(event_header);
-    event_header.event_length_ = event_header.next_position_ + data_size;
+    event_header.event_length_ = GetEventHeaderSize(event_header) + data_size;
+    event_header.next_position_ = event_header.event_length_ + event_offset;
     auto header = event_header.Serialize();
     int header_size = header.size();
 
@@ -281,12 +302,11 @@ DescriptorEvent::DescriptorEvent(BinlogReaderPtr reader) {
 
 std::vector<uint8_t>
 DescriptorEvent::Serialize() {
+    event_header.event_type_ = EventType::DescriptorEvent;
     auto data = event_data.Serialize();
     int data_size = data.size();
 
-    event_header.event_type_ = EventType::DescriptorEvent;
-    event_header.next_position_ = GetEventHeaderSize(event_header);
-    event_header.event_length_ = event_header.next_position_ + data_size;
+    event_header.event_length_ = GetEventHeaderSize(event_header) + data_size;
     auto header = event_header.Serialize();
     int header_size = header.size();
 
@@ -298,6 +318,8 @@ DescriptorEvent::Serialize() {
     memcpy(res.data() + offset, header.data(), header_size);
     offset += header_size;
     memcpy(res.data() + offset, data.data(), data_size);
+    offset += data_size;
+    event_header.next_position_ = offset;
 
     return res;
 }

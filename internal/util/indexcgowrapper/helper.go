@@ -79,11 +79,13 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	return errors.New(finalMsg)
 }
 
-func GetLocalUsedSize() (int64, error) {
+func GetLocalUsedSize(path string) (int64, error) {
 	var availableSize int64
 	cSize := (*C.int64_t)(&availableSize)
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
 
-	status := C.GetLocalUsedSize(cSize)
+	status := C.GetLocalUsedSize(cPath, cSize)
 	err := HandleCStatus(&status, "get local used size failed")
 	if err != nil {
 		return 0, err

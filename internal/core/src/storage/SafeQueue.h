@@ -36,7 +36,7 @@ class SafeQueue {
         return queue_.empty();
     }
 
-    void
+    size_t
     size() {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         return queue_.size();

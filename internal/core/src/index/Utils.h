@@ -29,6 +29,7 @@
 #include "common/Types.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
+#include "storage/FieldData.h"
 
 namespace milvus::index {
 
@@ -44,21 +45,11 @@ BIN_List();
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations();
 
-template <typename T>
-inline bool
-is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
-    auto l = list_func();
-    return std::find(l.begin(), l.end(), t) != l.end();
-}
-
 bool
 is_in_bin_list(const IndexType& index_type);
 
 bool
 is_in_nm_list(const IndexType& index_type);
-
-bool
-is_in_disk_list(const IndexType& index_type);
 
 bool
 is_unsupported(const IndexType& index_type, const MetricType& metric_type);
@@ -117,5 +108,8 @@ GetIndexMetaFromConfig(const Config& config);
 Config
 ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
+
+void
+AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas);
 
 }  // namespace milvus::index

@@ -21,7 +21,7 @@
 
 #include "Utils.h"
 #include "Types.h"
-#include "common/Column.h"
+#include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
@@ -29,7 +29,7 @@
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
-#include "index/Utils.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -166,52 +166,73 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
+SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     // print(info);
     // NOTE: lock only when data is ready to avoid starvation
-    AssertInfo(info.row_count > 0, "The row count of field data is 0");
-    auto field_id = FieldId(info.field_id);
-    AssertInfo(info.field_data != nullptr, "Field info blob is null");
-    auto size = info.row_count;
+    // only one field for now, parallel load field data in golang
+    for (auto& [id, info] : load_info.field_infos) {
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+        auto field_id = FieldId(id);
+        auto insert_files = info.insert_files;
+        auto field_datas = LoadFieldDatasFromRemote(insert_files);
+        int64_t num_rows = storage::GetTotalNumRowsForFieldDatas(field_datas);
+        AssertInfo(num_rows == info.row_count,
+                   "inconsistent field data row count with meta");
+        auto field_data_info = FieldDataInfo{
+            field_id.get(), num_rows, field_datas, load_info.mmap_dir_path};
+        LoadFieldData(field_id, field_data_info);
+    }
+}
+
+void
+SegmentSealedImpl::LoadFieldData(FieldId field_id,
+                                 const FieldDataInfo& data_info) {
+    auto num_rows = data_info.row_count;
     if (row_count_opt_.has_value()) {
-        AssertInfo(
-            row_count_opt_.value() == size,
-            fmt::format(
-                "field {} has different row count {} to other column's {}",
-                field_id.get(),
-                size,
-                row_count_opt_.value()));
+        AssertInfo(row_count_opt_.value() == num_rows,
+                   "field (" + std::to_string(field_id.get()) +
+                       ") data has different row count (" +
+                       std::to_string(num_rows) +
+                       ") than other column's row count (" +
+                       std::to_string(row_count_opt_.value()) + ")");
     }
 
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type =
             SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
-            auto timestamps = reinterpret_cast<const Timestamp*>(
-                FIELD_DATA(info.field_data, long).data());
+            std::vector<Timestamp> timestamps(num_rows);
+            int64_t offset = 0;
+            for (auto& data : data_info.datas) {
+                int64_t row_count = data->get_num_rows();
+                std::copy_n(static_cast<const Timestamp*>(data->Data()),
+                            row_count,
+                            timestamps.data() + offset);
+                offset += row_count;
+            }
 
             TimestampIndex index;
-            auto min_slice_length = size < 4096 ? 1 : 4096;
-            auto meta = GenerateFakeSlices(timestamps, size, min_slice_length);
+            auto min_slice_length = num_rows < 4096 ? 1 : 4096;
+            auto meta = GenerateFakeSlices(
+                timestamps.data(), num_rows, min_slice_length);
             index.set_length_meta(std::move(meta));
-            index.build_with(timestamps, size);
+            // todo ::opt to avoid copy timestamps from field data
+            index.build_with(timestamps.data(), num_rows);
 
             // use special index
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-            insert_record_.timestamps_.fill_chunk_data(timestamps, size);
+            insert_record_.timestamps_.fill_chunk_data(data_info.datas);
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
-            auto row_ids = reinterpret_cast<const idx_t*>(
-                FIELD_DATA(info.field_data, long).data());
             // write data under lock
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
-            insert_record_.row_ids_.fill_chunk_data(row_ids, size);
+            insert_record_.row_ids_.fill_chunk_data(data_info.datas);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
         }
@@ -220,36 +241,33 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         auto& field_meta = (*schema_)[field_id];
         auto data_type = field_meta.get_data_type();
-        AssertInfo(data_type == DataType(info.field_data->type()),
-                   "field type of load data is inconsistent with the schema");
 
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id),
                    "field data can't be loaded when indexing exists");
 
-        size_t size = 0;
         if (datatype_is_variable(data_type)) {
             std::unique_ptr<ColumnBase> column{};
             switch (data_type) {
                 case milvus::DataType::STRING:
                 case milvus::DataType::VARCHAR: {
                     column = std::make_unique<VariableColumn<std::string>>(
-                        get_segment_id(), field_meta, info);
+                        get_segment_id(), field_meta, data_info);
                     break;
                 }
                 case milvus::DataType::JSON: {
                     column = std::make_unique<VariableColumn<Json>>(
-                        get_segment_id(), field_meta, info);
+                        get_segment_id(), field_meta, data_info);
                 }
                 default: {
                 }
             }
-            size = column->size();
+
             std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(column));
         } else {
-            auto column = Column(get_segment_id(), field_meta, info);
-            size = column.size();
+            auto column = Column(get_segment_id(), field_meta, data_info);
+
             std::unique_lock lck(mutex_);
             fixed_fields_.emplace(field_id, std::move(column));
         }
@@ -258,19 +276,15 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         if (schema_->get_primary_field_id() == field_id) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
-            std::vector<PkType> pks(info.row_count);
-            ParsePksFromFieldData(pks, *info.field_data);
-
-            for (int i = 0; i < info.row_count; ++i) {
-                insert_record_.insert_pk(pks[i], i);
-            }
+            insert_record_.insert_pks(data_info.datas);
             insert_record_.seal_pks();
         }
+
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
     std::unique_lock lck(mutex_);
-    update_row_count(info.row_count);
+    update_row_count(num_rows);
 }
 
 void

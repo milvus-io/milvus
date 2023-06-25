@@ -28,7 +28,7 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
-#include "common/Column.h"
+#include "mmap/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
 
@@ -55,6 +55,8 @@ class SegmentSealedImpl : public SegmentSealed {
     HasIndex(FieldId field_id) const override;
     bool
     HasFieldData(FieldId field_id) const override;
+    void
+    LoadFieldData(FieldId field_id, const FieldDataInfo& data_info) override;
 
     int64_t
     get_segment_id() const override {

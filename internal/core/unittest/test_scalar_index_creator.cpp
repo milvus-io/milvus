@@ -100,12 +100,19 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Constructor) {
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
         auto index_params = tp.second;
-        auto serialized_type_params = generate_type_params(type_params);
-        auto serialized_index_params = generate_index_params(index_params);
+
+        milvus::Config config;
+        for (auto iter = index_params.begin(); iter != index_params.end();
+             ++iter) {
+            config[iter->first] = iter->second;
+        }
+        for (auto iter = type_params.begin(); iter != type_params.end();
+             ++iter) {
+            config[iter->first] = iter->second;
+        }
+
         auto creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype),
-            serialized_type_params.c_str(),
-            serialized_index_params.c_str());
+            milvus::DataType(dtype), config, nullptr);
     }
 }
 
@@ -115,19 +122,23 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Codec) {
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
         auto index_params = tp.second;
-        auto serialized_type_params = generate_type_params(type_params);
-        auto serialized_index_params = generate_index_params(index_params);
+
+        milvus::Config config;
+        for (auto iter = index_params.begin(); iter != index_params.end();
+             ++iter) {
+            config[iter->first] = iter->second;
+        }
+        for (auto iter = type_params.begin(); iter != type_params.end();
+             ++iter) {
+            config[iter->first] = iter->second;
+        }
         auto creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype),
-            serialized_type_params.c_str(),
-            serialized_index_params.c_str());
+            milvus::DataType(dtype), config, nullptr);
         auto arr = GenArr<T>(nb);
         build_index<T>(creator, arr);
         auto binary_set = creator->Serialize();
         auto copy_creator = milvus::indexbuilder::CreateScalarIndex(
-            milvus::DataType(dtype),
-            serialized_type_params.c_str(),
-            serialized_index_params.c_str());
+            milvus::DataType(dtype), config, nullptr);
         copy_creator->Load(binary_set);
     }
 }

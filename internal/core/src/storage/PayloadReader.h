@@ -26,15 +26,12 @@ namespace milvus::storage {
 
 class PayloadReader {
  public:
-    explicit PayloadReader(std::shared_ptr<PayloadInputStream> input,
-                           DataType data_type);
-
     explicit PayloadReader(const uint8_t* data, int length, DataType data_type);
 
     ~PayloadReader() = default;
 
     void
-    init(std::shared_ptr<PayloadInputStream> input);
+    init(std::shared_ptr<arrow::io::BufferReader> buffer);
 
     const FieldDataPtr
     get_field_data() const {

@@ -1,14 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
-
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 #pragma once
 
 #include <sys/mman.h>
@@ -21,17 +25,9 @@
 #include <string>
 #include <utility>
 
-#include "common/FieldMeta.h"
-#include "common/LoadInfo.h"
-#include "common/Span.h"
-#include "common/Types.h"
-#include "common/Utils.h"
-#include "exceptions/EasyAssert.h"
-#include "fmt/core.h"
-#include "log/Log.h"
-#include "nlohmann/json.hpp"
+#include "mmap/Utils.h"
 
-namespace milvus::segcore {
+namespace milvus {
 
 struct Entry {
     char* data;
@@ -79,7 +75,7 @@ class Column : public ColumnBase {
  public:
     Column(int64_t segment_id,
            const FieldMeta& field_meta,
-           const LoadFieldDataInfo& info) {
+           const FieldDataInfo& info) {
         data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
         size_ = field_meta.get_sizeof() * info.row_count;
         row_count_ = info.row_count;
@@ -109,20 +105,13 @@ class VariableColumn : public ColumnBase {
 
     VariableColumn(int64_t segment_id,
                    const FieldMeta& field_meta,
-                   const LoadFieldDataInfo& info) {
-        auto begin = FIELD_DATA(info.field_data, string).begin();
-        auto end = FIELD_DATA(info.field_data, string).end();
-        if constexpr (std::is_same_v<T, Json>) {
-            begin = FIELD_DATA(info.field_data, json).begin();
-            end = FIELD_DATA(info.field_data, json).end();
-        }
-
-        size_ = 0;
+                   const FieldDataInfo& info) {
         indices_.reserve(info.row_count);
-        while (begin != end) {
-            indices_.push_back(size_);
-            size_ += begin->length();
-            begin++;
+        for (auto data : info.datas) {
+            for (ssize_t idx = 0; idx < data->get_num_rows(); ++idx) {
+                indices_.emplace_back(size_);
+                size_ += data->Size(idx);
+            }
         }
 
         data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
@@ -177,4 +166,4 @@ class VariableColumn : public ColumnBase {
     // Compatible with current Span type
     std::vector<ViewType> views_{};
 };
-}  // namespace milvus::segcore
+}  // namespace milvus

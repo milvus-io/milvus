@@ -51,20 +51,6 @@ IndexData::serialize_to_remote_file() {
     AssertInfo(index_meta_.has_value(), "index meta not exist");
     AssertInfo(field_data_ != nullptr, "empty field data");
 
-    // create index event
-    IndexEvent index_event;
-    auto& index_event_data = index_event.event_data;
-    index_event_data.start_timestamp = time_range_.first;
-    index_event_data.end_timestamp = time_range_.second;
-    index_event_data.field_data = field_data_;
-
-    auto& index_event_header = index_event.event_header;
-    index_event_header.event_type_ = EventType::IndexFileEvent;
-    // TODO :: set timestamps
-    index_event_header.timestamp_ = 0;
-
-    // serialize insert event
-    auto index_event_bytes = index_event.Serialize();
     DataType data_type = field_data_->get_data_type();
 
     // create descriptor event
@@ -95,6 +81,22 @@ IndexData::serialize_to_remote_file() {
 
     // serialize descriptor event data
     auto des_event_bytes = descriptor_event.Serialize();
+
+    // create index event
+    IndexEvent index_event;
+    index_event.event_offset = des_event_bytes.size();
+    auto& index_event_data = index_event.event_data;
+    index_event_data.start_timestamp = time_range_.first;
+    index_event_data.end_timestamp = time_range_.second;
+    index_event_data.field_data = field_data_;
+
+    auto& index_event_header = index_event.event_header;
+    index_event_header.event_type_ = EventType::IndexFileEvent;
+    // TODO :: set timestamps
+    index_event_header.timestamp_ = 0;
+
+    // serialize insert event
+    auto index_event_bytes = index_event.Serialize();
 
     des_event_bytes.insert(des_event_bytes.end(),
                            index_event_bytes.begin(),

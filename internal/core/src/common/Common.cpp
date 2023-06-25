@@ -19,27 +19,27 @@
 
 namespace milvus {
 
-int64_t index_file_slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
-int64_t thread_core_coefficient = DEFAULT_THREAD_CORE_COEFFICIENT;
-int cpu_num = DEFAULT_CPU_NUM;
+int64_t FILE_SLICE_SIZE = DEFAULT_INDEX_FILE_SLICE_SIZE;
+int64_t THREAD_CORE_COEFFICIENT = DEFAULT_THREAD_CORE_COEFFICIENT;
+int CPU_NUM = DEFAULT_CPU_NUM;
 
 void
 SetIndexSliceSize(const int64_t size) {
-    index_file_slice_size = size;
-    LOG_SEGCORE_DEBUG_ << "set config index slice size: "
-                       << index_file_slice_size;
+    FILE_SLICE_SIZE = size << 20;
+    LOG_SEGCORE_DEBUG_ << "set config index slice size (byte): "
+                       << FILE_SLICE_SIZE;
 }
 
 void
 SetThreadCoreCoefficient(const int64_t coefficient) {
-    thread_core_coefficient = coefficient;
+    THREAD_CORE_COEFFICIENT = coefficient;
     LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: "
-                       << thread_core_coefficient;
+                       << THREAD_CORE_COEFFICIENT;
 }
 
 void
 SetCpuNum(const int num) {
-    cpu_num = num;
+    CPU_NUM = num;
 }
 
 }  // namespace milvus

@@ -34,9 +34,6 @@ void
 InitCpuNum(const int);
 
 void
-InitLocalRootPath(const char*);
-
-void
 InitTrace(CTraceConfig* config);
 
 #ifdef __cplusplus

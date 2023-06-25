@@ -21,30 +21,14 @@
 namespace milvus::indexbuilder {
 
 ScalarIndexCreator::ScalarIndexCreator(DataType dtype,
-                                       const char* type_params,
-                                       const char* index_params)
-    : dtype_(dtype) {
-    // TODO: move parse-related logic to a common interface.
-    proto::indexcgo::TypeParams type_params_;
-    proto::indexcgo::IndexParams index_params_;
-    milvus::index::ParseFromString(type_params_, std::string(type_params));
-    milvus::index::ParseFromString(index_params_, std::string(index_params));
-
-    for (auto i = 0; i < type_params_.params_size(); ++i) {
-        const auto& param = type_params_.params(i);
-        config_[param.key()] = param.value();
-    }
-
-    for (auto i = 0; i < index_params_.params_size(); ++i) {
-        const auto& param = index_params_.params(i);
-        config_[param.key()] = param.value();
-    }
-
+                                       Config& config,
+                                       storage::FileManagerImplPtr file_manager)
+    : dtype_(dtype), config_(config) {
     milvus::index::CreateIndexInfo index_info;
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
-    index_ =
-        index::IndexFactory::GetInstance().CreateIndex(index_info, nullptr);
+    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info,
+                                                            file_manager);
 }
 
 void
@@ -52,6 +36,11 @@ ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
     auto size = dataset->GetRows();
     auto data = dataset->GetTensor();
     index_->BuildWithRawData(size, data);
+}
+
+void
+ScalarIndexCreator::Build() {
+    index_->Build(config_);
 }
 
 milvus::BinarySet
@@ -68,6 +57,11 @@ std::string
 ScalarIndexCreator::index_type() {
     // TODO
     return "sort";
+}
+
+BinarySet
+ScalarIndexCreator::Upload() {
+    return index_->Upload();
 }
 
 }  // namespace milvus::indexbuilder

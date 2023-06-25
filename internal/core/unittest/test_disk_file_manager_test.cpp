@@ -16,13 +16,13 @@
 #include <unistd.h>
 
 #include "common/Slice.h"
+#include "common/Common.h"
 #include "storage/Event.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/MinioChunkManager.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/ThreadPool.h"
-#include "storage/FieldDataFactory.h"
-#include "config/ConfigChunkManager.h"
+#include "storage/Util.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/LocalChunkManagerSingleton.h"
+
 #include "test_utils/indexbuilder_test_utils.h"
 
 using namespace std;
@@ -40,104 +40,31 @@ class DiskAnnFileManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        ChunkMangerConfig::SetLocalRootPath("/tmp/diskann");
-        storage_config_ = get_default_storage_config();
+        cm_ = storage::CreateChunkManager(get_default_storage_config());
     }
 
  protected:
-    StorageConfig storage_config_;
+    ChunkManagerPtr cm_;
 };
 
-TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
-    auto& lcm = LocalChunkManager::GetInstance();
-    string testBucketName = "test-diskann";
-    storage_config_.bucket_name = testBucketName;
-    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
-    if (!rcm->BucketExists(testBucketName)) {
-        rcm->CreateBucket(testBucketName);
-    }
-
-    std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
-    auto exist = lcm.Exist(indexFilePath);
-    EXPECT_EQ(exist, false);
-    uint64_t index_size = 1024;
-    lcm.CreateFile(indexFilePath);
-    std::vector<uint8_t> data(index_size);
-    lcm.Write(indexFilePath, data.data(), index_size);
-
-    // collection_id: 1, partition_id: 2, segment_id: 3
-    // field_id: 100, index_build_id: 1000, index_version: 1
-    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
-    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
-
-    int64_t slice_size = milvus::index_file_slice_size << 20;
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        filed_data_meta, index_meta, storage_config_);
-    auto ok = diskAnnFileManager->AddFile(indexFilePath);
-    EXPECT_EQ(ok, true);
-
-    auto remote_files_to_size = diskAnnFileManager->GetRemotePathsToFileSize();
-    auto num_slice = index_size / slice_size;
-    EXPECT_EQ(remote_files_to_size.size(),
-              index_size % slice_size == 0 ? num_slice : num_slice + 1);
-
-    std::vector<std::string> remote_files;
-    for (auto& file2size : remote_files_to_size) {
-        remote_files.emplace_back(file2size.first);
-    }
-    diskAnnFileManager->CacheIndexToDisk(remote_files);
-    auto local_files = diskAnnFileManager->GetLocalFilePaths();
-    for (auto& file : local_files) {
-        auto file_size = lcm.Size(file);
-        auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
-        lcm.Read(file, buf.get(), file_size);
-
-        auto index =
-            milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-                storage::DataType::INT8);
-        index->FillFieldData(buf.get(), file_size);
-        auto rows = index->get_num_rows();
-        auto rawData = (uint8_t*)(index->Data());
-
-        EXPECT_EQ(rows, index_size);
-        EXPECT_EQ(rawData[0], data[0]);
-        EXPECT_EQ(rawData[4], data[4]);
-    }
-
-    auto objects =
-        rcm->ListWithPrefix(diskAnnFileManager->GetRemoteIndexObjectPrefix());
-    for (auto obj : objects) {
-        rcm->Remove(obj);
-    }
-    ok = rcm->DeleteBucket(testBucketName);
-    EXPECT_EQ(ok, true);
-}
-
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
-    auto& lcm = LocalChunkManager::GetInstance();
-    string testBucketName = "test-diskann";
-    storage_config_.bucket_name = testBucketName;
-    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
-    if (!rcm->BucketExists(testBucketName)) {
-        rcm->CreateBucket(testBucketName);
-    }
-
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
-    auto exist = lcm.Exist(indexFilePath);
+    auto exist = lcm->Exist(indexFilePath);
     EXPECT_EQ(exist, false);
     uint64_t index_size = 50 << 20;
-    lcm.CreateFile(indexFilePath);
+    lcm->CreateFile(indexFilePath);
     std::vector<uint8_t> data(index_size);
-    lcm.Write(indexFilePath, data.data(), index_size);
+    lcm->Write(indexFilePath, data.data(), index_size);
 
     // collection_id: 1, partition_id: 2, segment_id: 3
     // field_id: 100, index_build_id: 1000, index_version: 1
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
-    int64_t slice_size = milvus::index_file_slice_size << 20;
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        filed_data_meta, index_meta, storage_config_);
+    int64_t slice_size = milvus::FILE_SLICE_SIZE;
+    auto diskAnnFileManager =
+        std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta, cm_);
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
@@ -154,13 +81,11 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     diskAnnFileManager->CacheIndexToDisk(remote_files);
     auto local_files = diskAnnFileManager->GetLocalFilePaths();
     for (auto& file : local_files) {
-        auto file_size = lcm.Size(file);
+        auto file_size = lcm->Size(file);
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
-        lcm.Read(file, buf.get(), file_size);
+        lcm->Read(file, buf.get(), file_size);
 
-        auto index =
-            milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
-                storage::DataType::INT8);
+        auto index = milvus::storage::CreateFieldData(storage::DataType::INT8);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
         auto rawData = (uint8_t*)(index->Data());
@@ -170,13 +95,9 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         EXPECT_EQ(rawData[4], data[4]);
     }
 
-    auto objects =
-        rcm->ListWithPrefix(diskAnnFileManager->GetRemoteIndexObjectPrefix());
-    for (auto obj : objects) {
-        rcm->Remove(obj);
+    for (auto file : local_files) {
+        cm_->Remove(file);
     }
-    ok = rcm->DeleteBucket(testBucketName);
-    EXPECT_EQ(ok, true);
 }
 
 int

@@ -14,20 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "config/ConfigChunkManager.h"
+#include <stdint.h>
+#include <string>
+#include <vector>
+#include "common/Types.h"
+#include "index/Index.h"
+#include "storage/Types.h"
 
-namespace milvus::ChunkMangerConfig {
-
-std::string LOCAL_ROOT_PATH = "/tmp/milvus";  // NOLINT
-
-void
-SetLocalRootPath(const std::string_view path_prefix) {
-    LOCAL_ROOT_PATH = path_prefix;
-}
-
-std::string
-GetLocalRootPath() {
-    return LOCAL_ROOT_PATH;
-}
-
-}  // namespace milvus::ChunkMangerConfig
+struct BuildIndexInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    int64_t segment_id;
+    int64_t field_id;
+    milvus::DataType field_type;
+    int64_t index_id;
+    int64_t index_build_id;
+    int64_t index_version;
+    std::vector<std::string> insert_files;
+    milvus::storage::StorageConfig storage_config;
+    milvus::Config config;
+};

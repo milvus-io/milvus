@@ -25,11 +25,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type SearchSuite struct {
 	suite.Suite
+	chunkManager storage.ChunkManager
 
 	manager      *Manager
 	collectionID int64
@@ -46,6 +48,13 @@ func (suite *SearchSuite) SetupSuite() {
 
 func (suite *SearchSuite) SetupTest() {
 	var err error
+	ctx := context.Background()
+	msgLength := 100
+
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
 	suite.collectionID = 100
 	suite.partitionID = 10
 	suite.segmentID = 1
@@ -76,6 +85,20 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
+	binlogs, _, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		schema,
+		suite.chunkManager,
+	)
+	suite.Require().NoError(err)
+	for _, binlog := range binlogs {
+		err = suite.sealed.LoadFieldData(binlog.FieldID, int64(msgLength), binlog)
+		suite.Require().NoError(err)
+	}
+
 	suite.growing, err = NewSegment(suite.collection,
 		suite.segmentID+1,
 		suite.partitionID,
@@ -88,19 +111,9 @@ func (suite *SearchSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	insertData, err := genInsertData(100, suite.collection.Schema())
+	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.segmentID, msgLength)
 	suite.Require().NoError(err)
-	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
-	suite.Require().NoError(err)
-	numRows := insertRecord.NumRows
-	for _, fieldData := range insertRecord.FieldsData {
-		err = suite.sealed.LoadField(numRows, fieldData)
-		suite.Require().NoError(err)
-	}
-
-	insertMsg, err := genInsertMsg(suite.collection, suite.partitionID, suite.growing.segmentID, 100)
-	suite.Require().NoError(err)
-	insertRecord, err = storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
 	suite.Require().NoError(err)
 	suite.growing.Insert(insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 
@@ -111,6 +124,8 @@ func (suite *SearchSuite) SetupTest() {
 func (suite *SearchSuite) TearDownTest() {
 	DeleteSegment(suite.sealed)
 	DeleteCollection(suite.collection)
+	ctx := context.Background()
+	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
 }
 
 func (suite *SearchSuite) TestSearchSealed() {

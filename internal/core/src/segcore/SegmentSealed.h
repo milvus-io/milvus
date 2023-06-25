@@ -18,6 +18,7 @@
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "mmap/Column.h"
 
 namespace milvus::segcore {
 
@@ -28,11 +29,11 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
-    virtual void
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
+    virtual void
+    LoadFieldData(FieldId field_id, const FieldDataInfo& data_info) = 0;
 
     SegmentType
     type() const override {

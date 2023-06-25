@@ -25,17 +25,13 @@ package segments
 import "C"
 
 import (
-	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -49,35 +45,7 @@ type LoadIndexInfo struct {
 func newLoadIndexInfo() (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 
-	// TODO::xige-16 support embedded milvus
-	storageType := "minio"
-	cAddress := C.CString(paramtable.Get().MinioCfg.Address.GetValue())
-	cBucketName := C.CString(paramtable.Get().MinioCfg.BucketName.GetValue())
-	cAccessKey := C.CString(paramtable.Get().MinioCfg.AccessKeyID.GetValue())
-	cAccessValue := C.CString(paramtable.Get().MinioCfg.SecretAccessKey.GetValue())
-	cRootPath := C.CString(paramtable.Get().MinioCfg.RootPath.GetValue())
-	cStorageType := C.CString(storageType)
-	cIamEndPoint := C.CString(paramtable.Get().MinioCfg.IAMEndpoint.GetValue())
-	defer C.free(unsafe.Pointer(cAddress))
-	defer C.free(unsafe.Pointer(cBucketName))
-	defer C.free(unsafe.Pointer(cAccessKey))
-	defer C.free(unsafe.Pointer(cAccessValue))
-	defer C.free(unsafe.Pointer(cRootPath))
-	defer C.free(unsafe.Pointer(cStorageType))
-	defer C.free(unsafe.Pointer(cIamEndPoint))
-	storageConfig := C.CStorageConfig{
-		address:          cAddress,
-		bucket_name:      cBucketName,
-		access_key_id:    cAccessKey,
-		access_key_value: cAccessValue,
-		remote_root_path: cRootPath,
-		storage_type:     cStorageType,
-		iam_endpoint:     cIamEndPoint,
-		useSSL:           C.bool(paramtable.Get().MinioCfg.UseSSL.GetAsBool()),
-		useIAM:           C.bool(paramtable.Get().MinioCfg.UseIAM.GetAsBool()),
-	}
-
-	status := C.NewLoadIndexInfo(&cLoadIndexInfo, storageConfig)
+	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
 	if err := HandleCStatus(&status, "NewLoadIndexInfo failed"); err != nil {
 		return nil, err
 	}
@@ -105,14 +73,12 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 
 	// some build params also exist in indexParams, which are useless during loading process
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows())
-
-	jsonIndexParams, err := json.Marshal(indexParams)
-	if err != nil {
-		err = fmt.Errorf("failed to json marshal index params %w", err)
-		return err
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+		err = indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows())
+		if err != nil {
+			return err
+		}
 	}
-	log.Info("start append index params", zap.String("index params", string(jsonIndexParams)))
 
 	for key, value := range indexParams {
 		err = li.appendIndexParam(key, value)
@@ -168,7 +134,7 @@ func (li *LoadIndexInfo) appendFieldInfo(collectionID int64, partitionID int64, 
 	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 
-// appendIndexData appends binarySet index to cLoadIndexInfo
+// appendIndexData appends index path to cLoadIndexInfo and create index
 func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string) error {
 	for _, indexPath := range indexKeys {
 		err := li.appendIndexFile(indexPath)
@@ -177,26 +143,30 @@ func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string
 		}
 	}
 
-	var cBinarySet C.CBinarySet
-	status := C.NewBinarySet(&cBinarySet)
-	defer C.DeleteBinarySet(cBinarySet)
-
-	if err := HandleCStatus(&status, "NewBinarySet failed"); err != nil {
-		return err
-	}
-
-	for i, byteIndex := range bytesIndex {
-		indexPtr := unsafe.Pointer(&byteIndex[0])
-		indexLen := C.int64_t(len(byteIndex))
-		binarySetKey := filepath.Base(indexKeys[i])
-		indexKey := C.CString(binarySetKey)
-		status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
-		C.free(unsafe.Pointer(indexKey))
-		if err := HandleCStatus(&status, "LoadIndexInfo AppendIndexBinary failed"); err != nil {
+	if bytesIndex != nil {
+		var cBinarySet C.CBinarySet
+		status := C.NewBinarySet(&cBinarySet)
+		defer C.DeleteBinarySet(cBinarySet)
+		if err := HandleCStatus(&status, "NewBinarySet failed"); err != nil {
 			return err
 		}
+
+		for i, byteIndex := range bytesIndex {
+			indexPtr := unsafe.Pointer(&byteIndex[0])
+			indexLen := C.int64_t(len(byteIndex))
+			binarySetKey := filepath.Base(indexKeys[i])
+			indexKey := C.CString(binarySetKey)
+			status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
+			C.free(unsafe.Pointer(indexKey))
+			if err := HandleCStatus(&status, "LoadIndexInfo AppendIndexBinary failed"); err != nil {
+				return err
+			}
+		}
+
+		status = C.AppendIndex(li.cLoadIndexInfo, cBinarySet)
+		return HandleCStatus(&status, "AppendIndex failed")
 	}
 
-	status = C.AppendIndex(li.cLoadIndexInfo, cBinarySet)
+	status := C.AppendIndexV2(li.cLoadIndexInfo)
 	return HandleCStatus(&status, "AppendIndex failed")
 }

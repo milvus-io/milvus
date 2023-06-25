@@ -621,22 +621,24 @@ TEST(Sealed, LoadScalarIndex) {
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
         FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto array = CreateScalarDataArrayFrom(
-        dataset.row_ids_.data(), N, row_id_field_meta);
-    row_id_info.field_data = array.get();
-    row_id_info.row_count = dataset.row_ids_.size();
-    row_id_info.field_id = RowFieldID.get();  // field id for RowId
-    segment->LoadFieldData(row_id_info);
+    auto field_data =
+        std::make_shared<milvus::storage::FieldData<int64_t>>(DataType::INT64);
+    field_data->FillFieldData(dataset.row_ids_.data(), N);
+    auto field_data_info = FieldDataInfo{
+        RowFieldID.get(), N, std::vector<storage::FieldDataPtr>{field_data}};
+    segment->LoadFieldData(RowFieldID, field_data_info);
 
     LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(
         FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    array =
-        CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    ts_info.field_data = array.get();
-    ts_info.row_count = dataset.timestamps_.size();
-    ts_info.field_id = TimestampFieldID.get();
-    segment->LoadFieldData(ts_info);
+    field_data =
+        std::make_shared<milvus::storage::FieldData<int64_t>>(DataType::INT64);
+    field_data->FillFieldData(dataset.timestamps_.data(), N);
+    field_data_info =
+        FieldDataInfo{TimestampFieldID.get(),
+                      N,
+                      std::vector<storage::FieldDataPtr>{field_data}};
+    segment->LoadFieldData(TimestampFieldID, field_data_info);
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -886,14 +888,6 @@ GenQueryVecs(int N, int dim) {
     return vecs;
 }
 
-auto
-transfer_to_fields_data(const std::vector<float>& vecs) {
-    auto arr = std::make_unique<DataArray>();
-    *(arr->mutable_vectors()->mutable_float_vector()->mutable_data()) = {
-        vecs.begin(), vecs.end()};
-    return arr;
-}
-
 TEST(Sealed, BF) {
     auto schema = std::make_shared<Schema>();
     auto dim = 128;
@@ -904,18 +898,18 @@ TEST(Sealed, BF) {
     schema->set_primary_field_id(i64_fid);
 
     int64_t N = 100000;
-    auto base = GenRandomFloatVecs(N, dim);
-    auto base_arr = transfer_to_fields_data(base);
-    base_arr->set_type(proto::schema::DataType::FloatVector);
-
-    LoadFieldDataInfo load_info{100, base_arr.get(), N};
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     std::cout << fake_id.get() << std::endl;
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
-    segment->LoadFieldData(load_info);
+    auto vec_data = GenRandomFloatVecs(N, dim);
+    auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
+    field_data->FillFieldData(vec_data.data(), N);
+    auto field_data_info = FieldDataInfo{
+        fake_id.get(), N, std::vector<storage::FieldDataPtr>{field_data}};
+    segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
     auto fmt = boost::format(R"(vector_anns: <
@@ -961,16 +955,18 @@ TEST(Sealed, BF_Overflow) {
     schema->set_primary_field_id(i64_fid);
 
     int64_t N = 10;
-    auto base = GenMaxFloatVecs(N, dim);
-    auto base_arr = transfer_to_fields_data(base);
-    base_arr->set_type(proto::schema::DataType::FloatVector);
-    LoadFieldDataInfo load_info{100, base_arr.get(), N};
+
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     std::cout << fake_id.get() << std::endl;
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
-    segment->LoadFieldData(load_info);
+    auto vec_data = GenMaxFloatVecs(N, dim);
+    auto field_data = storage::CreateFieldData(DataType::VECTOR_FLOAT, dim);
+    field_data->FillFieldData(vec_data.data(), N);
+    auto field_data_info = FieldDataInfo{
+        fake_id.get(), N, std::vector<storage::FieldDataPtr>{field_data}};
+    segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
     auto fmt = boost::format(R"(vector_anns: <

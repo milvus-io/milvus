@@ -23,14 +23,9 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/Timer.h"
-
-#ifdef BUILD_DISK_ANN
-#include "storage/MinioChunkManager.h"
-#include "storage/DiskFileManagerImpl.h"
+#include "storage/Util.h"
 
 using namespace boost::filesystem;
-#endif
-
 using namespace milvus;
 using namespace milvus::segcore;
 
@@ -291,10 +286,6 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         storage_config_ = get_default_storage_config();
-        // auto rcm = std::make_shared<storage::MinioChunkManager>(storage_config_);
-        // if (!rcm->BucketExists(storage_config_.bucket_name)) {
-        //     rcm->CreateBucket(storage_config_.bucket_name);
-        // }
 
         auto param = GetParam();
         index_type = param.first;
@@ -373,12 +364,10 @@ INSTANTIATE_TEST_CASE_P(
                   knowhere::metric::TANIMOTO),
         std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
                   knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)
-        // ci ut not start minio, so not run ut about diskann index for now
-        // #ifdef BUILD_DISK_ANN
-        //     std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
-        // #endif
-        ));
+#ifdef BUILD_DISK_ANN
+        std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+#endif
+        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
 TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::CreateIndexInfo create_index_info;
@@ -386,37 +375,26 @@ TEST_P(IndexTest, BuildAndQuery) {
     create_index_info.metric_type = metric_type;
     create_index_info.field_type = vec_field_data_type;
     index::IndexBasePtr index;
-    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
-        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager =
-            std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                field_data_meta, index_meta, storage_config_);
-        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, file_manager);
-#endif
-    } else {
-        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, nullptr);
-    }
+
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
+    auto file_manager = milvus::storage::CreateFileManager(
+        index_type, field_data_meta, index_meta, chunk_manager);
+    index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager);
+
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
         // TODO ::diskann.query need load first, ugly
         auto binary_set = index->Serialize(milvus::Config{});
         index.reset();
-        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager =
-            std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                field_data_meta, index_meta, storage_config_);
+
         new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             create_index_info, file_manager);
-
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
         std::vector<std::string> index_files;
@@ -426,7 +404,6 @@ TEST_P(IndexTest, BuildAndQuery) {
         load_conf["index_files"] = index_files;
         ASSERT_NO_THROW(vec_index->Load(binary_set, load_conf));
         EXPECT_EQ(vec_index->Count(), NB);
-#endif
     } else {
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
     }
@@ -456,34 +433,23 @@ TEST_P(IndexTest, GetVector) {
     create_index_info.field_type = vec_field_data_type;
     index::IndexBasePtr index;
 
-    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
-        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager =
-            std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                field_data_meta, index_meta, storage_config_);
-        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, file_manager);
-#endif
-    } else {
-        index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, nullptr);
-    }
+    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config_);
+    auto file_manager = milvus::storage::CreateFileManager(
+        index_type, field_data_meta, index_meta, chunk_manager);
+    index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager);
+
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-#ifdef BUILD_DISK_ANN
         // TODO ::diskann.query need load first, ugly
         auto binary_set = index->Serialize(milvus::Config{});
         index.reset();
-        milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-        milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager =
-            std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                field_data_meta, index_meta, storage_config_);
+
         new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             create_index_info, file_manager);
 
@@ -496,7 +462,6 @@ TEST_P(IndexTest, GetVector) {
         load_conf["index_files"] = index_files;
         vec_index->Load(binary_set, load_conf);
         EXPECT_EQ(vec_index->Count(), NB);
-#endif
     } else {
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
     }
@@ -534,73 +499,81 @@ TEST_P(IndexTest, GetVector) {
     }
 }
 
-// #ifdef BUILD_DISK_ANN
-//  TEST(Indexing, SearchDiskAnnWithInvalidParam) {
-//     int64_t NB = 10000;
-//     IndexType index_type = knowhere::IndexEnum::INDEX_DISKANN;
-//     MetricType metric_type = knowhere::metric::L2;
-//     milvus::index::CreateIndexInfo create_index_info;
-//     create_index_info.index_type = index_type;
-//     create_index_info.metric_type = metric_type;
-//     create_index_info.field_type = milvus::DataType::VECTOR_FLOAT;
-//
-//     StorageConfig storage_config = get_default_storage_config();
-//     auto rcm = std::make_shared<storage::MinioChunkManager>(storage_config);
-//     if (!rcm->BucketExists(storage_config.bucket_name)) {
-//         rcm->CreateBucket(storage_config.bucket_name);
-//     }
-//     milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-//     milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-//     auto file_manager =
-//         std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta, storage_config);
-//     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, file_manager);
-//
-//     auto build_conf = knowhere::Config{
-//         {knowhere::meta::METRIC_TYPE, metric_type},
-//         {knowhere::meta::DIM, std::to_string(DIM)},
-//         {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(48)},
-//         {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(128)},
-//         {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
-//         {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
-//     };
-//
-//     // build disk ann index
-//     auto dataset = GenDataset(NB, metric_type, false);
-//     std::vector<float> xb_data = dataset.get_col<float>(milvus::FieldId(100));
-//     knowhere::DatasetPtr xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
-//     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
-//
-//     // serialize and load disk index, disk index can only be search after loading for now
-//     auto binary_set = index->Serialize(milvus::Config{});
-//     index.reset();
-//     // clean local file dir
-//     file_manager.reset();
-//
-//     auto new_file_manager =
-//         std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta, storage_config);
-//     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, new_file_manager);
-//     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-//     std::vector<std::string> index_files;
-//     for (auto& binary : binary_set.binary_map_) {
-//         index_files.emplace_back(binary.first);
-//     }
-//     auto load_conf = generate_load_conf(index_type, metric_type, NB);
-//     load_conf["index_files"] = index_files;
-//     vec_index->Load(binary_set, load_conf);
-//     EXPECT_EQ(vec_index->Count(), NB);
-//
-//     // search disk index with search_list == limit
-//     int query_offset = 100;
-//     knowhere::DatasetPtr xq_dataset = knowhere::GenDataset(NQ, DIM, xb_data.data() + DIM * query_offset);
-//
-//     milvus::SearchInfo search_info;
-//     search_info.topk_ = K;
-//     search_info.metric_type_ = metric_type;
-//     search_info.search_params_ = milvus::Config{
-//         {knowhere::meta::METRIC_TYPE, metric_type},
-//         {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
-//     };
-//     EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr), std::runtime_error);
-//     // vec_index->Query(xq_dataset, search_info, nullptr);
-// }
-// #endif
+#ifdef BUILD_DISK_ANN
+TEST(Indexing, SearchDiskAnnWithInvalidParam) {
+    int64_t NB = 10000;
+    IndexType index_type = knowhere::IndexEnum::INDEX_DISKANN;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT;
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto file_manager = milvus::storage::CreateFileManager(
+        index_type, field_data_meta, index_meta, chunk_manager);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(48)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(128)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+    };
+
+    // build disk ann index
+    auto dataset = GenDataset(NB, metric_type, false);
+    std::vector<float> xb_data =
+        dataset.get_col<float>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+
+    // serialize and load disk index, disk index can only be search after loading for now
+    auto binary_set = index->Upload();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
+    }
+    auto load_conf = generate_load_conf(index_type, metric_type, NB);
+    load_conf["index_files"] = index_files;
+    vec_index->Load(load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    // search disk index with search_list == limit
+    int query_offset = 100;
+    knowhere::DataSetPtr xq_dataset =
+        knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = K;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
+    };
+    EXPECT_THROW(vec_index->Query(xq_dataset, search_info, nullptr),
+                 std::runtime_error);
+}
+#endif

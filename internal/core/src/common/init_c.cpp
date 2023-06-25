@@ -20,36 +20,24 @@
 #include "common/init_c.h"
 
 #include <string>
-#include "config/ConfigChunkManager.h"
 #include "common/Slice.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4;
+std::once_flag flag1, flag2, flag3;
 std::once_flag traceFlag;
-
-void
-InitLocalRootPath(const char* root_path) {
-    std::string local_path_root(root_path);
-    std::call_once(
-        flag1,
-        [](std::string path) {
-            milvus::ChunkMangerConfig::SetLocalRootPath(path);
-        },
-        local_path_root);
-}
 
 void
 InitIndexSliceSize(const int64_t size) {
     std::call_once(
-        flag2, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
+        flag1, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
 }
 
 void
 InitThreadCoreCoefficient(const int64_t value) {
     std::call_once(
-        flag3,
+        flag2,
         [](int64_t value) { milvus::SetThreadCoreCoefficient(value); },
         value);
 }
@@ -57,7 +45,7 @@ InitThreadCoreCoefficient(const int64_t value) {
 void
 InitCpuNum(const int value) {
     std::call_once(
-        flag4, [](int value) { milvus::SetCpuNum(value); }, value);
+        flag3, [](int value) { milvus::SetCpuNum(value); }, value);
 }
 
 void

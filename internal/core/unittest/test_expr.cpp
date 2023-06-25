@@ -1110,11 +1110,16 @@ TEST(Expr, TestCompareExpr) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    for (auto& [field_id, field_meta] : schema->get_fields()) {
-        auto array = raw_data.get_col(field_id);
-        auto data_info =
-            LoadFieldDataInfo{field_id.get(), array.get(), N, "/tmp/a"};
-        seg->LoadFieldData(data_info);
+    auto fields = schema->get_fields();
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo{field_data.field_id(), N, {}, "/tmp/a"};
+        auto field_meta = fields.at(FieldId(field_id));
+        info.datas.emplace_back(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+
+        seg->LoadFieldData(FieldId(field_id), info);
     }
 
     ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
@@ -1253,13 +1258,16 @@ TEST(Expr, TestExprs) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    for (auto& [field_id, field_meta] : schema->get_fields()) {
-        std::cout << field_id.get() << field_meta.get_name().get() << std::endl;
-        auto array = raw_data.get_col(field_id);
+    auto fields = schema->get_fields();
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
 
-        auto data_info =
-            LoadFieldDataInfo{field_id.get(), array.get(), N, "/tmp/a"};
-        seg->LoadFieldData(data_info);
+        auto info = FieldDataInfo{field_data.field_id(), N, {}, "/tmp/a"};
+        auto field_meta = fields.at(FieldId(field_id));
+        info.datas.emplace_back(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+
+        seg->LoadFieldData(FieldId(field_id), info);
     }
 
     ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);

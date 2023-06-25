@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <map>
 
 namespace milvus::storage {
 
@@ -112,23 +113,23 @@ class ChunkManager {
      */
     virtual std::string
     GetName() const = 0;
-};
 
-/**
- * @brief RemoteChunkManager is responsible for read and write Remote file
- * that inherited from ChunkManager.
- */
-
-class RemoteChunkManager : public ChunkManager {
- public:
-    virtual ~RemoteChunkManager() {
-    }
+    /**
+     * @brief Get the Root Path
+     * @return std::string
+     */
     virtual std::string
-    GetName() const {
-        return "RemoteChunkManager";
-    }
+    GetRootPath() const = 0;
 };
 
-using RemoteChunkManagerPtr = std::unique_ptr<RemoteChunkManager>;
+using ChunkManagerPtr = std::shared_ptr<ChunkManager>;
+
+enum ChunkManagerType : int8_t {
+    None_CM = 0,
+    Local = 1,
+    Minio = 2,
+};
+
+extern std::map<std::string, ChunkManagerType> ChunkManagerType_Map;
 
 }  // namespace milvus::storage

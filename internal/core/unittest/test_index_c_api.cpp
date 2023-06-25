@@ -47,11 +47,8 @@ TEST(FloatVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype,
-                             type_params_str.c_str(),
-                             index_params_str.c_str(),
-                             &index,
-                             c_storage_config);
+        status = CreateIndex(
+            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -66,8 +63,7 @@ TEST(FloatVecIndex, All) {
         status = CreateIndex(dtype,
                              type_params_str.c_str(),
                              index_params_str.c_str(),
-                             &copy_index,
-                             c_storage_config);
+                             &copy_index);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -110,11 +106,8 @@ TEST(BinaryVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype,
-                             type_params_str.c_str(),
-                             index_params_str.c_str(),
-                             &index,
-                             c_storage_config);
+        status = CreateIndex(
+            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -129,8 +122,7 @@ TEST(BinaryVecIndex, All) {
         status = CreateIndex(dtype,
                              type_params_str.c_str(),
                              index_params_str.c_str(),
-                             &copy_index,
-                             c_storage_config);
+                             &copy_index);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -174,8 +166,7 @@ TEST(CBoolIndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &index,
-                                 c_storage_config);
+                                 &index);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -191,8 +182,7 @@ TEST(CBoolIndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &copy_index,
-                                 c_storage_config);
+                                 &copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -234,8 +224,7 @@ TEST(CInt64IndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &index,
-                                 c_storage_config);
+                                 &index);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -250,8 +239,7 @@ TEST(CInt64IndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &copy_index,
-                                 c_storage_config);
+                                 &copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -295,8 +283,7 @@ TEST(CStringIndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &index,
-                                 c_storage_config);
+                                 &index);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -312,8 +299,7 @@ TEST(CStringIndexTest, All) {
             status = CreateIndex(dtype,
                                  type_params_str.c_str(),
                                  index_params_str.c_str(),
-                                 &copy_index,
-                                 c_storage_config);
+                                 &copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
         {

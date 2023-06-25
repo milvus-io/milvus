@@ -30,12 +30,12 @@
 #include <google/cloud/storage/oauth2/compute_engine_credentials.h>
 #include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
+
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "config/ConfigChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Exception.h"
 #include "storage/Types.h"
@@ -47,7 +47,7 @@ enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
 /**
  * @brief This MinioChunkManager is responsible for read and write file in S3.
  */
-class MinioChunkManager : public RemoteChunkManager {
+class MinioChunkManager : public ChunkManager {
  public:
     explicit MinioChunkManager(const StorageConfig& storage_config);
 
@@ -97,6 +97,11 @@ class MinioChunkManager : public RemoteChunkManager {
     virtual std::string
     GetName() const {
         return "MinioChunkManager";
+    }
+
+    virtual std::string
+    GetRootPath() const {
+        return remote_root_path_;
     }
 
     inline std::string
@@ -163,6 +168,7 @@ class MinioChunkManager : public RemoteChunkManager {
     static std::mutex client_mutex_;
     std::shared_ptr<Aws::S3::S3Client> client_;
     std::string default_bucket_name_;
+    std::string remote_root_path_;
 };
 
 using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;

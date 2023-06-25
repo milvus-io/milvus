@@ -24,8 +24,7 @@ CStatus
 CreateIndex(enum CDataType dtype,
             const char* serialized_type_params,
             const char* serialized_index_params,
-            CIndex* res_index,
-            CStorageConfig storage_config);
+            CIndex* res_index);
 
 CStatus
 DeleteIndex(CIndex index);
@@ -52,6 +51,46 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
 CStatus
 CleanLocalData(CIndex index);
+
+CStatus
+NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
+                  CStorageConfig c_storage_config);
+
+void
+DeleteBuildIndexInfo(CBuildIndexInfo c_build_index_info);
+
+CStatus
+AppendBuildIndexParam(CBuildIndexInfo c_build_index_info,
+                      const uint8_t* serialized_type_params,
+                      const uint64_t len);
+
+CStatus
+AppendBuildTypeParam(CBuildIndexInfo c_build_index_info,
+                     const uint8_t* serialized_type_params,
+                     const uint64_t len);
+
+CStatus
+AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
+                    int64_t collection_id,
+                    int64_t partition_id,
+                    int64_t segment_id,
+                    int64_t field_id,
+                    enum CDataType field_type);
+
+CStatus
+AppendIndexMetaInfo(CBuildIndexInfo c_build_index_info,
+                    int64_t index_id,
+                    int64_t build_id,
+                    int64_t version);
+
+CStatus
+AppendInsertFilePath(CBuildIndexInfo c_build_index_info, const char* file_path);
+
+CStatus
+CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info);
+
+CStatus
+SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
 
 #ifdef __cplusplus
 };

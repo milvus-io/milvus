@@ -21,10 +21,45 @@
 #include <memory>
 
 #include "knowhere/file_manager.h"
+#include "common/Consts.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "log/Log.h"
 
 namespace milvus::storage {
 
+#define FILEMANAGER_TRY try {
+#define FILEMANAGER_CATCH                                                     \
+    }                                                                         \
+    catch (LocalChunkManagerException & e) {                                  \
+        LOG_SEGCORE_ERROR_ << "LocalChunkManagerException:" << e.what();      \
+        return false;                                                         \
+    }                                                                         \
+    catch (MinioException & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::MinioException:" << e.what(); \
+        return false;                                                         \
+    }                                                                         \
+    catch (DiskANNFileManagerException & e) {                                 \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::DiskANNFileManagerException:" \
+                           << e.what();                                       \
+        return false;                                                         \
+    }                                                                         \
+    catch (ArrowException & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::ArrowException:" << e.what(); \
+        return false;                                                         \
+    }                                                                         \
+    catch (std::exception & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "Exception:" << e.what();                       \
+        return false;
+#define FILEMANAGER_END }
+
 class FileManagerImpl : public knowhere::FileManager {
+ public:
+    explicit FileManagerImpl(const FieldDataMeta& field_mata,
+                             IndexMeta index_meta)
+        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+    }
+
  public:
     /**
      * @brief Load a file to the local disk, so we can use stl lib to operate it.
@@ -61,6 +96,37 @@ class FileManagerImpl : public knowhere::FileManager {
      */
     virtual bool
     RemoveFile(const std::string& filename) noexcept = 0;
+
+ public:
+    virtual std::string
+    GetName() const = 0;
+
+    virtual FieldDataMeta
+    GetFieldDataMeta() const {
+        return field_meta_;
+    }
+
+    virtual IndexMeta
+    GetIndexMeta() const {
+        return index_meta_;
+    }
+
+    virtual std::string
+    GetRemoteIndexObjectPrefix() const {
+        return rcm_->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+               std::to_string(index_meta_.build_id) + "/" +
+               std::to_string(index_meta_.index_version) + "/" +
+               std::to_string(field_meta_.partition_id) + "/" +
+               std::to_string(field_meta_.segment_id);
+    }
+
+ protected:
+    // collection meta
+    FieldDataMeta field_meta_;
+
+    // index meta
+    IndexMeta index_meta_;
+    ChunkManagerPtr rcm_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

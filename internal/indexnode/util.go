@@ -14,35 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package indexnode
 
-#include <string>
+import (
+	"unsafe"
 
-#include "storage/FieldData.h"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+)
 
-namespace milvus::storage {
+func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
+	if dataType == schemapb.DataType_FloatVector {
+		var value float32
+		/* #nosec G103 */
+		return uint64(dim) * uint64(numRows) * uint64(unsafe.Sizeof(value)), nil
+	}
+	if dataType == schemapb.DataType_BinaryVector {
+		return uint64(dim) / 8 * uint64(numRows), nil
+	}
 
-class FieldDataFactory {
- private:
-    FieldDataFactory() = default;
-    FieldDataFactory(const FieldDataFactory&) = delete;
-    FieldDataFactory
-    operator=(const FieldDataFactory&) = delete;
-
- public:
-    static FieldDataFactory&
-    GetInstance() {
-        static FieldDataFactory inst;
-        return inst;
-    }
-
-    std::string
-    GetName() const {
-        return "FieldDataFactory";
-    }
-
-    FieldDataPtr
-    CreateFieldData(const DataType& type, const int64_t dim = 1);
-};
-
-}  // namespace milvus::storage
+	return 0, nil
+}

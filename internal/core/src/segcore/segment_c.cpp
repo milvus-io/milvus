@@ -17,12 +17,12 @@
 #include "common/Tracer.h"
 #include "common/type_c.h"
 #include "google/protobuf/text_format.h"
-#include "index/IndexInfo.h"
 #include "log/Log.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "segcore/SegcoreConfig.h"
+#include "storage/Util.h"
+#include "mmap/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -228,22 +228,51 @@ Delete(CSegmentInterface c_segment,
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
 LoadFieldData(CSegmentInterface c_segment,
-              CLoadFieldDataInfo load_field_data_info) {
+              CLoadFieldDataInfo c_load_field_data_info) {
+    try {
+        auto segment =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
+        segment->LoadFieldData(*load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+// just for test
+CStatus
+LoadFieldRawData(CSegmentInterface c_segment,
+                 int64_t field_id,
+                 const void* data,
+                 int64_t row_count) {
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment =
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto field_data = std::make_unique<milvus::DataArray>();
-        auto suc = field_data->ParseFromArray(load_field_data_info.blob,
-                                              load_field_data_info.blob_size);
-        AssertInfo(suc, "unmarshal field data string failed");
-        auto load_info = LoadFieldDataInfo{load_field_data_info.field_id,
-                                           field_data.get(),
-                                           load_field_data_info.row_count,
-                                           load_field_data_info.mmap_dir_path};
-        segment->LoadFieldData(load_info);
+        milvus::DataType data_type;
+        int64_t dim = 1;
+        if (milvus::SystemProperty::Instance().IsSystem(
+                milvus::FieldId(field_id))) {
+            data_type = milvus::DataType::INT64;
+        } else {
+            auto field_meta = segment->get_schema()[milvus::FieldId(field_id)];
+            data_type = field_meta.get_data_type();
+
+            if (milvus::datatype_is_vector(data_type)) {
+                dim = field_meta.get_dim();
+            }
+        }
+        auto field_data = milvus::storage::CreateFieldData(data_type, dim);
+        field_data->FillFieldData(data, row_count);
+        auto field_data_info = milvus::FieldDataInfo{
+            field_id,
+            row_count,
+            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+        segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

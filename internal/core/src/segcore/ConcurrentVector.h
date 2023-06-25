@@ -31,6 +31,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "exceptions/EasyAssert.h"
+#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 
@@ -100,6 +101,10 @@ class VectorBase {
                  const void* source,
                  ssize_t element_count) = 0;
 
+    virtual void
+    set_data_raw(ssize_t element_offset,
+                 const std::vector<storage::FieldDataPtr>& data) = 0;
+
     void
     set_data_raw(ssize_t element_offset,
                  ssize_t element_count,
@@ -107,12 +112,7 @@ class VectorBase {
                  const FieldMeta& field_meta);
 
     virtual void
-    fill_chunk_data(const void* source, ssize_t element_count) = 0;
-
-    void
-    fill_chunk_data(ssize_t element_count,
-                    const DataArray* data,
-                    const FieldMeta& field_meta);
+    fill_chunk_data(const std::vector<storage::FieldDataPtr>& data) = 0;
 
     virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
@@ -196,13 +196,32 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    fill_chunk_data(const void* source, ssize_t element_count) override {
-        if (element_count == 0) {
-            return;
-        }
+    fill_chunk_data(const std::vector<storage::FieldDataPtr>& datas)
+        override {  // used only for sealed segment
         AssertInfo(chunks_.size() == 0, "no empty concurrent vector");
+
+        int64_t element_count = 0;
+        for (auto& field_data : datas) {
+            element_count += field_data->get_num_rows();
+        }
         chunks_.emplace_to_at_least(1, Dim * element_count);
-        set_data(0, static_cast<const Type*>(source), element_count);
+        int64_t offset = 0;
+        for (auto& field_data : datas) {
+            auto num_rows = field_data->get_num_rows();
+            set_data(
+                offset, static_cast<const Type*>(field_data->Data()), num_rows);
+            offset += num_rows;
+        }
+    }
+
+    void
+    set_data_raw(ssize_t element_offset,
+                 const std::vector<storage::FieldDataPtr>& datas) override {
+        for (auto& field_data : datas) {
+            auto num_rows = field_data->get_num_rows();
+            set_data_raw(element_offset, field_data->Data(), num_rows);
+            element_offset += num_rows;
+        }
     }
 
     void

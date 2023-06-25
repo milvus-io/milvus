@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
-	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -105,7 +104,9 @@ func (suite *ServiceSuite) SetupTest() {
 	// init mock
 	suite.factory = dependency.NewMockFactory(suite.T())
 	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
+	// TODO:: cpp chunk manager not support local chunk manager
+	//suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactoryWithParam(paramtable.Get())
 	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(ctx))
 
@@ -131,9 +132,27 @@ func (suite *ServiceSuite) SetupTest() {
 }
 
 func (suite *ServiceSuite) TearDownTest() {
+	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+	// ReleaseSegment, avoid throwing an instance of 'std::system_error' when stop node
+	resp, err := suite.node.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_ReleaseSegments,
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		SegmentIDs:   suite.validSegmentIDs,
+		NodeID:       suite.node.session.ServerID,
+		Scope:        querypb.DataScope_All,
+		Shard:        suite.vchannel,
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	suite.node.vectorStorage.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+
 	suite.node.Stop()
 	suite.etcdClient.Close()
-	os.RemoveAll("/tmp/milvus-test")
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
@@ -467,6 +486,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 			PartitionID:   suite.partitionIDs[i%partNum],
 			CollectionID:  suite.collectionID,
 			InsertChannel: suite.vchannel,
+			NumOfRows:     1000,
 			BinlogPaths:   binlogs,
 			Statslogs:     statslogs,
 			IndexInfos:    []*querypb.FieldIndexInfo{indexes},

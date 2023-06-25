@@ -276,6 +276,27 @@ class IndexingRecord {
         }
     }
 
+    // concurrent, reentrant
+    template <bool is_sealed>
+    void
+    AppendingIndex(int64_t reserved_offset,
+                   int64_t size,
+                   FieldId fieldId,
+                   const storage::FieldDataPtr data,
+                   const InsertRecord<is_sealed>& record) {
+        if (is_in(fieldId)) {
+            auto& indexing = field_indexings_.at(fieldId);
+            if (indexing->get_field_meta().is_vector() &&
+                indexing->get_field_meta().get_data_type() ==
+                    DataType::VECTOR_FLOAT &&
+                reserved_offset + size >= indexing->get_build_threshold()) {
+                auto vec_base = record.get_field_data_base(fieldId);
+                indexing->AppendSegmentIndex(
+                    reserved_offset, size, vec_base, data->Data());
+            }
+        }
+    }
+
     void
     GetDataFromIndex(FieldId fieldId,
                      const int64_t* seg_offsets,
