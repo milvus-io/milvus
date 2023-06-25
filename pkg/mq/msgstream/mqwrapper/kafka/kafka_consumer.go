@@ -149,7 +149,11 @@ func (kc *Consumer) Chan() <-chan mqwrapper.Message {
 							kc.skipMsg = false
 							continue
 						}
-						kc.msgChannel <- &kafkaMessage{msg: e}
+
+						select {
+						case kc.msgChannel <- &kafkaMessage{msg: e}:
+						case <-kc.closeCh:
+						}
 					}
 				}
 			}
