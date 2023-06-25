@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -143,8 +144,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		return resp, nil
 	}
 
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-AssignSegmentID")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+	method := "AssignSegmentID"
+	tr := timerecord.NewTimeRecorder(method)
+	log := log.With(zap.String("traceID", traceID))
+
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
-	beforeAssign := time.Now()
 	for _, r := range req.SegmentIDRequests {
 		log.Info("handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
@@ -203,8 +210,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			assigns = append(assigns, result)
 		}
 	}
-	assignSegmentsDuration := time.Since(beforeAssign)
-	if assignSegmentsDuration > 100*time.Millisecond {
+	assignSegmentsDuration := tr.ElapseSpan()
+	if assignSegmentsDuration > 1000*time.Millisecond {
 		log.Warn("assign segments time cost too much",
 			zap.Int64("assignDurationMs", assignSegmentsDuration.Milliseconds()))
 	}

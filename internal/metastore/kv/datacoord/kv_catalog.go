@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -135,7 +136,9 @@ func (asyncUpdater *asyncMetaUpdater) tryToSyncMeta() error {
 	saveFn := func(partialKvs map[string]string) error {
 		return asyncUpdater.metaKv.MultiSave(partialKvs)
 	}
+	tr := timerecord.NewTimeRecorder("hc---asyncMetaUpdater--tryToSyncMeta")
 	asyncUpdater.syncLock.Lock()
+	tr.Record("hc---asyncMetaUpdater--obtainSyncLock")
 	defer asyncUpdater.syncLock.Unlock()
 	log.Info("try to sync meta", zap.Int("lastMapLen", len(asyncUpdater.lastMap)))
 	if err := etcd.SaveByBatchWithLimit(asyncUpdater.lastMap, 64, saveFn); err != nil {
@@ -143,7 +146,8 @@ func (asyncUpdater *asyncMetaUpdater) tryToSyncMeta() error {
 		return err
 	}
 	asyncUpdater.lastMap = nil
-	log.Info("successfully sync meta", zap.Int("lastMapLen", len(asyncUpdater.lastMap)))
+	log.Info("successfully sync meta", zap.Int("lastMapLen", len(asyncUpdater.lastMap)),
+		zap.Duration("time_cost", tr.ElapseSpan()))
 	return nil
 }
 
@@ -151,12 +155,15 @@ func (asyncUpdater *asyncMetaUpdater) cache(kvs map[string]string) error {
 	if asyncUpdater.stopped.Load() {
 		return fmt.Errorf("cannot cache meta kv to stopped asyncMetaUpdater")
 	}
+	tr := timerecord.NewTimeRecorder("hc---asyncMetaUpdater--cache")
 	asyncUpdater.mapLock.Lock()
+	tr.Record("hc--asyncMetaUpdater-obtainMapLock")
+	defer asyncUpdater.mapLock.Unlock()
 	for key, value := range kvs {
 		asyncUpdater.currentMap[key] = value
 	}
-	asyncUpdater.mapLock.Unlock()
-	log.Debug("AsyncMetaUpdater cache kvs", zap.Any("kvs", kvs))
+	log.Debug("AsyncMetaUpdater cache kvs", zap.Strings("keys", lo.Keys(kvs)),
+		zap.Duration("time_cost", tr.ElapseSpan()))
 	return nil
 }
 

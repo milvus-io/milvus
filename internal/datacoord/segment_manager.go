@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/logutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
@@ -231,7 +233,11 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
+	log := logutil.Logger(ctx)
+	method := "AllocSegment"
+	tr := timerecord.NewTimeRecorder(method)
 	s.mu.Lock()
+	tr.CtxRecord(ctx, "hc---ObtainSegmentManagerMuLock")
 	defer s.mu.Unlock()
 
 	// filter segments
@@ -261,8 +267,10 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	if err != nil {
 		return nil, err
 	}
+	tr.CtxRecord(ctx, "hc---calculated allocations")
 	for _, allocation := range newSegmentAllocations {
 		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
+		tr.CtxRecord(ctx, "hc---opened new segment")
 		if err != nil {
 			return nil, err
 		}
@@ -271,6 +279,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
 			return nil, err
 		}
+		tr.CtxRecord(ctx, "hc---AddNewAllocation")
 	}
 
 	for _, allocation := range existedSegmentAllocations {
@@ -278,8 +287,9 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
 			return nil, err
 		}
+		tr.CtxRecord(ctx, "hc---AddExistedAllocation")
 	}
-
+	log.Info("Finish allocating", zap.Duration("time_cost", tr.ElapseSpan()))
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
 	return allocations, nil
 }
@@ -378,7 +388,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	s.segments = append(s.segments, id)
-	log.Info("datacoord: estimateTotalRows: ",
+	logutil.Logger(ctx).Info("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),
