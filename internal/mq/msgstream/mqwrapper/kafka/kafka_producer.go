@@ -37,6 +37,7 @@ type kafkaProducer struct {
 	topic        string
 	deliveryChan chan kafka.Event
 	closeOnce    sync.Once
+	isClosed     bool
 }
 
 func (kp *kafkaProducer) Topic() string {
@@ -46,6 +47,12 @@ func (kp *kafkaProducer) Topic() string {
 func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
 	start := timerecord.NewTimeRecorder("send msg to stream")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
+
+	if kp.isClosed {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
+		log.Error("kafka produce message fail because the producer has been closed", zap.String("topic", kp.topic))
+		return nil, common.NewIgnorableError(fmt.Errorf("kafka producer is closed"))
+	}
 
 	err := kp.p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
@@ -79,9 +86,14 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 
 func (kp *kafkaProducer) Close() {
 	kp.closeOnce.Do(func() {
+		kp.isClosed = true
+
 		start := time.Now()
 		//flush in-flight msg within queue.
-		kp.p.Flush(10000)
+		i := kp.p.Flush(10000)
+		if i > 0 {
+			log.Warn("There are still un-flushed outstanding events", zap.Int("event_num", i), zap.Any("topic", kp.topic))
+		}
 
 		close(kp.deliveryChan)
 
