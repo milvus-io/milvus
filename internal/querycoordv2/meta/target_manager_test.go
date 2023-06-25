@@ -215,7 +215,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(collectionID, CurrentTarget))
 
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, int64(1)).Return(nil, nil, status.Errorf(codes.NotFound, "fake not found"))
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, int64(1)).Return(nil, nil, status.Errorf(codes.Unimplemented, "fake not found"))
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
 	err := suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
 	suite.NoError(err)
