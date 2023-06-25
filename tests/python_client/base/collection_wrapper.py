@@ -322,6 +322,7 @@ class ApiCollectionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
+    @trace()
     def get_compaction_state(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
@@ -329,6 +330,7 @@ class ApiCollectionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
+    @trace()
     def get_compaction_plans(self, timeout=None, check_task=None, check_items={}, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
@@ -342,6 +344,7 @@ class ApiCollectionWrapper:
         # log.debug(res)
         return res
 
+    @trace()
     def get_replicas(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
