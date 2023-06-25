@@ -120,17 +120,12 @@ CheckRangeSearchParam(float radius,
      *
      */
     if (PositivelyRelated(metric_type)) {
-        if (range_filter <= radius) {
-            PanicInfo(
-                "range_filter must be greater than or equal to radius for IP "
-                "and COSINE");
-        }
+        AssertInfo(range_filter > radius,
+                   "range_filter must be greater than radius for IP/COSINE");
     } else {
-        if (range_filter >= radius) {
-            PanicInfo(
-                "range_filter must be less than or equal to radius for "
-                "L2/HAMMING/JACCARD/TANIMOTO");
-        }
+        AssertInfo(range_filter < radius,
+                   "range_filter must be less than radius for "
+                   "L2/HAMMING/JACCARD/TANIMOTO");
     }
 }
 
