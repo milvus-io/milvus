@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -120,7 +121,7 @@ func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) e
 
 func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	ret, err := w.client.SearchSegments(ctx, req)
-	if err != nil && funcutil.IsGrpcErr(err) {
+	if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
 		return w.client.Search(ctx, req)
 	}
@@ -130,7 +131,7 @@ func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	ret, err := w.client.QuerySegments(ctx, req)
-	if err != nil && funcutil.IsGrpcErr(err) {
+	if err != nil && funcutil.IsGrpcErr(err, codes.Unimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
 		return w.client.Query(ctx, req)
 	}

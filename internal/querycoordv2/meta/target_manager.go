@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 )
 
 type TargetScope = int32
@@ -208,7 +209,7 @@ func (mgr *TargetManager) PullNextTarget(broker Broker, collectionID int64, chos
 		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID)
 		if err != nil {
 			// if meet rpc error, for compatibility with previous versions, try pull next target v1
-			if funcutil.IsGrpcErr(err) {
+			if funcutil.IsGrpcErr(err, codes.Unimplemented) {
 				target, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
 				return err
 			}
