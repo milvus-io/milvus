@@ -69,6 +69,18 @@ type Server struct {
 	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
 }
 
+func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreateDatabase(ctx, request)
+}
+
+func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DropDatabase(ctx, request)
+}
+
+func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return s.rootCoord.ListDatabases(ctx, request)
+}
+
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.rootCoord.CheckHealth(ctx, request)
 }

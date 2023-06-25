@@ -988,7 +988,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		DbName:       "",
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(resp, err); err != nil {
@@ -1000,9 +1000,12 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		DbName:         "",
-		CollectionName: resp.Schema.Name,
-		CollectionID:   resp.CollectionID,
+		// please do not specify the collection name alone after database feature.
+		/*
+			DbName:         "",
+			CollectionName: resp.Schema.Name,
+		*/
+		CollectionID: resp.CollectionID,
 	})
 	if err = VerifyResponse(presp, err); err != nil {
 		log.Error("show partitions error", zap.String("collectionName", resp.Schema.Name),

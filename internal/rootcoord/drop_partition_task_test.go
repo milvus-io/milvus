@@ -21,14 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func Test_dropPartitionTask_Prepare(t *testing.T) {
@@ -70,10 +70,15 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 
 		collectionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll.Clone(), nil
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll.Clone(), nil)
+
 		core := newTestCore(withMeta(meta))
 		task := &dropPartitionTask{
 			baseTask: baseTask{core: core},
@@ -150,15 +155,26 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		removePartitionMetaCalled := false
 		removePartitionMetaChan := make(chan struct{}, 1)
-		meta := newMockMetaTable()
-		meta.ChangePartitionStateFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state etcdpb.PartitionState, ts Timestamp) error {
-			return nil
-		}
-		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ChangePartitionState",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta.On("RemovePartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(func(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
 			removePartitionMetaCalled = true
 			removePartitionMetaChan <- struct{}{}
 			return nil
-		}
+		})
 
 		gc := newMockGarbageCollector()
 		deletePartitionCalled := false

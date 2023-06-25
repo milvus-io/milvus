@@ -22,10 +22,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
 type stepPriority int
@@ -165,6 +163,7 @@ func (s *changeCollectionStateStep) Desc() string {
 
 type expireCacheStep struct {
 	baseStep
+	dbName          string
 	collectionNames []string
 	collectionID    UniqueID
 	ts              Timestamp
@@ -172,7 +171,7 @@ type expireCacheStep struct {
 }
 
 func (s *expireCacheStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.ExpireMetaCache(ctx, s.collectionNames, s.collectionID, s.ts, s.opts...)
+	err := s.core.ExpireMetaCache(ctx, s.dbName, s.collectionNames, s.collectionID, s.ts, s.opts...)
 	return nil, err
 }
 
@@ -364,13 +363,14 @@ func (s *changePartitionStateStep) Desc() string {
 
 type removePartitionMetaStep struct {
 	baseStep
+	dbID         UniqueID
 	collectionID UniqueID
 	partitionID  UniqueID
 	ts           Timestamp
 }
 
 func (s *removePartitionMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.meta.RemovePartition(ctx, s.collectionID, s.partitionID, s.ts)
+	err := s.core.meta.RemovePartition(ctx, s.dbID, s.collectionID, s.partitionID, s.ts)
 	return nil, err
 }
 

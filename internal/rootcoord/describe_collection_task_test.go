@@ -20,11 +20,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_describeCollectionTask_Prepare(t *testing.T) {
@@ -93,17 +96,21 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
-			return &model.Collection{
-				CollectionID: 1,
-				Name:         "test coll",
-			}, nil
-		}
 		alias1, alias2 := funcutil.GenRandomStr(), funcutil.GenRandomStr()
-		meta.ListAliasesByIDFunc = func(collID UniqueID) []string {
-			return []string{alias1, alias2}
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+		}, nil)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+		).Return([]string{alias1, alias2})
 
 		core := newTestCore(withMeta(meta))
 		task := &describeCollectionTask{

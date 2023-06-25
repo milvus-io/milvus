@@ -20,17 +20,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus/pkg/common"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type dropPartitionTask struct {
@@ -46,7 +43,7 @@ func (t *dropPartitionTask) Prepare(ctx context.Context) error {
 	if t.Req.GetPartitionName() == Params.CommonCfg.DefaultPartitionName.GetValue() {
 		return fmt.Errorf("default partition cannot be deleted")
 	}
-	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), t.GetTs())
+	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.GetTs())
 	if err != nil {
 		// Is this idempotent?
 		return err
@@ -73,6 +70,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
+		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
@@ -103,6 +101,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	redoTask.AddAsyncStep(newConfirmGCStep(t.core, t.collMeta.CollectionID, partID))
 	redoTask.AddAsyncStep(&removePartitionMetaStep{
 		baseStep:     baseStep{core: t.core},
+		dbID:         t.collMeta.DBID,
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
 		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already

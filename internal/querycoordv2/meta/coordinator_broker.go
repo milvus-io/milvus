@@ -74,6 +74,7 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	}
 	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
@@ -101,6 +102,7 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	}
 	resp, err := broker.rootCoord.ShowPartitions(ctx, req)

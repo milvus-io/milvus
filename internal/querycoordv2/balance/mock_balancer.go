@@ -42,8 +42,8 @@ type MockBalancer_AssignChannel_Call struct {
 }
 
 // AssignChannel is a helper method to define mock.On call
-//   - channels []*meta.DmChannel
-//   - nodes []int64
+//  - channels []*meta.DmChannel
+//  - nodes []int64
 func (_e *MockBalancer_Expecter) AssignChannel(channels interface{}, nodes interface{}) *MockBalancer_AssignChannel_Call {
 	return &MockBalancer_AssignChannel_Call{Call: _e.mock.On("AssignChannel", channels, nodes)}
 }
@@ -82,9 +82,9 @@ type MockBalancer_AssignSegment_Call struct {
 }
 
 // AssignSegment is a helper method to define mock.On call
-//   - collectionID int64
-//   - segments []*meta.Segment
-//   - nodes []int64
+//  - collectionID int64
+//  - segments []*meta.Segment
+//  - nodes []int64
 func (_e *MockBalancer_Expecter) AssignSegment(collectionID interface{}, segments interface{}, nodes interface{}) *MockBalancer_AssignSegment_Call {
 	return &MockBalancer_AssignSegment_Call{Call: _e.mock.On("AssignSegment", collectionID, segments, nodes)}
 }
@@ -132,7 +132,7 @@ type MockBalancer_BalanceReplica_Call struct {
 }
 
 // BalanceReplica is a helper method to define mock.On call
-//   - replica *meta.Replica
+//  - replica *meta.Replica
 func (_e *MockBalancer_Expecter) BalanceReplica(replica interface{}) *MockBalancer_BalanceReplica_Call {
 	return &MockBalancer_BalanceReplica_Call{Call: _e.mock.On("BalanceReplica", replica)}
 }

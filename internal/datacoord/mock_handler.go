@@ -144,7 +144,7 @@ func (_c *NMockHandler_GetCollection_Call) Return(_a0 *collectionInfo, _a1 error
 	return _c
 }
 
-// GetDataVChanPositions provides a mock function with given fields: channel, partitionID
+// GetDataVChanPositions provides a mock function with given fields: ch, partitionID
 func (_m *NMockHandler) GetDataVChanPositions(ch *channel, partitionID int64) *datapb.VchannelInfo {
 	ret := _m.Called(ch, partitionID)
 
@@ -166,13 +166,13 @@ type NMockHandler_GetDataVChanPositions_Call struct {
 }
 
 // GetDataVChanPositions is a helper method to define mock.On call
-//  - channel *channel
+//  - ch *channel
 //  - partitionID int64
-func (_e *NMockHandler_Expecter) GetDataVChanPositions(channel interface{}, partitionID interface{}) *NMockHandler_GetDataVChanPositions_Call {
-	return &NMockHandler_GetDataVChanPositions_Call{Call: _e.mock.On("GetDataVChanPositions", channel, partitionID)}
+func (_e *NMockHandler_Expecter) GetDataVChanPositions(ch interface{}, partitionID interface{}) *NMockHandler_GetDataVChanPositions_Call {
+	return &NMockHandler_GetDataVChanPositions_Call{Call: _e.mock.On("GetDataVChanPositions", ch, partitionID)}
 }
 
-func (_c *NMockHandler_GetDataVChanPositions_Call) Run(run func(channel *channel, partitionID int64)) *NMockHandler_GetDataVChanPositions_Call {
+func (_c *NMockHandler_GetDataVChanPositions_Call) Run(run func(ch *channel, partitionID int64)) *NMockHandler_GetDataVChanPositions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*channel), args[1].(int64))
 	})
@@ -184,7 +184,7 @@ func (_c *NMockHandler_GetDataVChanPositions_Call) Return(_a0 *datapb.VchannelIn
 	return _c
 }
 
-// GetQueryVChanPositions provides a mock function with given fields: channel, partitionIDs
+// GetQueryVChanPositions provides a mock function with given fields: ch, partitionIDs
 func (_m *NMockHandler) GetQueryVChanPositions(ch *channel, partitionIDs ...int64) *datapb.VchannelInfo {
 	_va := make([]interface{}, len(partitionIDs))
 	for _i := range partitionIDs {
@@ -213,14 +213,14 @@ type NMockHandler_GetQueryVChanPositions_Call struct {
 }
 
 // GetQueryVChanPositions is a helper method to define mock.On call
-//  - channel *channel
+//  - ch *channel
 //  - partitionIDs ...int64
-func (_e *NMockHandler_Expecter) GetQueryVChanPositions(channel interface{}, partitionIDs ...interface{}) *NMockHandler_GetQueryVChanPositions_Call {
+func (_e *NMockHandler_Expecter) GetQueryVChanPositions(ch interface{}, partitionIDs ...interface{}) *NMockHandler_GetQueryVChanPositions_Call {
 	return &NMockHandler_GetQueryVChanPositions_Call{Call: _e.mock.On("GetQueryVChanPositions",
-		append([]interface{}{channel}, partitionIDs...)...)}
+		append([]interface{}{ch}, partitionIDs...)...)}
 }
 
-func (_c *NMockHandler_GetQueryVChanPositions_Call) Run(run func(channel *channel, partitionIDs ...int64)) *NMockHandler_GetQueryVChanPositions_Call {
+func (_c *NMockHandler_GetQueryVChanPositions_Call) Run(run func(ch *channel, partitionIDs ...int64)) *NMockHandler_GetQueryVChanPositions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]int64, len(args)-1)
 		for i, a := range args[1:] {

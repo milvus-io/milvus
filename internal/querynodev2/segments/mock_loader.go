@@ -29,11 +29,11 @@ func (_m *MockLoader) EXPECT() *MockLoader_Expecter {
 	return &MockLoader_Expecter{mock: &_m.Mock}
 }
 
-// Load provides a mock function with given fields: ctx, collectionID, segmentType, version, infos
-func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, infos ...*querypb.SegmentLoadInfo) ([]Segment, error) {
-	_va := make([]interface{}, len(infos))
-	for _i := range infos {
-		_va[_i] = infos[_i]
+// Load provides a mock function with given fields: ctx, collectionID, segmentType, version, segments
+func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error) {
+	_va := make([]interface{}, len(segments))
+	for _i := range segments {
+		_va[_i] = segments[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, ctx, collectionID, segmentType, version)
@@ -42,7 +42,7 @@ func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType 
 
 	var r0 []Segment
 	if rf, ok := ret.Get(0).(func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) []Segment); ok {
-		r0 = rf(ctx, collectionID, segmentType, version, infos...)
+		r0 = rf(ctx, collectionID, segmentType, version, segments...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]Segment)
@@ -51,7 +51,7 @@ func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType 
 
 	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, int64, commonpb.SegmentState, int64, ...*querypb.SegmentLoadInfo) error); ok {
-		r1 = rf(ctx, collectionID, segmentType, version, infos...)
+		r1 = rf(ctx, collectionID, segmentType, version, segments...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -75,7 +75,7 @@ func (_e *MockLoader_Expecter) Load(ctx interface{}, collectionID interface{}, s
 		append([]interface{}{ctx, collectionID, segmentType, version}, infos...)...)}
 }
 
-func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, infos ...*querypb.SegmentLoadInfo)) *MockLoader_Load_Call {
+func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo)) *MockLoader_Load_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*querypb.SegmentLoadInfo, len(args)-4)
 		for i, a := range args[4:] {

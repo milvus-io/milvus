@@ -20,10 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/stretchr/testify/assert"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 )
 
 func Test_hasPartitionTask_Prepare(t *testing.T) {
@@ -75,16 +78,20 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return &model.Collection{
-				Partitions: []*model.Partition{
-					{
-						PartitionName: "invalid test partition",
-					},
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			Partitions: []*model.Partition{
+				{
+					PartitionName: "invalid test partition",
 				},
-			}, nil
-		}
+			},
+		}, nil)
+
 		core := newTestCore(withMeta(meta))
 		task := &hasPartitionTask{
 			baseTask: baseTask{
@@ -107,19 +114,23 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return &model.Collection{
-				Partitions: []*model.Partition{
-					{
-						PartitionName: "invalid test partition",
-					},
-					{
-						PartitionName: "test partition",
-					},
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			Partitions: []*model.Partition{
+				{
+					PartitionName: "invalid test partition",
 				},
-			}, nil
-		}
+				{
+					PartitionName: "test partition",
+				},
+			},
+		}, nil)
+
 		core := newTestCore(withMeta(meta))
 		task := &hasPartitionTask{
 			baseTask: baseTask{

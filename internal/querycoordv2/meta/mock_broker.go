@@ -4,9 +4,9 @@ package meta
 
 import (
 	context "context"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -28,102 +28,7 @@ func (_m *MockBroker) EXPECT() *MockBroker_Expecter {
 	return &MockBroker_Expecter{mock: &_m.Mock}
 }
 
-// GetCollectionSchema provides a mock function with given fields: ctx, collectionID
-func (_m *MockBroker) GetCollectionSchema(ctx context.Context, collectionID int64) (*schemapb.CollectionSchema, error) {
-	ret := _m.Called(ctx, collectionID)
-
-	var r0 *schemapb.CollectionSchema
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *schemapb.CollectionSchema); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*schemapb.CollectionSchema)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, collectionID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_GetCollectionSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionSchema'
-type MockBroker_GetCollectionSchema_Call struct {
-	*mock.Call
-}
-
-// GetCollectionSchema is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-func (_e *MockBroker_Expecter) GetCollectionSchema(ctx interface{}, collectionID interface{}) *MockBroker_GetCollectionSchema_Call {
-	return &MockBroker_GetCollectionSchema_Call{Call: _e.mock.On("GetCollectionSchema", ctx, collectionID)}
-}
-
-func (_c *MockBroker_GetCollectionSchema_Call) Run(run func(ctx context.Context, collectionID int64)) *MockBroker_GetCollectionSchema_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MockBroker_GetCollectionSchema_Call) Return(_a0 *schemapb.CollectionSchema, _a1 error) *MockBroker_GetCollectionSchema_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-// GetIndexInfo provides a mock function with given fields: ctx, collectionID, segmentID
-func (_m *MockBroker) GetIndexInfo(ctx context.Context, collectionID int64, segmentID int64) ([]*querypb.FieldIndexInfo, error) {
-	ret := _m.Called(ctx, collectionID, segmentID)
-
-	var r0 []*querypb.FieldIndexInfo
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) []*querypb.FieldIndexInfo); ok {
-		r0 = rf(ctx, collectionID, segmentID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*querypb.FieldIndexInfo)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
-		r1 = rf(ctx, collectionID, segmentID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_GetIndexInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexInfo'
-type MockBroker_GetIndexInfo_Call struct {
-	*mock.Call
-}
-
-// GetIndexInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segmentID int64
-func (_e *MockBroker_Expecter) GetIndexInfo(ctx interface{}, collectionID interface{}, segmentID interface{}) *MockBroker_GetIndexInfo_Call {
-	return &MockBroker_GetIndexInfo_Call{Call: _e.mock.On("GetIndexInfo", ctx, collectionID, segmentID)}
-}
-
-func (_c *MockBroker_GetIndexInfo_Call) Run(run func(ctx context.Context, collectionID int64, segmentID int64)) *MockBroker_GetIndexInfo_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
-	})
-	return _c
-}
-
-func (_c *MockBroker_GetIndexInfo_Call) Return(_a0 []*querypb.FieldIndexInfo, _a1 error) *MockBroker_GetIndexInfo_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-// DescribeIndex provides a mock function with given fields: ctx, collectionID, segmentID
+// DescribeIndex provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) DescribeIndex(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
 	ret := _m.Called(ctx, collectionID)
 
@@ -170,6 +75,101 @@ func (_c *MockBroker_DescribeIndex_Call) Return(_a0 []*indexpb.IndexInfo, _a1 er
 	return _c
 }
 
+// GetCollectionSchema provides a mock function with given fields: ctx, collectionID
+func (_m *MockBroker) GetCollectionSchema(ctx context.Context, collectionID int64) (*schemapb.CollectionSchema, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	var r0 *schemapb.CollectionSchema
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *schemapb.CollectionSchema); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*schemapb.CollectionSchema)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_GetCollectionSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionSchema'
+type MockBroker_GetCollectionSchema_Call struct {
+	*mock.Call
+}
+
+// GetCollectionSchema is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+func (_e *MockBroker_Expecter) GetCollectionSchema(ctx interface{}, collectionID interface{}) *MockBroker_GetCollectionSchema_Call {
+	return &MockBroker_GetCollectionSchema_Call{Call: _e.mock.On("GetCollectionSchema", ctx, collectionID)}
+}
+
+func (_c *MockBroker_GetCollectionSchema_Call) Run(run func(ctx context.Context, collectionID int64)) *MockBroker_GetCollectionSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroker_GetCollectionSchema_Call) Return(_a0 *schemapb.CollectionSchema, _a1 error) *MockBroker_GetCollectionSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// GetIndexInfo provides a mock function with given fields: ctx, collectionID, segmentID
+func (_m *MockBroker) GetIndexInfo(ctx context.Context, collectionID int64, segmentID int64) ([]*querypb.FieldIndexInfo, error) {
+	ret := _m.Called(ctx, collectionID, segmentID)
+
+	var r0 []*querypb.FieldIndexInfo
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) []*querypb.FieldIndexInfo); ok {
+		r0 = rf(ctx, collectionID, segmentID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*querypb.FieldIndexInfo)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
+		r1 = rf(ctx, collectionID, segmentID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_GetIndexInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexInfo'
+type MockBroker_GetIndexInfo_Call struct {
+	*mock.Call
+}
+
+// GetIndexInfo is a helper method to define mock.On call
+//  - ctx context.Context
+//  - collectionID int64
+//  - segmentID int64
+func (_e *MockBroker_Expecter) GetIndexInfo(ctx interface{}, collectionID interface{}, segmentID interface{}) *MockBroker_GetIndexInfo_Call {
+	return &MockBroker_GetIndexInfo_Call{Call: _e.mock.On("GetIndexInfo", ctx, collectionID, segmentID)}
+}
+
+func (_c *MockBroker_GetIndexInfo_Call) Run(run func(ctx context.Context, collectionID int64, segmentID int64)) *MockBroker_GetIndexInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroker_GetIndexInfo_Call) Return(_a0 []*querypb.FieldIndexInfo, _a1 error) *MockBroker_GetIndexInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetPartitions provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) GetPartitions(ctx context.Context, collectionID int64) ([]int64, error) {
 	ret := _m.Called(ctx, collectionID)
@@ -199,8 +199,8 @@ type MockBroker_GetPartitions_Call struct {
 }
 
 // GetPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
+//  - ctx context.Context
+//  - collectionID int64
 func (_e *MockBroker_Expecter) GetPartitions(ctx interface{}, collectionID interface{}) *MockBroker_GetPartitions_Call {
 	return &MockBroker_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx, collectionID)}
 }
@@ -255,9 +255,9 @@ type MockBroker_GetRecoveryInfo_Call struct {
 }
 
 // GetRecoveryInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - partitionID int64
+//  - ctx context.Context
+//  - collectionID int64
+//  - partitionID int64
 func (_e *MockBroker_Expecter) GetRecoveryInfo(ctx interface{}, collectionID interface{}, partitionID interface{}) *MockBroker_GetRecoveryInfo_Call {
 	return &MockBroker_GetRecoveryInfo_Call{Call: _e.mock.On("GetRecoveryInfo", ctx, collectionID, partitionID)}
 }
@@ -319,9 +319,9 @@ type MockBroker_GetRecoveryInfoV2_Call struct {
 }
 
 // GetRecoveryInfoV2 is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - partitionIDs ...int64
+//  - ctx context.Context
+//  - collectionID int64
+//  - partitionIDs ...int64
 func (_e *MockBroker_Expecter) GetRecoveryInfoV2(ctx interface{}, collectionID interface{}, partitionIDs ...interface{}) *MockBroker_GetRecoveryInfoV2_Call {
 	return &MockBroker_GetRecoveryInfoV2_Call{Call: _e.mock.On("GetRecoveryInfoV2",
 		append([]interface{}{ctx, collectionID}, partitionIDs...)...)}
@@ -381,8 +381,8 @@ type MockBroker_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - segmentID ...int64
+//  - ctx context.Context
+//  - segmentID ...int64
 func (_e *MockBroker_Expecter) GetSegmentInfo(ctx interface{}, segmentID ...interface{}) *MockBroker_GetSegmentInfo_Call {
 	return &MockBroker_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo",
 		append([]interface{}{ctx}, segmentID...)...)}

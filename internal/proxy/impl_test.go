@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,12 +30,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -368,6 +366,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 func TestProxy_FlushAll(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
+	paramtable.Init()
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
@@ -375,6 +374,8 @@ func TestProxy_FlushAll(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
+
+	Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	assert.NoError(t, err)
 	err = node.sched.Start()
@@ -384,17 +385,26 @@ func TestProxy_FlushAll(t *testing.T) {
 	node.rootCoord = mocks.NewRootCoord(t)
 
 	// set expectations
-	cache := newMockCache()
-	getIDFunc := func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return UniqueID(0), nil
-	}
-	cache.getIDFunc = getIDFunc
+	cache := NewMockCache(t)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(UniqueID(0), nil).Once()
+
+	cache.On("RemoveDatabase",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+	).Maybe()
+
 	globalMetaCache = cache
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	node.dataCoord.(*mocks.DataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
 		Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
 	node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 		Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
+	node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+		Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
 
 	t.Run("FlushAll", func(t *testing.T) {
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
@@ -411,13 +421,19 @@ func TestProxy_FlushAll(t *testing.T) {
 	})
 
 	t.Run("FlushAll failed, get id failed", func(t *testing.T) {
-		globalMetaCache.(*mockCache).getIDFunc = func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("mock error")
-		}
+		globalMetaCache.(*MockCache).On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), errors.New("mock error")).Once()
 		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
-		globalMetaCache.(*mockCache).getIDFunc = getIDFunc
+		globalMetaCache.(*MockCache).On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), nil).Once()
 	})
 
 	t.Run("FlushAll failed, DataCoord flush failed", func(t *testing.T) {
@@ -436,8 +452,24 @@ func TestProxy_FlushAll(t *testing.T) {
 
 	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
 		node.rootCoord.(*mocks.RootCoord).ExpectedCalls = nil
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{Status: successStatus, DbNames: []string{"default"}}, nil).Maybe()
 		node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 			Return(&milvuspb.ShowCollectionsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock err",
+				},
+			}, nil).Maybe()
+		resp, err := node.FlushAll(ctx, &milvuspb.FlushAllRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("FlushAll failed, RootCoord showCollections failed", func(t *testing.T) {
+		node.rootCoord.(*mocks.RootCoord).ExpectedCalls = nil
+		node.rootCoord.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    "mock err",
@@ -613,5 +645,174 @@ func TestProxy_ListClientInfos(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
+	})
+}
+
+func TestProxyCreateDatabase(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.multiRateLimiter = NewMultiRateLimiter()
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(10)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+
+	t.Run("create database fail", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("CreateDatabase", mock.Anything, mock.Anything).
+			Return(nil, errors.New("fail"))
+		node.rootCoord = rc
+		ctx := context.Background()
+		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("create database ok", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("CreateDatabase", mock.Anything, mock.Anything).
+			Return(&commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil)
+		node.rootCoord = rc
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestProxyDropDatabase(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.multiRateLimiter = NewMultiRateLimiter()
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(10)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+
+	t.Run("drop database fail", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("DropDatabase", mock.Anything, mock.Anything).
+			Return(nil, errors.New("fail"))
+		node.rootCoord = rc
+		ctx := context.Background()
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("drop database ok", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("DropDatabase", mock.Anything, mock.Anything).
+			Return(&commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil)
+		node.rootCoord = rc
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestProxyListDatabase(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.multiRateLimiter = NewMultiRateLimiter()
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(10)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+
+	t.Run("list database fail", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("ListDatabases", mock.Anything, mock.Anything).
+			Return(nil, errors.New("fail"))
+		node.rootCoord = rc
+		ctx := context.Background()
+		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("list database ok", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("ListDatabases", mock.Anything, mock.Anything).
+			Return(&milvuspb.ListDatabasesResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				}}, nil)
+		node.rootCoord = rc
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }

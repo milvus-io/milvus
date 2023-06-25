@@ -59,12 +59,16 @@ func Test_GetResourceNames(t *testing.T) {
 
 func Test_PolicyForPrivilege(t *testing.T) {
 	assert.Equal(t,
-		`{"PType":"p","V0":"admin","V1":"COLLECTION-col1","V2":"ALL"}`,
-		PolicyForPrivilege("admin", "COLLECTION", "col1", "ALL"))
+		`{"PType":"p","V0":"admin","V1":"COLLECTION-default.col1","V2":"ALL"}`,
+		PolicyForPrivilege("admin", "COLLECTION", "col1", "ALL", "default"))
 }
 
 func Test_PolicyForResource(t *testing.T) {
 	assert.Equal(t,
-		`COLLECTION-col1`,
-		PolicyForResource("COLLECTION", "col1"))
+		`COLLECTION-default.col1`,
+		PolicyForResource("", "COLLECTION", "col1"))
+
+	assert.Equal(t,
+		`COLLECTION-db.col1`,
+		PolicyForResource("db", "COLLECTION", "col1"))
 }

@@ -648,6 +648,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -785,6 +786,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
+		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -1299,34 +1301,48 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		return resp, nil
 	}
 
-	showColRsp, err := s.rootCoordClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
-		)})
-	if err = VerifyResponse(showColRsp, err); err != nil {
-		log.Warn("failed to ShowCollections", zap.Error(err))
+	dbsRsp, err := s.rootCoordClient.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
+	})
+	if err = VerifyResponse(dbsRsp, err); err != nil {
+		log.Warn("failed to ListDatabases", zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
 
-	for _, collection := range showColRsp.GetCollectionIds() {
-		describeColRsp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+	for _, dbName := range dbsRsp.DbNames {
+		showColRsp, err := s.rootCoordClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
-			CollectionID: collection,
+			DbName: dbName,
 		})
-		if err = VerifyResponse(describeColRsp, err); err != nil {
-			log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+		if err = VerifyResponse(showColRsp, err); err != nil {
+			log.Warn("failed to ShowCollections", zap.Error(err))
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
-		for _, channel := range describeColRsp.GetVirtualChannelNames() {
-			channelCP := s.meta.GetChannelCheckpoint(channel)
-			if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
-				resp.Flushed = false
-				resp.Status.ErrorCode = commonpb.ErrorCode_Success
+
+		for _, collection := range showColRsp.GetCollectionIds() {
+			describeColRsp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+				),
+				// please do not specify the collection name alone after database feature.
+				CollectionID: collection,
+			})
+			if err = VerifyResponse(describeColRsp, err); err != nil {
+				log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
+				resp.Status.Reason = err.Error()
 				return resp, nil
+			}
+			for _, channel := range describeColRsp.GetVirtualChannelNames() {
+				channelCP := s.meta.GetChannelCheckpoint(channel)
+				if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
+					resp.Flushed = false
+					resp.Status.ErrorCode = commonpb.ErrorCode_Success
+					return resp, nil
+				}
 			}
 		}
 	}

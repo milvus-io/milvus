@@ -85,6 +85,11 @@ var (
 	// Index related
 	ErrIndexNotFound = newMilvusError("index not found", 700, false)
 
+	// Database related
+	ErrDatabaseNotfound         = newMilvusError("database not found", 800, false)
+	ErrDatabaseNumLimitExceeded = newMilvusError("exceeded the limit number of database", 801, false)
+	ErrInvalidedDatabaseName    = newMilvusError("invalided database name", 802, false)
+
 	// Node related
 	ErrNodeNotFound    = newMilvusError("node not found", 901, false)
 	ErrNodeOffline     = newMilvusError("node offline", 902, false)

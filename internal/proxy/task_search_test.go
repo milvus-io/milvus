@@ -1603,7 +1603,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}

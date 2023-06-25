@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -41,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
 )
 
 const (
@@ -734,7 +734,9 @@ func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64)
 
 func (q *QuotaCenter) getCollectionLimitConfig(collection int64) map[string]string {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
-	collectionInfo, err := q.meta.GetCollectionByID(context.TODO(), collection, typeutil.MaxTimestamp, false)
+
+	// dbName can be ignored if ts is max timestamps
+	collectionInfo, err := q.meta.GetCollectionByID(context.TODO(), "", collection, typeutil.MaxTimestamp, false)
 	if err != nil {
 		log.RatedWarn(10, "failed to get collection rate limit config",
 			zap.Int64("collectionID", collection),

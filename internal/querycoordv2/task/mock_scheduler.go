@@ -41,7 +41,7 @@ type MockScheduler_Add_Call struct {
 }
 
 // Add is a helper method to define mock.On call
-//   - task Task
+//  - task Task
 func (_e *MockScheduler_Expecter) Add(task interface{}) *MockScheduler_Add_Call {
 	return &MockScheduler_Add_Call{Call: _e.mock.On("Add", task)}
 }
@@ -69,7 +69,7 @@ type MockScheduler_AddExecutor_Call struct {
 }
 
 // AddExecutor is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockScheduler_Expecter) AddExecutor(nodeID interface{}) *MockScheduler_AddExecutor_Call {
 	return &MockScheduler_AddExecutor_Call{Call: _e.mock.On("AddExecutor", nodeID)}
 }
@@ -97,7 +97,7 @@ type MockScheduler_Dispatch_Call struct {
 }
 
 // Dispatch is a helper method to define mock.On call
-//   - node int64
+//  - node int64
 func (_e *MockScheduler_Expecter) Dispatch(node interface{}) *MockScheduler_Dispatch_Call {
 	return &MockScheduler_Dispatch_Call{Call: _e.mock.On("Dispatch", node)}
 }
@@ -170,7 +170,7 @@ type MockScheduler_GetNodeChannelDelta_Call struct {
 }
 
 // GetNodeChannelDelta is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockScheduler_Expecter) GetNodeChannelDelta(nodeID interface{}) *MockScheduler_GetNodeChannelDelta_Call {
 	return &MockScheduler_GetNodeChannelDelta_Call{Call: _e.mock.On("GetNodeChannelDelta", nodeID)}
 }
@@ -207,7 +207,7 @@ type MockScheduler_GetNodeSegmentDelta_Call struct {
 }
 
 // GetNodeSegmentDelta is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockScheduler_Expecter) GetNodeSegmentDelta(nodeID interface{}) *MockScheduler_GetNodeSegmentDelta_Call {
 	return &MockScheduler_GetNodeSegmentDelta_Call{Call: _e.mock.On("GetNodeSegmentDelta", nodeID)}
 }
@@ -271,7 +271,7 @@ type MockScheduler_RemoveByNode_Call struct {
 }
 
 // RemoveByNode is a helper method to define mock.On call
-//   - node int64
+//  - node int64
 func (_e *MockScheduler_Expecter) RemoveByNode(node interface{}) *MockScheduler_RemoveByNode_Call {
 	return &MockScheduler_RemoveByNode_Call{Call: _e.mock.On("RemoveByNode", node)}
 }
@@ -299,7 +299,7 @@ type MockScheduler_RemoveExecutor_Call struct {
 }
 
 // RemoveExecutor is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockScheduler_Expecter) RemoveExecutor(nodeID interface{}) *MockScheduler_RemoveExecutor_Call {
 	return &MockScheduler_RemoveExecutor_Call{Call: _e.mock.On("RemoveExecutor", nodeID)}
 }
@@ -327,7 +327,7 @@ type MockScheduler_Start_Call struct {
 }
 
 // Start is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *MockScheduler_Expecter) Start(ctx interface{}) *MockScheduler_Start_Call {
 	return &MockScheduler_Start_Call{Call: _e.mock.On("Start", ctx)}
 }

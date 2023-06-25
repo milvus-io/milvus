@@ -20,15 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type createPartitionTask struct {
@@ -41,7 +39,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreatePartition); err != nil {
 		return err
 	}
-	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), t.GetTs())
+	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.GetTs())
 	if err != nil {
 		return err
 	}
@@ -80,6 +78,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
+		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
@@ -90,6 +89,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		partition: partition,
 	}, &removePartitionMetaStep{
 		baseStep:     baseStep{core: t.core},
+		dbID:         t.collMeta.DBID,
 		collectionID: partition.CollectionID,
 		partitionID:  partition.PartitionID,
 		ts:           t.GetTs(),

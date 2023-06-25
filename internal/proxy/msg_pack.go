@@ -116,7 +116,7 @@ func repackInsertDataByPartition(ctx context.Context,
 		}
 	}
 
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.CollectionName, partitionName)
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	}
 
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
-	partitionNames, err := getDefaultPartitionNames(ctx, insertMsg.CollectionName)
+	partitionNames, err := getDefaultPartitionNames(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		log.Warn("get default partition names failed in partition key mode",
 			zap.String("collection name", insertMsg.CollectionName),

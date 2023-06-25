@@ -20,15 +20,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
 func Test_createPartitionTask_Prepare(t *testing.T) {
@@ -51,12 +51,17 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		meta := newMockMetaTable()
 		collectionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll.Clone(), nil
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(coll.Clone(), nil)
+
 		core := newTestCore(withMeta(meta))
 		task := &createPartitionTask{
 			baseTask: baseTask{core: core},

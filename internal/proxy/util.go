@@ -165,6 +165,32 @@ func ValidateResourceGroupName(entity string) error {
 	return nil
 }
 
+func ValidateDatabaseName(dbName string) error {
+	if dbName == "" {
+		return merr.WrapErrInvalidedDatabaseName(dbName, "database name couldn't be empty")
+	}
+
+	if len(dbName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		return merr.WrapErrInvalidedDatabaseName(dbName,
+			fmt.Sprintf("the length of a database name must be less than %d characters", Params.ProxyCfg.MaxNameLength.GetAsInt()))
+	}
+
+	firstChar := dbName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return merr.WrapErrInvalidedDatabaseName(dbName,
+			"the first character of a database name must be an underscore or letter")
+	}
+
+	for i := 1; i < len(dbName); i++ {
+		c := dbName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrInvalidedDatabaseName(dbName,
+				"database name can only contain numbers, letters and underscores")
+		}
+	}
+	return nil
+}
+
 // ValidateCollectionAlias returns true if collAlias is a valid alias name for collection, otherwise returns false.
 func ValidateCollectionAlias(collAlias string) error {
 	return validateCollectionNameOrAlias(collAlias, "alias")
@@ -810,6 +836,18 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return username, nil
 }
 
+func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return util.DefaultDBName
+	}
+	dbNameData := md[strings.ToLower(util.HeaderDBName)]
+	if len(dbNameData) < 1 || dbNameData[0] == "" {
+		return util.DefaultDBName
+	}
+	return dbNameData[0]
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
@@ -1141,7 +1179,7 @@ func getCollectionProgress(
 	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 		),
 		CollectionIDs: []int64{collectionID},
 	})
@@ -1191,14 +1229,16 @@ func getPartitionProgress(
 	partitionIDs := make([]int64, 0)
 	for _, partitionName := range partitionNames {
 		var partitionID int64
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName, partitionName)
 		if err != nil {
 			return
 		}
 		IDs2Names[partitionID] = partitionName
 		partitionIDs = append(partitionIDs, partitionID)
 	}
-	resp, err := queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+
+	var resp *querypb.ShowPartitionsResponse
+	resp, err = queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
@@ -1253,8 +1293,8 @@ func getPartitionProgress(
 	return
 }
 
-func isPartitionKeyMode(ctx context.Context, colName string) (bool, error) {
-	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, colName)
+func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (bool, error) {
+	colSchema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
 	if err != nil {
 		return false, err
 	}
@@ -1269,8 +1309,34 @@ func isPartitionKeyMode(ctx context.Context, colName string) (bool, error) {
 }
 
 // getDefaultPartitionNames only used in partition key mode
-func getDefaultPartitionNames(ctx context.Context, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, collectionName)
+func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, collectionName string) ([]string, error) {
+	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make sure the order of the partition names got every time is the same
+	partitionNames := make([]string, len(partitions))
+	for partitionName := range partitions {
+		splits := strings.Split(partitionName, "_")
+		if len(splits) < 2 {
+			err = fmt.Errorf("bad default partion name in partition ket mode: %s", partitionName)
+			return nil, err
+		}
+		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		partitionNames[index] = partitionName
+	}
+
+	return partitionNames, nil
+}
+
+// getDefaultPartitionNames only used in partition key mode
+func getDefaultPartitionNames(ctx context.Context, dbName string, collectionName string) ([]string, error) {
+	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -1311,13 +1377,13 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 	return channel2RowOffsets
 }
 
-func assignPartitionKeys(ctx context.Context, collName string, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := getDefaultPartitionNames(ctx, collName)
+func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+	partitionNames, err := getDefaultPartitionNames(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}

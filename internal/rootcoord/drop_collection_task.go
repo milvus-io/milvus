@@ -20,18 +20,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/common"
-
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type dropCollectionTask struct {
@@ -43,7 +39,7 @@ func (t *dropCollectionTask) validate() error {
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_DropCollection); err != nil {
 		return err
 	}
-	if t.core.meta.IsAlias(t.Req.GetCollectionName()) {
+	if t.core.meta.IsAlias(t.Req.GetDbName(), t.Req.GetCollectionName()) {
 		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 	return nil
@@ -58,7 +54,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	// we cannot handle case that
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
-	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if common.IsCollectionNotExistError(err) {
 		// make dropping collection idempotent.
 		log.Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()))
@@ -78,6 +74,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
+		dbName:          t.Req.GetDbName(),
 		collectionNames: append(aliases, collMeta.Name),
 		collectionID:    collMeta.CollectionID,
 		ts:              ts,

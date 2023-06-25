@@ -6,32 +6,29 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/samber/lo"
-
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/common"
-
+	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -248,7 +245,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
@@ -256,7 +253,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collID
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
 		return err
@@ -308,7 +305,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
 
-	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	schema, _ := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
 	t.schema = schema
 
 	if t.ids != nil {
@@ -332,7 +329,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := ParsePartitionKeys(expr)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.CollectionName, partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, "", t.request.CollectionName, partitionKeys)
 		if err != nil {
 			return err
 		}
@@ -394,6 +391,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
+		db:         t.request.GetDbName(),
 		collection: t.collectionName,
 		nq:         1,
 		exec:       t.queryShard,
@@ -466,12 +464,12 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		globalMetaCache.DeprecateShardCache(t.collectionName)
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

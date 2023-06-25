@@ -23,7 +23,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
 
-	config "github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
@@ -779,6 +779,7 @@ type rootCoordConfig struct {
 	ImportMaxPendingTaskCount   ParamItem `refreshable:"true"`
 	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
+	MaxDatabaseNum              ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -849,6 +850,15 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
+
+	p.MaxDatabaseNum = ParamItem{
+		Key:          "rootCoord.maxDatabaseNum",
+		Version:      "2.3.0",
+		DefaultValue: "64",
+		Doc:          "Maximum number of database",
+		Export:       true,
+	}
+	p.MaxDatabaseNum.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -46,7 +46,7 @@ type MockManager_GetWorker_Call struct {
 }
 
 // GetWorker is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockManager_Expecter) GetWorker(nodeID interface{}) *MockManager_GetWorker_Call {
 	return &MockManager_GetWorker_Call{Call: _e.mock.On("GetWorker", nodeID)}
 }

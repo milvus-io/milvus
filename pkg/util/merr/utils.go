@@ -168,6 +168,30 @@ func WrapErrCrossClusterRouting(expectedCluster, actualCluster string, msg ...st
 	return err
 }
 
+func WrapErrDatabaseNotFound(database any, msg ...string) error {
+	err := wrapWithField(ErrDatabaseNotfound, "database", database)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrDatabaseResourceLimitExceeded(msg ...string) error {
+	var err error = ErrDatabaseNumLimitExceeded
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrInvalidedDatabaseName(database any, msg ...string) error {
+	err := wrapWithField(ErrInvalidedDatabaseName, "database", database)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Collection related
 func WrapErrCollectionNotFound(collection any, msg ...string) error {
 	err := wrapWithField(ErrCollectionNotFound, "collection", collection)

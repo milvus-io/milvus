@@ -81,6 +81,9 @@ func TestHookInterceptor(t *testing.T) {
 		info = &grpc.UnaryServerInfo{
 			FullMethod: "test",
 		}
+		emptyFullMethod = &grpc.UnaryServerInfo{
+			FullMethod: "",
+		}
 		interceptor = UnaryServerHookInterceptor()
 		mockHoo     = mockHook{mockRes: "mock", mockErr: errors.New("mock")}
 		r           = &req{method: "req"}
@@ -94,6 +97,11 @@ func TestHookInterceptor(t *testing.T) {
 
 	hoo = mockHoo
 	res, err = interceptor(ctx, "request", info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		return nil, nil
+	})
+	assert.Equal(t, res, mockHoo.mockRes)
+	assert.Equal(t, err, mockHoo.mockErr)
+	res, err = interceptor(ctx, "request", emptyFullMethod, func(ctx context.Context, req interface{}) (interface{}, error) {
 		return nil, nil
 	})
 	assert.Equal(t, res, mockHoo.mockRes)

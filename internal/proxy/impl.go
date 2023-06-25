@@ -58,6 +58,7 @@ import (
 )
 
 const moduleName = "Proxy"
+
 const SlowReadSpan = time.Second * 5
 
 // UpdateStateCode updates the state code of Proxy.
@@ -129,7 +130,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	var aliasName []string
 	if globalMetaCache != nil {
 		if collectionName != "" {
-			globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 		}
 		if request.CollectionID != UniqueID(0) {
 			aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
@@ -150,6 +151,160 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
+}
+
+func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateDatabase")
+	defer sp.End()
+
+	method := "CreateDatabase"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	cct := &createDatabaseTask{
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		CreateDatabaseRequest: request,
+		rootCoord:             node.rootCoord,
+	}
+
+	log := log.With(zap.String("traceID", sp.SpanContext().TraceID().String()),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("dbName", request.DbName))
+
+	log.Info(rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Info(rpcEnqueued(method))
+	if err := cct.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Info(rpcDone(method))
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return cct.result, nil
+}
+
+func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropDatabase")
+	defer sp.End()
+
+	method := "DropDatabase"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	dct := &dropDatabaseTask{
+		ctx:                 ctx,
+		Condition:           NewTaskCondition(ctx),
+		DropDatabaseRequest: request,
+		rootCoord:           node.rootCoord,
+	}
+
+	log := log.With(zap.String("traceID", sp.SpanContext().TraceID().String()),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("dbName", request.DbName))
+
+	log.Info(rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Info(rpcEnqueued(method))
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Info(rpcDone(method))
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return dct.result, nil
+}
+
+func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	resp := &milvuspb.ListDatabasesResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListDatabases")
+	defer sp.End()
+
+	method := "ListDatabases"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	dct := &listDatabaseTask{
+		ctx:                  ctx,
+		Condition:            NewTaskCondition(ctx),
+		ListDatabasesRequest: request,
+		rootCoord:            node.rootCoord,
+	}
+
+	log := log.With(zap.String("traceID", sp.SpanContext().TraceID().String()),
+		zap.String("role", typeutil.ProxyRole))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return resp, nil
+	}
+
+	log.Info(rpcEnqueued(method))
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return resp, nil
+	}
+
+	log.Info(rpcDone(method), zap.Int("num of db", len(dct.result.DbNames)))
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return dct.result, nil
 }
 
 // CreateCollection create a collection by the schema.
@@ -570,7 +725,9 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 	log.Debug("DescribeCollection done",
 		zap.Uint64("BeginTS", dct.BeginTs()),
-		zap.Uint64("EndTS", dct.EndTs()))
+		zap.Uint64("EndTS", dct.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
@@ -1467,7 +1624,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err := validateCollectionName(request.CollectionName); err != nil {
 		return getErrResponse(err), nil
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.CollectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		return getErrResponse(err), nil
 	}
@@ -1565,7 +1722,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.CollectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		successResponse.State = commonpb.LoadState_LoadStateNotExist
 		return successResponse, nil
@@ -2132,6 +2289,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 					commonpbutil.WithMsgID(0),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
+				DbName:         request.GetDbName(),
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
 				FieldsData:     request.FieldsData,
@@ -2346,24 +2504,18 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		metrics.UpsertLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 
+	request.Base = commonpbutil.NewMsgBase(
+		commonpbutil.WithMsgType(commonpb.MsgType_Upsert),
+		commonpbutil.WithSourceID(paramtable.GetNodeID()),
+	)
+
 	it := &upsertTask{
 		baseMsg: msgstream.BaseMsg{
 			HashValues: request.HashKeys,
 		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-
-		req: &milvuspb.UpsertRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Upsert),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			CollectionName: request.CollectionName,
-			PartitionName:  request.PartitionName,
-			FieldsData:     request.FieldsData,
-			NumRows:        request.NumRows,
-		},
-
+		req:       request,
 		result: &milvuspb.MutationResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -3106,39 +3258,48 @@ func (node *Proxy) FlushAll(ctx context.Context, _ *milvuspb.FlushAllRequest) (*
 	}
 	log.Info(rpcReceived("FlushAll"))
 
-	// Flush all collections to accelerate the flushAll progress
-	showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
-	})
-	if err != nil {
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	hasError := func(status *commonpb.Status, err error) bool {
+		if err != nil {
+			resp.Status = &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("FlushAll failed", zap.String("err", err.Error()))
+			return true
 		}
-		log.Warn("FlushAll failed", zap.String("err", err.Error()))
-		return resp, nil
-	}
-	if showColRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("FlushAll failed", zap.String("err", showColRsp.GetStatus().GetReason()))
-		resp.Status = showColRsp.GetStatus()
-		return resp, nil
-	}
-	flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
-		Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
-		CollectionNames: showColRsp.GetCollectionNames(),
-	})
-	if err != nil {
-		resp.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("FlushAll failed", zap.String("err", status.GetReason()))
+			resp.Status = status
+			return true
 		}
-		log.Warn("FlushAll failed", zap.String("err", err.Error()))
+		return false
+	}
+
+	dbsRsp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
+	})
+	if hasError(dbsRsp.GetStatus(), err) {
 		return resp, nil
 	}
-	if flushRsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("FlushAll failed", zap.String("err", flushRsp.GetStatus().GetReason()))
-		resp.Status = flushRsp.GetStatus()
-		return resp, nil
+
+	for _, dbName := range dbsRsp.DbNames {
+		// Flush all collections to accelerate the flushAll progress
+		showColRsp, err := node.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
+			DbName: dbName,
+		})
+		if hasError(showColRsp.GetStatus(), err) {
+			return resp, nil
+		}
+
+		flushRsp, err := node.Flush(ctx, &milvuspb.FlushRequest{
+			Base:            commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
+			DbName:          dbName,
+			CollectionNames: showColRsp.GetCollectionNames(),
+		})
+		if hasError(flushRsp.GetStatus(), err) {
+			return resp, nil
+		}
 	}
 
 	// allocate current ts as FlushAllTs
@@ -3194,7 +3355,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		metrics.TotalLabel).Inc()
 
 	// list segments
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		resp.Status.Reason = fmt.Errorf("getCollectionID failed, err:%w", err).Error()
@@ -3284,7 +3445,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, req.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		resp.Status.Reason = err.Error()
@@ -3587,7 +3748,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		log.Warn("failed to get collection id",
 			zap.String("collection name", req.GetCollectionName()),
@@ -3649,7 +3810,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	)
 
 	if req.GetCollectionName() != "" {
-		req.CollectionID, _ = globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
+		req.CollectionID, _ = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	}
 
 	r, err := node.queryCoord.GetReplicas(ctx, req)
@@ -5124,28 +5285,5 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 	return &proxypb.ListClientInfosResponse{
 		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		ClientInfos: clients,
-	}, nil
-}
-
-func (node *Proxy) CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "TODO: implement me @jaime",
-	}, nil
-}
-
-func (node *Proxy) DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "TODO: implement me @jaime",
-	}, nil
-}
-
-func (node *Proxy) ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-	return &milvuspb.ListDatabasesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "TODO: implement me @jaime",
-		},
 	}, nil
 }

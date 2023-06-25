@@ -32,7 +32,7 @@ type MockController_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
-//   - nodeID int64
+//  - nodeID int64
 func (_e *MockController_Expecter) Remove(nodeID interface{}) *MockController_Remove_Call {
 	return &MockController_Remove_Call{Call: _e.mock.On("Remove", nodeID)}
 }
@@ -60,8 +60,8 @@ type MockController_StartDistInstance_Call struct {
 }
 
 // StartDistInstance is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
+//  - ctx context.Context
+//  - nodeID int64
 func (_e *MockController_Expecter) StartDistInstance(ctx interface{}, nodeID interface{}) *MockController_StartDistInstance_Call {
 	return &MockController_StartDistInstance_Call{Call: _e.mock.On("StartDistInstance", ctx, nodeID)}
 }
@@ -116,7 +116,7 @@ type MockController_SyncAll_Call struct {
 }
 
 // SyncAll is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *MockController_Expecter) SyncAll(ctx interface{}) *MockController_SyncAll_Call {
 	return &MockController_SyncAll_Call{Call: _e.mock.On("SyncAll", ctx)}
 }

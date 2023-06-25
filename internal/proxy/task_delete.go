@@ -82,7 +82,7 @@ func (dt *deleteTask) OnEnqueue() error {
 }
 
 func (dt *deleteTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.deleteMsg.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.deleteMsg.GetDbName(), dt.deleteMsg.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		log.Info("Invalid collection name", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
-	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
 		log.Info("Failed to get collection id", zap.String("collectionName", collName), zap.Error(err))
 		return err
@@ -176,7 +176,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.deleteMsg.CollectionID = collID
 	dt.collectionID = collID
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, collName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.deleteMsg.GetDbName(), dt.deleteMsg.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, collName, partName)
+		partID, err := globalMetaCache.GetPartitionID(ctx, dt.deleteMsg.GetDbName(), collName, partName)
 		if err != nil {
 			log.Info("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
 			return err
@@ -201,7 +201,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		dt.deleteMsg.PartitionID = common.InvalidPartitionID
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
 		log.Info("Failed to get collection schema", zap.String("collectionName", collName), zap.Error(err))
 		return err

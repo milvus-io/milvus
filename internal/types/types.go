@@ -19,13 +19,12 @@ package types
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -443,9 +442,40 @@ type IndexNodeComponent interface {
 }
 
 // RootCoord is the interface `rootcoord` package implements
+//
+//go:generate mockery --name=RootCoord  --output=../mocks --filename=mock_rootcoord.go --with-expecter
 type RootCoord interface {
 	Component
 	TimeTickProvider
+
+	// CreateDatabase notifies RootCoord to create a database
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including a database name
+	//
+	// The `ErrorCode` of `Status` is `Success` if create database successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error)
+
+	// DropDatabase notifies RootCoord to drop a database
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including a database name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop database successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error)
+
+	// ListDatabases notifies RootCoord to list all database names at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and timestamp
+	//
+	// The `Status` in response struct `ListDatabasesResponse` indicates if this operation is processed successfully or fail cause;
+	// other fields in `ListDatabasesResponse` are filled with all database names, error is always nil
+	ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)
 
 	// CreateCollection notifies RootCoord to create a collection
 	//
@@ -889,6 +919,35 @@ type ProxyComponent interface {
 	// UpdateStateCode updates state code for Proxy
 	//  `stateCode` is current statement of this proxy node, indicating whether it's healthy.
 	UpdateStateCode(stateCode commonpb.StateCode)
+
+	// CreateDatabase notifies Proxy to create a database
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including a database name
+	//
+	// The `ErrorCode` of `Status` is `Success` if create database successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	CreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error)
+
+	// DropDatabase notifies Proxy to drop a database
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including a database name
+	//
+	// The `ErrorCode` of `Status` is `Success` if drop database successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	DropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) (*commonpb.Status, error)
+
+	// ListDatabases notifies Proxy to list all database names at specified timestamp
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(not used), collection name and timestamp
+	//
+	// The `Status` in response struct `ListDatabasesResponse` indicates if this operation is processed successfully or fail cause;
+	// other fields in `ListDatabasesResponse` are filled with all database names, error is always nil
+	ListDatabases(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)
 
 	// CreateCollection notifies Proxy to create a collection
 	//

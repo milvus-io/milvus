@@ -21,6 +21,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 )
 
 type LBPolicySuite struct {
@@ -129,6 +130,7 @@ func (s *LBPolicySuite) loadCollection() {
 		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
 			CollectionName: s.collection,
+			DbName:         dbName,
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
@@ -141,7 +143,7 @@ func (s *LBPolicySuite) loadCollection() {
 	s.NoError(createColT.Execute(ctx))
 	s.NoError(createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, s.collection)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, s.collection)
 	s.NoError(err)
 
 	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
@@ -159,6 +161,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	ctx := context.Background()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(5, nil)
 	targetNode, err := s.lbPolicy.selectNode(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -172,6 +175,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(3, nil)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: []int64{},
@@ -184,6 +188,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: []int64{},
@@ -196,6 +201,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -210,6 +216,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.qc.ExpectedCalls = nil
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrNoAvailableNodeInReplica)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -228,6 +235,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -243,6 +251,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -261,6 +270,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -277,6 +287,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -296,6 +307,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := 0
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		db:           dbName,
 		collection:   s.collection,
 		channel:      s.channels[0],
 		shardLeaders: s.nodes,
@@ -319,6 +331,7 @@ func (s *LBPolicySuite) TestExecute() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		db:         dbName,
 		collection: s.collection,
 		nq:         1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
@@ -330,6 +343,7 @@ func (s *LBPolicySuite) TestExecute() {
 	// test some channel failed
 	counter := atomic.NewInt64(0)
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		db:         dbName,
 		collection: s.collection,
 		nq:         1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {
@@ -344,9 +358,10 @@ func (s *LBPolicySuite) TestExecute() {
 
 	// test get shard leader failed
 	s.qc.ExpectedCalls = nil
-	globalMetaCache.DeprecateShardCache(s.collection)
+	globalMetaCache.DeprecateShardCache(dbName, s.collection)
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		db:         dbName,
 		collection: s.collection,
 		nq:         1,
 		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNode, s ...string) error {

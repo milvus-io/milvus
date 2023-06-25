@@ -143,6 +143,7 @@ natsmq:
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of dml channels created at system startup
+  maxDatabaseNum: 64 # Maximum number of database
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
@@ -461,7 +462,7 @@ quotaAndLimits:
   enabled: true # `true` to enable quota and limits, `false` to disable.
   limits:
     maxCollectionNum: 65536
-    maxCollectionNumPerDB: 64
+    maxCollectionNumPerDB: 65536
   # quotaCenterCollectInterval is the time interval that quotaCenter
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)

@@ -54,7 +54,7 @@ type MockAllocator_Alloc_Call struct {
 }
 
 // Alloc is a helper method to define mock.On call
-//   - count uint32
+//  - count uint32
 func (_e *MockAllocator_Expecter) Alloc(count interface{}) *MockAllocator_Alloc_Call {
 	return &MockAllocator_Alloc_Call{Call: _e.mock.On("Alloc", count)}
 }
@@ -170,8 +170,8 @@ type MockAllocator_GetGenerator_Call struct {
 }
 
 // GetGenerator is a helper method to define mock.On call
-//   - count int
-//   - done <-chan struct{}
+//  - count int
+//  - done <-chan struct{}
 func (_e *MockAllocator_Expecter) GetGenerator(count interface{}, done interface{}) *MockAllocator_GetGenerator_Call {
 	return &MockAllocator_GetGenerator_Call{Call: _e.mock.On("GetGenerator", count, done)}
 }

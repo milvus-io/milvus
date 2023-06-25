@@ -22,8 +22,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/config"
-
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -35,9 +33,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -129,10 +127,12 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	dc := NewDataCoordMock()
 	ctx := context.Background()
 
-	mockCache := newMockCache()
-	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return collectionID, nil
-	})
+	mockCache := NewMockCache(t)
+	mockCache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
 	globalMetaCache = mockCache
 
 	dit := dropIndexTask{
@@ -161,18 +161,22 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	})
 
 	t.Run("get collectionID error", func(t *testing.T) {
-		mockCache := newMockCache()
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("error")
-		})
+		mockCache := NewMockCache(t)
+		mockCache.On("GetCollectionID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(0), errors.New("error"))
 		globalMetaCache = mockCache
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
 
-	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return collectionID, nil
-	})
+	mockCache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
 	globalMetaCache = mockCache
 
 	t.Run("coll has been loaded", func(t *testing.T) {
@@ -238,13 +242,18 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	dc := NewDataCoordMock()
 	ctx := context.Background()
 
-	mockCache := newMockCache()
-	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return collectionID, nil
-	})
-	mockCache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-		return newTestSchema(), nil
-	})
+	mockCache := NewMockCache(t)
+	mockCache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+	mockCache.On("GetCollectionSchema",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(newTestSchema(), nil)
+
 	globalMetaCache = mockCache
 
 	cit := createIndexTask{

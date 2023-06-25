@@ -248,6 +248,18 @@ func Test_NewClient(t *testing.T) {
 			r, err := client.CheckHealth(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
+		{
+			r, err := client.CreateDatabase(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.DropDatabase(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.ListDatabases(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
@@ -448,6 +460,18 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.CheckHealth(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.CreateDatabase(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.DropDatabase(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.ListDatabases(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	// clean up

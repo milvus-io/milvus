@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -414,35 +415,43 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	t.Run("failed to get from catalog", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("int64"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(nil, errors.New("error mock GetCollectionByID"))
 		meta := &MetaTable{
-			catalog:     catalog,
+			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		_, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
+		_, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, false)
 		assert.Error(t, err)
 	})
 
 	t.Run("collection not available", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("int64"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
 		meta := &MetaTable{
-			catalog:     catalog,
+			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		_, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
+		_, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, false)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
-		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101, true)
+		coll, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 101, true)
 		assert.NoError(t, err)
 		assert.False(t, coll.Available())
 	})
@@ -462,7 +471,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
+		coll, err := meta.getCollectionByIDInternal(ctx, "", 100, 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -484,7 +493,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		coll, err := meta.getCollectionByIDInternal(ctx, 100, typeutil.MaxTimestamp, false)
+		coll, err := meta.getCollectionByIDInternal(ctx, "", 100, typeutil.MaxTimestamp, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -495,9 +504,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 func TestMetaTable_GetCollectionByName(t *testing.T) {
 	t.Run("get by alias", func(t *testing.T) {
 		meta := &MetaTable{
-			collAlias2ID: map[string]typeutil.UniqueID{
-				"alias": 100,
-			},
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
@@ -509,8 +516,9 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 		}
+		meta.aliases.insert(util.DefaultDBName, "alias", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "alias", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -519,9 +527,8 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 
 	t.Run("get by name", func(t *testing.T) {
 		meta := &MetaTable{
-			collName2ID: map[string]typeutil.UniqueID{
-				"name": 100,
-			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
@@ -533,8 +540,9 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 		}
+		meta.names.insert(util.DefaultDBName, "name", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "name", 101)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -544,26 +552,42 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	t.Run("failed to get from catalog", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByName",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(nil, errors.New("error mock GetCollectionByName"))
-		meta := &MetaTable{catalog: catalog}
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
 		assert.Error(t, err)
 	})
 
 	t.Run("collection not available", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByName",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
-		meta := &MetaTable{catalog: catalog}
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
 	})
@@ -571,9 +595,10 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("GetCollectionByName",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(&model.Collection{
 			State:      pb.CollectionState_CollectionCreated,
 			CreateTime: 99,
@@ -582,9 +607,17 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 			},
 		}, nil)
-		meta := &MetaTable{catalog: catalog}
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -593,8 +626,8 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 
 	t.Run("get latest version", func(t *testing.T) {
 		ctx := context.Background()
-		meta := &MetaTable{collName2ID: nil}
-		_, err := meta.GetCollectionByName(ctx, "not_exist", typeutil.MaxTimestamp)
+		meta := &MetaTable{names: newNameDb(), aliases: newNameDb()}
+		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
 	})
@@ -720,7 +753,19 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(errors.New("error mock DropCollection"))
-		meta := &MetaTable{catalog: catalog}
+
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					CollectionID: 100,
+					DBID:         int64(100),
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.Error(t, err)
@@ -735,17 +780,15 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
-			collAlias2ID: map[string]typeutil.UniqueID{
-				"alias1": 100,
-				"alias2": 100,
-			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "collection"},
 			},
-			collName2ID: map[string]typeutil.UniqueID{
-				"collection": 100,
-			},
 		}
+		meta.names.insert("", "collection", 100)
+		meta.names.insert("", "alias1", 100)
+		meta.names.insert("", "alias2", 100)
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
@@ -753,51 +796,135 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 }
 
 func TestMetaTable_reload(t *testing.T) {
-	t.Run("failed to list collections", func(t *testing.T) {
+	createMetaTableFn := func(catalogOpts ...func(*mocks.RootCoordCatalog)) *MetaTable {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("ListCollections",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("uint64"),
-		).Return(nil, errors.New("error mock ListCollections"))
+		catalog.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(make([]*model.Database, 0), nil)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		tso := mocktso.NewAllocator(t)
+		tso.On("GenerateTSO",
+			mock.Anything,
+		).Return(uint64(1), nil)
+
+		for _, opt := range catalogOpts {
+			opt(catalog)
+		}
+		return &MetaTable{
+			names:        newNameDb(),
+			aliases:      newNameDb(),
+			catalog:      catalog,
+			tsoAllocator: tso,
+		}
+	}
+
+	t.Run("list db fail", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock ListDatabases"))
+
 		meta := &MetaTable{catalog: catalog}
 		err := meta.reload()
 		assert.Error(t, err)
 		assert.Empty(t, meta.collID2Meta)
-		assert.Empty(t, meta.collName2ID)
-		assert.Empty(t, meta.collAlias2ID)
+
+		assert.Equal(t, 0, len(meta.names.listDB()))
+		assert.Equal(t, 0, len(meta.aliases.listDB()))
+	})
+
+	t.Run("failed to list collections", func(t *testing.T) {
+		meta := createMetaTableFn(func(catalog *mocks.RootCoordCatalog) {
+			catalog.On("ListCollections",
+				mock.Anything,
+				mock.Anything,
+				mock.Anything,
+			).Return(nil, errors.New("error mock ListCollections"))
+		})
+
+		err := meta.reload()
+		assert.Error(t, err)
+		assert.Empty(t, meta.collID2Meta)
 	})
 
 	t.Run("failed to list aliases", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("ListCollections",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("uint64"),
-		).Return(
-			map[string]*model.Collection{"test": {CollectionID: 100, Name: "test"}},
-			nil)
-		catalog.On("ListAliases",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("uint64"),
-		).Return(nil, errors.New("error mock ListAliases"))
-		meta := &MetaTable{catalog: catalog}
+		meta := createMetaTableFn(
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListCollections",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(
+					[]*model.Collection{{CollectionID: 100, Name: "test"}},
+					nil)
+			},
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListAliases",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(nil, errors.New("error mock ListAliases"))
+			},
+		)
+
 		err := meta.reload()
 		assert.Error(t, err)
-		assert.Empty(t, meta.collAlias2ID)
 	})
 
-	t.Run("normal case", func(t *testing.T) {
+	t.Run("no collections and default db doesn't exists", func(t *testing.T) {
+		meta := createMetaTableFn(
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListCollections",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(make([]*model.Collection, 0), nil)
+			},
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListAliases",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(
+					[]*model.Alias{},
+					nil)
+			},
+		)
+		err := meta.reload()
+		assert.NoError(t, err)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(meta.collID2Meta))
+
+		assert.Equal(t, 1, len(meta.names.listDB()))
+		assert.True(t, meta.names.exist("default"))
+		assert.Equal(t, 1, len(meta.aliases.listDB()))
+		assert.True(t, meta.aliases.exist("default"))
+	})
+
+	t.Run("no collections and default db already exists", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-
+		catalog.On("ListDatabases",
+			mock.Anything,
+			mock.Anything,
+		).Return([]*model.Database{model.NewDefaultDatabase()}, nil)
 		catalog.On("ListCollections",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(
-			map[string]*model.Collection{"test": {CollectionID: 100, Name: "test"}},
+			[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
 			nil)
-
 		catalog.On("ListAliases",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(
 			[]*model.Alias{{Name: "alias", CollectionID: 100}},
 			nil)
@@ -805,10 +932,117 @@ func TestMetaTable_reload(t *testing.T) {
 		meta := &MetaTable{catalog: catalog}
 		err := meta.reload()
 		assert.NoError(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(meta.collID2Meta))
-		assert.Equal(t, 1, len(meta.collName2ID))
-		assert.Equal(t, 1, len(meta.collAlias2ID))
+
+		assert.Equal(t, 1, len(meta.names.listDB()))
+		assert.True(t, meta.names.exist(util.DefaultDBName))
+		assert.Equal(t, 1, len(meta.aliases.listDB()))
+		assert.True(t, meta.aliases.exist(util.DefaultDBName))
 	})
+
+	t.Run("ok", func(t *testing.T) {
+		meta := createMetaTableFn(
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListCollections",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(
+					[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+					nil)
+			},
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListAliases",
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(
+					[]*model.Alias{{Name: "alias", CollectionID: 100}},
+					nil)
+			},
+		)
+
+		err := meta.reload()
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(meta.collID2Meta))
+
+		assert.Equal(t, 1, len(meta.names.listDB()))
+		assert.True(t, meta.names.exist(util.DefaultDBName))
+		assert.Equal(t, 1, len(meta.aliases.listDB()))
+		assert.True(t, meta.aliases.exist(util.DefaultDBName))
+
+		colls, err := meta.names.listCollectionID(util.DefaultDBName)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(colls))
+		assert.Equal(t, int64(100), colls[0])
+
+		colls, err = meta.aliases.listCollectionID(util.DefaultDBName)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(colls))
+		assert.Equal(t, int64(100), colls[0])
+	})
+}
+
+func TestMetaTable_ListAllAvailCollections(t *testing.T) {
+	meta := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: {
+				ID: util.DefaultDBID,
+			},
+			"db2": {
+				ID: 11,
+			},
+			"db3": {
+				ID: 2,
+			},
+			"db4": {
+				ID: 1111,
+			},
+		},
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			111: {
+				CollectionID: 111,
+				DBID:         1111,
+				State:        pb.CollectionState_CollectionDropped,
+			},
+			2: {
+				CollectionID: 2,
+				DBID:         11,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			3: {
+				CollectionID: 3,
+				DBID:         11,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			4: {
+				CollectionID: 4,
+				DBID:         2,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+			5: {
+				CollectionID: 5,
+				DBID:         util.NonDBID,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+		},
+	}
+
+	ret := meta.ListAllAvailCollections(context.TODO())
+	assert.Equal(t, 4, len(ret))
+	db0, ok := ret[util.DefaultDBID]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(db0))
+	db1, ok := ret[11]
+	assert.True(t, ok)
+	assert.Equal(t, 2, len(db1))
+	db2, ok2 := ret[2]
+	assert.True(t, ok2)
+	assert.Equal(t, 1, len(db2))
+	db3, ok := ret[1111]
+	assert.True(t, ok)
+	assert.Equal(t, 0, len(db3))
 }
 
 func TestMetaTable_ChangeCollectionState(t *testing.T) {
@@ -882,9 +1116,10 @@ func TestMetaTable_AddPartition(t *testing.T) {
 	t.Run("failed to create partition", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("CreatePartition",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Partition
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("error mock CreatePartition"))
 		meta := &MetaTable{
 			catalog: catalog,
@@ -899,9 +1134,10 @@ func TestMetaTable_AddPartition(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("CreatePartition",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Partition
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -917,36 +1153,37 @@ func TestMetaTable_AddPartition(t *testing.T) {
 func TestMetaTable_RenameCollection(t *testing.T) {
 	t.Run("unsupported use a alias to rename collection", func(t *testing.T) {
 		meta := &MetaTable{
-			collAlias2ID: map[string]typeutil.UniqueID{
-				"alias": 1,
-			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
 		}
-		err := meta.RenameCollection(context.TODO(), "alias", "new", typeutil.MaxTimestamp)
+		meta.names.insert("", "alias", 1)
+		err := meta.RenameCollection(context.TODO(), "", "alias", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
 	t.Run("collection name not exist", func(t *testing.T) {
-		meta := &MetaTable{}
-		err := meta.RenameCollection(context.TODO(), "non-exists", "new", typeutil.MaxTimestamp)
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		err := meta.RenameCollection(context.TODO(), "", "non-exists", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
 	t.Run("collection id not exist", func(t *testing.T) {
 		meta := &MetaTable{
-			collName2ID: map[string]typeutil.UniqueID{
-				"old": 1,
-			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
 		}
-		err := meta.RenameCollection(context.TODO(), "old", "new", typeutil.MaxTimestamp)
+		meta.names.insert("", "old", 1)
+		err := meta.RenameCollection(context.TODO(), "", "old", "new", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 	})
 
 	t.Run("new collection name already exist-1", func(t *testing.T) {
 		meta := &MetaTable{
-			collName2ID: map[string]typeutil.UniqueID{
-				"old": 1,
-				"new": 2,
-			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				2: {
 					CollectionID: 1,
@@ -955,7 +1192,9 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				},
 			},
 		}
-		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.names.insert(util.DefaultDBName, "new", 2)
+		err := meta.RenameCollection(context.TODO(), "", "old", "new", 1000)
 		assert.Error(t, err)
 	})
 
@@ -965,15 +1204,19 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, errors.New("error mock GetCollectionByID"))
 		meta := &MetaTable{
-			catalog: catalog,
-			collName2ID: map[string]typeutil.UniqueID{
-				"old": 1,
-				"new": 2,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
 			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
 		}
-		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		meta.names.insert(util.DefaultDBName, "new", 2)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
 		assert.Error(t, err)
 	})
 
@@ -990,13 +1233,16 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, common.NewCollectionNotExistError("error"))
 
 		meta := &MetaTable{
-			catalog: catalog,
-			collName2ID: map[string]typeutil.UniqueID{
-				"old": 1,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
 			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {
 					CollectionID: 1,
@@ -1004,7 +1250,8 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				},
 			},
 		}
-		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
 		assert.Error(t, err)
 	})
 
@@ -1021,12 +1268,15 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, common.NewCollectionNotExistError("error"))
 		meta := &MetaTable{
-			catalog: catalog,
-			collName2ID: map[string]typeutil.UniqueID{
-				"old": 1,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
 			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				1: {
 					CollectionID: 1,
@@ -1034,10 +1284,11 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 				},
 			},
 		}
-		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", "new", 1000)
 		assert.NoError(t, err)
 
-		id, ok := meta.collName2ID["new"]
+		id, ok := meta.names.get(util.DefaultDBName, "new")
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), id)
 
@@ -1067,11 +1318,12 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 	t.Run("failed to alter partition", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterPartition",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Partition
-			mock.Anything, // *model.Partition
-			mock.Anything, // metastore.AlterType
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("error mock AlterPartition"))
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1091,11 +1343,12 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterPartition",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Partition
-			mock.Anything, // *model.Partition
-			mock.Anything, // metastore.AlterType
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1112,5 +1365,225 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 		assert.NoError(t, err)
 		err = meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
 		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_CreateDatabase(t *testing.T) {
+	db := model.NewDatabase(1, "exist", pb.DatabaseState_DatabaseCreated)
+	t.Run("database already exist", func(t *testing.T) {
+		meta := &MetaTable{
+			names: newNameDb(),
+		}
+		meta.names.insert("exist", "collection", 100)
+		err := meta.CreateDatabase(context.TODO(), db, 10000)
+		assert.Error(t, err)
+	})
+
+	t.Run("database not persistent", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("error mock CreateDatabase"))
+		meta := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		err := meta.CreateDatabase(context.TODO(), db, 10000)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"exist": db,
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		err := meta.CreateDatabase(context.TODO(), db, 10000)
+		assert.NoError(t, err)
+		assert.True(t, meta.names.exist("exist"))
+		assert.True(t, meta.aliases.exist("exist"))
+		assert.True(t, meta.names.empty("exist"))
+		assert.True(t, meta.aliases.empty("exist"))
+	})
+}
+
+func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
+	t.Run("getDatabaseByNameInternal with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: {ID: 1},
+			},
+		}
+
+		ret, err := mt.getDatabaseByNameInternal(context.TODO(), "", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), ret.ID)
+	})
+
+	t.Run("getCollectionByNameInternal with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {CollectionID: 1},
+			},
+		}
+
+		mt.aliases.insert(util.DefaultDBName, "aliases", 1)
+		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), ret.CollectionID)
+	})
+
+	t.Run("listCollectionFromCache with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(),
+				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated),
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					State:        pb.CollectionState_CollectionCreated,
+				},
+				2: {
+					CollectionID: 2,
+					State:        pb.CollectionState_CollectionDropping,
+					DBID:         util.DefaultDBID,
+				},
+				3: {
+					CollectionID: 3,
+					State:        pb.CollectionState_CollectionCreated,
+					DBID:         2,
+				},
+			},
+		}
+
+		ret, err := mt.listCollectionFromCache("none", false)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+
+		ret, err = mt.listCollectionFromCache("", false)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(ret))
+		assert.Equal(t, []int64{ret[0].CollectionID, ret[1].CollectionID}, []int64{1, 2})
+
+		ret, err = mt.listCollectionFromCache("db2", false)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(ret))
+		assert.Equal(t, int64(3), ret[0].CollectionID)
+	})
+
+	t.Run("CreateAlias with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+		}
+
+		mt.names.insert(util.DefaultDBName, "name", 1)
+		err := mt.CreateAlias(context.TODO(), "", "name", "name", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("DropAlias with empty db", func(t *testing.T) {
+		mt := &MetaTable{
+			names: newNameDb(),
+		}
+
+		mt.names.insert(util.DefaultDBName, "name", 1)
+		err := mt.DropAlias(context.TODO(), "", "name", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_DropDatabase(t *testing.T) {
+	t.Run("can't drop default database", func(t *testing.T) {
+		mt := &MetaTable{}
+		err := mt.DropDatabase(context.TODO(), "default", 10000)
+		assert.Error(t, err)
+	})
+
+	t.Run("database not exist", func(t *testing.T) {
+		mt := &MetaTable{
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		err := mt.DropDatabase(context.TODO(), "not_exist", 10000)
+		assert.NoError(t, err)
+	})
+
+	t.Run("database not empty", func(t *testing.T) {
+		mt := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"not_empty": model.NewDatabase(1, "not_empty", pb.DatabaseState_DatabaseCreated),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[int64]*model.Collection{
+				10000000: {
+					DBID:         1,
+					CollectionID: 10000000,
+					Name:         "collection",
+				},
+			},
+		}
+		mt.names.insert("not_empty", "collection", 10000000)
+		err := mt.DropDatabase(context.TODO(), "not_empty", 10000)
+		assert.Error(t, err)
+	})
+
+	t.Run("not commit", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("error mock DropDatabase"))
+		mt := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		mt.names.createDbIfNotExist("not_commit")
+		mt.aliases.createDbIfNotExist("not_commit")
+		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		mt := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated),
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		mt.names.createDbIfNotExist("not_commit")
+		mt.aliases.createDbIfNotExist("not_commit")
+		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		assert.NoError(t, err)
+		assert.False(t, mt.names.exist("not_commit"))
+		assert.False(t, mt.aliases.exist("not_commit"))
 	})
 }
