@@ -342,9 +342,10 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 			stats, err := c.loadStats(context.Background(), s.segmentID, s.collectionID, statsBinlogs, ts)
 			if err != nil {
 				// TODO if not retryable, add rebuild statslog logic
-				log.Warn("failed to lazy load statslog for segment", zap.Error(err))
+				log.Warn("failed to lazy load statslog for segment", zap.Int64("segment", s.segmentID), zap.Error(err))
 				if c.retryableLoadError(err) {
-					log.Info("retry load statslog")
+					time.Sleep(100 * time.Millisecond)
+					log.Warn("failed to lazy load statslog for segment, retrying...", zap.Int64("segment", s.segmentID), zap.Error(err))
 					c.submitLoadStatsTask(s, statsBinlogs, ts)
 				}
 				return struct{}{}, err

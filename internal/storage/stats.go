@@ -282,7 +282,7 @@ func (sr *StatsReader) GetPrimaryKeyStatsList() ([]*PrimaryKeyStats, error) {
 func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 	results := make([]*PrimaryKeyStats, 0, len(blobs))
 	for _, blob := range blobs {
-		if blob.Value == nil {
+		if len(blob.Value) == 0 {
 			continue
 		}
 		sr := &StatsReader{}
@@ -297,7 +297,7 @@ func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 }
 
 func DeserializeStatsList(blob *Blob) ([]*PrimaryKeyStats, error) {
-	if blob.Value == nil {
+	if len(blob.Value) == 0 {
 		return []*PrimaryKeyStats{}, nil
 	}
 	sr := &StatsReader{}
