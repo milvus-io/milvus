@@ -1006,9 +1006,10 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         method: connect without parameters of user and password
         excepted: connected is false
         """
-        self.connection_wrap.connect(host=host, port=port, check_task=ct.CheckTasks.ccr)
-        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
-                                           check_items={ct.err_code: 1})
+        self.connection_wrap.connect(host=host, port=port,
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 2,
+                                                  ct.err_msg: "Fail connecting to server"})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["alice3333"])
@@ -1019,9 +1020,9 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         excepted: connected is false
         """
         self.connection_wrap.connect(host=host, port=port, user=user, password="abc123",
-                                     check_task=ct.CheckTasks.ccr)
-        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
-                                           check_items={ct.err_code: 1})
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 2,
+                                                  ct.err_msg: "Fail connecting to server"})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
     @pytest.mark.parametrize("user", ["anny015"])
@@ -1041,6 +1042,7 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
 
         # 3.connect with the created user and wrong password
         self.connection_wrap.disconnect(alias=connect_name)
-        self.connection_wrap.connect(host=host, port=port, user=user, password=ct.default_password)
-        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
-                                           check_items={ct.err_code: 1})
+        self.connection_wrap.connect(host=host, port=port, user=user, password=ct.default_password,
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 2,
+                                                  ct.err_msg: "Fail connecting to server"})

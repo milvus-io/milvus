@@ -83,6 +83,23 @@ class Base:
             log.debug(str(e))
 
         try:
+            """ Drop roles before disconnect """
+            if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
+                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+                                             port=cf.param_info.param_port, user=ct.default_user,
+                                             password=ct.default_password)
+
+            role_list = self.utility_wrap.list_roles(False)[0]
+            for role in role_list.groups:
+                role_name = role.role_name
+                if role_name not in ["admin", "public"]:
+                    each_role = self.utility_wrap.init_role(name=role_name)[0]
+                    each_role.drop()
+
+        except Exception as e:
+            log.debug(str(e))
+
+        try:
             """ Delete connection and reset configuration"""
             res = self.connection_wrap.list_connections()
             for i in res[0]:
