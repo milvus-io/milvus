@@ -91,6 +91,7 @@ type quotaConfig struct {
 	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
 	TopKLimit             ParamItem `refreshable:"true"`
 	NQLimit               ParamItem `refreshable:"true"`
+	MaxQueryResultWindow  ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                     ParamItem `refreshable:"true"`
@@ -761,6 +762,15 @@ maximum # of search requests (nq).
 Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.NQLimit.Init(base.mgr)
+
+	p.MaxQueryResultWindow = ParamItem{
+		Key:          "quotaAndLimits.limits.maxQueryResultWindow",
+		Version:      "2.3.0",
+		DefaultValue: "16384",
+		FallbackKeys: []string{},
+		Doc:          `Query limit, which applies on: maximum of offset + limit`,
+	}
+	p.MaxQueryResultWindow.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{
