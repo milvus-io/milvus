@@ -34,7 +34,7 @@ import (
 )
 
 type channelStateTimer struct {
-	watchkv kv.MetaKv
+	watchkv kv.WatchKV
 
 	runningTimers     sync.Map
 	runningTimerStops sync.Map // channel name to timer stop channels
@@ -45,7 +45,7 @@ type channelStateTimer struct {
 	runningTimerCount atomic.Int32
 }
 
-func newChannelStateTimer(kv kv.MetaKv) *channelStateTimer {
+func newChannelStateTimer(kv kv.WatchKV) *channelStateTimer {
 	return &channelStateTimer{
 		watchkv:        kv,
 		timeoutWatcher: make(chan *ackEvent, 20),

@@ -136,7 +136,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func newTestEtcdKV() (kv.MetaKv, error) {
+func newTestEtcdKV() (kv.WatchKV, error) {
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),

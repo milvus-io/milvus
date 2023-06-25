@@ -579,7 +579,7 @@ func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *etcdKV) CompareVersionAndSwap(key string, source int64, target string, opts ...clientv3.OpOption) (bool, error) {
+func (kv *etcdKV) CompareVersionAndSwap(key string, source int64, target string) (bool, error) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -588,7 +588,7 @@ func (kv *etcdKV) CompareVersionAndSwap(key string, source int64, target string,
 			clientv3.Version(path.Join(kv.rootPath, key)),
 			"=",
 			source)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
 	if err != nil {
 		return false, err
 	}

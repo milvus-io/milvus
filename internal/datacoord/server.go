@@ -106,7 +106,7 @@ type Server struct {
 
 	etcdCli          *clientv3.Client
 	address          string
-	kvClient         kv.MetaKv
+	kvClient         kv.WatchKV
 	meta             *meta
 	segmentManager   Manager
 	allocator        allocator

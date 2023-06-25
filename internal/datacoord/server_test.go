@@ -3171,7 +3171,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 }
 
 func TestOptions(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -3242,7 +3242,7 @@ func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
 }
 
 func TestHandleSessionEvent(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()

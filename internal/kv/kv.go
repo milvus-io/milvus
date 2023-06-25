@@ -67,11 +67,18 @@ type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
 	LoadWithPrefix(key string) ([]string, []string, error)
+	CompareVersionAndSwap(key string, version int64, target string) (bool, error)
+	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
+}
+
+// WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.
+//
+//go:generate mockery --name=WatchKV --with-expecter
+type WatchKV interface {
+	MetaKv
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	WatchWithRevision(key string, revision int64) clientv3.WatchChan
-	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
-	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.

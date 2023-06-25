@@ -29,7 +29,7 @@ import (
 )
 
 func TestChannelStateTimer(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer kv.Close()
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
