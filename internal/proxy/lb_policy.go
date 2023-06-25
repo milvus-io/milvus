@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -62,7 +63,18 @@ type LBPolicyImpl struct {
 }
 
 func NewLBPolicyImpl(clientMgr shardClientMgr) *LBPolicyImpl {
-	balancer := NewLookAsideBalancer(clientMgr)
+	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
+
+	var balancer LBBalancer
+	switch balancePolicy {
+	case "round_robin":
+		log.Info("use round_robin policy on replica selection")
+		balancer = NewRoundRobinBalancer()
+	default:
+		log.Info("use look_aside policy on replica selection")
+		balancer = NewLookAsideBalancer(clientMgr)
+	}
+
 	return &LBPolicyImpl{
 		balancer:  balancer,
 		clientMgr: clientMgr,

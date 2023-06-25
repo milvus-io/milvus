@@ -894,6 +894,7 @@ type proxyConfig struct {
 	MaxTaskNum               ParamItem `refreshable:"false"`
 	AccessLog                AccessLogConfig
 	ShardLeaderCacheInterval ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy   ParamItem `refreshable:"false"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1103,6 +1104,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "time interval to update shard leader cache, in seconds",
 	}
 	p.ShardLeaderCacheInterval.Init(base.mgr)
+
+	p.ReplicaSelectionPolicy = ParamItem{
+		Key:          "proxy.replicaSelectionPolicy",
+		Version:      "2.3.0",
+		DefaultValue: "look_aside",
+		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+	}
+	p.ReplicaSelectionPolicy.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

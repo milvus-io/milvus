@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -374,6 +375,22 @@ func (s *LBPolicySuite) TestExecute() {
 func (s *LBPolicySuite) TestUpdateCostMetrics() {
 	s.lbBalancer.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything)
 	s.lbPolicy.UpdateCostMetrics(1, &internalpb.CostAggregation{})
+}
+
+func (s *LBPolicySuite) TestNewLBPolicy() {
+	policy := NewLBPolicyImpl(s.mgr)
+	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	policy.Close()
+
+	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "round_robin")
+	policy = NewLBPolicyImpl(s.mgr)
+	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.RoundRobinBalancer")
+	policy.Close()
+
+	Params.Save(Params.ProxyCfg.ReplicaSelectionPolicy.Key, "look_aside")
+	policy = NewLBPolicyImpl(s.mgr)
+	s.Equal(reflect.TypeOf(policy.balancer).String(), "*proxy.LookAsideBalancer")
+	policy.Close()
 }
 
 func TestLBPolicySuite(t *testing.T) {
