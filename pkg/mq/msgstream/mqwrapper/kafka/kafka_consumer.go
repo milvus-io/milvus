@@ -251,7 +251,6 @@ func (kc *Consumer) CheckTopicValid(topic string) error {
 func (kc *Consumer) Close() {
 	kc.closeOnce.Do(func() {
 		close(kc.closeCh)
-		kc.wg.Wait()
-		kc.c.Close()
+		kc.wg.Wait() // wait worker exist and close the client
 	})
 }
