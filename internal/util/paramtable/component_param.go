@@ -1798,7 +1798,7 @@ func (p *dataNodeConfig) initCpLagPeriod() {
 }
 
 func (p *dataNodeConfig) initMaxSyncBatch() {
-	p.MaxSyncBatch = p.Base.ParseIntWithDefault("datanode.segment.maxSyncBatch", 50)
+	p.MaxSyncBatch = p.Base.ParseIntWithDefault("datanode.segment.maxSyncBatch", 500)
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {

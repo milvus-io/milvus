@@ -558,10 +558,10 @@ func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
-	log.Info("updating segment num row", zap.Int64("Segment ID", segID), zap.Int64("numRows", numRows))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
 		seg.numRows += numRows
+		log.Info("updated segment num row", zap.Int64("Segment ID", segID), zap.Int64("row number", seg.numRows))
 		return
 	}
 
@@ -573,10 +573,10 @@ func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) 
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
-	log.Info("updating segment memorySize", zap.Int64("Segment ID", segID), zap.Int64("memorySize", memorySize))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
 		seg.memorySize = memorySize
+		log.Info("updated segment memorySize", zap.Int64("Segment ID", segID), zap.Int64("memorySize", seg.memorySize))
 		return
 	}
 
