@@ -55,6 +55,7 @@ type Segment struct {
 	startPos    *msgpb.MsgPosition // TODO readonly
 	lazyLoading atomic.Value
 	syncing     atomic.Value
+	released    atomic.Value
 }
 
 func (s *Segment) isSyncing() bool {
@@ -83,6 +84,18 @@ func (s *Segment) isLoadingLazy() bool {
 
 func (s *Segment) setLoadingLazy(b bool) {
 	s.lazyLoading.Store(b)
+}
+
+func (s *Segment) isReleased() bool {
+	b, ok := s.released.Load().(bool)
+	if !ok {
+		return false
+	}
+	return b
+}
+
+func (s *Segment) setReleased(b bool) {
+	s.released.Store(b)
 }
 
 func (s *Segment) isValid() bool {
