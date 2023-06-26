@@ -57,10 +57,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections by name", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,
@@ -77,10 +74,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections by id", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,
@@ -114,10 +108,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,

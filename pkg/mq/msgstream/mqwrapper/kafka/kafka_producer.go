@@ -11,7 +11,9 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type kafkaProducer struct {
@@ -26,6 +28,9 @@ func (kp *kafkaProducer) Topic() string {
 }
 
 func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+	start := timerecord.NewTimeRecorder("send msg to stream")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
+
 	headers := make([]kafka.Header, 0, len(message.Properties))
 	for key, value := range message.Properties {
 		header := kafka.Header{Key: key, Value: []byte(value)}
@@ -38,19 +43,26 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 	}, kp.deliveryChan)
 
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 
 	e, ok := <-kp.deliveryChan
 	if !ok {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Error("kafka produce message fail because of delivery chan is closed", zap.String("topic", kp.topic))
 		return nil, common.NewIgnorableError(fmt.Errorf("delivery chan of kafka producer is closed"))
 	}
 
 	m := e.(*kafka.Message)
 	if m.TopicPartition.Error != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		return nil, m.TopicPartition.Error
 	}
+
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 
 	return &kafkaID{messageID: int64(m.TopicPartition.Offset)}, nil
 }

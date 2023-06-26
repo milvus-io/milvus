@@ -541,6 +541,7 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	log.Info("finish index task success", zap.Int64("buildID", taskInfo.BuildID),
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()))
 	m.updateIndexTasksMetrics()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.IndexFileKeys)))
 	return nil
 }
 

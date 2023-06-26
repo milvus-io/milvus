@@ -19,6 +19,7 @@ package indexnode
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"runtime/debug"
 	"sync"
 
@@ -28,6 +29,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -229,6 +232,10 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		}
 	}
 	t.SetState(commonpb.IndexState_Finished, "")
+	if indexBuildTask, ok := t.(*indexBuildTask); ok {
+		metrics.IndexNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(indexBuildTask.tr.ElapseSpan().Milliseconds()))
+		metrics.IndexNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(indexBuildTask.queueDur.Milliseconds()))
+	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

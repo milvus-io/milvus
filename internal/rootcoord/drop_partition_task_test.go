@@ -56,7 +56,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 	t.Run("failed to get collection meta", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 			},
@@ -81,7 +81,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 
 		core := newTestCore(withMeta(meta))
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -116,7 +116,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withInvalidProxyManager())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -134,7 +134,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -204,7 +204,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 			withBroker(broker))
 
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,

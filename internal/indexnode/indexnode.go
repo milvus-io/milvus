@@ -28,6 +28,7 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"path"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
@@ -122,12 +124,14 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 func (i *IndexNode) Register() error {
 	i.session.Register()
 
+	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.IndexNodeRole).Inc()
 	//start liveness check
 	i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.IndexNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if i.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {

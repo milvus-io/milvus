@@ -25,7 +25,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 // nmqClient implements mqwrapper.Client.
@@ -55,9 +57,13 @@ func NewClient(url string, options ...nats.Option) (*nmqClient, error) {
 
 // CreateProducer creates a producer for natsmq client
 func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+	start := timerecord.NewTimeRecorder("create producer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
+
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, errors.Wrap(err, "failed to create jetstream context")
 	}
 	// TODO: (1) investigate on performance of multiple streams vs multiple topics.
@@ -67,23 +73,34 @@ func (nc *nmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, errors.Wrap(err, "failed to add/connect to jetstream for producer")
 	}
 	rp := nmqProducer{js: js, topic: options.Topic}
+
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 	return &rp, nil
 }
 
 func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	start := timerecord.NewTimeRecorder("create consumer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
+
 	if options.Topic == "" {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, fmt.Errorf("invalid consumer config: empty topic")
 	}
 
 	if options.SubscriptionName == "" {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, fmt.Errorf("invalid consumer config: empty subscription name")
 	}
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, errors.Wrap(err, "failed to create jetstream context")
 	}
 	// TODO: do we allow passing in an existing natsChan from options?
@@ -95,6 +112,7 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		Subjects: []string{options.Topic},
 	})
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, errors.Wrap(err, "failed to add/connect to jetstream for consumer")
 	}
 	closeChan := make(chan struct{})
@@ -109,9 +127,13 @@ func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		sub, err = js.ChanSubscribe(options.Topic, natsChan, nats.DeliverAll())
 	}
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, errors.Wrap(err, fmt.Sprintf("failed to get consumer info, subscribe position: %d", position))
 	}
 
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
 	return &Consumer{
 		js:        js,
 		sub:       sub,

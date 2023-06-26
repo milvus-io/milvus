@@ -18,6 +18,9 @@ package rootcoord
 
 import (
 	"context"
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type task interface {
@@ -31,6 +34,7 @@ type task interface {
 	Execute(ctx context.Context) error
 	WaitToFinish() error
 	NotifyDone(err error)
+	SetInQueueDuration()
 }
 
 type baseTask struct {
@@ -39,12 +43,16 @@ type baseTask struct {
 	done chan error
 	ts   Timestamp
 	id   UniqueID
+
+	tr       *timerecord.TimeRecorder
+	queueDur time.Duration
 }
 
 func newBaseTask(ctx context.Context, core *Core) baseTask {
 	b := baseTask{
 		core: core,
 		done: make(chan error, 1),
+		tr:   timerecord.NewTimeRecorderWithTrace(ctx, "new task"),
 	}
 	b.SetCtx(ctx)
 	return b
@@ -88,4 +96,8 @@ func (b *baseTask) WaitToFinish() error {
 
 func (b *baseTask) NotifyDone(err error) {
 	b.done <- err
+}
+
+func (b *baseTask) SetInQueueDuration() {
+	b.queueDur = b.tr.ElapseSpan()
 }

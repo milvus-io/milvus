@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -165,6 +166,7 @@ func (c *ChannelStore) Reload() error {
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 		log.Info("channel store reload channel",
 			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
+		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
 	}
 	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -274,6 +276,7 @@ func (c *ChannelStore) update(opSet ChannelOpSet) error {
 		default:
 			return errUnknownOpType
 		}
+		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(op.NodeID, 10)).Set(float64(len(c.channelsInfo[op.NodeID].Channels)))
 	}
 	return nil
 }

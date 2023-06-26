@@ -60,10 +60,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to get collection by name", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &describeCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DescribeCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_DescribeCollection,
@@ -79,10 +76,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to get collection by id", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &describeCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DescribeCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_DescribeCollection,
@@ -114,10 +108,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withMeta(meta))
 		task := &describeCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DescribeCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_DescribeCollection,

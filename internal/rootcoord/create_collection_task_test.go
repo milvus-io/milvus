@@ -524,7 +524,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -558,7 +558,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -595,7 +595,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
 		task := &createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -642,7 +642,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
 		task := &createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -662,7 +662,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		pchans := ticker.getDmlChannelNames(shardNum)
 		core := newTestCore(withTtSynchronizer(ticker))
 		task := &createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			channels: collectionChannels{
 				physicalChannels: pchans,
 				virtualChannels:  []string{funcutil.GenRandomStr(), funcutil.GenRandomStr()},
@@ -734,7 +734,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				DbName:         "mock-db",
@@ -829,7 +829,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,

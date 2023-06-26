@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -61,12 +62,6 @@ import (
 const (
 	// RPCConnectionTimeout is used to set the timeout for rpc request
 	RPCConnectionTimeout = 30 * time.Second
-
-	// MetricRequestsTotal is used to count the num of total requests
-	MetricRequestsTotal = "total"
-
-	// MetricRequestsSuccess is used to count the num of successful requests
-	MetricRequestsSuccess = "success"
 
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
@@ -193,12 +188,15 @@ func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 func (node *DataNode) Register() error {
 	node.session.Register()
 
+	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataNodeRole).Inc()
+	log.Info("DataNode Register Finished")
 	// Start liveness check
 	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetSession().ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {

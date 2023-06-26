@@ -29,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
@@ -180,7 +182,7 @@ func (mcm *MinioChunkManager) Path(ctx context.Context, filePath string) (string
 
 // Reader returns the path of minio data if exists.
 func (mcm *MinioChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
-	reader, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+	reader, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
 		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
@@ -189,7 +191,7 @@ func (mcm *MinioChunkManager) Reader(ctx context.Context, filePath string) (File
 }
 
 func (mcm *MinioChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
-	objectInfo, err := mcm.Client.StatObject(ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
+	objectInfo, err := mcm.statMinioObject(ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
 	if err != nil {
 		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return 0, err
@@ -200,13 +202,14 @@ func (mcm *MinioChunkManager) Size(ctx context.Context, filePath string) (int64,
 
 // Write writes the data to minio storage.
 func (mcm *MinioChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	_, err := mcm.Client.PutObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{})
+	_, err := mcm.putMinioObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{})
 
 	if err != nil {
 		log.Warn("failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
 	}
 
+	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataPutLabel).Observe(float64(len(content)))
 	return nil
 }
 
@@ -225,7 +228,7 @@ func (mcm *MinioChunkManager) MultiWrite(ctx context.Context, kvs map[string][]b
 
 // Exist checks whether chunk is saved to minio storage.
 func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
-	_, err := mcm.Client.StatObject(ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
+	_, err := mcm.statMinioObject(ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
@@ -239,7 +242,7 @@ func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool,
 
 // Read reads the minio storage data if exists.
 func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	object, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+	object, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
 		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
@@ -277,6 +280,7 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
+	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(objectInfo.Size))
 	return data, nil
 }
 
@@ -324,7 +328,7 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		return nil, err
 	}
 
-	object, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, opts)
+	object, err := mcm.getMinioObject(ctx, mcm.bucketName, filePath, opts)
 	if err != nil {
 		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
@@ -340,12 +344,13 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
+	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(length))
 	return data, nil
 }
 
 // Remove deletes an object with @key.
 func (mcm *MinioChunkManager) Remove(ctx context.Context, filePath string) error {
-	err := mcm.Client.RemoveObject(ctx, mcm.bucketName, filePath, minio.RemoveObjectOptions{})
+	err := mcm.removeMinioObject(ctx, mcm.bucketName, filePath, minio.RemoveObjectOptions{})
 	if err != nil {
 		log.Warn("failed to remove object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
@@ -367,7 +372,7 @@ func (mcm *MinioChunkManager) MultiRemove(ctx context.Context, keys []string) er
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
-	objects := mcm.Client.ListObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+	objects := mcm.listMinioObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
 	i := 0
 	maxGoroutine := 10
 	removeKeys := make([]string, 0, len(objects))
@@ -382,7 +387,7 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 		for j := 0; j < maxGoroutine && i < len(removeKeys); j++ {
 			key := removeKeys[i]
 			runningGroup.Go(func() error {
-				err := mcm.Client.RemoveObject(groupCtx, mcm.bucketName, key, minio.RemoveObjectOptions{})
+				err := mcm.removeMinioObject(groupCtx, mcm.bucketName, key, minio.RemoveObjectOptions{})
 				if err != nil {
 					log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
 					return err
@@ -422,7 +427,7 @@ func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string,
 
 		// TODO add concurrent call if performance matters
 		// only return current level per call
-		objects := mcm.Client.ListObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: pre, Recursive: false})
+		objects := mcm.listMinioObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: pre, Recursive: false})
 
 		for object := range objects {
 			if object.Err != nil {
@@ -462,4 +467,80 @@ func Read(r io.Reader, size int64) ([]byte, error) {
 			return data, nil
 		}
 	}
+}
+
+func (mcm *MinioChunkManager) getMinioObject(ctx context.Context, bucketName, objectName string,
+	opts minio.GetObjectOptions) (*minio.Object, error) {
+	start := timerecord.NewTimeRecorder("getMinioObject")
+
+	reader, err := mcm.Client.GetObject(ctx, bucketName, objectName, opts)
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.TotalLabel).Inc()
+	if err == nil && reader != nil {
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.FailLabel).Inc()
+	}
+
+	return reader, err
+}
+
+func (mcm *MinioChunkManager) putMinioObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64,
+	opts minio.PutObjectOptions) (minio.UploadInfo, error) {
+	start := timerecord.NewTimeRecorder("putMinioObject")
+
+	info, err := mcm.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, opts)
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
+	if err == nil {
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
+	}
+
+	return info, err
+}
+
+func (mcm *MinioChunkManager) statMinioObject(ctx context.Context, bucketName, objectName string,
+	opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	start := timerecord.NewTimeRecorder("statMinioObject")
+
+	info, err := mcm.Client.StatObject(ctx, bucketName, objectName, opts)
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.TotalLabel).Inc()
+	if err == nil {
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataStatLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.FailLabel).Inc()
+	}
+
+	return info, err
+}
+
+func (mcm *MinioChunkManager) listMinioObjects(ctx context.Context, bucketName string,
+	opts minio.ListObjectsOptions) <-chan minio.ObjectInfo {
+	start := timerecord.NewTimeRecorder("listMinioObjects")
+
+	res := mcm.Client.ListObjects(ctx, bucketName, opts)
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
+
+	return res
+}
+
+func (mcm *MinioChunkManager) removeMinioObject(ctx context.Context, bucketName, objectName string,
+	opts minio.RemoveObjectOptions) error {
+	start := timerecord.NewTimeRecorder("removeMinioObject")
+
+	err := mcm.Client.RemoveObject(ctx, bucketName, objectName, opts)
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Inc()
+	if err == nil {
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.FailLabel).Inc()
+	}
+
+	return err
 }

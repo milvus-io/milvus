@@ -71,8 +71,11 @@ func searchSegments(ctx context.Context, manager *Manager, segType SegmentType, 
 			errs[i] = err
 			resultCh <- searchResult
 			// update metrics
+			elapsed := tr.ElapseSpan().Milliseconds()
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.SearchLabel, searchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+				metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+			metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+				metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
 		}(segID, i)
 	}
 	wg.Wait()

@@ -138,7 +138,7 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
-	// ProxyCacheHitCounter record the number of Proxy cache hits or miss.
+	// ProxyCacheStatsCounter record the number of Proxy cache hits or miss.
 	ProxyCacheStatsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -155,7 +155,7 @@ var (
 			Name:      "cache_update_latency",
 			Help:      "latency that proxy update cache when cache miss",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName})
+		}, []string{nodeIDLabelName, cacheNameLabelName})
 
 	// ProxySyncTimeTickLag record Proxy synchronization timestamp statistics, differentiated by Channel.
 	ProxySyncTimeTickLag = prometheus.NewGaugeVec(

@@ -25,7 +25,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 // nmqClient implements mqwrapper.Client.
@@ -53,18 +55,30 @@ func NewClient(opts client.Options) (*rmqClient, error) {
 
 // CreateProducer creates a producer for rocksmq client
 func (rc *rmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+	start := timerecord.NewTimeRecorder("create producer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
+
 	rmqOpts := client.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 	rp := rmqProducer{p: pp}
+
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 	return &rp, nil
 }
 
 // Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	start := timerecord.NewTimeRecorder("create consumer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
+
 	if options.BufSize == 0 {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		err := errors.New("subscription bufSize of rmq should never be zero")
 		log.Warn("unexpected subscription consumer options", zap.Error(err))
 		return nil, err
@@ -78,11 +92,15 @@ func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		SubscriptionInitialPosition: options.SubscriptionInitialPosition,
 	})
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 
 	rConsumer := &Consumer{c: cli, closeCh: make(chan struct{})}
 
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
 	return rConsumer, nil
 }
 

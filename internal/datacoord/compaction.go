@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
@@ -250,6 +251,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 	nodeID := c.plans[planID].dataNodeID
 	c.releaseQueue(nodeID)
+
+	metrics.DataCoordCompactedSegmentSize.WithLabelValues().Observe(float64(getCompactedSegmentSize(result)))
 	return nil
 }
 

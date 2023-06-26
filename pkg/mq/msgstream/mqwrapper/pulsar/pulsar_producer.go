@@ -21,7 +21,9 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 // implementation assertion
@@ -37,9 +39,19 @@ func (pp *pulsarProducer) Topic() string {
 }
 
 func (pp *pulsarProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+	start := timerecord.NewTimeRecorder("send msg to stream")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
+
 	ppm := &pulsar.ProducerMessage{Payload: message.Payload, Properties: message.Properties}
 	pmID, err := pp.p.Send(ctx, ppm)
-	return &pulsarID{messageID: pmID}, err
+	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
+		return &pulsarID{messageID: pmID}, err
+	}
+
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
+	return &pulsarID{messageID: pmID}, nil
 }
 
 func (pp *pulsarProducer) Close() {

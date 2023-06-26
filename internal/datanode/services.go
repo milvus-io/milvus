@@ -91,7 +91,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*milvuspb.Compone
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
-		MetricRequestsTotal).Inc()
+		metrics.TotalLabel).Inc()
 
 	if !node.isHealthy() {
 		err := merr.WrapErrServiceNotReady(node.GetStateCode().String())
@@ -158,7 +158,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
-		MetricRequestsSuccess).Inc()
+		metrics.SuccessLabel).Inc()
 	return merr.Status(nil), nil
 }
 

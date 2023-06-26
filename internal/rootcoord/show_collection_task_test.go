@@ -56,10 +56,7 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.ShowCollectionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowCollections,
@@ -85,10 +82,7 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &showCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.ShowCollectionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowCollections,

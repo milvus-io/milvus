@@ -45,7 +45,7 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		core := newTestCore(withInvalidProxyManager())
 		task := &alterAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterAliasRequest{
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				Alias: "test",
@@ -58,7 +58,7 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 	t.Run("failed to alter alias", func(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		task := &alterAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterAliasRequest{
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				Alias: "test",
