@@ -1,6 +1,7 @@
 import numpy
 import pandas as pd
 import pytest
+import threading
 
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -1795,6 +1796,30 @@ class TestDropCollection(TestcaseBase):
         for item in collection_names:
             assert not self.utility_wrap.has_collection(item)[0]
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_during_insert(self):
+        """
+        target: test drop collection during insert
+        method: drop collection during insert
+        expected: drop successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_dataframe_data()
+
+        def insert():
+            collection_w.insert(data)
+
+        t = threading.Thread(target=insert, args=())
+
+        t.start()
+        collection_w.drop()
+        t.join()
+
+        collection_list = self.utility_wrap.list_collections()[0]
+        assert c_name not in collection_list
+
 
 class TestDropCollectionInvalid(TestcaseBase):
     """
@@ -2956,6 +2981,7 @@ class TestCollectionString(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "The auto_id can only be specified on field with DataType.INT64"}
         self.collection_schema_wrap.init_collection_schema(fields=fields,
                                                            check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestCollectionJSON(TestcaseBase):
     """
