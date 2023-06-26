@@ -7,7 +7,7 @@ sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from pymilvus import BulkInsertState
-from pymilvus import Role
+from pymilvus.orm.role import Role
 from utils.util_log import test_log as log
 
 TIMEOUT = 20
@@ -367,21 +367,6 @@ class ApiUtilityWrapper:
                                        using=using).run()
         return res, check_result
 
-    def init_role(self, name, using="default", check_task=None, check_items=None, **kwargs):
-        func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([Role, name, using], **kwargs)
-        self.role = res if is_succ else None
-        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       name=name, **kwargs).run()
-        return res, check_result
-
-    def create_role(self, using="default", check_task=None, check_items=None, **kwargs):
-        func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.role.create], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       **kwargs).run()
-        return res, check_result
-
     def list_roles(self, include_user_info: bool, using="default", check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.list_roles, include_user_info, using])
@@ -398,6 +383,21 @@ class ApiUtilityWrapper:
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.list_users, include_role_info, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, using=using).run()
+        return res, check_result
+
+    def init_role(self, name, using="default", check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([Role, name, using], **kwargs)
+        self.role = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    def create_role(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.role.create], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       **kwargs).run()
         return res, check_result
 
     def role_drop(self, check_task=None, check_items=None, **kwargs):
@@ -434,27 +434,27 @@ class ApiUtilityWrapper:
     def role_name(self):
         return self.role.name
 
-    def role_grant(self, object: str, object_name: str, privilege: str, check_task=None, check_items=None, **kwargs):
+    def role_grant(self, object: str, object_name: str, privilege: str, db_name="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.role.grant, object, object_name, privilege], **kwargs)
+        res, check = api_request([self.role.grant, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_revoke(self, object: str, object_name: str, privilege: str, check_task=None, check_items=None, **kwargs):
+    def role_revoke(self, object: str, object_name: str, privilege: str, db_name="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.role.revoke, object, object_name, privilege], **kwargs)
+        res, check = api_request([self.role.revoke, object, object_name, privilege, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_list_grant(self, object: str, object_name: str, check_task=None, check_items=None, **kwargs):
+    def role_list_grant(self, object: str, object_name: str, db_name="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.role.list_grant, object, object_name], **kwargs)
+        res, check = api_request([self.role.list_grant, object, object_name, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def role_list_grants(self, check_task=None, check_items=None, **kwargs):
+    def role_list_grants(self, db_name="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.role.list_grants], **kwargs)
+        res, check = api_request([self.role.list_grants, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 

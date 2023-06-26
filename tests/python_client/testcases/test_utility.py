@@ -2211,10 +2211,10 @@ class TestUtilityUserPassword(TestcaseBase):
         self.utility_wrap.create_user(user=user, password="abc123")
         self.utility_wrap.delete_user(user=user)
         self.connection_wrap.disconnect(alias=connect_name)
-        self.connection_wrap.connect(host=host, port=port, user=user,
-                                     password="abc123", check_task=ct.CheckTasks.ccr)
-        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
-                                           check_items={ct.err_code: 1})
+        self.connection_wrap.connect(host=host, port=port, user=user, password="abc123",
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 2,
+                                                  ct.err_msg: "Fail connecting to server"})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
     def test_delete_user_with_invalid_username(self, host, port):
@@ -2338,7 +2338,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                          check_items={ct.err_code: 5})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("user", ["genny"])
+    @pytest.mark.parametrize("user", ["genny001"])
     def test_reset_password_with_invalid_old_password(self, host, port, user):
         """
         target: test the old password when resetting password
@@ -2353,7 +2353,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                          check_items={ct.err_code: 30})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("user", ["hobo89"])
+    @pytest.mark.parametrize("user", ["hobo233"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     def test_update_password_with_invalid_username(self, host, port, user, old_password):
         """
@@ -2374,7 +2374,7 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                           check_items={ct.err_code: 30})
 
     @pytest.mark.tags(ct.CaseLabel.RBAC)
-    @pytest.mark.parametrize("user", ["demo"])
+    @pytest.mark.parametrize("user", ["demo001"])
     @pytest.mark.parametrize("old_password", ["qwaszx0"])
     @pytest.mark.parametrize("new_password", ["12345"])
     def test_update_password_with_invalid_new_password(self, host, port, user, old_password, new_password):
