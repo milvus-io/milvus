@@ -235,7 +235,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w = self.init_collection_general(prefix, True, 1)[0]
         # 2. search with invalid dim
         log.info("test_search_param_invalid_dim: searching with invalid dim")
         wrong_dim = 129
@@ -294,7 +294,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid metric_type
         log.info("test_search_param_invalid_metric_type: searching with invalid metric_type")
         invalid_metric = get_invalid_metric_type
@@ -408,7 +408,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. create a collection
-        nb = 1000
+        nb = 1
         dim = 1
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
@@ -462,7 +462,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, is_all_data_type=True)[0]
+        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
         # 2 search with invalid bool expr
         invalid_search_expr_bool = f"{default_bool_field_name} == {get_invalid_expr_bool_value}"
         log.info("test_search_param_invalid_expr_bool: searching with "
@@ -481,18 +481,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: test search int64 and float with like
         expected: searched failed
         """
-        nb = 1000
-        dim = 8
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                             nb, dim=dim,
-                                                                             is_index=True)[0:4]
+        collection_w = self.init_collection_general(prefix, is_index=True)[0]
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
         log.info("test_search_with_expression: searching with expression: %s" % expression)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                            default_search_params, nb, expression,
+                                            default_search_params, default_limit, expression,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1,
                                                          "err_msg": "failed to create query plan: cannot parse "
@@ -546,7 +542,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. release collection
         collection_w.release()
         # 3. Search the released collection
@@ -731,7 +727,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_index=True)[0]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -791,7 +787,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -831,7 +827,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search
         log.info("test_search_output_field_invalid_wildcard: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -854,7 +850,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         if ignore_growing is None or ignore_growing == "":
             pytest.skip("number is valid")
         # 1. create a collection
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w = self.init_collection_general(prefix, True, 10)[0]
 
         # 2. insert data again
         data = cf.gen_default_dataframe_data(start=10000)
@@ -877,7 +873,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid travel timestamp
         log.info("test_search_param_invalid_travel_timestamp: searching with invalid travel timestamp")
         invalid_travel_time = get_invalid_travel_timestamp
@@ -896,7 +892,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 10)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid travel timestamp
         log.info("test_search_param_invalid_guarantee_timestamp: searching with invalid guarantee timestamp")
         invalid_guarantee_time = get_invalid_guarantee_timestamp
@@ -917,7 +913,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        collection_w = self.init_collection_general(prefix)[0]
         # 2. search
         log.info("test_search_invalid_round_decimal: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -936,7 +932,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: Raise exception
         """
         # create collection, insert tmp_nb, flush and load
-        collection_w = self.init_collection_general(prefix, insert_data=True,
+        collection_w = self.init_collection_general(prefix, insert_data=True, nb=1,
                                                     primary_field=ct.default_string_field_name,
                                                     is_index=True,
                                                     enable_dynamic_field=True)[0]
