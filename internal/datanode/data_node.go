@@ -35,9 +35,14 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -62,9 +67,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -950,14 +952,21 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	// block all flow graph so it's safe to remove segment
 	ds.fg.Blockall()
-	defer ds.fg.Unblock()
+
+	success := false
+	defer func() {
+		// success is false if getting lock of fg fails or merging flushed segments fails.
+		node.compactionExecutor.injectDone(req.GetPlanID(), success)
+		ds.fg.Unblock()
+	}()
+
 	if err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
 		status.Reason = err.Error()
-		node.compactionExecutor.injectDone(req.GetPlanID(), false)
 		return status, nil
 	}
-	node.compactionExecutor.injectDone(req.GetPlanID(), true)
+
+	success = true
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
 }
