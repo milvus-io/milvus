@@ -35,9 +35,9 @@ import (
 )
 
 // waitAndStore simulates DataNode's action
-func waitAndStore(t *testing.T, metakv kv.MetaKv, key string, waitState, storeState datapb.ChannelWatchState) {
+func waitAndStore(t *testing.T, watchkv kv.MetaKv, key string, waitState, storeState datapb.ChannelWatchState) {
 	for {
-		v, err := metakv.Load(key)
+		v, err := watchkv.Load(key)
 		if err == nil && len(v) > 0 {
 			watchInfo, err := parseWatchInfo(key, []byte(v))
 			require.NoError(t, err)
@@ -47,7 +47,7 @@ func waitAndStore(t *testing.T, metakv kv.MetaKv, key string, waitState, storeSt
 			data, err := proto.Marshal(watchInfo)
 			require.NoError(t, err)
 
-			metakv.Save(key, string(data))
+			watchkv.Save(key, string(data))
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -84,10 +84,10 @@ func getOpsWithWatchInfo(nodeID UniqueID, ch *channel) ChannelOpSet {
 }
 
 func TestChannelManager_StateTransfer(t *testing.T) {
-	metakv := getMetaKv(t)
+	watchkv := getWatchKV(t)
 	defer func() {
-		metakv.RemoveWithPrefix("")
-		metakv.Close()
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
 	}()
 
 	p := "/tmp/milvus_ut/rdb_data"
@@ -105,11 +105,11 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	)
 
 	t.Run("ToWatch-WatchSuccess", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		cName := channelNamePrefix + "ToWatch-WatchSuccess"
 
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -123,8 +123,8 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
 			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
@@ -136,10 +136,10 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToWatch-WatchFail-ToRelease", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		cName := channelNamePrefix + "ToWatch-WatchFail-ToRelase"
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -153,8 +153,8 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		chManager.Watch(&channel{Name: cName, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchFailure)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchFailure)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
 			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
@@ -167,10 +167,10 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToWatch-Timeout", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		cName := channelNamePrefix + "ToWatch-Timeout"
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -191,7 +191,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}
 		chManager.stateTimer.notifyTimeoutWatcher(e)
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 		assert.Eventually(t, func() bool {
 			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
@@ -206,9 +206,9 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		var oldNode = UniqueID(120)
 		cName := channelNamePrefix + "ToRelease-ReleaseSuccess-Reassign-ToWatch-2-DN"
 
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -219,7 +219,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{Name: cName, CollectionID: collectionID},
@@ -232,13 +232,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.NoError(t, err)
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, oldNode, cName, collectionID)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, oldNode, cName, collectionID)
 
 		cancel()
 		wg.Wait()
 
-		w, err := metakv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
+		w, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
 		assert.Error(t, err)
 		assert.Empty(t, w)
 
@@ -248,10 +248,10 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToRelease-ReleaseSuccess-Reassign-ToWatch-1-DN", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
 		cName := channelNamePrefix + "ToRelease-ReleaseSuccess-Reassign-ToWatch-1-DN"
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -262,7 +262,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{Name: cName, CollectionID: collectionID},
@@ -274,9 +274,9 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.NoError(t, err)
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
 			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
@@ -292,12 +292,12 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		var oldNode = UniqueID(121)
 
 		cName := channelNamePrefix + "ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-2-DN"
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
 		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withMsgstreamFactory(factory))
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -308,7 +308,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{Name: cName, CollectionID: collectionID},
@@ -321,13 +321,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.NoError(t, err)
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseFailure)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, oldNode, cName, collectionID)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseFailure)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, oldNode, cName, collectionID)
 
 		cancel()
 		wg.Wait()
 
-		w, err := metakv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
+		w, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
 		assert.Error(t, err)
 		assert.Empty(t, w)
 
@@ -337,13 +337,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	})
 
 	t.Run("ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-1-DN", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 		cName := channelNamePrefix + "ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-1-DN"
 		ctx, cancel := context.WithCancel(context.TODO())
 		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withMsgstreamFactory(factory))
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -354,7 +354,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{Name: cName, CollectionID: collectionID},
@@ -366,9 +366,9 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.NoError(t, err)
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseFailure)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseFailure)
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
 		assert.Eventually(t, func() bool {
 			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
@@ -381,26 +381,26 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 }
 
 func TestChannelManager(t *testing.T) {
-	metakv := getMetaKv(t)
+	watchkv := getWatchKV(t)
 	defer func() {
-		metakv.RemoveWithPrefix("")
-		metakv.Close()
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
 	}()
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 	t.Run("test AddNode with avalible node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			collectionID       = UniqueID(8)
 			nodeID, nodeToAdd  = UniqueID(118), UniqueID(811)
 			channel1, channel2 = "channel1", "channel2"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{Name: channel1, CollectionID: collectionID},
@@ -422,23 +422,23 @@ func TestChannelManager(t *testing.T) {
 
 		assert.True(t, chManager.Match(nodeToAdd, "channel-3"))
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeToAdd, "channel-3", collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeToAdd, "channel-3", collectionID)
 		chManager.stateTimer.removeTimers([]string{"channel-3"})
 	})
 
 	t.Run("test AddNode with no available node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			collectionID       = UniqueID(8)
 			nodeID             = UniqueID(119)
 			channel1, channel2 = "channel1", "channel2"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				bufferID: {bufferID, []*channel{
 					{Name: channel1, CollectionID: collectionID},
@@ -451,10 +451,10 @@ func TestChannelManager(t *testing.T) {
 		assert.NoError(t, err)
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channel1)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		key = path.Join(prefix, strconv.FormatInt(nodeID, 10), channel2)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		assert.True(t, chManager.Match(nodeID, channel1))
 		assert.True(t, chManager.Match(nodeID, channel2))
@@ -462,12 +462,12 @@ func TestChannelManager(t *testing.T) {
 		err = chManager.Watch(&channel{Name: "channel-3", CollectionID: collectionID})
 		assert.NoError(t, err)
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
 		chManager.stateTimer.removeTimers([]string{"channel-3"})
 	})
 
 	t.Run("test Watch", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			collectionID = UniqueID(7)
 			nodeID       = UniqueID(117)
@@ -475,34 +475,34 @@ func TestChannelManager(t *testing.T) {
 			chanToAdd    = "new-channel-watch"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		err = chManager.Watch(&channel{Name: bufferCh, CollectionID: collectionID})
 		assert.NoError(t, err)
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, bufferID, bufferCh, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, bufferID, bufferCh, collectionID)
 
 		chManager.store.Add(nodeID)
 		err = chManager.Watch(&channel{Name: chanToAdd, CollectionID: collectionID})
 		assert.NoError(t, err)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, chanToAdd, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, chanToAdd, collectionID)
 
 		chManager.stateTimer.removeTimers([]string{chanToAdd})
 	})
 
 	t.Run("test Release", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			collectionID               = UniqueID(4)
 			nodeID, invalidNodeID      = UniqueID(114), UniqueID(999)
 			channelName, invalidChName = "to-release", "invalid-to-release"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 			},
@@ -515,11 +515,11 @@ func TestChannelManager(t *testing.T) {
 		assert.NoError(t, err)
 		chManager.stateTimer.removeTimers([]string{channelName})
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, channelName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToRelease, nodeID, channelName, collectionID)
 	})
 
 	t.Run("test Reassign", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var collectionID = UniqueID(5)
 
 		tests := []struct {
@@ -530,7 +530,7 @@ func TestChannelManager(t *testing.T) {
 			{UniqueID(115), "to-delete-chan"},
 		}
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		// prepare tests
@@ -540,7 +540,7 @@ func TestChannelManager(t *testing.T) {
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
 
-			info, err := metakv.Load(path.Join(prefix, strconv.FormatInt(test.nodeID, 10), test.chName))
+			info, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(test.nodeID, 10), test.chName))
 			require.NoError(t, err)
 			require.NotNil(t, info)
 		}
@@ -565,19 +565,19 @@ func TestChannelManager(t *testing.T) {
 		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// channel is added to remainTest because there's only one node left
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
 	})
 
 	t.Run("test DeleteNode", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 
 		var (
 			collectionID = UniqueID(999)
 		)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withStateChecker())
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withStateChecker())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
 					{Name: "channel-1", CollectionID: collectionID},
@@ -595,7 +595,7 @@ func TestChannelManager(t *testing.T) {
 	})
 
 	t.Run("test CleanupAndReassign", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var collectionID = UniqueID(6)
 
 		tests := []struct {
@@ -609,7 +609,7 @@ func TestChannelManager(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withMsgstreamFactory(factory))
 
 		require.NoError(t, err)
 
@@ -620,7 +620,7 @@ func TestChannelManager(t *testing.T) {
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
 
-			info, err := metakv.Load(path.Join(prefix, strconv.FormatInt(test.nodeID, 10), test.chName))
+			info, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(test.nodeID, 10), test.chName))
 			require.NoError(t, err)
 			require.NotNil(t, info)
 		}
@@ -646,18 +646,18 @@ func TestChannelManager(t *testing.T) {
 		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// channel is added to remainTest because there's only one node left
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
 	})
 
 	t.Run("test getChannelByNodeAndName", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			nodeID       = UniqueID(113)
 			collectionID = UniqueID(3)
 			channelName  = "get-channel-by-node-and-name"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		ch := chManager.getChannelByNodeAndName(nodeID, channelName)
@@ -668,7 +668,7 @@ func TestChannelManager(t *testing.T) {
 		assert.Nil(t, ch)
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 			},
@@ -680,14 +680,14 @@ func TestChannelManager(t *testing.T) {
 	})
 
 	t.Run("test fillChannelWatchInfoWithState", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		var (
 			nodeID       = UniqueID(111)
 			collectionID = UniqueID(1)
 			channelName  = "fill-channel-watchInfo-with-state"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -722,7 +722,7 @@ func TestChannelManager(t *testing.T) {
 			channelName  = "update-with-timer"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
 		chManager.store.Add(nodeID)
 
@@ -731,12 +731,12 @@ func TestChannelManager(t *testing.T) {
 		chManager.updateWithTimer(opSet, datapb.ChannelWatchState_ToWatch)
 		chManager.stateTimer.removeTimers([]string{channelName})
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, channelName, collectionID)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, channelName, collectionID)
 	})
 
 	t.Run("test background check silent", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
-		defer metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 		prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 		var (
 			collectionID      = UniqueID(9)
@@ -748,7 +748,7 @@ func TestChannelManager(t *testing.T) {
 		//1. set up channel_manager
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withBgChecker())
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withBgChecker())
 		require.NoError(t, err)
 		assert.NotNil(t, chManager.bgChecker)
 		chManager.Startup(ctx, []int64{nodeID})
@@ -763,8 +763,8 @@ func TestChannelManager(t *testing.T) {
 		assert.False(t, chManager.isSilent())
 		assert.True(t, chManager.stateTimer.hasRunningTimers())
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), cName)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
 
 		//4. wait for duration and check silent again
 		time.Sleep(Params.DataCoordCfg.ChannelBalanceSilentDuration.GetAsDuration(time.Second))
@@ -775,10 +775,10 @@ func TestChannelManager(t *testing.T) {
 }
 
 func TestChannelManager_Reload(t *testing.T) {
-	metakv := getMetaKv(t)
+	watchkv := getWatchKV(t)
 	defer func() {
-		metakv.RemoveWithPrefix("")
-		metakv.Close()
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
 	}()
 
 	var (
@@ -799,15 +799,15 @@ func TestChannelManager_Reload(t *testing.T) {
 	}
 
 	t.Run("test checkOldNodes", func(t *testing.T) {
-		metakv.RemoveWithPrefix("")
+		watchkv.RemoveWithPrefix("")
 
 		t.Run("ToWatch", func(t *testing.T) {
-			defer metakv.RemoveWithPrefix("")
+			defer watchkv.RemoveWithPrefix("")
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ToWatch, collectionID, channelName))
 			require.NoError(t, err)
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(watchkv, newMockHandler())
 			require.NoError(t, err)
-			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
+			err = watchkv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
 
 			chManager.checkOldNodes([]UniqueID{nodeID})
@@ -817,12 +817,12 @@ func TestChannelManager_Reload(t *testing.T) {
 		})
 
 		t.Run("ToRelease", func(t *testing.T) {
-			defer metakv.RemoveWithPrefix("")
+			defer watchkv.RemoveWithPrefix("")
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ToRelease, collectionID, channelName))
 			require.NoError(t, err)
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(watchkv, newMockHandler())
 			require.NoError(t, err)
-			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
+			err = watchkv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
 			err = chManager.checkOldNodes([]UniqueID{nodeID})
 			assert.NoError(t, err)
@@ -833,73 +833,73 @@ func TestChannelManager_Reload(t *testing.T) {
 		})
 
 		t.Run("WatchFail", func(t *testing.T) {
-			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			defer watchkv.RemoveWithPrefix("")
+			chManager, err := NewChannelManager(watchkv, newMockHandler())
 			require.NoError(t, err)
 			chManager.store = &ChannelStore{
-				store: metakv,
+				store: watchkv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
 			}
 
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_WatchFailure, collectionID, channelName))
 			require.NoError(t, err)
-			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
+			err = watchkv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
 			err = chManager.checkOldNodes([]UniqueID{nodeID})
 			assert.NoError(t, err)
 
-			waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, channelName, collectionID)
+			waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToRelease, nodeID, channelName, collectionID)
 			chManager.stateTimer.removeTimers([]string{channelName})
 		})
 
 		t.Run("ReleaseSuccess", func(t *testing.T) {
-			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			defer watchkv.RemoveWithPrefix("")
+			chManager, err := NewChannelManager(watchkv, newMockHandler())
 			require.NoError(t, err)
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ReleaseSuccess, collectionID, channelName))
 			chManager.store = &ChannelStore{
-				store: metakv,
+				store: watchkv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
 			}
 
 			require.NoError(t, err)
 			chManager.AddNode(UniqueID(111))
-			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
+			err = watchkv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
 			err = chManager.checkOldNodes([]UniqueID{nodeID})
 			assert.NoError(t, err)
 
-			waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, 111, channelName, collectionID)
+			waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 111, channelName, collectionID)
 			chManager.stateTimer.removeTimers([]string{channelName})
 
-			v, err := metakv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
+			v, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10)))
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		})
 
 		t.Run("ReleaseFail", func(t *testing.T) {
-			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			defer watchkv.RemoveWithPrefix("")
+			chManager, err := NewChannelManager(watchkv, newMockHandler())
 			require.NoError(t, err)
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ReleaseFailure, collectionID, channelName))
 			chManager.store = &ChannelStore{
-				store: metakv,
+				store: watchkv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 					999:    {999, []*channel{}},
 				},
 			}
 			require.NoError(t, err)
-			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
+			err = watchkv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
 			err = chManager.checkOldNodes([]UniqueID{nodeID})
 			assert.NoError(t, err)
 
-			waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, 999, channelName, collectionID)
+			waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 999, channelName, collectionID)
 
-			v, err := metakv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName))
+			v, err := watchkv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName))
 			assert.Error(t, err)
 			assert.Empty(t, v)
 
@@ -907,17 +907,17 @@ func TestChannelManager_Reload(t *testing.T) {
 	})
 
 	t.Run("test reload with data", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		cm, err := NewChannelManager(metakv, newMockHandler())
+		cm, err := NewChannelManager(watchkv, newMockHandler())
 		assert.NoError(t, err)
 		assert.Nil(t, cm.AddNode(1))
 		assert.Nil(t, cm.AddNode(2))
 		cm.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{{Name: "channel1", CollectionID: 1}}},
 				2: {2, []*channel{{Name: "channel2", CollectionID: 1}}},
@@ -926,19 +926,19 @@ func TestChannelManager_Reload(t *testing.T) {
 
 		data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_WatchSuccess, 1, "channel1"))
 		require.NoError(t, err)
-		err = metakv.Save(path.Join(prefix, strconv.FormatInt(1, 10), "channel1"), string(data))
+		err = watchkv.Save(path.Join(prefix, strconv.FormatInt(1, 10), "channel1"), string(data))
 		require.NoError(t, err)
 		data, err = proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_WatchSuccess, 1, "channel2"))
 		require.NoError(t, err)
-		err = metakv.Save(path.Join(prefix, strconv.FormatInt(2, 10), "channel2"), string(data))
+		err = watchkv.Save(path.Join(prefix, strconv.FormatInt(2, 10), "channel2"), string(data))
 		require.NoError(t, err)
 
-		cm2, err := NewChannelManager(metakv, newMockHandler())
+		cm2, err := NewChannelManager(watchkv, newMockHandler())
 		assert.NoError(t, err)
 		assert.Nil(t, cm2.Startup(ctx, []int64{3}))
 
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, 3, "channel1", 1)
-		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, 3, "channel2", 1)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 3, "channel1", 1)
+		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 3, "channel2", 1)
 		assert.True(t, cm2.Match(3, "channel1"))
 		assert.True(t, cm2.Match(3, "channel2"))
 
@@ -947,22 +947,22 @@ func TestChannelManager_Reload(t *testing.T) {
 }
 
 func TestChannelManager_BalanceBehaviour(t *testing.T) {
-	metakv := getMetaKv(t)
+	watchkv := getWatchKV(t)
 	defer func() {
-		metakv.RemoveWithPrefix("")
-		metakv.Close()
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
 	}()
 
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
 	t.Run("one node with three channels add a new node", func(t *testing.T) {
-		defer metakv.RemoveWithPrefix("")
+		defer watchkv.RemoveWithPrefix("")
 
 		var (
 			collectionID = UniqueID(999)
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withStateChecker())
+		chManager, err := NewChannelManager(watchkv, newMockHandler(), withStateChecker())
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -971,7 +971,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		go chManager.stateChecker(ctx, common.LatestRevision)
 
 		chManager.store = &ChannelStore{
-			store: metakv,
+			store: watchkv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
 					{Name: "channel-1", CollectionID: collectionID},
@@ -989,7 +989,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		// waitAndStore := func(waitState, storeState datapb.ChannelWatchState, nodeID UniqueID, channelName string) {
 		//     for {
 		//         key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName)
-		//         v, err := metakv.Load(key)
+		//         v, err := watchkv.Load(key)
 		//         if err == nil && len(v) > 0 {
 		//             watchInfo, err := parseWatchInfo(key, []byte(v))
 		//             require.NoError(t, err)
@@ -999,7 +999,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		//             data, err := proto.Marshal(watchInfo)
 		//             require.NoError(t, err)
 		//
-		//             metakv.Save(key, string(data))
+		//             watchkv.Save(key, string(data))
 		//             break
 		//         }
 		//         time.Sleep(100 * time.Millisecond)
@@ -1007,10 +1007,10 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		// }
 
 		key := path.Join(prefix, "1", channelBalanced)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
 
 		key = path.Join(prefix, "2", channelBalanced)
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
@@ -1020,7 +1020,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		chManager.AddNode(3)
 		chManager.Watch(&channel{Name: "channel-4", CollectionID: collectionID})
 		key = path.Join(prefix, "3", "channel-4")
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
@@ -1029,7 +1029,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 
 		chManager.DeleteNode(3)
 		key = path.Join(prefix, "2", "channel-4")
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
@@ -1038,9 +1038,9 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 
 		chManager.DeleteNode(2)
 		key = path.Join(prefix, "1", "channel-4")
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 		key = path.Join(prefix, "1", "channel-1")
-		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
+		waitAndStore(t, watchkv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
@@ -1051,10 +1051,10 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 }
 
 func TestChannelManager_RemoveChannel(t *testing.T) {
-	metakv := getMetaKv(t)
+	watchkv := getWatchKV(t)
 	defer func() {
-		metakv.RemoveWithPrefix("")
-		metakv.Close()
+		watchkv.RemoveWithPrefix("")
+		watchkv.Close()
 	}()
 
 	type fields struct {
@@ -1073,7 +1073,7 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 			"test remove existed channel",
 			fields{
 				store: &ChannelStore{
-					store: metakv,
+					store: watchkv,
 					channelsInfo: map[int64]*NodeChannelInfo{
 						1: {
 							NodeID: 1,

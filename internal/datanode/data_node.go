@@ -121,7 +121,7 @@ type DataNode struct {
 	wg           sync.WaitGroup
 	sessionMu    sync.Mutex // to fix data race
 	session      *sessionutil.Session
-	watchKv      kv.MetaKv
+	watchKv      kv.WatchKV
 	chunkManager storage.ChunkManager
 	allocator    allocator.Allocator
 

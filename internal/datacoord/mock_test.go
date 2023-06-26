@@ -79,7 +79,7 @@ func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.W
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
+func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string) (bool, error) {
 	panic("implement me")
 }
 

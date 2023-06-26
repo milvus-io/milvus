@@ -35,14 +35,22 @@ import (
 
 func getMetaKv(t *testing.T) kv.MetaKv {
 	rootPath := "/etcd/test/root/" + t.Name()
-	metakv, err := etcdkv.NewMetaKvFactory(rootPath, &Params.EtcdCfg)
+	kv, err := etcdkv.NewMetaKvFactory(rootPath, &Params.EtcdCfg)
 	require.NoError(t, err)
 
-	return metakv
+	return kv
+}
+
+func getWatchKV(t *testing.T) kv.WatchKV {
+	rootPath := "/etcd/test/root/" + t.Name()
+	kv, err := etcdkv.NewWatchKVFactory(rootPath, &Params.EtcdCfg)
+	require.NoError(t, err)
+
+	return kv
 }
 
 func TestClusterCreate(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -155,7 +163,7 @@ func TestClusterCreate(t *testing.T) {
 	t.Run("loadKv Fails", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		fkv := &loadPrefixFailKV{MetaKv: kv}
+		fkv := &loadPrefixFailKV{WatchKV: kv}
 		_, err := NewChannelManager(fkv, newMockHandler())
 		assert.Error(t, err)
 	})
@@ -163,7 +171,7 @@ func TestClusterCreate(t *testing.T) {
 
 // a mock kv that always fail when LoadWithPrefix
 type loadPrefixFailKV struct {
-	kv.MetaKv
+	kv.WatchKV
 }
 
 // LoadWithPrefix override behavior
@@ -172,7 +180,7 @@ func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, erro
 }
 
 func TestRegister(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -268,7 +276,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestUnregister(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -369,7 +377,7 @@ func TestUnregister(t *testing.T) {
 }
 
 func TestWatchIfNeeded(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -426,7 +434,7 @@ func TestWatchIfNeeded(t *testing.T) {
 }
 
 func TestConsistentHashPolicy(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -508,7 +516,7 @@ func TestConsistentHashPolicy(t *testing.T) {
 }
 
 func TestCluster_Flush(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -555,7 +563,7 @@ func TestCluster_Flush(t *testing.T) {
 }
 
 func TestCluster_Import(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()
@@ -587,7 +595,7 @@ func TestCluster_Import(t *testing.T) {
 }
 
 func TestCluster_ReCollectSegmentStats(t *testing.T) {
-	kv := getMetaKv(t)
+	kv := getWatchKV(t)
 	defer func() {
 		kv.RemoveWithPrefix("")
 		kv.Close()

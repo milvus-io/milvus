@@ -426,15 +426,28 @@ type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
 	LoadWithPrefix(key string) ([]string, []string, error)
-	Watch(key string) clientv3.WatchChan
-	WatchWithPrefix(key string) clientv3.WatchChan
-	WatchWithRevision(key string, revision int64) clientv3.WatchChan
-	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
+	CompareVersionAndSwap(key string, version int64, target string) error
+    WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 ```
 
-###### A.7.4 MetaKv
+###### A.7.4 WatchKV
+
+```go
+// WatchKV is watchable MetaKv.
+//
+//go:generate mockery --name=WatchKv --with-expecter
+type WatchKV interface {
+	MetaKv
+	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	WatchWithRevision(key string, revision int64) clientv3.WatchChan
+}
+
+```
+
+###### A.7.5 SnapShotKv
 
 ```go
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.
@@ -446,7 +459,7 @@ type SnapShotKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error
 ```
 
-###### A.7.5 Etcd KV
+###### A.7.6 Etcd KV
 
 ```go
 type etcdKV struct {
@@ -475,7 +488,7 @@ func NewEtcdKV(etcdAddr string, rootPath string) *etcdKV
 
 etcdKV implements all _TxnKV_ interfaces.
 
-###### A.7.6 Memory KV
+###### A.7.7 Memory KV
 
 ```go
 type MemoryKV struct {
@@ -500,7 +513,7 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 
 MemoryKV implements all _TxnKV_ interfaces.
 
-###### A.7.7 MinIO KV
+###### A.7.8 MinIO KV
 
 ```go
 type MinIOKV struct {
@@ -522,7 +535,7 @@ func (kv *MinIOKV) Close()
 
 MinIOKV implements all _KV_ interfaces.
 
-###### A.7.8 RocksdbKV KV
+###### A.7.9 RocksdbKV KV
 
 ```go
 type RocksdbKV struct {

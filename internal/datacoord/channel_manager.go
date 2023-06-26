@@ -98,7 +98,7 @@ func withBgChecker() ChannelManagerOpt {
 
 // NewChannelManager creates and returns a new ChannelManager instance.
 func NewChannelManager(
-	kv kv.MetaKv, // for TxnKv and MetaKv
+	kv kv.WatchKV, // for TxnKv, MetaKv and WatchKV
 	h Handler,
 	options ...ChannelManagerOpt,
 ) (*ChannelManager, error) {

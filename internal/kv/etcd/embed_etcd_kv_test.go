@@ -701,17 +701,17 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("etcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
+		watchKv, err := embed_etcd_kv.NewWatchKVFactory(rootPath, &param.EtcdCfg)
 		assert.NoError(t, err)
 
-		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer watchKv.Close()
+		defer watchKv.RemoveWithPrefix("")
 
-		ch := metaKv.Watch("x")
+		ch := watchKv.Watch("x")
 		resp := <-ch
 		assert.True(t, resp.Created)
 
-		ch = metaKv.WatchWithPrefix("x")
+		ch = watchKv.WatchWithPrefix("x")
 		resp = <-ch
 		assert.True(t, resp.Created)
 	})
