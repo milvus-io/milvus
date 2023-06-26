@@ -280,8 +280,7 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
-    json_values = [{"number": i, "float": i*1.0, "string": str(i), "bool": bool(i),
-                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
+    json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
@@ -302,8 +301,7 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
         dict = {ct.default_int64_field_name: i,
                 ct.default_float_field_name: i*1.0,
                 ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
-                                             "list": [j for j in range(0, i)]},
+                ct.default_json_field_name: {"number": i},
                 ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
                 }
         if with_json is False:
@@ -372,8 +370,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     float_vec_values = gen_vectors(nb, dim)
-    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
-                   for i in range(start, start + nb)]
+    json_values = [{"number": i, "string": str(i), "bool": bool(i),
+                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
     df = pd.DataFrame({
         ct.default_int64_field_name: int64_values,
         ct.default_int32_field_name: int32_values,
@@ -404,7 +402,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                 ct.default_double_field_name: i*1.0,
                 ct.default_string_field_name: str(i),
                 ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
-                                             "list": [j for j in range(0, i)]},
+                                             "list": [j for j in range(i, i + ct.default_json_list_length)]},
                 ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
                 }
         if with_json is False:
