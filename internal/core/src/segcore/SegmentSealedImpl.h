@@ -55,8 +55,12 @@ class SegmentSealedImpl : public SegmentSealed {
     HasIndex(FieldId field_id) const override;
     bool
     HasFieldData(FieldId field_id) const override;
+
     void
     LoadFieldData(FieldId field_id, const FieldDataInfo& data_info) override;
+
+    void
+    MapFieldData(const FieldId field_id, const FieldDataInfo& data);
 
     int64_t
     get_segment_id() const override {

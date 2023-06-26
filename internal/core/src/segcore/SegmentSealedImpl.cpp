@@ -14,13 +14,16 @@
 #include <fcntl.h>
 #include <fmt/core.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "Utils.h"
 #include "Types.h"
+#include "common/Json.h"
 #include "mmap/Column.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -178,9 +181,15 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         int64_t num_rows = storage::GetTotalNumRowsForFieldDatas(field_datas);
         AssertInfo(num_rows == info.row_count,
                    "inconsistent field data row count with meta");
+
         auto field_data_info = FieldDataInfo{
             field_id.get(), num_rows, field_datas, load_info.mmap_dir_path};
-        LoadFieldData(field_id, field_data_info);
+        if (load_info.mmap_dir_path.empty() ||
+            SystemProperty::Instance().IsSystem(field_id)) {
+            LoadFieldData(field_id, field_data_info);
+        } else {
+            MapFieldData(field_id, field_data_info);
+        }
     }
 }
 
@@ -251,13 +260,37 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id,
             switch (data_type) {
                 case milvus::DataType::STRING:
                 case milvus::DataType::VARCHAR: {
-                    column = std::make_unique<VariableColumn<std::string>>(
-                        get_segment_id(), field_meta, data_info);
+                    auto var_column =
+                        std::make_unique<VariableColumn<std::string>>(
+                            num_rows, field_meta);
+                    for (auto& data : data_info.datas) {
+                        for (auto i = 0; i < data->get_num_rows(); i++) {
+                            auto str = static_cast<const std::string*>(
+                                data->RawValue(i));
+                            var_column->Append(str->data(), str->size());
+                        }
+                    }
+                    var_column->Seal();
+                    column = std::move(var_column);
                     break;
                 }
                 case milvus::DataType::JSON: {
-                    column = std::make_unique<VariableColumn<Json>>(
-                        get_segment_id(), field_meta, data_info);
+                    auto var_column =
+                        std::make_unique<VariableColumn<milvus::Json>>(
+                            num_rows, field_meta);
+                    for (auto& data : data_info.datas) {
+                        for (auto i = 0; i < data->get_num_rows(); i++) {
+                            auto padded_string =
+                                static_cast<const milvus::Json*>(
+                                    data->RawValue(i))
+                                    ->data();
+                            var_column->Append(padded_string.data(),
+                                               padded_string.size());
+                        }
+                    }
+                    var_column->Seal();
+                    column = std::move(var_column);
+                    break;
                 }
                 default: {
                 }
@@ -266,8 +299,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id,
             std::unique_lock lck(mutex_);
             variable_fields_.emplace(field_id, std::move(column));
         } else {
-            auto column = Column(get_segment_id(), field_meta, data_info);
-
+            auto column = Column(num_rows, field_meta);
+            for (auto& data : data_info.datas) {
+                column.Append(static_cast<const char*>(data->Data()),
+                              data->Size());
+            }
             std::unique_lock lck(mutex_);
             fixed_fields_.emplace(field_id, std::move(column));
         }
@@ -285,6 +321,106 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id,
     }
     std::unique_lock lck(mutex_);
     update_row_count(num_rows);
+}
+
+void
+SegmentSealedImpl::MapFieldData(const FieldId field_id,
+                                const FieldDataInfo& data_info) {
+    auto filepath = std::filesystem::path(data_info.mmap_dir_path) /
+                    std::to_string(get_segment_id()) /
+                    std::to_string(field_id.get());
+    auto dir = filepath.parent_path();
+    std::filesystem::create_directories(dir);
+
+    int fd =
+        open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    AssertInfo(fd != -1,
+               fmt::format("failed to create mmap file {}", filepath.c_str()));
+
+    auto& field_meta = (*schema_)[field_id];
+    auto data_type = field_meta.get_data_type();
+
+    // write the field data to disk
+    ssize_t total_written{0};
+    auto data_size = GetDataSize(data_info.datas);
+    std::vector<uint64_t> indices{};
+    for (auto& data : data_info.datas) {
+        auto written = WriteFieldData(fd, data_type, data);
+        if (written != data->Size()) {
+            break;
+        }
+        indices.emplace_back(total_written);
+        total_written += written;
+    }
+    AssertInfo(
+        total_written == data_size ||
+            total_written != -1 &&
+                datatype_is_variable(field_meta.get_data_type()),
+        fmt::format(
+            "failed to write data file {}, written {} but total {}, err: {}",
+            filepath.c_str(),
+            total_written,
+            data_size,
+            strerror(errno)));
+    int ok = fsync(fd);
+    AssertInfo(ok == 0,
+               fmt::format("failed to fsync mmap data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
+
+    auto num_rows = data_info.row_count;
+    if (datatype_is_variable(data_type)) {
+        std::unique_ptr<ColumnBase> column{};
+        switch (data_type) {
+            case milvus::DataType::STRING:
+            case milvus::DataType::VARCHAR: {
+                auto var_column = std::make_unique<VariableColumn<std::string>>(
+                    fd, total_written, field_meta);
+                var_column->Seal(std::move(indices));
+                column = std::move(var_column);
+                break;
+            }
+            case milvus::DataType::JSON: {
+                auto var_column =
+                    std::make_unique<VariableColumn<milvus::Json>>(
+                        fd, total_written, field_meta);
+                var_column->Seal(std::move(indices));
+                column = std::move(var_column);
+                break;
+            }
+            default: {
+            }
+        }
+
+        std::unique_lock lck(mutex_);
+        variable_fields_.emplace(field_id, std::move(column));
+    } else {
+        auto column = Column(fd, total_written, field_meta);
+        std::unique_lock lck(mutex_);
+        fixed_fields_.emplace(field_id, std::move(column));
+    }
+
+    ok = unlink(filepath.c_str());
+    AssertInfo(ok == 0,
+               fmt::format("failed to unlink mmap data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
+    ok = close(fd);
+    AssertInfo(ok == 0,
+               fmt::format("failed to close data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
+
+    // set pks to offset
+    if (schema_->get_primary_field_id() == field_id) {
+        AssertInfo(field_id.get() != -1, "Primary key is -1");
+        AssertInfo(insert_record_.empty_pks(), "already exists");
+        insert_record_.insert_pks(data_info.datas);
+        insert_record_.seal_pks();
+    }
+
+    std::unique_lock lck(mutex_);
+    set_bit(field_data_ready_bitset_, field_id, true);
 }
 
 void
@@ -340,12 +476,12 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto element_sizeof = field_meta.get_sizeof();
     if (auto it = fixed_fields_.find(field_id); it != fixed_fields_.end()) {
         auto& field_data = it->second;
-        return field_data.span();
+        return field_data.Span();
     }
     if (auto it = variable_fields_.find(field_id);
         it != variable_fields_.end()) {
         auto& field = it->second;
-        return field->span();
+        return field->Span();
     }
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1,
@@ -439,7 +575,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         auto row_count = row_count_opt_.value();
         auto& vec_data = fixed_fields_.at(field_id);
         query::SearchOnSealed(*schema_,
-                              vec_data.data(),
+                              vec_data.Data(),
                               search_info,
                               query_data,
                               query_count,
@@ -614,7 +750,7 @@ SegmentSealedImpl::bulk_subscript_impl(const ColumnBase* column,
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = std::move(T(field->raw_at(offset)));
+            dst[i] = std::move(T(field->RawAt(offset)));
         }
     }
 }
@@ -706,7 +842,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         }
     }
 
-    auto src_vec = fixed_fields_.at(field_id).data();
+    auto src_vec = fixed_fields_.at(field_id).Data();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);

@@ -552,12 +552,12 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
     std::sort(remote_files.begin(),
               remote_files.end(),
               [](const std::string& a, const std::string& b) {
-                  return std::stol(a.substr(a.find_last_of("/") + 1)) <
-                         std::stol(b.substr(b.find_last_of("/") + 1));
+                  return std::stol(a.substr(a.find_last_of('/') + 1)) <
+                         std::stol(b.substr(b.find_last_of('/') + 1));
               });
 
     auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
     std::vector<storage::FieldDataPtr> field_datas;
 
