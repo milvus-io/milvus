@@ -159,6 +159,17 @@ var (
 			nodeIDLabelName,
 		})
 
+	DataNodeCompactionLatencyInQueue = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_latency_in_queue",
+			Help:      "latency of compaction operation in queue",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
 	// DataNodeFlushReqCounter counts the num of calls of FlushSegments
 	DataNodeFlushReqCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -188,6 +199,17 @@ var (
 			Help:      "forward delete message time taken",
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName})
+
+	DataNodeFlowGraphBufferDataSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "fg_buffer_size",
+			Help:      "the buffered data size of flow graph",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
 
 	DataNodeMsgDispatcherTtLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -219,6 +241,8 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeConsumeBytesCount)
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeMsgDispatcherTtLag)
+	registry.MustRegister(DataNodeCompactionLatencyInQueue)
+	registry.MustRegister(DataNodeFlowGraphBufferDataSize)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

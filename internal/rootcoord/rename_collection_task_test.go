@@ -59,7 +59,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		core := newTestCore(withInvalidProxyManager())
 		task := &renameCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_RenameCollection,
@@ -78,7 +78,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &renameCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_RenameCollection,

@@ -280,12 +280,14 @@ func (c *Core) Register() error {
 			return err
 		}
 	}
+	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
 	log.Info("RootCoord Register Finished")
 	c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Dec()
 		// manually send signal to starter goroutine
 		if c.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -900,12 +902,8 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 		zap.String("role", typeutil.RootCoordRole))
 
 	t := &createCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -932,6 +930,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Inc()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create collection",
 		zap.String("role", typeutil.RootCoordRole),
@@ -955,12 +954,8 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		zap.String("name", in.GetCollectionName()))
 
 	t := &dropCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -985,6 +980,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()),
@@ -1033,6 +1029,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
@@ -1127,6 +1124,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
@@ -1189,6 +1187,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
@@ -1208,12 +1207,8 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 		zap.String("name", in.GetCollectionName()))
 
 	t := &alterCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1240,6 +1235,7 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterCollection").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection",
 		zap.String("role", typeutil.RootCoordRole),
@@ -1263,12 +1259,8 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		zap.String("partition", in.GetPartitionName()))
 
 	t := &createPartitionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1296,6 +1288,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreatePartition").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create partition",
 		zap.String("role", typeutil.RootCoordRole),
@@ -1320,12 +1313,8 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		zap.String("partition", in.GetPartitionName()))
 
 	t := &dropPartitionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1352,6 +1341,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropPartition").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop partition",
 		zap.String("role", typeutil.RootCoordRole),
@@ -1404,6 +1394,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
 
@@ -1454,6 +1445,7 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
@@ -1656,12 +1648,8 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 		zap.String("collection", in.GetCollectionName()))
 
 	t := &createAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1689,6 +1677,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("CreateAlias").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create alias",
 		zap.String("role", typeutil.RootCoordRole),
@@ -1712,12 +1701,8 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 		zap.String("alias", in.GetAlias()))
 
 	t := &dropAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1743,6 +1728,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DropAlias").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop alias",
 		zap.String("role", typeutil.RootCoordRole),
@@ -1766,12 +1752,8 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		zap.String("collection", in.GetCollectionName()))
 
 	t := &alterAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1799,6 +1781,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AlterAlias").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter alias",
 		zap.String("role", typeutil.RootCoordRole),
@@ -2713,12 +2696,8 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("RenameCollection")
 	t := &renameCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: req,
+		baseTask: newBaseTask(ctx, c),
+		Req:      req,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {

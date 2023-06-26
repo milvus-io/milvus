@@ -32,6 +32,12 @@ const (
 	CompactOutputLabel   = "output"
 	compactIOLabelName   = "IO"
 	compactTypeLabelName = "compactType"
+
+	InsertFileLabel          = "insert_file"
+	DeleteFileLabel          = "delete_file"
+	StatFileLabel            = "stat_file"
+	IndexFileLabel           = "index_file"
+	segmentFileTypeLabelName = "segment_file_type"
 )
 
 var (
@@ -111,6 +117,33 @@ var (
 			collectionIDLabelName,
 			segmentIDLabelName,
 		})
+
+	DataCoordDmlChannelNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "watched_dml_chanel_num",
+			Help:      "the num of dml channel watched by datanode",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	DataCoordCompactedSegmentSize = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "compacted_segment_size",
+			Help:      "the segment size of compacted segment",
+			Buckets:   buckets,
+		}, []string{})
+
+	FlushedSegmentFileNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Name:      "flushed_segment_file_num",
+			Help:      "the num of files for flushed segment",
+			Buckets:   buckets,
+		}, []string{segmentFileTypeLabelName})
 
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
@@ -195,6 +228,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordStoredBinlogSize)
 	registry.MustRegister(DataCoordSegmentBinLogFileCount)
+	registry.MustRegister(DataCoordDmlChannelNum)
+	registry.MustRegister(DataCoordCompactedSegmentSize)
+	registry.MustRegister(FlushedSegmentFileNum)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)

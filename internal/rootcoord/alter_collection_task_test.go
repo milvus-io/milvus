@@ -67,7 +67,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to create alias", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -95,7 +95,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withMeta(meta))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -129,7 +129,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -163,7 +163,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",

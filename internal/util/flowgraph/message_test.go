@@ -80,6 +80,10 @@ func (bm *MockMsg) SetPosition(position *MsgPosition) {
 
 }
 
+func (bm *MockMsg) Size() int {
+	return 0
+}
+
 func Test_GenerateMsgStreamMsg(t *testing.T) {
 	messages := make([]msgstream.TsMsg, 1)
 	messages[0] = &MockMsg{

@@ -38,10 +38,7 @@ type mockFailTask struct {
 
 func newMockFailTask() *mockFailTask {
 	task := &mockFailTask{
-		baseTask: baseTask{
-			ctx:  context.Background(),
-			done: make(chan error, 1),
-		},
+		baseTask: newBaseTask(context.Background(), nil),
 	}
 	task.SetCtx(context.Background())
 	return task
@@ -73,10 +70,7 @@ type mockNormalTask struct {
 
 func newMockNormalTask() *mockNormalTask {
 	task := &mockNormalTask{
-		baseTask: baseTask{
-			ctx:  context.Background(),
-			done: make(chan error, 1),
-		},
+		baseTask: newBaseTask(context.Background(), nil),
 	}
 	task.SetCtx(context.Background())
 	return task

@@ -80,6 +80,7 @@ func (s *scheduler) Stop() {
 
 func (s *scheduler) execute(task task) {
 	defer s.setMinDdlTs(task.GetTs()) // we should update ts, whatever task succeeds or not.
+	task.SetInQueueDuration()
 	if err := task.Prepare(task.GetCtx()); err != nil {
 		task.NotifyDone(err)
 		return

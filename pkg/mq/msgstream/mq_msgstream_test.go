@@ -1091,6 +1091,10 @@ func (t *MarshalFailTsMsg) Unmarshal(_ MarshalType) (TsMsg, error) {
 	return nil, errors.New("mocked error")
 }
 
+func (t *MarshalFailTsMsg) Size() int {
+	return 0
+}
+
 var _ mqwrapper.Producer = (*mockSendFailProducer)(nil)
 
 type mockSendFailProducer struct {

@@ -59,10 +59,7 @@ func Test_hasCollectionTask_Execute(t *testing.T) {
 	t.Run("failed", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &hasCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.HasCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasCollection,
@@ -87,10 +84,7 @@ func Test_hasCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withMeta(meta))
 		task := &hasCollectionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.HasCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasCollection,

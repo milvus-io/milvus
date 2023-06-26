@@ -30,6 +30,7 @@ func TestRegisterMetrics(t *testing.T) {
 	RegisterProxy(r.GoRegistry)
 	RegisterQueryNode(r.GoRegistry)
 	RegisterQueryCoord(r.GoRegistry)
-	RegisterEtcdMetrics(r.GoRegistry)
-	RegisterMq(r.GoRegistry)
+	RegisterMetaMetrics(r.GoRegistry)
+	RegisterStorageMetrics(r.GoRegistry)
+	RegisterMsgStreamMetrics(r.GoRegistry)
 }

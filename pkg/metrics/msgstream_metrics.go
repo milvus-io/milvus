@@ -16,8 +16,16 @@
 
 package metrics
 
-import (
-	"github.com/prometheus/client_golang/prometheus"
+import "github.com/prometheus/client_golang/prometheus"
+
+const (
+	SendMsgLabel    = "produce"
+	ReceiveMsgLabel = "consume" // not used
+
+	CreateProducerLabel = "create_producer"
+	CreateConsumerLabel = "create_consumer"
+
+	msgStreamOpType = "message_op_type"
 )
 
 var (
@@ -31,8 +39,28 @@ var (
 			roleNameLabelName,
 			nodeIDLabelName,
 		})
+
+	MsgStreamRequestLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "msgstream",
+			Name:      "request_latency",
+			Help:      "request latency on the client side ",
+			Buckets:   buckets,
+		}, []string{msgStreamOpType})
+
+	MsgStreamOpCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "msgstream",
+			Name:      "op_count",
+			Help:      "count of stream message operation",
+		}, []string{msgStreamOpType, statusLabelName})
 )
 
-func RegisterMq(registry *prometheus.Registry) {
+// RegisterMsgStreamMetrics registers msg stream metrics
+func RegisterMsgStreamMetrics(registry *prometheus.Registry) {
 	registry.MustRegister(NumConsumers)
+	registry.MustRegister(MsgStreamRequestLatency)
+	registry.MustRegister(MsgStreamOpCounter)
 }

@@ -357,6 +357,30 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		})
+
+	QueryNodeSegmentSearchLatencyPerVector = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_latency_per_vector",
+			Help:      "one vector's search latency per segment",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			segmentStateLabelName,
+		})
+
+	QueryNodeWatchDmlChannelLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "watch_dml_channel_latency",
+			Help:      "latency of watch dml channel",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -391,6 +415,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumerMsgCount)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
+	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
+	registry.MustRegister(QueryNodeWatchDmlChannelLatency)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

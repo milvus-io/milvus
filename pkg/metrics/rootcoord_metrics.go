@@ -168,6 +168,14 @@ var (
 		}, []string{
 			"quota_states",
 		})
+
+	RootCoordDDLReqLatencyInQueue = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "ddl_req_latency_in_queue",
+			Help:      "latency of each DDL operations in queue",
+		}, []string{functionLabelName})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -200,4 +208,5 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
+	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
 }

@@ -52,8 +52,10 @@ var Registry *metrics.MilvusRegistry
 
 func init() {
 	Registry = metrics.NewMilvusRegistry()
-	metrics.RegisterEtcdMetrics(Registry.GoRegistry)
-	metrics.RegisterMq(Registry.GoRegistry)
+	metrics.Register(Registry.GoRegistry)
+	metrics.RegisterMetaMetrics(Registry.GoRegistry)
+	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
+	metrics.RegisterStorageMetrics(Registry.GoRegistry)
 }
 
 func stopRocksmq() {

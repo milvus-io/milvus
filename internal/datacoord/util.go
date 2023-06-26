@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -159,6 +160,32 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	}
 
 	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
+}
+
+func getCompactedSegmentSize(s *datapb.CompactionResult) int64 {
+	var segmentSize int64
+
+	if s != nil {
+		for _, binlogs := range s.GetInsertLogs() {
+			for _, l := range binlogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+
+		for _, statsLogs := range s.GetDeltalogs() {
+			for _, l := range statsLogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+	}
+
+	return segmentSize
 }
 
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.

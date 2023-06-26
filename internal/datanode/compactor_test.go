@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 var compactTestDir = "/tmp/milvus_test/compact"
@@ -673,6 +674,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			cancel:  cancel,
 			done:    make(chan struct{}, 1),
 			Channel: &ChannelMeta{},
+			tr:      timerecord.NewTimeRecorder("test"),
 		}
 
 		plan := &datapb.CompactionPlan{

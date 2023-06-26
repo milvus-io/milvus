@@ -20,7 +20,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 )
@@ -40,6 +42,9 @@ func (np *nmqProducer) Topic() string {
 
 // Send send the producer messages to natsmq
 func (np *nmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+	start := timerecord.NewTimeRecorder("send msg to stream")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
+
 	// Encode message
 	msg := &nats.Msg{
 		Subject: np.topic,
@@ -53,9 +58,14 @@ func (np *nmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMess
 	// publish to nats-server
 	pa, err := np.js.PublishMsg(msg)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Warn("failed to publish message by nmq", zap.String("topic", np.topic), zap.Error(err), zap.Int("payload_size", len(message.Payload)))
 		return nil, err
 	}
+
+	elapsed := start.ElapseSpan()
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 	return &nmqID{messageID: pa.Sequence}, err
 }
 

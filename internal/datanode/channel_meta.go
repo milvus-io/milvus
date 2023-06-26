@@ -851,7 +851,7 @@ func (c *ChannelMeta) setCurInsertBuffer(segmentID UniqueID, buf *BufferData) {
 
 	seg, ok := c.segments[segmentID]
 	if ok {
-		seg.curInsertBuf = buf
+		seg.setInsertBuffer(buf)
 		return
 	}
 	log.Warn("cannot find segment when setCurInsertBuffer", zap.Int64("segmentID", segmentID))
