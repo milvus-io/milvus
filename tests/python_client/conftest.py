@@ -45,6 +45,8 @@ def pytest_addoption(parser):
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
     parser.addoption('--replica_num', type='int', action='store', default=ct.default_replica_num, help="memory replica number")
     parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
+    parser.addoption('--uri', action='store', default="", help="uri for high level api")
+    parser.addoption('--token', action='store', default="", help="token for high level api")
 
 
 @pytest.fixture
@@ -174,6 +176,16 @@ def minio_host(request):
     return request.config.getoption("--minio_host")
 
 
+@pytest.fixture
+def uri(request):
+    return request.config.getoption("--uri")
+
+
+@pytest.fixture
+def token(request):
+    return request.config.getoption("--token")
+
+
 """ fixture func """
 
 
@@ -188,6 +200,8 @@ def initialize_env(request):
     secure = request.config.getoption("--secure")
     clean_log = request.config.getoption("--clean_log")
     replica_num = request.config.getoption("--replica_num")
+    uri = request.config.getoption("--uri")
+    token = request.config.getoption("--token")
 
     """ params check """
     assert ip_check(host) and number_check(port)
@@ -200,7 +214,7 @@ def initialize_env(request):
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
-    param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure)
+    param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure, uri, token)
 
 
 @pytest.fixture(params=ct.get_invalid_strs)

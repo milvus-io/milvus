@@ -4836,7 +4836,7 @@ class  TestsearchDiskann(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         search_list = 20
-        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
