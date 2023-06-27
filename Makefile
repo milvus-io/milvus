@@ -254,15 +254,18 @@ else
 endif
 	@echo "Installation successful."
 
-clean:
+clean-compile:
+	@echo "Cleaning compiled files"
+	@rm -rf cmake_build
+	@rm -rf cwrapper_build
+
+clean: clean-compile
 	@echo "Cleaning up all the generated files"
 	@find . -name '*.test' | xargs rm -fv
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/milvus
-	@rm -rf cmake_build
-	@rm -rf cwrapper_build
 	@rm -rf internal/core/output
 
 milvus-tools: print-build-info
@@ -305,4 +308,4 @@ mock-indexcoord:
 mock-tnx-kv:
 	mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=TxnKV.go --with-expecter
 
-ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp codecov-go
+ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp clean-compile codecov-go

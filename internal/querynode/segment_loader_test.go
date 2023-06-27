@@ -1085,6 +1085,18 @@ func (s *SegmentLoaderMockSuite) TestSkipBFLoad() {
 		s.True(segment.isLazyLoading())
 		s.True(segment.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
 	})
+}
+
+func (s *SegmentLoaderMockSuite) TestSkipBFLoad2() {
+	Params.DataNodeCfg.SkipBFStatsLoad = true
+	defer func() {
+		Params.DataNodeCfg.SkipBFStatsLoad = false
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statslogPath := "rootPath/stats/1/0/100/10001"
 
 	s.Run("transient_error", func() {
 		defer s.SetupTest()
