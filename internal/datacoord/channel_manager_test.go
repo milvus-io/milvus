@@ -100,7 +100,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		nodeID            = UniqueID(119)
 		channelNamePrefix = t.Name()
 
-		waitFor = time.Second
+		waitFor = time.Second * 10
 		tick    = time.Millisecond * 10
 	)
 

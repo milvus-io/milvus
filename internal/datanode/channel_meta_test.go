@@ -1197,6 +1197,13 @@ func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad() {
 		s.True(seg.isLoadingLazy())
 		s.True(seg.isPKExist(&storage.Int64PrimaryKey{Value: 100}))
 	})
+}
+
+func (s *ChannelMetaMockSuite) TestAddSegment_SkipBFLoad2() {
+	Params.Save(Params.DataNodeCfg.SkipBFStatsLoad.Key, "true")
+	defer func() {
+		Params.Save(Params.DataNodeCfg.SkipBFStatsLoad.Key, "false")
+	}()
 
 	s.Run("transient_error", func() {
 		defer s.SetupTest()
