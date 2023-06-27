@@ -110,11 +110,13 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 		}
 	}
 
-	if targetNode != -1 {
-		// update executing task cost
-		totalNQ, _ := b.executingTaskTotalNQ.Get(targetNode)
-		totalNQ.Add(cost)
+	if targetNode == -1 {
+		return -1, merr.WrapErrNoAvailableNode("all available nodes are unreachable")
 	}
+
+	// update executing task cost
+	totalNQ, _ := b.executingTaskTotalNQ.Get(targetNode)
+	totalNQ.Add(cost)
 
 	return targetNode, nil
 }
@@ -137,14 +139,20 @@ func (b *LookAsideBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostA
 // calculateScore compute the query node's workload score
 // https://www.usenix.org/conference/nsdi15/technical-sessions/presentation/suresh
 func (b *LookAsideBalancer) calculateScore(cost *internalpb.CostAggregation, executingNQ int64) float64 {
-	if cost == nil || cost.ResponseTime == 0 {
-		return float64(executingNQ)
+	if cost == nil || cost.ResponseTime == 0 || cost.ServiceTime == 0 {
+		return math.Pow(float64(1+executingNQ), 3.0)
 	}
-	return float64(cost.ResponseTime) - float64(1)/float64(cost.ServiceTime) + math.Pow(float64(1+cost.TotalNQ+executingNQ), 3.0)/float64(cost.ServiceTime)
+	executeSpeed := float64(cost.ResponseTime) - float64(1)/float64(cost.ServiceTime)
+	workload := math.Pow(float64(1+cost.TotalNQ+executingNQ), 3.0) / float64(cost.ServiceTime)
+	if workload < 0.0 {
+		return math.MaxFloat64
+	}
+
+	return executeSpeed + workload
 }
 
 func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
-	log := log.Ctx(context.TODO()).WithRateGroup("proxy.LookAsideBalancer", 60, 1)
+	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 60, 1)
 	defer b.wg.Done()
 
 	ticker := time.NewTicker(checkQueryNodeHealthInterval)

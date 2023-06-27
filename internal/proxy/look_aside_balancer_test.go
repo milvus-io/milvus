@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -108,6 +110,16 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	suite.Equal(float64(176), score6)
 	suite.Equal(float64(352), score7)
 	suite.Equal(float64(220), score8)
+
+	// test score overflow
+	costMetrics5 := &internalpb.CostAggregation{
+		ResponseTime: 5,
+		ServiceTime:  1,
+		TotalNQ:      math.MaxInt64,
+	}
+
+	score9 := suite.balancer.calculateScore(costMetrics5, math.MaxInt64)
+	suite.Equal(math.MaxFloat64, score9)
 }
 
 func (suite *LookAsideBalancerSuite) TestSelectNode() {
@@ -283,7 +295,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
 	}, 2*time.Second, 100*time.Millisecond)
 	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
-	suite.NoError(err)
+	suite.ErrorIs(err, merr.ErrNoAvailableNode)
 	suite.Equal(int64(-1), targetNode)
 
 	suite.Eventually(func() bool {

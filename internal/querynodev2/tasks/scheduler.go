@@ -179,7 +179,6 @@ func (s *Scheduler) mergeTasks(t Task) {
 		merged := false
 		for _, task := range s.mergingSearchTasks {
 			if task.Merge(t) {
-				s.waitingTaskTotalNQ.Sub(t.nq)
 				merged = true
 				break
 			}
