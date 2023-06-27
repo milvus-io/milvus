@@ -1,5 +1,6 @@
 from pymilvus import Connections
 from pymilvus import DefaultConfig
+from pymilvus import MilvusClient
 import sys
 
 sys.path.append("..")
@@ -57,4 +58,11 @@ class ApiConnectionsWrapper:
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([self.connection.get_connection_addr, alias])
         check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        return response, check_result
+    
+    # high level api
+    def MilvusClient(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        response, succ = api_request([MilvusClient], **kwargs)
+        check_result = ResponseChecker(response, func_name, check_task, check_items, succ, **kwargs).run()
         return response, check_result
