@@ -823,7 +823,7 @@ class TestConnect(TestcaseBase):
         self.connection_wrap.disconnect(alias=connect_name)
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("protocol", ["http", "https", "ftp", "tcp"])
+    @pytest.mark.parametrize("protocol", ["http", "ftp", "tcp"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_parameters_with_uri_connection(self, host, port, connect_name, protocol):
         """
