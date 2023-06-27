@@ -253,7 +253,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	log.Info("Delegator search done")
+	log.Debug("Delegator search done")
 
 	return results, nil
 }
@@ -484,7 +484,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) error {
 	lag := gt.Sub(st)
 	maxLag := paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)
 	if lag > maxLag {
-		log.Warn("guarantee and servicable ts larger than MaxLag",
+		log.Warn("guarantee and serviceable ts larger than MaxLag",
 			zap.Time("guaranteeTime", gt),
 			zap.Time("serviceableTime", st),
 			zap.Duration("lag", lag),

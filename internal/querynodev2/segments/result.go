@@ -40,6 +40,14 @@ var _ typeutil.ResultWithID = &internalpb.RetrieveResults{}
 var _ typeutil.ResultWithID = &segcorepb.RetrieveResults{}
 
 func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
+	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
+		return result != nil && result.GetSlicedBlob() != nil
+	})
+
+	if len(results) == 1 {
+		return results[0], nil
+	}
+
 	log := log.Ctx(ctx)
 
 	searchResultData, err := DecodeSearchResults(results)

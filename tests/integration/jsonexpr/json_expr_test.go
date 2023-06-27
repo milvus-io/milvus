@@ -207,7 +207,9 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	// search
 	expr = `$meta["A"] > 90`
 	checkFunc := func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
 	log.Info("GT expression run successfully")
@@ -563,7 +565,9 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `exists AAA`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("EXISTS expression run successfully")
@@ -610,7 +614,9 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `A like "10"`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
@@ -627,14 +633,18 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `str1 like 'abc"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
 	expr = `str2 like 'abc\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
@@ -651,7 +661,9 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 
 	expr = `A in []`
 	checkFunc = func(result *milvuspb.SearchResults) {
-		s.Equal(0, len(result.Results.FieldsData))
+		for _, f := range result.Results.GetFieldsData() {
+			s.Nil(f)
+		}
 	}
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("term empty expression run successfully")
