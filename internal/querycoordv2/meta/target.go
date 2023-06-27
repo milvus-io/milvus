@@ -17,6 +17,8 @@
 package meta
 
 import (
+	"time"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -26,17 +28,23 @@ import (
 type CollectionTarget struct {
 	segments   map[int64]*datapb.SegmentInfo
 	dmChannels map[string]*DmChannel
+	version    int64
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel) *CollectionTarget {
 	return &CollectionTarget{
 		segments:   segments,
 		dmChannels: dmChannels,
+		version:    time.Now().UnixNano(),
 	}
 }
 
 func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
 	return p.segments
+}
+
+func (p *CollectionTarget) GetTargetVersion() int64 {
+	return p.version
 }
 
 func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {

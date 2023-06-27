@@ -360,6 +360,7 @@ func (s *Server) initObserver() {
 		s.meta,
 		s.targetMgr,
 		s.targetObserver,
+		s.leaderObserver,
 		s.checkerController,
 	)
 

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -39,13 +40,14 @@ const (
 
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
-	wg      sync.WaitGroup
-	closeCh chan struct{}
-	dist    *meta.DistributionManager
-	meta    *meta.Meta
-	target  *meta.TargetManager
-	broker  meta.Broker
-	cluster session.Cluster
+	wg          sync.WaitGroup
+	closeCh     chan struct{}
+	dist        *meta.DistributionManager
+	meta        *meta.Meta
+	target      *meta.TargetManager
+	broker      meta.Broker
+	cluster     session.Cluster
+	manualCheck chan checkRequest
 
 	stopOnce sync.Once
 }
@@ -64,6 +66,12 @@ func (o *LeaderObserver) Start(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("stop leader observer due to ctx done")
 				return
+			case req := <-o.manualCheck:
+				log.Info("triggering manual check")
+				ret := o.observeCollection(ctx, req.CollectionID)
+				req.Notifier <- ret
+				log.Info("manual check done", zap.Bool("result", ret))
+
 			case <-ticker.C:
 				o.observe(ctx)
 			}
@@ -89,8 +97,9 @@ func (o *LeaderObserver) observeSegmentsDist(ctx context.Context) {
 	}
 }
 
-func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64) {
+func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64) bool {
 	replicas := o.meta.ReplicaManager.GetByCollection(collection)
+	result := true
 	for _, replica := range replicas {
 		leaders := o.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
 		for ch, leaderID := range leaders {
@@ -99,10 +108,54 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 				continue
 			}
 			dists := o.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
-			needLoaded, needRemoved := o.findNeedLoadedSegments(leaderView, dists),
-				o.findNeedRemovedSegments(leaderView, dists)
-			o.sync(ctx, replica.GetID(), leaderView, append(needLoaded, needRemoved...))
+
+			actions := o.findNeedLoadedSegments(leaderView, dists)
+			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
+			updateVersionAction := o.checkNeedUpdateTargetVersion(leaderView)
+			if updateVersionAction != nil {
+				actions = append(actions, updateVersionAction)
+			}
+			success := o.sync(ctx, replica.GetID(), leaderView, actions)
+			if !success {
+				result = false
+			}
 		}
+	}
+	return result
+}
+
+func (ob *LeaderObserver) CheckTargetVersion(collectionID int64) bool {
+	notifier := make(chan bool)
+	ob.manualCheck <- checkRequest{
+		CollectionID: collectionID,
+		Notifier:     notifier,
+	}
+	return <-notifier
+}
+
+func (o *LeaderObserver) checkNeedUpdateTargetVersion(leaderView *meta.LeaderView) *querypb.SyncAction {
+	targetVersion := o.target.GetCollectionTargetVersion(leaderView.CollectionID, meta.CurrentTarget)
+
+	if targetVersion <= leaderView.TargetVersion {
+		return nil
+	}
+
+	log.Info("Update readable segment version",
+		zap.Int64("collectionID", leaderView.CollectionID),
+		zap.String("channelName", leaderView.Channel),
+		zap.Int64("nodeID", leaderView.ID),
+		zap.Int64("oldVersion", leaderView.TargetVersion),
+		zap.Int64("newVersion", targetVersion),
+	)
+
+	sealedSegments := o.target.GetHistoricalSegmentsByCollection(leaderView.CollectionID, meta.CurrentTarget)
+	growingSegments := o.target.GetStreamingSegmentsByCollection(leaderView.CollectionID, meta.CurrentTarget)
+
+	return &querypb.SyncAction{
+		Type:            querypb.SyncType_UpdateVersion,
+		GrowingInTarget: growingSegments.Collect(),
+		SealedInTarget:  lo.Keys(sealedSegments),
+		TargetVersion:   targetVersion,
 	}
 }
 
@@ -168,9 +221,9 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	return ret
 }
 
-func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) {
+func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) bool {
 	if len(diffs) == 0 {
-		return
+		return true
 	}
 
 	log := log.With(
@@ -182,12 +235,12 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 	schema, err := o.broker.GetCollectionSchema(ctx, leaderView.CollectionID)
 	if err != nil {
 		log.Error("sync distribution failed, cannot get schema of collection", zap.Error(err))
-		return
+		return false
 	}
 	partitions, err := utils.GetPartitions(o.meta.CollectionManager, leaderView.CollectionID)
 	if err != nil {
 		log.Error("sync distribution failed, cannot get partitions of collection", zap.Error(err))
-		return
+		return false
 	}
 
 	req := &querypb.SyncDistributionRequest{
@@ -209,12 +262,15 @@ func (o *LeaderObserver) sync(ctx context.Context, replicaID int64, leaderView *
 	resp, err := o.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {
 		log.Error("failed to sync distribution", zap.Error(err))
-		return
+		return false
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		log.Error("failed to sync distribution", zap.String("reason", resp.GetReason()))
+		return false
 	}
+
+	return true
 }
 
 func NewLeaderObserver(
@@ -225,11 +281,12 @@ func NewLeaderObserver(
 	cluster session.Cluster,
 ) *LeaderObserver {
 	return &LeaderObserver{
-		closeCh: make(chan struct{}),
-		dist:    dist,
-		meta:    meta,
-		target:  targetMgr,
-		broker:  broker,
-		cluster: cluster,
+		closeCh:     make(chan struct{}),
+		dist:        dist,
+		meta:        meta,
+		target:      targetMgr,
+		broker:      broker,
+		cluster:     cluster,
+		manualCheck: make(chan checkRequest, 10),
 	}
 }

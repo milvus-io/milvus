@@ -30,6 +30,7 @@ type DistributionSuite struct {
 
 func (s *DistributionSuite) SetupTest() {
 	s.dist = NewDistribution()
+	s.Equal(initialTargetVersion, s.dist.getTargetVersion())
 }
 
 func (s *DistributionSuite) TearDownTest() {
@@ -145,11 +146,10 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.SetupTest()
 			defer s.TearDownTest()
 			s.dist.AddGrowing(tc.growing...)
-			_, _, version := s.dist.GetCurrent()
-			_, signal := s.dist.AddDistributions(tc.input...)
-			sealed, _ := s.dist.Peek()
+			_, _, version := s.dist.GetSegments(false)
+			s.dist.AddDistributions(tc.input...)
+			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
-			s.Equal(tc.expectedSignalClosed, s.isClosedCh(signal))
 			s.dist.FinishUsage(version)
 		})
 	}
@@ -215,7 +215,7 @@ func (s *DistributionSuite) TestAddGrowing() {
 			defer s.TearDownTest()
 
 			s.dist.AddGrowing(tc.input...)
-			_, growing, version := s.dist.GetCurrent()
+			_, growing, version := s.dist.GetSegments(false)
 			defer s.dist.FinishUsage(version)
 
 			s.ElementsMatch(tc.expected, growing)
@@ -394,7 +394,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 
 			var version int64
 			if tc.withMockRead {
-				_, _, version = s.dist.GetCurrent()
+				_, _, version = s.dist.GetSegments(false)
 			}
 
 			ch := s.dist.RemoveDistributions(tc.removalSealed, tc.removalGrowing)
@@ -418,7 +418,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			case <-ch:
 			}
 
-			sealed, growing, version := s.dist.GetCurrent()
+			sealed, growing, version := s.dist.GetSegments(false)
 			defer s.dist.FinishUsage(version)
 			s.compareSnapshotItems(tc.expectSealed, sealed)
 			s.ElementsMatch(tc.expectGrowing, growing)
@@ -514,7 +514,7 @@ func (s *DistributionSuite) TestPeek() {
 			// peek during lock
 			s.dist.AddDistributions(tc.input...)
 			s.dist.mut.Lock()
-			sealed, _ := s.dist.Peek()
+			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.mut.Unlock()
 		})
@@ -575,6 +575,62 @@ func (s *DistributionSuite) TestAddOfflines() {
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 		})
 	}
+}
+
+func (s *DistributionSuite) Test_SyncTargetVersion() {
+	growing := []SegmentEntry{
+		{
+			NodeID:        1,
+			SegmentID:     1,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+		{
+			NodeID:        1,
+			SegmentID:     2,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+		{
+			NodeID:        1,
+			SegmentID:     3,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+	}
+
+	sealed := []SegmentEntry{
+		{
+			NodeID:        1,
+			SegmentID:     4,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+		{
+			NodeID:        1,
+			SegmentID:     5,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+		{
+			NodeID:        1,
+			SegmentID:     6,
+			PartitionID:   1,
+			TargetVersion: 1,
+		},
+	}
+
+	s.dist.AddGrowing(growing...)
+	s.dist.AddDistributions(sealed...)
+	s.dist.SyncTargetVersion(2, []int64{2, 3}, []int64{6})
+
+	s1, s2, _ := s.dist.GetSegments(true)
+	s.Len(s1[0].Segments, 1)
+	s.Len(s2, 2)
+
+	s1, s2, _ = s.dist.GetSegments(false)
+	s.Len(s1[0].Segments, 3)
+	s.Len(s2, 3)
 }
 
 func TestDistributionSuite(t *testing.T) {

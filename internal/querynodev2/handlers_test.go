@@ -164,7 +164,7 @@ func (suite *OptimizeSearchParamSuite) SetupSuite() {
 	suite.channel = "test-channel"
 
 	suite.delegator = &delegator.MockShardDelegator{}
-	suite.delegator.EXPECT().GetSegmentInfo().Return([]delegator.SnapshotItem{{NodeID: 1, Segments: []delegator.SegmentEntry{{SegmentID: 100}}}}, []delegator.SegmentEntry{})
+	suite.delegator.EXPECT().GetSegmentInfo(mock.Anything).Return([]delegator.SnapshotItem{{NodeID: 1, Segments: []delegator.SegmentEntry{{SegmentID: 100}}}}, []delegator.SegmentEntry{})
 }
 
 func (suite *OptimizeSearchParamSuite) SetupTest() {

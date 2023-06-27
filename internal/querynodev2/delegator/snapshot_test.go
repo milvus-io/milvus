@@ -30,8 +30,9 @@ type SnapshotSuite struct {
 }
 
 func (s *SnapshotSuite) SetupTest() {
-	last := NewSnapshot(nil, nil, nil, 0)
+	last := NewSnapshot(nil, nil, nil, 0, initialTargetVersion)
 	last.Expire(func() {})
+	s.Equal(initialTargetVersion, last.GetTargetVersion())
 
 	dist := []SnapshotItem{
 		{
@@ -72,7 +73,8 @@ func (s *SnapshotSuite) SetupTest() {
 		},
 	}
 
-	s.snapshot = NewSnapshot(dist, growing, last, 1)
+	s.snapshot = NewSnapshot(dist, growing, last, 1, 1)
+	s.Equal(int64(1), s.snapshot.GetTargetVersion())
 }
 
 func (s *SnapshotSuite) TearDownTest() {

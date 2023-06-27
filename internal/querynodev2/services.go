@@ -1184,7 +1184,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Version:    value.Version(),
 		})
 
-		sealed, growing := value.GetSegmentInfo()
+		sealed, growing := value.GetSegmentInfo(false)
 		sealedSegments := make(map[int64]*querypb.SegmentDist)
 		for _, item := range sealed {
 			for _, segment := range item.Segments {
@@ -1210,6 +1210,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Channel:         key,
 			SegmentDist:     sealedSegments,
 			GrowingSegments: growingSegments,
+			TargetVersion:   value.GetTargetVersion(),
 		})
 		return true
 	})
@@ -1260,6 +1261,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		log := log.With(zap.String("Action",
 			action.GetType().String()),
 			zap.Int64("segmentID", action.SegmentID),
+			zap.Int64("TargetVersion", action.GetTargetVersion()),
 		)
 		log.Info("sync action")
 		switch action.GetType() {
@@ -1267,6 +1269,8 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			removeActions = append(removeActions, action)
 		case querypb.SyncType_Set:
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
+		case querypb.SyncType_UpdateVersion:
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(), action.GetSealedInTarget())
 		default:
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

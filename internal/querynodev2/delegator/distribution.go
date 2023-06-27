@@ -20,13 +20,17 @@ import (
 	"sync"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
 	// wildcardNodeID matches any nodeID, used for force distribution correction.
-	wildcardNodeID = int64(-1)
+	wildcardNodeID       = int64(-1)
+	initialTargetVersion = int64(0)
 )
 
 var (
@@ -47,11 +51,12 @@ func getClosedCh() chan struct{} {
 type distribution struct {
 	// segments information
 	// map[SegmentID]=>segmentEntry
+	targetVersion   *atomic.Int64
 	growingSegments map[UniqueID]SegmentEntry
 	sealedSegments  map[UniqueID]SegmentEntry
 
-	// version indicator
-	version int64
+	// snapshotVersion indicator
+	snapshotVersion int64
 	// quick flag for current snapshot is serviceable
 	serviceable *atomic.Bool
 	offlines    typeutil.Set[int64]
@@ -66,10 +71,11 @@ type distribution struct {
 
 // SegmentEntry stores the segment meta information.
 type SegmentEntry struct {
-	NodeID      int64
-	SegmentID   UniqueID
-	PartitionID UniqueID
-	Version     int64
+	NodeID        int64
+	SegmentID     UniqueID
+	PartitionID   UniqueID
+	Version       int64
+	TargetVersion int64
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
@@ -81,20 +87,59 @@ func NewDistribution() *distribution {
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
 		offlines:        typeutil.NewSet[int64](),
+		targetVersion:   atomic.NewInt64(initialTargetVersion),
 	}
 
 	dist.genSnapshot()
 	return dist
 }
 
-// GetCurrent returns current snapshot.
-func (d *distribution) GetCurrent(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
+// GetAllSegments returns segments in current snapshot, filter readable segment when readable is true
+func (d *distribution) GetSegments(readable bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
 	current := d.current.Load()
 	sealed, growing = current.Get(partitions...)
 	version = current.version
+
+	if readable {
+		TargetVersion := current.GetTargetVersion()
+		sealed, growing = d.filterReadableSegments(sealed, growing, TargetVersion)
+		return
+	}
+
+	return
+}
+
+func (d *distribution) filterReadableSegments(sealed []SnapshotItem, growing []SegmentEntry, targetVersion int64) ([]SnapshotItem, []SegmentEntry) {
+	filterReadable := func(entry SegmentEntry, _ int) bool {
+		return entry.TargetVersion == targetVersion || entry.TargetVersion == initialTargetVersion
+	}
+
+	growing = lo.Filter(growing, filterReadable)
+	sealed = lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
+		return SnapshotItem{
+			NodeID:   item.NodeID,
+			Segments: lo.Filter(item.Segments, filterReadable),
+		}
+	})
+
+	return sealed, growing
+}
+
+// PeekAllSegments returns current snapshot without increasing inuse count
+// show only used by GetDataDistribution.
+func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+	current := d.current.Load()
+	sealed, growing = current.Peek(partitions...)
+
+	if readable {
+		TargetVersion := current.GetTargetVersion()
+		sealed, growing = d.filterReadableSegments(sealed, growing, TargetVersion)
+		return
+	}
+
 	return
 }
 
@@ -106,12 +151,9 @@ func (d *distribution) FinishUsage(version int64) {
 	}
 }
 
-// Peek returns current snapshot without increasing inuse count
-// show only used by GetDataDistribution.
-func (d *distribution) Peek(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+func (d *distribution) getTargetVersion() int64 {
 	current := d.current.Load()
-	sealed, growing = current.Peek(partitions...)
-	return sealed, growing
+	return current.GetTargetVersion()
 }
 
 // Serviceable returns wether current snapshot is serviceable.
@@ -120,28 +162,16 @@ func (d *distribution) Serviceable() bool {
 }
 
 // AddDistributions add multiple segment entries.
-func (d *distribution) AddDistributions(entries ...SegmentEntry) ([]int64, chan struct{}) {
+func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	// remove growing if sealed is loaded
-	var removed []int64
 	for _, entry := range entries {
 		d.sealedSegments[entry.SegmentID] = entry
 		d.offlines.Remove(entry.SegmentID)
-		_, ok := d.growingSegments[entry.SegmentID]
-		if ok {
-			removed = append(removed, entry.SegmentID)
-			delete(d.growingSegments, entry.SegmentID)
-		}
 	}
 
-	ch := d.genSnapshot()
-	// no offline growing, return closed ch to skip wait
-	if len(removed) == 0 {
-		return removed, getClosedCh()
-	}
-	return removed, ch
+	d.genSnapshot()
 }
 
 // AddGrowing adds growing segment distribution.
@@ -174,6 +204,45 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 	if updated {
 		d.genSnapshot()
 	}
+}
+
+// UpdateTargetVersion update readable segment version
+func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+	for _, segmentID := range growingInTarget {
+		entry, ok := d.growingSegments[segmentID]
+		if !ok {
+			log.Error("readable growing segment lost, make it unserviceable",
+				zap.Int64("segmentID", segmentID))
+			d.serviceable.Store(false)
+			continue
+		}
+		entry.TargetVersion = newVersion
+		d.growingSegments[segmentID] = entry
+	}
+
+	for _, segmentID := range sealedInTarget {
+		entry, ok := d.sealedSegments[segmentID]
+		if !ok {
+			log.Error("readable sealed segment lost, make it unserviceable",
+				zap.Int64("segmentID", segmentID))
+			d.serviceable.Store(false)
+			continue
+		}
+		entry.TargetVersion = newVersion
+		d.sealedSegments[segmentID] = entry
+	}
+
+	oldValue := d.targetVersion.Load()
+	d.targetVersion.Store(newVersion)
+	d.genSnapshot()
+	log.Info("Update readable segment version",
+		zap.Int64("oldVersion", oldValue),
+		zap.Int64("newVersion", newVersion),
+		zap.Int64s("growing", growingInTarget),
+		zap.Int64s("sealed", sealedInTarget),
+	)
 }
 
 // RemoveDistributions remove segments distributions and returns the clear signal channel.
@@ -219,7 +288,6 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 // in which, user could use found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
 func (d *distribution) genSnapshot() chan struct{} {
-
 	nodeSegments := make(map[int64][]SegmentEntry)
 	for _, entry := range d.sealedSegments {
 		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
@@ -243,12 +311,12 @@ func (d *distribution) genSnapshot() chan struct{} {
 	// stores last snapshot
 	// ok to be nil
 	last := d.current.Load()
-	// increase version
-	d.version++
-	newSnapShot := NewSnapshot(dist, growing, last, d.version)
+	// update snapshot version
+	d.snapshotVersion++
+	newSnapShot := NewSnapshot(dist, growing, last, d.snapshotVersion, d.targetVersion.Load())
 	d.current.Store(newSnapShot)
 	// shall be a new one
-	d.snapshots.GetOrInsert(d.version, newSnapShot)
+	d.snapshots.GetOrInsert(d.snapshotVersion, newSnapShot)
 
 	// first snapshot, return closed chan
 	if last == nil {

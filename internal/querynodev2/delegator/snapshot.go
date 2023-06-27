@@ -36,8 +36,9 @@ type snapshotCleanup func()
 
 // snapshot records segment distribution with ref count.
 type snapshot struct {
-	dist    []SnapshotItem
-	growing []SegmentEntry
+	dist          []SnapshotItem
+	growing       []SegmentEntry
+	targetVersion int64
 
 	// version ID for tracking
 	version int64
@@ -57,13 +58,14 @@ type snapshot struct {
 }
 
 // NewSnapshot returns a prepared snapshot with channel initialized.
-func NewSnapshot(sealed []SnapshotItem, growing []SegmentEntry, last *snapshot, version int64) *snapshot {
+func NewSnapshot(sealed []SnapshotItem, growing []SegmentEntry, last *snapshot, version int64, targetVersion int64) *snapshot {
 	return &snapshot{
-		version: version,
-		growing: growing,
-		dist:    sealed,
-		last:    last,
-		cleared: make(chan struct{}),
+		version:       version,
+		growing:       growing,
+		dist:          sealed,
+		last:          last,
+		cleared:       make(chan struct{}),
+		targetVersion: targetVersion,
 	}
 }
 
@@ -78,6 +80,10 @@ func (s *snapshot) Get(partitions ...int64) (sealed []SnapshotItem, growing []Se
 	s.inUse.Inc()
 
 	return s.filter(partitions...)
+}
+
+func (s *snapshot) GetTargetVersion() int64 {
+	return s.targetVersion
 }
 
 // Peek returns segment distributions without increasing inUse.

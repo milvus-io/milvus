@@ -201,6 +201,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			Version:         version,
 			Segments:        lview.GetSegmentDist(),
 			GrowingSegments: segments,
+			TargetVersion:   lview.TargetVersion,
 		}
 		updates = append(updates, view)
 	}

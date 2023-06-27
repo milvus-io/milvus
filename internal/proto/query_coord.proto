@@ -490,6 +490,7 @@ message LeaderView {
   map<int64, SegmentDist> segment_dist = 3;
   repeated int64 growing_segmentIDs = 4;
   map<int64, msg.MsgPosition> growing_segments = 5;
+  int64 TargetVersion = 6;
 }
 
 message SegmentDist {
@@ -547,6 +548,7 @@ enum SyncType {
   Remove = 0;
   Set = 1;
   Amend = 2;
+  UpdateVersion = 3;
 }
 
 message SyncAction {
@@ -556,6 +558,9 @@ message SyncAction {
   int64 nodeID = 4;
   int64 version = 5;
   SegmentLoadInfo info = 6;
+  repeated int64 growingInTarget = 7;
+  repeated int64 sealedInTarget = 8;
+  int64 TargetVersion = 9;
 }
 
 message SyncDistributionRequest {

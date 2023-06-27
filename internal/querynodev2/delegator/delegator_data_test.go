@@ -345,7 +345,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		sealed, _ := s.delegator.GetSegmentInfo()
+		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
@@ -421,7 +421,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		sealed, _ := s.delegator.GetSegmentInfo()
+		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
 		s.ElementsMatch([]SegmentEntry{
@@ -625,7 +625,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
-	sealed, growing := s.delegator.GetSegmentInfo()
+	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
 	s.ElementsMatch([]SegmentEntry{
@@ -652,7 +652,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	}, false)
 
 	s.NoError(err)
-	sealed, _ = s.delegator.GetSegmentInfo()
+	sealed, _ = s.delegator.GetSegmentInfo(false)
 	s.Equal(0, len(sealed))
 
 	err = s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
@@ -663,7 +663,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	}, false)
 
 	s.NoError(err)
-	_, growing = s.delegator.GetSegmentInfo()
+	_, growing = s.delegator.GetSegmentInfo(false)
 	s.Equal(0, len(growing))
 
 	err = s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
@@ -685,6 +685,11 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorSuite) TestSyncTargetVersion() {
+	s.delegator.SyncTargetVersion(int64(5), []int64{}, []int64{})
+	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 
 func TestDelegatorDataSuite(t *testing.T) {
