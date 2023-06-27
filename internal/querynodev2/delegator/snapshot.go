@@ -54,7 +54,7 @@ type snapshot struct {
 	inUse atomic.Int64
 
 	// expired flag
-	expired bool
+	expired atomic.Bool
 }
 
 // NewSnapshot returns a prepared snapshot with channel initialized.
@@ -71,7 +71,7 @@ func NewSnapshot(sealed []SnapshotItem, growing []SegmentEntry, last *snapshot, 
 
 // Expire sets expired flag to true.
 func (s *snapshot) Expire(cleanup snapshotCleanup) {
-	s.expired = true
+	s.expired.Store(true)
 	s.checkCleared(cleanup)
 }
 
@@ -118,7 +118,7 @@ func (s *snapshot) Done(cleanup snapshotCleanup) {
 
 // checkCleared performs safety check for snapshot closing the cleared signal.
 func (s *snapshot) checkCleared(cleanup snapshotCleanup) {
-	if s.expired && s.inUse.Load() == 0 {
+	if s.expired.Load() && s.inUse.Load() == 0 {
 		s.once.Do(func() {
 			// first snapshot
 			if s.last == nil {
