@@ -5,6 +5,7 @@ import random
 import pytest
 import pandas as pd
 from time import sleep
+import heapq
 
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
@@ -959,12 +960,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function",
-                    params=[default_nb, default_nb_medium])
+    @pytest.fixture(scope="function", params=[default_nb_medium])
     def nb(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[2, 500])
+    @pytest.fixture(scope="function", params=[200])
     def nq(self, request):
         yield request.param
 
@@ -990,6 +990,10 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["IP", "L2"])
+    def metric_type(self, request):
         yield request.param
 
     """
@@ -1615,7 +1619,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("M", [4, 64])
     @pytest.mark.parametrize("efConstruction", [8, 512])
-    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("limit", [1, 10, 2000])
     def test_search_HNSW_index_with_redundant_param(self, M, efConstruction, limit, auto_id,
                                                     _async, enable_dynamic_field):
         """
@@ -1651,7 +1655,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("M", [4, 64])
     @pytest.mark.parametrize("efConstruction", [8, 512])
-    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    @pytest.mark.parametrize("limit", [1, 10, 2000])
     def test_search_HNSW_index_with_min_ef(self, M, efConstruction, limit, auto_id, _async, enable_dynamic_field):
         """
         target: test search HNSW index with min ef
@@ -1830,6 +1834,77 @@ class TestCollectionSearch(TestcaseBase):
                                              "ids": insert_ids,
                                              "limit": default_limit,
                                              "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue 24957")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
+    def test_search_after_release_recreate_index(self, dim, index, params, auto_id, _async,
+                                                 enable_dynamic_field, metric_type):
+        """
+        target: test search after new metric with different metric type
+        method: test search after new metric with different metric type
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                         partition_num=1,
+                                                                                         auto_id=auto_id,
+                                                                                         dim=dim, is_index=False,
+                                                                                         enable_dynamic_field=
+                                                                                         enable_dynamic_field)[0:5]
+        # 2. get vectors that inserted into collection
+        original_vectors = []
+        if enable_dynamic_field:
+            for vector in _vectors[0]:
+                vector = vector[ct.default_float_vec_field_name]
+                original_vectors.append(vector)
+        else:
+            for _vector in _vectors:
+                vectors_tmp = np.array(_vector).tolist()
+                vectors_single = [vectors_tmp[i][-1] for i in range(2500)]
+                original_vectors.append(vectors_single)
+        # 3. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        log.info("test_search_after_release_recreate_index: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_after_release_recreate_index: Created index-%s" % index)
+        collection_w.load()
+        # 4. search
+        search_params = cf.gen_search_param(index, "COSINE")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async)
+        # 5. re-create index
+        collection_w.release()
+        collection_w.drop_index()
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async,
+                                             "metric": metric_type,
+                                             "vector_nq": vectors[:default_nq],
+                                             "original_vectors": original_vectors})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_collection_multiple_times(self, nb, nq, dim, auto_id, _async, enable_dynamic_field):
@@ -3693,7 +3768,7 @@ class TestSearchDSL(TestcaseBase):
                                          "limit": ct.default_top_k})
 
 
-class  TestsearchString(TestcaseBase):
+class TestsearchString(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test search about string

@@ -42,7 +42,7 @@ default_search_exp = "int64 >= 0"
 default_limit = ct.default_limit
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 default_search_field = ct.default_float_vec_field_name
-default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+default_search_params = ct.default_search_params
 
 
 class TestCollectionParams(TestcaseBase):
@@ -2956,6 +2956,7 @@ class TestCollectionString(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "The auto_id can only be specified on field with DataType.INT64"}
         self.collection_schema_wrap.init_collection_schema(fields=fields,
                                                            check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestCollectionJSON(TestcaseBase):
     """
