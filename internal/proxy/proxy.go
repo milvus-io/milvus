@@ -120,6 +120,8 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
 	mgr := newShardClientMgr()
+	lbPolicy := NewLBPolicyImpl(mgr)
+	lbPolicy.Start(ctx)
 	node := &Proxy{
 		ctx:              ctx1,
 		cancel:           cancel,
@@ -127,7 +129,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		searchResultCh:   make(chan *internalpb.SearchResults, n),
 		shardMgr:         mgr,
 		multiRateLimiter: NewMultiRateLimiter(),
-		lbPolicy:         NewLBPolicyImpl(mgr),
+		lbPolicy:         lbPolicy,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))

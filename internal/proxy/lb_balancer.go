@@ -16,11 +16,16 @@
 
 package proxy
 
-import "github.com/milvus-io/milvus/internal/proto/internalpb"
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+)
 
 type LBBalancer interface {
-	SelectNode(availableNodes []int64, nq int64) (int64, error)
+	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error)
 	CancelWorkload(node int64, nq int64)
 	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
+	Start(ctx context.Context)
 	Close()
 }

@@ -3,6 +3,8 @@
 package proxy
 
 import (
+	context "context"
+
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -86,23 +88,23 @@ func (_c *MockLBBalancer_Close_Call) RunAndReturn(run func()) *MockLBBalancer_Cl
 	return _c
 }
 
-// SelectNode provides a mock function with given fields: availableNodes, nq
-func (_m *MockLBBalancer) SelectNode(availableNodes []int64, nq int64) (int64, error) {
-	ret := _m.Called(availableNodes, nq)
+// SelectNode provides a mock function with given fields: ctx, availableNodes, nq
+func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+	ret := _m.Called(ctx, availableNodes, nq)
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func([]int64, int64) (int64, error)); ok {
-		return rf(availableNodes, nq)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, int64) (int64, error)); ok {
+		return rf(ctx, availableNodes, nq)
 	}
-	if rf, ok := ret.Get(0).(func([]int64, int64) int64); ok {
-		r0 = rf(availableNodes, nq)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, int64) int64); ok {
+		r0 = rf(ctx, availableNodes, nq)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func([]int64, int64) error); ok {
-		r1 = rf(availableNodes, nq)
+	if rf, ok := ret.Get(1).(func(context.Context, []int64, int64) error); ok {
+		r1 = rf(ctx, availableNodes, nq)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -116,15 +118,16 @@ type MockLBBalancer_SelectNode_Call struct {
 }
 
 // SelectNode is a helper method to define mock.On call
+//   - ctx context.Context
 //   - availableNodes []int64
 //   - nq int64
-func (_e *MockLBBalancer_Expecter) SelectNode(availableNodes interface{}, nq interface{}) *MockLBBalancer_SelectNode_Call {
-	return &MockLBBalancer_SelectNode_Call{Call: _e.mock.On("SelectNode", availableNodes, nq)}
+func (_e *MockLBBalancer_Expecter) SelectNode(ctx interface{}, availableNodes interface{}, nq interface{}) *MockLBBalancer_SelectNode_Call {
+	return &MockLBBalancer_SelectNode_Call{Call: _e.mock.On("SelectNode", ctx, availableNodes, nq)}
 }
 
-func (_c *MockLBBalancer_SelectNode_Call) Run(run func(availableNodes []int64, nq int64)) *MockLBBalancer_SelectNode_Call {
+func (_c *MockLBBalancer_SelectNode_Call) Run(run func(ctx context.Context, availableNodes []int64, nq int64)) *MockLBBalancer_SelectNode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]int64), args[1].(int64))
+		run(args[0].(context.Context), args[1].([]int64), args[2].(int64))
 	})
 	return _c
 }
@@ -134,7 +137,40 @@ func (_c *MockLBBalancer_SelectNode_Call) Return(_a0 int64, _a1 error) *MockLBBa
 	return _c
 }
 
-func (_c *MockLBBalancer_SelectNode_Call) RunAndReturn(run func([]int64, int64) (int64, error)) *MockLBBalancer_SelectNode_Call {
+func (_c *MockLBBalancer_SelectNode_Call) RunAndReturn(run func(context.Context, []int64, int64) (int64, error)) *MockLBBalancer_SelectNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Start provides a mock function with given fields: ctx
+func (_m *MockLBBalancer) Start(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockLBBalancer_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockLBBalancer_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockLBBalancer_Expecter) Start(ctx interface{}) *MockLBBalancer_Start_Call {
+	return &MockLBBalancer_Start_Call{Call: _e.mock.On("Start", ctx)}
+}
+
+func (_c *MockLBBalancer_Start_Call) Run(run func(ctx context.Context)) *MockLBBalancer_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockLBBalancer_Start_Call) Return() *MockLBBalancer_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLBBalancer_Start_Call) RunAndReturn(run func(context.Context)) *MockLBBalancer_Start_Call {
 	_c.Call.Return(run)
 	return _c
 }

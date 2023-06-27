@@ -99,7 +99,9 @@ func (s *LBPolicySuite) SetupTest() {
 	s.mgr = NewMockShardClientManager(s.T())
 	s.mgr.EXPECT().UpdateShardLeaders(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.lbBalancer = NewMockLBBalancer(s.T())
+	s.lbBalancer.EXPECT().Start(context.Background()).Maybe()
 	s.lbPolicy = NewLBPolicyImpl(s.mgr)
+	s.lbPolicy.Start(context.Background())
 	s.lbPolicy.balancer = s.lbBalancer
 
 	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
@@ -160,7 +162,7 @@ func (s *LBPolicySuite) loadCollection() {
 
 func (s *LBPolicySuite) TestSelectNode() {
 	ctx := context.Background()
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(5, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(5, nil)
 	targetNode, err := s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -173,8 +175,8 @@ func (s *LBPolicySuite) TestSelectNode() {
 
 	// test select node failed, then update shard leader cache and retry, expect success
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(3, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, errors.New("fake err")).Times(1)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(3, nil)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -187,7 +189,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 
 	// test select node always fails, expected failure
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -200,7 +202,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 
 	// test all nodes has been excluded, expected failure
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -213,7 +215,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 
 	// test get shard leaders failed, retry to select node failed
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	s.qc.ExpectedCalls = nil
 	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrNoAvailableNodeInReplica)
 	targetNode, err = s.lbPolicy.selectNode(ctx, ChannelWorkload{
@@ -233,7 +235,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	// test execute success
 	s.lbBalancer.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		db:           dbName,
@@ -250,7 +252,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 
 	// test select node failed, expected error
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNoAvailableNode)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		db:           dbName,
 		collection:   s.collection,
@@ -268,7 +270,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		db:           dbName,
@@ -304,7 +306,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.ExpectedCalls = nil
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := 0
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -329,7 +331,7 @@ func (s *LBPolicySuite) TestExecute() {
 	ctx := context.Background()
 	// test  all channel success
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		db:         dbName,
