@@ -42,6 +42,23 @@ type varCharPrimaryKey = storage.VarCharPrimaryKey
 var newInt64PrimaryKey = storage.NewInt64PrimaryKey
 var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
 
+var deletePool *concurrency.Pool
+var deletePoolInitOnce sync.Once
+
+func initDeletePool() {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false))
+	if err != nil {
+		// shall no happen here
+		panic(err)
+	}
+	deletePool = pool
+}
+
+func getOrCreateDeletePool() *concurrency.Pool {
+	deletePoolInitOnce.Do(initDeletePool)
+	return deletePool
+}
+
 // deleteNode is the one of nodes in delta flow graph
 type deleteNode struct {
 	baseNode
@@ -204,17 +221,12 @@ func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, deltaVch
 		return nil, err
 	}
 
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false))
-	if err != nil {
-		return nil, err
-	}
-
 	return &deleteNode{
 		baseNode:      baseNode,
 		collectionID:  collectionID,
 		metaReplica:   metaReplica,
 		deltaVchannel: deltaVchannel,
 		dmlVchannel:   dmlVChannel,
-		pool:          pool,
+		pool:          getOrCreateDeletePool(),
 	}, nil
 }

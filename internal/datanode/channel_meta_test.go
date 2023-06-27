@@ -1019,6 +1019,9 @@ func (s *ChannelMetaMockSuite) SetupTest() {
 
 	s.cm = mocks.NewChunkManager(s.T())
 	s.collID = 1
+	if s.channel != nil {
+		s.channel.close()
+	}
 	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
 	s.vchanName = "channel"
 }
