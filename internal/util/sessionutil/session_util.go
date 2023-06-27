@@ -784,6 +784,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				return
 			case <-ctx.Done():
 				log.Debug("liveness exits due to context done")
+				s.enableRetryKeepAlive = false
 				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
