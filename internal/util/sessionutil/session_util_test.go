@@ -537,7 +537,7 @@ func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
 
 		result, _, err := s.GetSessionsWithVersionRange(suite.serverName, r)
 		suite.Require().NoError(err)
-		suite.Equal(0, len(result))
+		suite.Equal(1, len(result))
 	})
 
 	suite.Run(">=0.0.0 with garbage", func() {

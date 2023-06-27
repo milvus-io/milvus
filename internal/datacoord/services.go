@@ -442,6 +442,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	// validate
 	nodeID := req.GetBase().GetSourceID()
+	// virtual channel name
+	channelName := req.Channel
+	// for compatibility issue , if len(channelName) not exist, skip the check
+	// No need to check import channel--node matching in data import case.
+	// Also avoid to handle segment not found error if not the owner of shard
+	if !req.GetImporting() && len(channelName) != 0 {
+		if !s.channelManager.Match(nodeID, channelName) {
+			failResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channelName, nodeID))
+			resp.ErrorCode = commonpb.ErrorCode_MetaFailed
+			log.Warn("node is not matched with channel", zap.String("channel", channelName))
+			return resp, nil
+		}
+	}
 	segmentID := req.GetSegmentID()
 	segment := s.meta.GetSegment(segmentID)
 
@@ -461,17 +474,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound,
 			fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
-	}
-
-	// No need to check import channel--node matching in data import case.
-	if !req.GetImporting() {
-		channel := segment.GetInsertChannel()
-		if !s.channelManager.Match(nodeID, channel) {
-			failResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
-			resp.ErrorCode = commonpb.ErrorCode_MetaFailed
-			log.Warn("node is not matched with channel", zap.String("channel", channel))
-			return resp, nil
-		}
 	}
 
 	if req.GetDropped() {
