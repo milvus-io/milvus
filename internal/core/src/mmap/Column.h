@@ -16,29 +16,76 @@
 #pragma once
 
 #include <sys/mman.h>
-
+#include <algorithm>
 #include <cstddef>
-#include <ostream>
-#include <string_view>
-#include <type_traits>
-#include <vector>
-#include <string>
-#include <utility>
+#include <cstring>
+#include <filesystem>
 
+#include "common/FieldMeta.h"
+#include "common/Span.h"
+#include "exceptions/EasyAssert.h"
+#include "fmt/format.h"
 #include "mmap/Utils.h"
 
 namespace milvus {
 
-struct Entry {
-    char* data;
-    uint32_t length;
-};
+#ifdef MAP_POPULATE
+static int mmap_flags = MAP_PRIVATE | MAP_POPULATE;
+#else
+static int mmap_flags = MAP_PRIVATE;
+#endif
 
 class ColumnBase {
  public:
-    ColumnBase() = default;
+    // memory mode ctor
+    ColumnBase(size_t num_rows, const FieldMeta& field_meta) {
+        // simdjson requires a padding following the json data
+        padding_ = field_meta.get_data_type() == DataType::JSON
+                       ? simdjson::SIMDJSON_PADDING
+                       : 0;
+
+        if (datatype_is_variable(field_meta.get_data_type())) {
+            return;
+        }
+
+        size_ = field_meta.get_sizeof() * num_rows + padding_;
+        auto data_type = field_meta.get_data_type();
+
+        // use anon mapping so we are able to free these memory with munmap only
+        data_ = static_cast<char*>(mmap(nullptr,
+                                        size_,
+                                        PROT_READ | PROT_WRITE,
+                                        mmap_flags | MAP_ANON,
+                                        -1,
+                                        0));
+        AssertInfo(
+            data_ != MAP_FAILED,
+            fmt::format("failed to create anon map, err: {}", strerror(errno)));
+    }
+
+    // mmap mode ctor
+    ColumnBase(int fd, size_t size, const FieldMeta& field_meta) {
+        padding_ = field_meta.get_data_type() == DataType::JSON
+                       ? simdjson::SIMDJSON_PADDING
+                       : 0;
+
+        len_ = size;
+        size_ = size + padding_;
+        data_ = static_cast<char*>(
+            mmap(nullptr, size_, PROT_READ, mmap_flags, fd, 0));
+#ifndef MAP_POPULATE
+        // Manually access the mapping to populate it
+        const size_t page_size = getpagesize();
+        char* begin = (char*)data_;
+        char* end = begin + len_;
+        for (char* page = begin; page < end; page += page_size) {
+            char value = page[0];
+        }
+#endif
+    }
+
     virtual ~ColumnBase() {
-        if (data_ != nullptr && data_ != MAP_FAILED) {
+        if (data_ != nullptr) {
             if (munmap(data_, size_)) {
                 AssertInfo(true,
                            fmt::format("failed to unmap variable field, err={}",
@@ -54,47 +101,93 @@ class ColumnBase {
     }
 
     const char*
-    data() const {
+    Data() const {
         return data_;
     }
 
-    [[nodiscard]] size_t
-    size() const {
+    size_t
+    Size() const {
         return size_;
     }
 
     virtual SpanBase
-    span() const = 0;
+    Span() const = 0;
+
+    // build only
+    void
+    Append(const char* data, size_t size) {
+        size_t required_size = len_ + size;
+        if (required_size + padding_ > size_) {
+            Expand(required_size * 2 + padding_);
+        }
+
+        std::copy_n(data, size, data_ + len_);
+        len_ += size;
+    }
 
  protected:
+    // only for memory mode, not mmap
+    void
+    Expand(size_t size) {
+        auto data = static_cast<char*>(mmap(nullptr,
+                                            size,
+                                            PROT_READ | PROT_WRITE,
+                                            mmap_flags | MAP_ANON,
+                                            -1,
+                                            0));
+
+        AssertInfo(data != MAP_FAILED,
+                   fmt::format("failed to create map: {}", strerror(errno)));
+
+        if (data_ != nullptr) {
+            std::memcpy(data, data_, len_);
+            if (munmap(data_, size_)) {
+                AssertInfo(
+                    false,
+                    fmt::format("failed to unmap while expanding, err={}",
+                                strerror(errno)));
+            }
+        }
+
+        data_ = data;
+        size_ = size;
+    }
+
     char* data_{nullptr};
-    uint64_t size_{0};
+    size_t size_{0};
+    size_t padding_{0};
+
+    // build only
+    size_t len_{0};
 };
 
 class Column : public ColumnBase {
  public:
-    Column(int64_t segment_id,
-           const FieldMeta& field_meta,
-           const FieldDataInfo& info) {
-        data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
-        size_ = field_meta.get_sizeof() * info.row_count;
-        row_count_ = info.row_count;
+    // memory mode ctor
+    Column(size_t num_rows, const FieldMeta& field_meta)
+        : ColumnBase(num_rows, field_meta), num_rows_(num_rows) {
+    }
+
+    // mmap mode ctor
+    Column(int fd, size_t size, const FieldMeta& field_meta)
+        : ColumnBase(fd, size, field_meta),
+          num_rows_(size / field_meta.get_sizeof()) {
     }
 
     Column(Column&& column) noexcept
-        : ColumnBase(std::move(column)), row_count_(column.row_count_) {
-        column.row_count_ = 0;
+        : ColumnBase(std::move(column)), num_rows_(column.num_rows_) {
+        column.num_rows_ = 0;
     }
 
     ~Column() override = default;
 
     SpanBase
-    span() const override {
-        return SpanBase(data_, row_count_, size_ / row_count_);
+    Span() const override {
+        return SpanBase(data_, num_rows_, size_ / num_rows_);
     }
 
  private:
-    int64_t row_count_{};
+    size_t num_rows_{};
 };
 
 template <typename T>
@@ -103,37 +196,31 @@ class VariableColumn : public ColumnBase {
     using ViewType =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
-    VariableColumn(int64_t segment_id,
-                   const FieldMeta& field_meta,
-                   const FieldDataInfo& info) {
-        indices_.reserve(info.row_count);
-        for (auto data : info.datas) {
-            for (ssize_t idx = 0; idx < data->get_num_rows(); ++idx) {
-                indices_.emplace_back(size_);
-                size_ += data->Size(idx);
-            }
-        }
-
-        data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
-        construct_views();
+    // memory mode ctor
+    VariableColumn(size_t num_rows, const FieldMeta& field_meta)
+        : ColumnBase(num_rows, field_meta) {
     }
 
-    VariableColumn(VariableColumn&& field) noexcept
-        : indices_(std::move(field.indices_)), views_(std::move(field.views_)) {
-        data_ = field.data();
-        size_ = field.size();
-        field.data_ = nullptr;
+    // mmap mode ctor
+    VariableColumn(int fd, size_t size, const FieldMeta& field_meta)
+        : ColumnBase(fd, size, field_meta) {
+    }
+
+    VariableColumn(VariableColumn&& column) noexcept
+        : ColumnBase(std::move(column)),
+          indices_(std::move(column.indices_)),
+          views_(std::move(column.views_)) {
     }
 
     ~VariableColumn() override = default;
 
     SpanBase
-    span() const override {
+    Span() const override {
         return SpanBase(views_.data(), views_.size(), sizeof(ViewType));
     }
 
     [[nodiscard]] const std::vector<ViewType>&
-    views() const {
+    Views() const {
         return views_;
     }
 
@@ -143,21 +230,35 @@ class VariableColumn : public ColumnBase {
     }
 
     std::string_view
-    raw_at(const int i) const {
-        size_t len = (i == indices_.size() - 1) ? size_ - indices_.back()
+    RawAt(const int i) const {
+        size_t len = (i == indices_.size() - 1) ? len_ - indices_.back()
                                                 : indices_[i + 1] - indices_[i];
         return std::string_view(data_ + indices_[i], len);
     }
 
+    void
+    Append(const char* data, size_t size) {
+        indices_.emplace_back(len_);
+        ColumnBase::Append(data, size);
+    }
+
+    void
+    Seal(std::vector<uint64_t> indices = {}) {
+        if (!indices.empty()) {
+            indices_ = std::move(indices);
+        }
+        ConstructViews();
+    }
+
  protected:
     void
-    construct_views() {
+    ConstructViews() {
         views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
             views_.emplace_back(data_ + indices_[i],
                                 indices_[i + 1] - indices_[i]);
         }
-        views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
+        views_.emplace_back(data_ + indices_.back(), len_ - indices_.back());
     }
 
  private:
