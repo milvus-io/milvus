@@ -495,7 +495,7 @@ func (s *LocalSegment) ValidateIndexedFieldsData(ctx context.Context, result *se
 			if err != nil {
 				return err
 			}
-			err = fmt.Errorf("output fields for %s index is not allowed", indexType)
+			err = fmt.Errorf("vector output fields for %s index is not allowed", indexType)
 			log.Warn("validate fields failed", zap.Error(err))
 			return err
 		}
