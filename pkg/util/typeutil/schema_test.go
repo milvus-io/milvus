@@ -1089,7 +1089,6 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	FloatArray := []float32{1.0, 2.0}
 	DoubleArray := []float64{11.0, 22.0}
 	VarCharArray := []string{"a", "b"}
-	StringArray := []string{"c", "d"}
 	BinaryVector := []byte{0x12, 0x34}
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 
@@ -1101,39 +1100,18 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	floatData := genFieldData(fieldName, fieldID, schemapb.DataType_Float, FloatArray, 1)
 	doubleData := genFieldData(fieldName, fieldID, schemapb.DataType_Double, DoubleArray, 1)
 	varCharData := genFieldData(fieldName, fieldID, schemapb.DataType_VarChar, VarCharArray, 1)
-	stringData := genFieldData(fieldName, fieldID, schemapb.DataType_String, StringArray, 1)
 	binVecData := genFieldData(fieldName, fieldID, schemapb.DataType_BinaryVector, BinaryVector, Dim)
 	floatVecData := genFieldData(fieldName, fieldID, schemapb.DataType_FloatVector, FloatVector, Dim)
 	invalidData := &schemapb.FieldData{
 		Type: schemapb.DataType_None,
 	}
 
-	t.Run("test GetDataSize", func(t *testing.T) {
-		boolDataRes := GetDataSize(boolData)
-		int8DataRes := GetDataSize(int8Data)
-		int16DataRes := GetDataSize(int16Data)
-		int32DataRes := GetDataSize(int32Data)
-		int64DataRes := GetDataSize(int64Data)
-		floatDataRes := GetDataSize(floatData)
-		doubleDataRes := GetDataSize(doubleData)
-		varCharDataRes := GetDataSize(varCharData)
-		stringDataRes := GetDataSize(stringData)
-		binVecDataRes := GetDataSize(binVecData)
-		floatVecDataRes := GetDataSize(floatVecData)
-		invalidDataRes := GetDataSize(invalidData)
+	t.Run("test GetPKSize", func(t *testing.T) {
+		int64DataRes := GetPKSize(int64Data)
+		varCharDataRes := GetPKSize(varCharData)
 
-		assert.Equal(t, 2, boolDataRes)
-		assert.Equal(t, 2, int8DataRes)
-		assert.Equal(t, 2, int16DataRes)
-		assert.Equal(t, 2, int32DataRes)
 		assert.Equal(t, 2, int64DataRes)
-		assert.Equal(t, 2, floatDataRes)
-		assert.Equal(t, 2, doubleDataRes)
 		assert.Equal(t, 2, varCharDataRes)
-		assert.Equal(t, 2, stringDataRes)
-		assert.Equal(t, 2*Dim/8, binVecDataRes)
-		assert.Equal(t, 2*Dim, floatVecDataRes)
-		assert.Equal(t, 0, invalidDataRes)
 	})
 
 	t.Run("test GetData", func(t *testing.T) {
@@ -1145,7 +1123,6 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		floatDataRes := GetData(floatData, 0)
 		doubleDataRes := GetData(doubleData, 0)
 		varCharDataRes := GetData(varCharData, 0)
-		stringDataRes := GetData(stringData, 0)
 		binVecDataRes := GetData(binVecData, 0)
 		floatVecDataRes := GetData(floatVecData, 0)
 		invalidDataRes := GetData(invalidData, 0)
@@ -1158,7 +1135,6 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		assert.Equal(t, FloatArray[0], floatDataRes)
 		assert.Equal(t, DoubleArray[0], doubleDataRes)
 		assert.Equal(t, VarCharArray[0], varCharDataRes)
-		assert.Equal(t, StringArray[0], stringDataRes)
 		assert.ElementsMatch(t, BinaryVector[:Dim/8], binVecDataRes)
 		assert.ElementsMatch(t, FloatVector[:Dim], floatVecDataRes)
 		assert.Nil(t, invalidDataRes)

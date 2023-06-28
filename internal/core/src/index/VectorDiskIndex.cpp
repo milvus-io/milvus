@@ -291,7 +291,7 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 }
 
 template <typename T>
-const std::vector<uint8_t>
+std::vector<uint8_t>
 VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {

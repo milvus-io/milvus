@@ -65,7 +65,7 @@ class VectorMemIndex : public VectorIndex {
     const bool
     HasRawData() const override;
 
-    const std::vector<uint8_t>
+    std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
     BinarySet

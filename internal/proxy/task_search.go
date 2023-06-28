@@ -596,7 +596,7 @@ func (t *searchTask) Requery() error {
 		return err
 	}
 	offsets := make(map[any]int)
-	for i := 0; i < typeutil.GetDataSize(pkFieldData); i++ {
+	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
 		pk := typeutil.GetData(pkFieldData, i)
 		offsets[pk] = i
 	}
