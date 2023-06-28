@@ -291,6 +291,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 
 	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli())
 	suite.balancer.metricsUpdateTs.Insert(2, time.Now().UnixMilli())
+	suite.balancer.unreachableQueryNodes.Insert(2)
 	suite.Eventually(func() bool {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
 	}, 2*time.Second, 100*time.Millisecond)
