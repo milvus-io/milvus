@@ -256,6 +256,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}, req.GetLoadMeta())
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
 		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
 	if err != nil {
@@ -447,6 +449,8 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 		LoadType:     querypb.LoadType_LoadCollection, // TODO: dyh, remove loadType in querynode
 		MetricType:   metricType,
 	})
+	collection = node.manager.Collection.Get(req.GetCollectionID())
+	collection.SetMetricType(metricType)
 
 	log.Info("load partitions done")
 	return merr.Status(nil), nil
@@ -510,6 +514,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 
 	// Actual load segment
 	log.Info("start to load segments...")
