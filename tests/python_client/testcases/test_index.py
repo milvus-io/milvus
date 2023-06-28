@@ -43,6 +43,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_search_ip_params = ct.default_search_ip_params
 default_search_binary_params = ct.default_search_binary_params
+default_nb = ct.default_nb
 
 
 class TestIndexParams(TestcaseBase):

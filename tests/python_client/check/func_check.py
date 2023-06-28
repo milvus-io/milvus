@@ -321,6 +321,7 @@ class ResponseChecker:
                     pass    # just check nq and topk, not specific ids need check
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
+
         return True
 
     @staticmethod

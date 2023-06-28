@@ -20,7 +20,7 @@ default_string_expr = "varchar in [ \"0\"]"
 default_invaild_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
-default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+default_search_params = ct.default_search_params
 
 
 class TestDeleteParams(TestcaseBase):
@@ -1789,7 +1789,6 @@ class TestDeleteString(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res = df.iloc[:1, 2:3].to_dict('records')
-        default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
         collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
@@ -1846,6 +1845,3 @@ class TestDeleteString(TestcaseBase):
         # load and query with id
         collection_w.load()
         collection_w.query(string_expr, check_task=CheckTasks.check_query_empty)
-
-
-       
