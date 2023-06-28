@@ -83,9 +83,14 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_permission_deny:
             # Collection interface response check
             result = self.check_permission_deny(self.response, self.succ)
+            
         elif self.check_task == CheckTasks.check_rg_property:
             # describe resource group interface response check
             result = self.check_rg_property(self.response, self.func_name, self.check_items)
+            
+        elif self.check_task == CheckTasks.check_describe_collection_property:
+            # describe collection interface(high level api) response check
+            result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -179,6 +184,48 @@ class ResponseChecker:
         return True
 
     @staticmethod
+    def check_describe_collection_property(res, func_name, check_items):
+        """
+        According to the check_items to check collection properties of res, which return from func_name
+        :param res: actual response of init collection
+        :type res: Collection
+
+        :param func_name: init collection API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked, including name, schema, num_entities, primary
+        :type check_items: dict, {check_key: expected_value}
+        """
+        exp_func_name = "describe_collection"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("collection_name", None) is not None:
+            assert res["collection_name"] == check_items.get("collection_name")
+        if check_items.get("auto_id", False):
+            assert res["auto_id"] == check_items.get("auto_id")
+        if check_items.get("num_shards", 1):
+            assert res["num_shards"] == check_items.get("num_shards", 1)
+        if check_items.get("consistency_level", 2):
+            assert res["consistency_level"] == check_items.get("consistency_level", 2)
+        if check_items.get("enable_dynamic_field", True):
+            assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
+        if check_items.get("num_partitions", 1):
+            assert res["num_partitions"] == check_items.get("num_partitions", 1)
+        if check_items.get("id_name", "id"):
+            assert res["fields"][0]["name"] == check_items.get("id_name", "id")
+        if check_items.get("vector_name", "vector"):
+            assert res["fields"][1]["name"] == check_items.get("vector_name", "vector")
+        if check_items.get("dim", None) is not None:
+            assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
+        assert res["fields"][0]["is_primary"] is True
+        assert res["fields"][0]["field_id"] == 100 and res["fields"][0]["type"] == 5
+        assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
+
+        return True
+
+    @staticmethod
     def check_partition_property(partition, func_name, check_items):
         exp_func_name = "init_partition"
         if func_name != exp_func_name:
@@ -248,18 +295,26 @@ class ResponseChecker:
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
+        enable_high_level_api = check_items.get("enable_high_level_api", False)
+        log.debug(search_res)
         for hits in search_res:
             searched_original_vectors = []
+            ids = []
+            if enable_high_level_api:
+                for hit in hits:
+                    ids.append(hit['id'])
+            else:
+                ids = list(hits.ids)
             if (len(hits) != check_items["limit"]) \
-                    or (len(hits.ids) != check_items["limit"]):
+                    or (len(ids) != check_items["limit"]):
                 log.error("search_results_check: limit(topK) searched (%d) "
                           "is not equal with expected (%d)"
                           % (len(hits), check_items["limit"]))
                 assert len(hits) == check_items["limit"]
-                assert len(hits.ids) == check_items["limit"]
+                assert len(ids) == check_items["limit"]
             else:
                 if check_items.get("ids", None) is not None:
-                    ids_match = pc.list_contain_check(list(hits.ids),
+                    ids_match = pc.list_contain_check(ids,
                                                       list(check_items["ids"]))
                     if not ids_match:
                         log.error("search_results_check: ids searched not match")

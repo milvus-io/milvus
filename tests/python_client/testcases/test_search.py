@@ -3771,8 +3771,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
-                            **kwargs
-                            )
+                            **kwargs)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_consistency_session(self, nq, dim, auto_id, _async, enable_dynamic_field):
@@ -5624,7 +5623,7 @@ class TestSearchDiskann(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
         collection_w.load()
         search_list = 20
-        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
