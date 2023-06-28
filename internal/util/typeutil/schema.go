@@ -814,6 +814,16 @@ func GetSizeOfIDs(data *schemapb.IDs) int {
 	return result
 }
 
+func GetPKSize(fieldData *schemapb.FieldData) int {
+	switch fieldData.GetType() {
+	case schemapb.DataType_Int64:
+		return len(fieldData.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_VarChar:
+		return len(fieldData.GetScalars().GetStringData().GetData())
+	}
+	return 0
+}
+
 func IsPrimaryFieldType(dataType schemapb.DataType) bool {
 	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar {
 		return true
@@ -847,6 +857,31 @@ func GetTS(i *internalpb.RetrieveResults, idx int64) uint64 {
 		}
 	}
 	return 0
+}
+
+func GetData(field *schemapb.FieldData, idx int) interface{} {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return field.GetScalars().GetBoolData().GetData()[idx]
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return field.GetScalars().GetIntData().GetData()[idx]
+	case schemapb.DataType_Int64:
+		return field.GetScalars().GetLongData().GetData()[idx]
+	case schemapb.DataType_Float:
+		return field.GetScalars().GetFloatData().GetData()[idx]
+	case schemapb.DataType_Double:
+		return field.GetScalars().GetDoubleData().GetData()[idx]
+	case schemapb.DataType_VarChar:
+		return field.GetScalars().GetStringData().GetData()[idx]
+	case schemapb.DataType_FloatVector:
+		dim := int(field.GetVectors().GetDim())
+		return field.GetVectors().GetFloatVector().GetData()[idx*dim : (idx+1)*dim]
+	case schemapb.DataType_BinaryVector:
+		dim := int(field.GetVectors().GetDim())
+		dataBytes := dim / 8
+		return field.GetVectors().GetBinaryVector()[idx*dataBytes : (idx+1)*dataBytes]
+	}
+	return nil
 }
 
 func AppendPKs(pks *schemapb.IDs, pk interface{}) {
