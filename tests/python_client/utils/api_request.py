@@ -12,6 +12,12 @@ class Error:
         self.code = getattr(error, 'code', -1)
         self.message = getattr(error, 'message', str(error))
 
+    def __str__(self):
+        return f"Error(code={self.code}, message={self.message})"
+
+    def __repr__(self):
+        return f"Error(code={self.code}, message={self.message})"
+
 
 log_row_length = 300
 
