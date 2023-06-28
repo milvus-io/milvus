@@ -18,10 +18,12 @@ package cluster
 
 import (
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -36,6 +38,7 @@ type WorkerBuilder func(nodeID int64) (Worker, error)
 type grpcWorkerManager struct {
 	workers *typeutil.ConcurrentMap[int64, Worker]
 	builder WorkerBuilder
+	sf      conc.Singleflight[Worker] //singleflight.Group
 }
 
 // GetWorker returns worker with specified nodeID.
@@ -43,19 +46,24 @@ func (m *grpcWorkerManager) GetWorker(nodeID int64) (Worker, error) {
 	worker, ok := m.workers.Get(nodeID)
 	var err error
 	if !ok {
-		//TODO merge request?
-		worker, err = m.builder(nodeID)
+		worker, err, _ = m.sf.Do(strconv.FormatInt(nodeID, 10), func() (Worker, error) {
+			worker, err = m.builder(nodeID)
+			if err != nil {
+				log.Warn("failed to build worker",
+					zap.Int64("nodeID", nodeID),
+					zap.Error(err),
+				)
+				return nil, err
+			}
+			old, exist := m.workers.GetOrInsert(nodeID, worker)
+			if exist {
+				worker.Stop()
+				worker = old
+			}
+			return worker, nil
+		})
 		if err != nil {
-			log.Warn("failed to build worker",
-				zap.Int64("nodeID", nodeID),
-				zap.Error(err),
-			)
 			return nil, err
-		}
-		old, exist := m.workers.GetOrInsert(nodeID, worker)
-		if exist {
-			worker.Stop()
-			worker = old
 		}
 	}
 	if !worker.IsHealthy() {
