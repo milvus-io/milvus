@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"runtime"
 	"sync"
 	"time"
 
@@ -122,7 +121,7 @@ type ChannelMeta struct {
 
 	metaService  *metaService
 	chunkManager storage.ChunkManager
-	workerPool   *conc.Pool[struct{}]
+	workerPool   *conc.Pool[any]
 
 	closed *atomic.Bool
 }
@@ -143,8 +142,6 @@ var _ Channel = &ChannelMeta{}
 func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(rc, collID)
 
-	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0), conc.WithPreAlloc(false), conc.WithNonBlocking(false))
-
 	channel := ChannelMeta{
 		collectionID: collID,
 		collSchema:   schema,
@@ -161,7 +158,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		metaService:  metaService,
 		chunkManager: cm,
-		workerPool:   pool,
+		workerPool:   getOrCreateStatsPool(),
 		closed:       atomic.NewBool(false),
 	}
 
@@ -338,7 +335,7 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 	}
 	// do submitting in a goroutine in case of task pool is full
 	go func() {
-		c.workerPool.Submit(func() (struct{}, error) {
+		c.workerPool.Submit(func() (any, error) {
 			stats, err := c.loadStats(context.Background(), s.segmentID, s.collectionID, statsBinlogs, ts)
 			if err != nil {
 				// TODO if not retryable, add rebuild statslog logic
@@ -349,7 +346,7 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 
 					c.submitLoadStatsTask(s, statsBinlogs, ts)
 				}
-				return struct{}{}, err
+				return nil, err
 			}
 			// get segment lock here
 			// it's ok that segment is dropped here
@@ -357,10 +354,8 @@ func (c *ChannelMeta) submitLoadStatsTask(s *Segment, statsBinlogs []*datapb.Fie
 			defer c.segMu.Unlock()
 			s.historyStats = append(s.historyStats, stats...)
 			s.setLoadingLazy(false)
-
 			log.Info("lazy loading segment statslog complete")
-
-			return struct{}{}, nil
+			return nil, nil
 		})
 	}()
 }

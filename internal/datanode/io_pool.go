@@ -1,6 +1,7 @@
 package datanode
 
 import (
+	"runtime"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -8,6 +9,9 @@ import (
 
 var ioPool *conc.Pool[any]
 var ioPoolInitOnce sync.Once
+
+var statsPool *conc.Pool[any]
+var statsPoolInitOnce sync.Once
 
 func initIOPool() {
 	capacity := Params.DataNodeCfg.IOConcurrency.GetAsInt()
@@ -21,4 +25,13 @@ func initIOPool() {
 func getOrCreateIOPool() *conc.Pool[any] {
 	ioPoolInitOnce.Do(initIOPool)
 	return ioPool
+}
+
+func initStatsPool() {
+	statsPool = conc.NewPool[any](runtime.GOMAXPROCS(0), conc.WithPreAlloc(false), conc.WithNonBlocking(false))
+}
+
+func getOrCreateStatsPool() *conc.Pool[any] {
+	statsPoolInitOnce.Do(initStatsPool)
+	return statsPool
 }
