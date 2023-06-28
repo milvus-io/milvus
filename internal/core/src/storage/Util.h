@@ -27,6 +27,7 @@
 #include "storage/DataCodec.h"
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
+#include "common/LoadInfo.h"
 
 namespace milvus::storage {
 
@@ -106,6 +107,9 @@ PutIndexData(ChunkManager* remote_chunk_manager,
 
 int64_t
 GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+
+size_t
+GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
 
 void
 ReleaseArrowUnused();

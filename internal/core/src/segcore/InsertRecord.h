@@ -22,6 +22,7 @@
 #include "TimestampIndex.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "mmap/Column.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
@@ -245,6 +246,37 @@ struct InsertRecord {
             }
         }
         return res_offsets;
+    }
+
+    void
+    insert_pks(milvus::DataType data_type,
+               const std::shared_ptr<ColumnBase>& data) {
+        std::lock_guard lck(shared_mutex_);
+        int64_t offset = 0;
+        switch (data_type) {
+            case DataType::INT64: {
+                auto column = std::dynamic_pointer_cast<Column>(data);
+                auto pks = reinterpret_cast<const int64_t*>(column->Data());
+                for (int i = 0; i < column->NumRows(); ++i) {
+                    pk2offset_->insert(pks[i], offset++);
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto column =
+                    std::dynamic_pointer_cast<VariableColumn<std::string>>(
+                        data);
+                auto pks = column->Views();
+
+                for (int i = 0; i < column->NumRows(); ++i) {
+                    pk2offset_->insert(std::string(pks[i]), offset++);
+                }
+                break;
+            }
+            default: {
+                PanicInfo("unsupported primary key data type");
+            }
+        }
     }
 
     void

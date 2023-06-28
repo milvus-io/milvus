@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+#include <memory>
 
 #include "common/CGoHelper.h"
 #include "common/LoadInfo.h"
@@ -21,6 +22,7 @@
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "mmap/Types.h"
 
@@ -268,10 +270,12 @@ LoadFieldRawData(CSegmentInterface c_segment,
         }
         auto field_data = milvus::storage::CreateFieldData(data_type, dim);
         field_data->FillFieldData(data, row_count);
-        auto field_data_info = milvus::FieldDataInfo{
-            field_id,
-            row_count,
-            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+        milvus::storage::FieldDataChannelPtr channel =
+            std::make_shared<milvus::storage::FieldDataChannel>();
+        channel->push(field_data);
+        channel->close();
+        auto field_data_info = milvus::FieldDataInfo(
+            field_id, static_cast<size_t>(row_count), channel);
         segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
