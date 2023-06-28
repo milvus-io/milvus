@@ -2817,8 +2817,8 @@ class TestLoadCollection(TestcaseBase):
         expected: Verify query result
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df_1 = cf.gen_default_dataframe_data(nb=default_nb)
-        df_2 = cf.gen_default_dataframe_data(nb=default_nb, start=default_nb)
+        df_1 = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df_2 = cf.gen_default_dataframe_data(nb=ct.default_nb, start=ct.default_nb)
 
         collection_w.insert(df_1)
         partition_w = self.init_partition_wrap(collection_w, ct.default_tag)
@@ -2833,7 +2833,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
                            check_tasks=CheckTasks.check_query_empty)
         # default query 0 empty
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [3000]",
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [2000]",
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': df_2.iloc[:1, :1].to_dict('records')})
 
