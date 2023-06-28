@@ -30,6 +30,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test normal validate", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
@@ -37,6 +38,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test normal validate2", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
@@ -44,6 +46,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate non-existent collection", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID+1, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
@@ -51,6 +54,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate non-existent partition", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID + 1}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
@@ -58,6 +62,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate non-existent segment", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID + 1})
 		assert.NoError(t, err)
 	})
@@ -65,6 +70,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate segment not in given partition", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		err = his.addPartition(defaultCollectionID, defaultPartitionID+1)
 		assert.NoError(t, err)
 		schema := genTestCollectionSchema()
@@ -86,6 +92,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate after partition release", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
@@ -95,6 +102,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate after partition release2", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		col, err := his.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		col.setLoadType(loadTypePartition)
@@ -107,6 +115,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test validate after partition release3", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
+		defer his.freeAll()
 		col, err := his.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		col.setLoadType(loadTypeCollection)
