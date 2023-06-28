@@ -58,7 +58,7 @@ class MemFileManagerImpl : public FileManagerImpl {
     CacheRawDataToMemory(std::vector<std::string> remote_files);
 
     bool
-    AddFile(const BinarySet& binary_set) noexcept;
+    AddFile(const BinarySet& binary_set);
 
     std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
