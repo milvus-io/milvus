@@ -21,12 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -128,12 +126,6 @@ var _ Channel = &ChannelMeta{}
 func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
 	metaService := newMetaService(rc, collID)
 
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(false), ants.WithNonblocking(false))
-	if err != nil {
-		// shall no happen here
-		panic(err)
-	}
-
 	channel := ChannelMeta{
 		collectionID: collID,
 		collSchema:   schema,
@@ -150,7 +142,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		metaService:  metaService,
 		chunkManager: cm,
-		workerPool:   pool,
+		workerPool:   getOrCreateStatsPool(),
 		closed:       atomic.NewBool(false),
 	}
 
