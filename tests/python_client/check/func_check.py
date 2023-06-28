@@ -56,9 +56,17 @@ class ResponseChecker:
             # Search interface of collection and partition that response check
             result = self.check_search_results(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_search_iterator:
+            # Search iterator interface of collection and partition that response check
+            result = self.check_search_iterator(self.response, self.func_name, self.check_items)
+
         elif self.check_task == CheckTasks.check_query_results:
             # Query interface of collection and partition that response check
             result = self.check_query_results(self.response, self.func_name, self.check_items)
+
+        elif self.check_task == CheckTasks.check_query_iterator:
+            # query iterator interface of collection and partition that response check
+            result = self.check_query_iterator(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_query_empty:
             result = self.check_query_empty(self.response, self.func_name)
@@ -338,6 +346,46 @@ class ResponseChecker:
         return True
 
     @staticmethod
+    def check_search_iterator(search_res, func_name, check_items):
+        """
+        target: check the search iterator results
+        method: 1. check the iterator number
+                2. check the limit(topK) and ids
+                3. check the distance
+        expected: check the search is ok
+        """
+        log.info("search_iterator_results_check: checking the searching results")
+        if func_name != 'search_iterator':
+            log.warning("The function name is {} rather than {}".format(func_name, "search_iterator"))
+        search_iterator = search_res
+        pk_list = []
+        while True:
+            res = search_iterator.next()
+            if len(res[0]) == 0:
+                log.info("search iteration finished, close")
+                search_iterator.close()
+                break
+            if check_items.get("limit", None):
+                assert len(res[0].ids) <= check_items["limit"]
+            if check_items.get("radius", None):
+                for distance in res[0].distances:
+                    if check_items["metric_type"] == "L2":
+                        assert distance < check_items["radius"]
+                    else:
+                        assert distance > check_items["radius"]
+            if check_items.get("range_filter", None):
+                for distance in res[0].distances:
+                    if check_items["metric_type"] == "L2":
+                        assert distance >= check_items["range_filter"]
+                    else:
+                        assert distance <= check_items["range_filter"]
+            pk_list.extend(res[0].ids)
+        assert len(pk_list) == len(set(pk_list))
+        log.info("check: total %d results" % len(pk_list))
+
+        return True
+
+    @staticmethod
     def check_query_results(query_res, func_name, check_items):
         """
         According to the check_items to check actual query result, which return from func_name.
@@ -371,6 +419,37 @@ class ResponseChecker:
                 log.error(f"Query result {query_res} is not list")
                 return False
         log.warning(f'Expected query result is {exp_res}')
+
+    @staticmethod
+    def check_query_iterator(query_res, func_name, check_items):
+        """
+        target: check the query results
+        method: 1. check the query number
+                2. check the limit(topK) and ids
+                3. check the distance
+        expected: check the search is ok
+        """
+        log.info("query_iterator_results_check: checking the query results")
+        if func_name != 'query_iterator':
+            log.warning("The function name is {} rather than {}".format(func_name, "query_iterator"))
+        query_iterator = query_res
+        pk_list = []
+        while True:
+            res = query_iterator.next()
+            if len(res) == 0:
+                log.info("search iteration finished, close")
+                query_iterator.close()
+                break
+            for i in range(len(res)):
+                pk_list.append(res[i][ct.default_int64_field_name])
+            if check_items.get("limit", None):
+                assert len(res) <= check_items["limit"]
+        assert len(pk_list) == len(set(pk_list))
+        if check_items.get("count", None):
+            assert len(pk_list) == check_items["count"]
+        log.info("check: total %d results" % len(pk_list))
+
+        return True
 
     @staticmethod
     def check_query_empty(query_res, func_name):

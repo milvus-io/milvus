@@ -243,7 +243,9 @@ class CheckTasks:
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
+    check_search_iterator = "check_search_iterator"
     check_query_results = "check_query_results"
+    check_query_iterator = "check_query_iterator"
     check_query_empty = "check_query_empty"  # verify that query result is empty
     check_query_not_empty = "check_query_not_empty"
     check_distance = "check_distance"
