@@ -359,6 +359,7 @@ generate-mockery: getdeps
 	# internal/datacoord
 	$(PWD)/bin/mockery --dir=internal/datacoord --name=compactionPlanContext --filename=mock_compaction_plan_context.go --output=internal/datacoord  --structname=MockCompactionPlanContext --with-expecter --inpackage
 	$(PWD)/bin/mockery --dir=internal/datacoord --name=Handler --filename=mock_handler.go --output=internal/datacoord  --structname=NMockHandler --with-expecter --inpackage
+	$(PWD)/bin/mockery --name=DataCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/types --filename=mock_datacoord.go --with-expecter --structname=MockDataCoord --outpkg=types --inpackage
 	#internal/proxy
 	$(PWD)/bin/mockery --name=LBPolicy --dir=$(PWD)/internal/proxy --output=$(PWD)/internal/proxy --filename=mock_lb_policy.go --structname=MockLBPolicy --with-expecter --outpkg=proxy --inpackage
 	$(PWD)/bin/mockery --name=LBBalancer --dir=$(PWD)/internal/proxy --output=$(PWD)/internal/proxy --filename=mock_lb_balancer.go --structname=MockLBBalancer --with-expecter --outpkg=proxy  --inpackage
