@@ -3,6 +3,8 @@ import pytest
 import sys
 from pymilvus import DefaultConfig
 
+from base.database_wrapper import ApiDatabaseWrapper
+
 sys.path.append("..")
 from base.connections_wrapper import ApiConnectionsWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -27,6 +29,7 @@ class Base:
     utility_wrap = None
     collection_schema_wrap = None
     field_schema_wrap = None
+    database_wrap = None
     collection_object_list = []
     resource_group_list = []
     high_level_api_wrap = None
@@ -47,6 +50,7 @@ class Base:
         self.index_wrap = ApiIndexWrapper()
         self.collection_schema_wrap = ApiCollectionSchemaWrapper()
         self.field_schema_wrap = ApiFieldSchemaWrapper()
+        self.database_wrap = ApiDatabaseWrapper()
         self.high_level_api_wrap = HighLevelApiWrapper()
 
     def teardown_method(self, method):
@@ -134,7 +138,7 @@ class TestcaseBase(Base):
             if cf.param_info.param_user and cf.param_info.param_password:
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
                                                             host=cf.param_info.param_host,
-                                                            port=cf.param_info.param_port, 
+                                                            port=cf.param_info.param_port,
                                                             user=cf.param_info.param_user,
                                                             password=cf.param_info.param_password,
                                                             secure=cf.param_info.param_secure)
@@ -142,7 +146,7 @@ class TestcaseBase(Base):
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
                                                             host=cf.param_info.param_host,
                                                             port=cf.param_info.param_port)
-            
+
         return res
 
     def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,
@@ -333,3 +337,37 @@ class TestcaseBase(Base):
         if res is None and check_result:
             self.resource_group_list.append(name)
         return res, check_result
+
+    def init_user_with_privilege(self, privilege_object, object_name, privilege, db_name="default"):
+        """
+        init a user and role, grant privilege to the role with the db, then bind the role to the user
+        :param privilege_object: privilege object: Global, Collection, User
+        :type privilege_object: str
+        :param object_name: privilege object name
+        :type object_name: str
+        :param privilege: pivilege
+        :type privilege: str
+        :param db_name: database name
+        :type db_name: str
+        :return: user name, user pwd, role name
+        :rtype: str, str, str
+        """
+        tmp_user = cf.gen_unique_str("user")
+        tmp_pwd = cf.gen_unique_str("pwd")
+        tmp_role = cf.gen_unique_str("role")
+
+        # create user
+        self.utility_wrap.create_user(tmp_user, tmp_pwd)
+
+        # create role
+        self.utility_wrap.init_role(tmp_role)
+        self.utility_wrap.create_role()
+
+        # grant privilege to the role
+        self.utility_wrap.role_grant(object=privilege_object, object_name=object_name, privilege=privilege, db_name=db_name)
+
+        # bind the role to the user
+        self.utility_wrap.role_add_user(tmp_user)
+
+        return tmp_user, tmp_pwd, tmp_role
+

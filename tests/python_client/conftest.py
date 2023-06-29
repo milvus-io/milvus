@@ -24,7 +24,7 @@ def pytest_addoption(parser):
     parser.addoption("--port", action="store", default=19530, help="service's port")
     parser.addoption("--user", action="store", default="", help="user name for connection")
     parser.addoption("--password", action="store", default="", help="password for connection")
-    parser.addoption("--secure", type=bool, action="store", default=True, help="secure for connection")
+    parser.addoption("--secure", type=bool, action="store", default=False, help="secure for connection")
     parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
