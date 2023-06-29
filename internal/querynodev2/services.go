@@ -764,7 +764,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 	)
 
-	log.Info("Received SearchRequest",
+	log.Debug("Received SearchRequest",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
