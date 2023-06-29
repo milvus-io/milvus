@@ -59,7 +59,7 @@ class VectorIndex : public IndexBase {
     virtual const bool
     HasRawData() const = 0;
 
-    virtual const std::vector<uint8_t>
+    virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
 
     IndexType

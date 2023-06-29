@@ -67,7 +67,7 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
     ids_ds->SetIds(seg_offsets);
     ids_ds->SetIsOwner(false);
 
-    auto& vector = index_->GetVector(ids_ds);
+    auto vector = index_->GetVector(ids_ds);
 
     std::memcpy(output, vector.data(), count * element_size);
 }

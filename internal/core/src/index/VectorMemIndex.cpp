@@ -244,7 +244,7 @@ VectorMemIndex::HasRawData() const {
     return index_.HasRawData(GetMetricType());
 }
 
-const std::vector<uint8_t>
+std::vector<uint8_t>
 VectorMemIndex::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
