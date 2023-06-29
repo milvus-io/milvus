@@ -158,7 +158,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(rocksDBLRUCacheCapacity))
 
 	optsKV := gorocksdb.NewDefaultOptions()
-	optsKV.SetCompressionPerLevel([]gorocksdb.CompressionType{0, 0, 0, 0, 7, 7, 7})
+	optsKV.SetCompressionPerLevel([]gorocksdb.CompressionType{0, 0, 7, 7, 7, 7, 7})
 	optsKV.SetBlockBasedTableFactory(bbto)
 	optsKV.SetCreateIfMissing(true)
 	// by default there are only 1 thread for flush compaction, which may block each other.
@@ -177,7 +177,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	// finish rocks mq store initialization, rocks mq store has to set the prefix extractor
 	optsStore := gorocksdb.NewDefaultOptions()
 	// share block cache with kv
-	optsStore.SetCompressionPerLevel([]gorocksdb.CompressionType{0, 0, 0, 0, 7, 7, 7})
+	optsStore.SetCompressionPerLevel([]gorocksdb.CompressionType{0, 0, 7, 7, 7, 7, 7})
 	optsStore.SetBlockBasedTableFactory(bbto)
 	optsStore.SetCreateIfMissing(true)
 	// by default there are only 1 thread for flush compaction, which may block each other.
