@@ -171,7 +171,8 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 			b.metricsUpdateTs.Range(func(node int64, lastUpdateTs int64) bool {
 				if now-lastUpdateTs > checkQueryNodeHealthInterval.Milliseconds() {
 					futures = append(futures, pool.Submit(func() (any, error) {
-						ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+						checkInterval := paramtable.Get().ProxyCfg.HealthCheckTimetout.GetAsDuration(time.Millisecond)
+						ctx, cancel := context.WithTimeout(context.Background(), checkInterval)
 						defer cancel()
 
 						checkHealthFailed := func(err error) bool {

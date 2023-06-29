@@ -154,6 +154,8 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
 
+		t.Logf("healthCheckTimetout: %v", Params.HealthCheckTimetout)
+
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize.GetAsInt64())
 
 		t.Logf("MaxNameLength: %d", Params.MaxNameLength.GetAsInt64())

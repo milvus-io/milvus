@@ -159,6 +159,7 @@ rootCoord:
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
+  healthCheckTimetout: 500 # ms, the interval that to do component healthy check
   msgStream:
     timeTick:
       bufSize: 512
