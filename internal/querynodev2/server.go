@@ -65,6 +65,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -361,6 +362,34 @@ func (node *QueryNode) Start() error {
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
 		log.Info("Query node stop...")
+		err := node.session.GoingStop()
+		if err != nil {
+			log.Warn("session fail to go stopping state", zap.Error(err))
+		} else {
+			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		outer:
+			for node.manager == nil || node.manager.Segment.Empty() {
+				select {
+				case <-timeoutCh:
+					sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
+					growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+					log.Warn("migrate data timed out", zap.Int64("ServerID", paramtable.GetNodeID()),
+						zap.Int64s("sealedSegments", lo.Map[segments.Segment, int64](sealedSegments, func(s segments.Segment, i int) int64 {
+							return s.ID()
+						})),
+						zap.Int64s("growingSegments", lo.Map[segments.Segment, int64](growingSegments, func(t segments.Segment, i int) int64 {
+							return t.ID()
+						})),
+					)
+					break outer
+
+				case <-time.After(time.Second):
+				}
+			}
+
+		}
+
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		node.cancel()
@@ -372,6 +401,9 @@ func (node *QueryNode) Stop() error {
 		}
 		if node.dispClient != nil {
 			node.dispClient.Close()
+		}
+		if node.manager != nil {
+			node.manager.Segment.Clear()
 		}
 
 		// safe stop

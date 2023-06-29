@@ -27,6 +27,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -140,6 +143,21 @@ func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(nil, errors.New("mock error")).Once()
 	err = suite.node.Init()
 	suite.Error(err)
+}
+
+func (suite *QueryNodeSuite) TestStop() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
+
+	suite.node.manager = segments.NewManager()
+
+	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
+	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
+	segment, err := segments.NewSegment(collection, 100, 10, 1, "test_stop_channel", segments.SegmentTypeSealed, 1, nil, nil)
+	suite.NoError(err)
+	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)
+	err = suite.node.Stop()
+	suite.NoError(err)
+	suite.True(suite.node.manager.Segment.Empty())
 }
 
 func TestQueryNode(t *testing.T) {
