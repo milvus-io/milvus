@@ -296,6 +296,9 @@ class ResponseChecker:
         if check_items.get("output_fields", None):
             assert set(search_res[0][0].entity.fields) == set(check_items["output_fields"])
             log.info('search_results_check: Output fields of query searched is correct')
+            if check_items.get("original_entities", None):
+                original_entities = check_items["original_entities"][0]
+                pc.output_field_value_check(search_res, original_entities)
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
                       "is not equal with expected (%d)"
