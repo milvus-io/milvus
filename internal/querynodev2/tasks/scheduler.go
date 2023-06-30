@@ -5,11 +5,13 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 const (
@@ -31,7 +33,7 @@ func NewScheduler() *Scheduler {
 	return &Scheduler{
 		searchWaitQueue:    make(chan *SearchTask, maxWaitTaskNum),
 		mergingSearchTasks: make([]*SearchTask, 0),
-		mergedSearchTasks:  make(chan *SearchTask),
+		mergedSearchTasks:  make(chan *SearchTask, 1),
 
 		pool:               conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		waitingTaskTotalNQ: *atomic.NewInt64(0),
@@ -98,12 +100,13 @@ func (s *Scheduler) schedule(task Task) {
 	s.mergeTasks(task)
 	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 
-	mergeLimit := paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt()
-	mergeCount := 1
+	maxNq := paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64()
+	totalNq := task.(*SearchTask).nq
 
 	// try to merge the coming tasks
+	maxMergingTaskNum := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.GetAsInt()
 outer:
-	for mergeCount < mergeLimit {
+	for len(s.mergingSearchTasks) < maxMergingTaskNum && totalNq < maxNq {
 		select {
 		case t := <-s.searchWaitQueue:
 			if err := t.Canceled(); err != nil {
@@ -111,7 +114,7 @@ outer:
 				continue
 			}
 			s.mergeTasks(t)
-			mergeCount++
+			totalNq += t.nq
 			metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		default:
 			break outer
@@ -152,12 +155,13 @@ func (s *Scheduler) processAll(ctx context.Context) {
 }
 
 func (s *Scheduler) process(t Task) {
+	err := t.PreExecute()
+	if err != nil {
+		log.Warn("failed to pre-execute task", zap.Error(err))
+	}
+
 	s.pool.Submit(func() (any, error) {
 		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-		err := t.PreExecute()
-		if err != nil {
-			return nil, err
-		}
 
 		err = t.Execute()
 		t.Done(err)
@@ -177,8 +181,8 @@ func (s *Scheduler) mergeTasks(t Task) {
 	switch t := t.(type) {
 	case *SearchTask:
 		merged := false
-		for _, task := range s.mergingSearchTasks {
-			if task.Merge(t) {
+		for i := len(s.mergingSearchTasks) - 1; i >= 0; i-- {
+			if s.mergingSearchTasks[i].Merge(t) {
 				merged = true
 				break
 			}
