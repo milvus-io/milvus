@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -122,16 +123,6 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
-	if !isVecIndex {
-		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
-			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
-		} else {
-			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
-		}
-	}
-	if cit.fieldSchema.DataType == schemapb.DataType_JSON {
-		return fmt.Errorf("create index on json field is not supported")
-	}
 
 	for _, kv := range cit.req.GetExtraParams() {
 		if kv.Key == common.IndexParamsKey {
@@ -144,6 +135,23 @@ func (cit *createIndexTask) parseIndexParams() error {
 			}
 		} else {
 			indexParamsMap[kv.Key] = kv.Value
+		}
+	}
+	if !isVecIndex {
+		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
+		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
+			if exist && specifyIndexType != DefaultStringIndexType {
+				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
+			}
+			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
+		} else {
+			if cit.fieldSchema.DataType == schemapb.DataType_JSON {
+				return merr.WrapErrParameterInvalid("not json field", "create index on json field", "create index on json field is not supported")
+			}
+			if exist && specifyIndexType != DefaultIndexType {
+				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
+			}
+			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
 		}
 	}
 
