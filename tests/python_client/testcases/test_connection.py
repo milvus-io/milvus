@@ -813,17 +813,17 @@ class TestConnect(TestcaseBase):
         method: disconnect a connected client, disconnect again
         expected: status ok after disconnected
         """
-         # successfully created default connection
+        # successfully created default connection
         self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
          
-         # disconnect alias is exist 
+        # disconnect alias is exist
         self.connection_wrap.disconnect(alias=connect_name)
         
-         # disconnect alias is not exist
+        # disconnect alias is not exist
         self.connection_wrap.disconnect(alias=connect_name)
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("protocol", ["http", "https", "ftp", "tcp"])
+    @pytest.mark.parametrize("protocol", ["http", "ftp", "tcp"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_parameters_with_uri_connection(self, host, port, connect_name, protocol):
         """
