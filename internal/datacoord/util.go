@@ -134,6 +134,9 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 
 	indexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range segments {
+		if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
+			continue
+		}
 		segmentState := mt.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), vecFieldID[segment.GetCollectionID()])
 		if segmentState.state == commonpb.IndexState_Finished {
 			indexedSegments = append(indexedSegments, segment)

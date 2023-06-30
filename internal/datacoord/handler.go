@@ -123,6 +123,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ..
 		indexedIDs   = make(typeutil.UniqueSet)
 		unIndexedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
+		growingIDs   = make(typeutil.UniqueSet)
 	)
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
@@ -137,11 +138,16 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ..
 			continue
 		}
 		segmentInfos[s.GetID()] = s
-		if s.GetState() == commonpb.SegmentState_Dropped {
+		switch {
+		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-		} else if indexed.Contain(s.GetID()) {
+		case !isFlushState(s.GetState()):
+			growingIDs.Insert(s.GetID())
+		case indexed.Contain(s.GetID()):
 			indexedIDs.Insert(s.GetID())
-		} else {
+		case s.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(): // treat small flushed segment as indexed
+			indexedIDs.Insert(s.GetID())
+		default:
 			unIndexedIDs.Insert(s.GetID())
 		}
 	}
@@ -192,6 +198,16 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ..
 	}
 	for retrieveUnIndexed() {
 	}
+
+	for segId := range unIndexedIDs {
+		segInfo := segmentInfos[segId]
+		if segInfo.GetState() == commonpb.SegmentState_Dropped {
+			unIndexedIDs.Remove(segId)
+			indexedIDs.Insert(segId)
+		}
+	}
+
+	unIndexedIDs.Insert(growingIDs.Collect()...)
 
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.CollectionID,
