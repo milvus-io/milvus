@@ -34,7 +34,7 @@ MemFileManagerImpl::AddFile(const std::string& filename /* unused */) noexcept {
 }
 
 bool
-MemFileManagerImpl::AddFile(const BinarySet& binary_set) noexcept {
+MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
     std::vector<const uint8_t*> data_slices;
     std::vector<int64_t> slice_sizes;
     std::vector<std::string> slice_names;
