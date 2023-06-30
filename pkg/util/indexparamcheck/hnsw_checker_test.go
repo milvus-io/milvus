@@ -92,8 +92,8 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		{p1, true},
 		{p2, true},
 		{p3, true},
-		{p4, false},
-		{p5, false},
+		{p4, true},
+		{p5, true},
 		{p6, false},
 		{p7, false},
 		{p8, false},
@@ -166,7 +166,7 @@ func Test_hnswChecker_CheckValidDataType(t *testing.T) {
 		},
 		{
 			dType:    schemapb.DataType_BinaryVector,
-			errIsNil: false,
+			errIsNil: true,
 		},
 	}
 
