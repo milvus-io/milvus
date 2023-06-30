@@ -295,7 +295,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 	exist := false
 	for _, param := range field.TypeParams {
 		if param.Key != common.MaxLengthKey {
-			return fmt.Errorf("type param key(max_length) should be specified for varChar field, not %s", param.Key)
+			continue
 		}
 
 		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
