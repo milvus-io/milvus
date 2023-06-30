@@ -89,11 +89,14 @@ type SegmentManager interface {
 	GetBy(filters ...SegmentFilter) []Segment
 	GetSealed(segmentID UniqueID) Segment
 	GetGrowing(segmentID UniqueID) Segment
+	Empty() bool
+
 	// Remove removes the given segment,
 	// and decreases the ref count of the corresponding collection,
 	// will not decrease the ref count if the given segment not exists
 	Remove(segmentID UniqueID, scope querypb.DataScope)
 	RemoveBy(filters ...SegmentFilter)
+	Clear()
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -230,6 +233,13 @@ func (mgr *segmentManager) GetGrowing(segmentID UniqueID) Segment {
 	return nil
 }
 
+func (mgr *segmentManager) Empty() bool {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+
+	return len(mgr.growingSegments)+len(mgr.sealedSegments) == 0
+}
+
 func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -262,6 +272,20 @@ func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) {
 		if filter(segment, filters...) {
 			remove(id, mgr.sealedSegments)
 		}
+	}
+	mgr.updateMetric()
+}
+
+func (mgr *segmentManager) Clear() {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	for id := range mgr.growingSegments {
+		remove(id, mgr.growingSegments)
+	}
+
+	for id := range mgr.sealedSegments {
+		remove(id, mgr.sealedSegments)
 	}
 	mgr.updateMetric()
 }
