@@ -1714,11 +1714,11 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			Value: `{"nprobe": 10}`,
 		})
 
-		//noSearchParams := getBaseSearchParams()
-		//noSearchParams = append(noSearchParams, &commonpb.KeyValuePair{
-		//	Key:   common.MetricTypeKey,
-		//	Value: distance.L2,
-		//})
+		noSearchParams := getBaseSearchParams()
+		noSearchParams = append(noSearchParams, &commonpb.KeyValuePair{
+			Key:   common.MetricTypeKey,
+			Value: distance.L2,
+		})
 
 		offsetParam := getValidSearchParams()
 		offsetParam = append(offsetParam, &commonpb.KeyValuePair{
@@ -1731,7 +1731,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			validParams []*commonpb.KeyValuePair
 		}{
 			{"noMetricType", noMetricTypeParams},
-			//{"noSearchParams", noSearchParams},
+			{"noSearchParams", noSearchParams},
 			{"normal", normalParam},
 			{"offsetParam", offsetParam},
 		}

@@ -159,7 +159,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	}
 	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, err
+		searchParamStr = ""
 	}
 	return &planpb.QueryInfo{
 		Topk:         queryTopK,
