@@ -58,6 +58,11 @@ class SegmentSealedImpl : public SegmentSealed {
     bool
     HasFieldData(FieldId field_id) const override;
 
+    bool
+    Contain(const PkType& pk) const override {
+        return insert_record_.contain(pk);
+    }
+
     void
     LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
     void

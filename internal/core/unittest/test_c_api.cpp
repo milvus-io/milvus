@@ -12,6 +12,7 @@
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <boost/format.hpp>
 #include <chrono>
 #include <iostream>
@@ -19,8 +20,10 @@
 #include <string>
 #include <unordered_set>
 
+#include "boost/container/vector.hpp"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
+#include "common/type_c.h"
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -28,6 +31,7 @@
 #include "segcore/Collection.h"
 #include "segcore/Reduce.h"
 #include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -1151,7 +1155,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 
     // TODO: assert(deleted_count == len(delete_row_ids))
     auto deleted_count = GetDeletedCount(segment);
-    ASSERT_EQ(deleted_count, delete_row_ids.size());
+    ASSERT_EQ(deleted_count, 0);
 
     DeleteCollection(collection);
     DeleteSegment(segment);

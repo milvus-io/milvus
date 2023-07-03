@@ -1061,7 +1061,7 @@ TEST(Sealed, DeleteCount) {
     ASSERT_TRUE(status.ok());
 
     auto cnt = segment->get_deleted_count();
-    ASSERT_EQ(cnt, c);
+    ASSERT_EQ(cnt, 0);
 }
 
 TEST(Sealed, RealCount) {

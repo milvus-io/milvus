@@ -42,6 +42,9 @@ class OffsetMap {
  public:
     virtual ~OffsetMap() = default;
 
+    virtual bool
+    contain(const PkType& pk) const = 0;
+
     virtual std::vector<int64_t>
     find(const PkType& pk) const = 0;
 
@@ -65,6 +68,11 @@ class OffsetMap {
 template <typename T>
 class OffsetOrderedMap : public OffsetMap {
  public:
+    bool
+    contain(const PkType& pk) const override {
+        return map_.find(std::get<T>(pk)) != map_.end();
+    }
+
     std::vector<int64_t>
     find(const PkType& pk) const override {
         auto offset_vector = map_.find(std::get<T>(pk));
@@ -138,6 +146,19 @@ class OffsetOrderedMap : public OffsetMap {
 template <typename T>
 class OffsetOrderedArray : public OffsetMap {
  public:
+    bool
+    contain(const PkType& pk) const override {
+        const T& target = std::get<T>(pk);
+        auto it =
+            std::lower_bound(array_.begin(),
+                             array_.end(),
+                             target,
+                             [](const std::pair<T, int64_t>& elem,
+                                const T& value) { return elem.first < value; });
+
+        return it != array_.end();
+    }
+
     std::vector<int64_t>
     find(const PkType& pk) const override {
         check_search();
@@ -353,6 +374,11 @@ struct InsertRecord {
                 }
             }
         }
+    }
+
+    bool
+    contain(const PkType& pk) const {
+        return pk2offset_->contain(pk);
     }
 
     std::vector<SegOffset>

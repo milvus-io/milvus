@@ -28,7 +28,7 @@
 #include "InsertRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
-
+#include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "query/PlanNode.h"
 #include "common/IndexMeta.h"
@@ -46,6 +46,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
            const int64_t* row_ids,
            const Timestamp* timestamps,
            const InsertData* insert_data) override;
+
+    bool
+    Contain(const PkType& pk) const override {
+        return insert_record_.contain(pk);
+    }
 
     // TODO: add id into delete log, possibly bitmap
     SegcoreError

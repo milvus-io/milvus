@@ -21,6 +21,7 @@
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "segcore/Utils.h"
 #include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "mmap/Types.h"
