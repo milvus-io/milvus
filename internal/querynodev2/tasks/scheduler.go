@@ -23,19 +23,16 @@ type Scheduler struct {
 	mergingSearchTasks []*SearchTask
 	mergedSearchTasks  chan *SearchTask
 
-	pool               *conc.Pool[any]
 	waitingTaskTotalNQ atomic.Int64
 }
 
 func NewScheduler() *Scheduler {
 	maxWaitTaskNum := paramtable.Get().QueryNodeCfg.MaxReceiveChanSize.GetAsInt()
-	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	return &Scheduler{
 		searchWaitQueue:    make(chan *SearchTask, maxWaitTaskNum),
 		mergingSearchTasks: make([]*SearchTask, 0),
 		mergedSearchTasks:  make(chan *SearchTask, 1),
 
-		pool:               conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		waitingTaskTotalNQ: *atomic.NewInt64(0),
 	}
 }
@@ -61,7 +58,14 @@ func (s *Scheduler) Add(task Task) bool {
 // try execute merged tasks
 // try execute waiting tasks
 func (s *Scheduler) Schedule(ctx context.Context) {
-	go s.processAll(ctx)
+	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
+	pool := conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true))
+	for i := 0; i < maxReadConcurrency; i++ {
+		pool.Submit(func() (any, error) {
+			s.processAll(ctx)
+			return nil, nil
+		})
+	}
 
 	for {
 		if len(s.mergingSearchTasks) > 0 { // wait for an idle worker or a new task
@@ -70,12 +74,12 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 			case <-ctx.Done():
 				return
 
+			case s.mergedSearchTasks <- task:
+				s.mergingSearchTasks = s.mergingSearchTasks[1:]
+
 			case task = <-s.searchWaitQueue:
 				collector.Counter.Dec(metricsinfo.ReadyQueueType, 1)
 				s.schedule(task)
-
-			case s.mergedSearchTasks <- task:
-				s.mergingSearchTasks = s.mergingSearchTasks[1:]
 			}
 		} else { // wait for a new task if no task
 			select {
@@ -155,25 +159,26 @@ func (s *Scheduler) processAll(ctx context.Context) {
 }
 
 func (s *Scheduler) process(t Task) {
-	err := t.PreExecute()
+	var err error
+	defer func() {
+		switch t := t.(type) {
+		case *SearchTask:
+			s.waitingTaskTotalNQ.Sub(t.nq)
+		}
+
+		t.Done(err)
+	}()
+	err = t.PreExecute()
 	if err != nil {
 		log.Warn("failed to pre-execute task", zap.Error(err))
+		return
 	}
 
-	s.pool.Submit(func() (any, error) {
-		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 
-		err = t.Execute()
-		t.Done(err)
+	err = t.Execute()
 
-		metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-		return nil, err
-	})
-
-	switch t := t.(type) {
-	case *SearchTask:
-		s.waitingTaskTotalNQ.Sub(t.nq)
-	}
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 }
 
 // mergeTasks merge the given task with one of merged tasks,
