@@ -3885,6 +3885,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
+    @pytest.mark.skip(reason="create vector index type on scalar field, issue#25170 @Nico")
     def test_search_collection_naming_rules(self, nq, dim, name, index_name, _async):
         """
         target: test search collection naming rules
