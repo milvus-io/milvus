@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -78,6 +79,14 @@ func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*inte
 }
 
 func reduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
+	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
+		return result != nil && result.GetSlicedBlob() != nil
+	})
+
+	if len(results) == 1 {
+		return results[0], nil
+	}
+
 	searchResultData, err := decodeSearchResults(results)
 	if err != nil {
 		log.Ctx(ctx).Warn("decode search results errors", zap.Error(err))
