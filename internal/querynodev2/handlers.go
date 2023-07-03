@@ -30,10 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -41,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -200,44 +198,20 @@ func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequ
 	if collection == nil {
 		return nil, segments.ErrCollectionNotFound
 	}
-	// build plan
-	retrievePlan, err := segments.NewRetrievePlan(
-		collection,
-		req.Req.GetSerializedExprPlan(),
-		req.Req.GetTravelTimestamp(),
-		req.Req.Base.GetMsgID(),
-	)
-	if err != nil {
+
+	// Send task to scheduler and wait until it finished.
+	task := tasks.NewQueryTask(ctx, collection, node.manager, req)
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to add query task into scheduler", zap.Error(err))
 		return nil, err
 	}
-	defer retrievePlan.Delete()
-
-	var results []*segcorepb.RetrieveResults
-	collector.Counter.Inc(metricsinfo.ExecuteQueueType, 1)
-
-	if req.GetScope() == querypb.DataScope_Historical {
-		results, _, _, err = segments.RetrieveHistorical(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
-	} else {
-		results, _, _, err = segments.RetrieveStreaming(ctx, node.manager, retrievePlan, req.Req.CollectionID, nil, req.GetSegmentIDs())
-	}
-
-	collector.Counter.Dec(metricsinfo.ExecuteQueueType, 1)
+	err := task.Wait()
 	if err != nil {
+		log.Warn("failed to execute task by node scheduler", zap.Error(err))
 		return nil, err
 	}
 
-	reducer := segments.CreateSegCoreReducer(req, collection.Schema())
-
-	reducedResult, err := reducer.Reduce(ctx, results)
-	if err != nil {
-		return nil, err
-	}
-
-	return &internalpb.RetrieveResults{
-		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		Ids:        reducedResult.Ids,
-		FieldsData: reducedResult.FieldsData,
-	}, nil
+	return task.Result(), nil
 }
 
 func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, deleg delegator.ShardDelegator) (*querypb.SearchRequest, error) {

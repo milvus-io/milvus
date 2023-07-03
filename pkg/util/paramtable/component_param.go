@@ -1479,6 +1479,12 @@ type queryNodeConfig struct {
 
 	// loader
 	IoPoolSize ParamItem `refreshable:"false"`
+
+	// schedule task policy.
+	SchedulePolicyName                    ParamItem `refreshable:"false"`
+	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
+	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
+	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1803,6 +1809,36 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "Control how many goroutines will the loader use to pull files, if the given value is non-positive, the value will be set to CpuNum * 8, at least 32, and at most 256",
 	}
 	p.IoPoolSize.Init(base.mgr)
+
+	// schedule read task policy.
+	p.SchedulePolicyName = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.name",
+		Version:      "2.3.0",
+		DefaultValue: "fifo",
+		Doc:          "Control how to schedule query/search read task in query node",
+	}
+	p.SchedulePolicyName.Init(base.mgr)
+	p.SchedulePolicyTaskQueueExpire = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.taskQueueExpire",
+		Version:      "2.3.0",
+		DefaultValue: "60",
+		Doc:          "Control how long (many seconds) that queue retains since queue is empty",
+	}
+	p.SchedulePolicyTaskQueueExpire.Init(base.mgr)
+	p.SchedulePolicyEnableCrossUserGrouping = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.enableCrossUserGrouping",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Doc:          "Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)",
+	}
+	p.SchedulePolicyEnableCrossUserGrouping.Init(base.mgr)
+	p.SchedulePolicyMaxPendingTaskPerUser = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.maxPendingTaskPerUser",
+		Version:      "2.3.0",
+		DefaultValue: "1024",
+		Doc:          "Max pending task per user in scheduler",
+	}
+	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

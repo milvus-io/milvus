@@ -106,7 +106,7 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler *tasks.Scheduler
+	scheduler tasks.Scheduler
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -280,7 +280,11 @@ func (node *QueryNode) Init() error {
 
 		log.Info("queryNode try to connect etcd success", zap.String("MetaRootPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
 
-		node.scheduler = tasks.NewScheduler()
+		schedulePolicy := paramtable.Get().QueryNodeCfg.SchedulePolicyName.GetValue()
+		node.scheduler = tasks.NewScheduler(
+			schedulePolicy,
+		)
+		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
 		node.clusterManager = cluster.NewWorkerManager(func(nodeID int64) (cluster.Worker, error) {
 			if nodeID == paramtable.GetNodeID() {
@@ -345,7 +349,7 @@ func (node *QueryNode) Init() error {
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
 	node.startOnce.Do(func() {
-		go node.scheduler.Schedule(node.ctx)
+		node.scheduler.Start(node.ctx)
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
