@@ -81,13 +81,13 @@ minio:
   # For more infomation, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
-  # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control 
+  # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
   useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun". 
+  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
-  # You can use "aliyun" for other cloud provider uses virtual host style bucket 
+  # You can use "aliyun" for other cloud provider uses virtual host style bucket
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
@@ -244,13 +244,13 @@ queryNode:
     # the valid value is [3600, infinite)
     maxTimestampLag: 86400
     # read task schedule policy: fifo(by default), user-task-polling.
-    scheduleReadPolicy: 
+    scheduleReadPolicy:
       # fifo: A FIFO queue support the schedule.
-      # user-task-polling: 
-      #     The user's tasks will be polled one by one and scheduled. 
+      # user-task-polling:
+      #     The user's tasks will be polled one by one and scheduled.
       #     Scheduling is fair on task granularity.
       #     The policy is based on the username for authentication.
-      #     And an empty username is considered the same user. 
+      #     And an empty username is considered the same user.
       #     When there are no multi-users, the policy decay into FIFO
       name: fifo
       # user-task-polling configure:
@@ -357,7 +357,7 @@ dataNode:
 
 # Configures the system log output.
 log:
-  level: debug # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   stdout: "true" # default true, print log to stdout
   file:
     # please adjust in embedded Milvus: /tmp/milvus/logs
