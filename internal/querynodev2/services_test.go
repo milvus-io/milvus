@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -910,7 +912,13 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 	if err != nil {
 		return nil, err
 	}
-	simpleDSL, err2 := genDSLByIndexType(schema, indexType)
+	planStr, err := genDSLByIndexType(schema, indexType)
+	if err != nil {
+		return nil, err
+	}
+	var planpb planpb.PlanNode
+	proto.UnmarshalText(planStr, &planpb)
+	serializedPlan, err2 := proto.Marshal(&planpb)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -920,12 +928,12 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID:     suite.collectionID,
-		PartitionIDs:     suite.partitionIDs,
-		Dsl:              simpleDSL,
-		PlaceholderGroup: placeHolder,
-		DslType:          commonpb.DslType_Dsl,
-		Nq:               nq,
+		CollectionID:       suite.collectionID,
+		PartitionIDs:       suite.partitionIDs,
+		SerializedExprPlan: serializedPlan,
+		PlaceholderGroup:   placeHolder,
+		DslType:            commonpb.DslType_BoolExprV1,
+		Nq:                 nq,
 	}, nil
 }
 

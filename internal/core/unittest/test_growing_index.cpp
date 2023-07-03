@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "pb/plan.pb.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
@@ -42,25 +43,36 @@ TEST(GrowingIndex, Correctness) {
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
     auto segment = CreateGrowingSegment(schema, metaPtr);
 
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "embeddings": {
-                        "metric_type": "l2",
-                        "params": {
-                            "nprobe": 16
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal":3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "embeddings": {
+    //                     "metric_type": "l2",
+    //                     "params": {
+    //                         "nprobe": 16
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal":3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(102);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("l2");
+    query_info->set_search_params(R"({"nprobe": 16})");
+    auto plan_str = plan_node.SerializeAsString();
 
     int64_t per_batch = 10000;
     int64_t n_batch = 20;
@@ -75,7 +87,8 @@ TEST(GrowingIndex, Correctness) {
                         dataset.timestamps_.data(),
                         dataset.raw_);
 
-        auto plan = milvus::query::CreatePlan(*schema, dsl);
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            *schema, plan_str.data(), plan_str.size());
         auto num_queries = 5;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, 128, 1024);
         auto ph_group =

@@ -26,9 +26,6 @@ struct Plan;
 struct PlaceholderGroup;
 struct RetrievePlan;
 
-std::unique_ptr<Plan>
-CreatePlan(const Schema& schema, const std::string_view dsl);
-
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
 CreateSearchPlanByExpr(const Schema& schema,

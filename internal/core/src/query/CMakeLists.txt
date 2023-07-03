@@ -21,7 +21,6 @@ set(MILVUS_QUERY_SRCS
         visitors/VerifyExprVisitor.cpp
         visitors/ExtractInfoPlanNodeVisitor.cpp
         visitors/ExtractInfoExprVisitor.cpp
-        Parser.cpp
         Plan.cpp
         SearchOnGrowing.cpp
         SearchOnSealed.cpp

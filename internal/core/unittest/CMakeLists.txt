@@ -32,7 +32,6 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_init.cpp
         test_parquet_c.cpp
-        test_plan_proto.cpp
         test_query.cpp
         test_reduce.cpp
         test_reduce_c.cpp

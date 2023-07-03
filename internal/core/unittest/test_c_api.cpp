@@ -281,25 +281,38 @@ TEST(CApiTest, CPlan) {
         generate_collection_schema(knowhere::metric::JACCARD, DIM, true);
     auto collection = NewCollection(schema_string.c_str());
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-               }
-            }
-        }
-   })";
+    //  const char* dsl_string = R"(
+    //  {
+    //      "bool": {
+    //          "vector": {
+    //              "fakevec": {
+    //                  "metric_type": "L2",
+    //                  "params": {
+    //                      "nprobe": 10
+    //                  },
+    //                  "query": "$0",
+    //                  "topk": 10,
+    //                  "round_decimal": 3
+    //             }
+    //          }
+    //      }
+    // })";
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(true);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     int64_t field_id = -1;
@@ -924,28 +937,41 @@ TEST(CApiTest, SearchTest) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "L2",
+    //                 "params": {
+    //                     "nprobe": 10
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal": 3
+    //             }
+    //         }
+    //     }
+    // })";
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
 
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1240,12 +1266,12 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     std::unordered_set<PkType> pk_set;
     for (int qi = 0; qi < nq; qi++) {
         pk_set.clear();
-        for (int i = 0; i < results.size(); i++) {
+        for (size_t i = 0; i < results.size(); i++) {
             auto search_result = (SearchResult*)results[i];
             ASSERT_EQ(nq, search_result->total_nq_);
             auto topk_beg = search_result->topk_per_nq_prefix_sum_[qi];
             auto topk_end = search_result->topk_per_nq_prefix_sum_[qi + 1];
-            for (int ki = topk_beg; ki < topk_end; ki++) {
+            for (size_t ki = topk_beg; ki < topk_end; ki++) {
                 ASSERT_NE(search_result->seg_offsets_[ki], INVALID_SEG_OFFSET);
                 auto ret = pk_set.insert(search_result->primary_keys_[ki]);
                 ASSERT_TRUE(ret.second);
@@ -1273,30 +1299,42 @@ TEST(CApiTest, ReudceNullResult) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-               }
-            }
-        }
-   })";
+    //  const char* dsl_string = R"(
+    //  {
+    //      "bool": {
+    //          "vector": {
+    //              "fakevec": {
+    //                  "metric_type": "L2",
+    //                  "params": {
+    //                      "nprobe": 10
+    //                  },
+    //                  "query": "$0",
+    //                  "topk": 10,
+    //                  "round_decimal": 3
+    //             }
+    //          }
+    //      }
+    // })";
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
 
     int num_queries = 10;
-    int topK = 10;
 
     auto blob = generate_max_float_query_data(num_queries, num_queries / 2);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1363,22 +1401,33 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-               }
-            }
-        }
-   })";
+    //  const char* dsl_string = R"(
+    //  {
+    //      "bool": {
+    //          "vector": {
+    //              "fakevec": {
+    //                  "metric_type": "L2",
+    //                  "params": {
+    //                      "nprobe": 10
+    //                  },
+    //                  "query": "$0",
+    //                  "topk": 10,
+    //                  "round_decimal": 3
+    //             }
+    //          }
+    //      }
+    // })";
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
 
     int num_queries = 10;
     int topK = 10;
@@ -1386,7 +1435,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1565,7 +1615,7 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
             cSearchResultData);
 
     // check result
-    for (int i = 0; i < slice_nqs.size(); i++) {
+    for (size_t i = 0; i < slice_nqs.size(); i++) {
         milvus::proto::schema::SearchResultData search_result_data;
         auto suc = search_result_data.ParseFromArray(
             search_result_data_blobs->blobs[i].data(),
@@ -1648,7 +1698,7 @@ TEST(CApiTest, LoadIndexInfo) {
     DeleteLoadIndexInfo(c_load_index_info);
 }
 
-TEST(CApiTest, LoadIndex_Search) {
+TEST(CApiTest, LoadIndexSearch) {
     // generator index
     constexpr auto TOPK = 10;
 
@@ -1724,22 +1774,34 @@ TEST(CApiTest, Indexing_Without_Predicate) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-     {
-         "bool": {
-             "vector": {
-                 "fakevec": {
-                     "metric_type": "L2",
-                     "params": {
-                         "nprobe": 10
-                     },
-                     "query": "$0",
-                     "topk": 5,
-                     "round_decimal": -1
-                 }
-             }
-         }
-     })";
+    // const char* dsl_string = R"(
+    //  {
+    //      "bool": {
+    //          "vector": {
+    //              "fakevec": {
+    //                  "metric_type": "L2",
+    //                  "params": {
+    //                      "nprobe": 10
+    //                  },
+    //                  "query": "$0",
+    //                  "topk": 5,
+    //                  "round_decimal": -1
+    //              }
+    //          }
+    //      }
+    //  })";
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_round_decimal(-1);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
 
     // create place_holder_group
     int num_queries = 5;
@@ -1749,7 +1811,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -2022,34 +2085,74 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"({
-         "bool": {
-             "must": [
-             {
-                 "range": {
-                     "counter": {
-                         "GE": 4200,
-                         "LT": 4210
-                     }
-                 }
-             },
-             {
-                 "vector": {
-                     "fakevec": {
-                         "metric_type": "L2",
-                         "params": {
-                             "nprobe": 10
-                         },
-                         "query": "$0",
-                         "topk": 5,
-                         "round_decimal": -1
-
-                     }
-                 }
-             }
-             ]
-         }
-     })";
+    // const char* dsl_string = R"({
+    //      "bool": {
+    //          "must": [
+    //          {
+    //              "range": {
+    //                  "counter": {
+    //                      "GE": 4200,
+    //                      "LT": 4210
+    //                  }
+    //              }
+    //          },
+    //          {
+    //              "vector": {
+    //                  "fakevec": {
+    //                      "metric_type": "L2",
+    //                      "params": {
+    //                          "nprobe": 10
+    //                      },
+    //                      "query": "$0",
+    //                      "topk": 5,
+    //                      "round_decimal": -1
+    //
+    //                  }
+    //              }
+    //          }
+    //          ]
+    //      }
+    //  })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                  binary_expr: <
+                                    op: LogicalAnd
+                                    left: <
+                                      unary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Int64
+                                        >
+                                        op: GreaterEqual
+                                        value: <
+                                          int64_val: 4200
+                                        >
+                                      >
+                                    >
+                                    right: <
+                                      unary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Int64
+                                        >
+                                        op: LessThan
+                                        value: <
+                                          int64_val: 4210
+                                        >
+                                      >
+                                    >
+                                  >
+                                >
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: -1
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     // create place_holder_group
     int num_queries = 10;
@@ -2059,7 +2162,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -2359,33 +2463,67 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"({
-         "bool": {
-             "must": [
-             {
-                 "term": {
-                     "counter": {
-                         "values": [4200, 4201, 4202, 4203, 4204],
-                         "is_in_field": false
-                     }
-                 }
-             },
-             {
-                 "vector": {
-                     "fakevec": {
-                         "metric_type": "L2",
-                         "params": {
-                             "nprobe": 10
-                         },
-                         "query": "$0",
-                         "topk": 5,
-                         "round_decimal": -1
-                     }
-                 }
-             }
-             ]
-         }
-     })";
+    // const char* dsl_string = R"({
+    //      "bool": {
+    //          "must": [
+    //          {
+    //              "term": {
+    //                  "counter": {
+    //                      "values": [4200, 4201, 4202, 4203, 4204],
+    //                      "is_in_field": false
+    //                  }
+    //              }
+    //          },
+    //          {
+    //              "vector": {
+    //                  "fakevec": {
+    //                      "metric_type": "L2",
+    //                      "params": {
+    //                          "nprobe": 10
+    //                      },
+    //                      "query": "$0",
+    //                      "topk": 5,
+    //                      "round_decimal": -1
+    //                  }
+    //              }
+    //          }
+    //          ]
+    //      }
+    //  })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             predicates: <
+                                               term_expr: <
+                                                 column_info: <
+                                                   field_id: 101
+                                                   data_type: Int64
+                                                 >
+                                                 values: <
+                                                   int64_val: 4200
+                                                 >
+                                                 values: <
+                                                   int64_val: 4201
+                                                 >
+                                                 values: <
+                                                   int64_val: 4202
+                                                 >
+                                                 values: <
+                                                   int64_val: 4203
+                                                 >
+                                                 values: <
+                                                   int64_val: 4204
+                                                 >
+                                               >
+                                             >
+                                             query_info: <
+                                               topk: 5
+                                               round_decimal: -1
+                                               metric_type: "L2"
+                                               search_params: "{\"nprobe\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     // create place_holder_group
     int num_queries = 5;
@@ -2395,7 +2533,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -2688,33 +2827,73 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"({
-         "bool": {
-             "must": [
-             {
-                 "range": {
-                     "counter": {
-                         "GE": 4200,
-                         "LT": 4210
-                     }
-                 }
-             },
-             {
-                 "vector": {
-                     "fakevec": {
-                         "metric_type": "JACCARD",
-                         "params": {
-                             "nprobe": 10
-                         },
-                         "query": "$0",
-                         "topk": 5,
-                         "round_decimal": -1
-                     }
-                 }
-             }
-             ]
-         }
-     })";
+    // const char* dsl_string = R"({
+    //      "bool": {
+    //          "must": [
+    //          {
+    //              "range": {
+    //                  "counter": {
+    //                      "GE": 4200,
+    //                      "LT": 4210
+    //                  }
+    //              }
+    //          },
+    //          {
+    //              "vector": {
+    //                  "fakevec": {
+    //                      "metric_type": "JACCARD",
+    //                      "params": {
+    //                          "nprobe": 10
+    //                      },
+    //                      "query": "$0",
+    //                      "topk": 5,
+    //                      "round_decimal": -1
+    //                  }
+    //              }
+    //          }
+    //          ]
+    //      }
+    //  })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             predicates: <
+                                               binary_expr: <
+                                                 op: LogicalAnd
+                                                 left: <
+                                                   unary_range_expr: <
+                                                     column_info: <
+                                                       field_id: 101
+                                                       data_type: Int64
+                                                     >
+                                                     op: GreaterEqual
+                                                     value: <
+                                                       int64_val: 4200
+                                                     >
+                                                   >
+                                                 >
+                                                 right: <
+                                                   unary_range_expr: <
+                                                     column_info: <
+                                                       field_id: 101
+                                                       data_type: Int64
+                                                     >
+                                                     op: LessThan
+                                                     value: <
+                                                       int64_val: 4210
+                                                     >
+                                                   >
+                                                 >
+                                               >
+                                             >
+                                             query_info: <
+                                               topk: 5
+                                               round_decimal: -1
+                                               metric_type: "JACCARD"
+                                               search_params: "{\"nprobe\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     // create place_holder_group
     int num_queries = 5;
@@ -2724,7 +2903,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -3024,33 +3204,67 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"({
-        "bool": {
-            "must": [
-            {
-                "term": {
-                    "counter": {
-                        "values": [4200, 4201, 4202, 4203, 4204],
-                        "is_in_field": false
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "JACCARD",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": -1
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // const char* dsl_string = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "term": {
+    //                 "counter": {
+    //                     "values": [4200, 4201, 4202, 4203, 4204],
+    //                     "is_in_field": false
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "JACCARD",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": -1
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             predicates: <
+                                               term_expr: <
+                                                 column_info: <
+                                                   field_id: 101
+                                                   data_type: Int64
+                                                 >
+                                                 values: <
+                                                   int64_val: 4200
+                                                 >
+                                                 values: <
+                                                   int64_val: 4201
+                                                 >
+                                                 values: <
+                                                   int64_val: 4202
+                                                 >
+                                                 values: <
+                                                   int64_val: 4203
+                                                 >
+                                                 values: <
+                                                   int64_val: 4204
+                                                 >
+                                               >
+                                             >
+                                             query_info: <
+                                               topk: 5
+                                               round_decimal: -1
+                                               metric_type: "JACCARD"
+                                               search_params: "{\"nprobe\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     // create place_holder_group
     int num_queries = 5;
@@ -3061,7 +3275,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -3405,33 +3620,74 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
-    const char* dsl_string = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "counter": {
-                        "GE": 4200,
-                        "LT": 4210
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": -1
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // const char* dsl_string = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "counter": {
+    //                     "GE": 4200,
+    //                     "LT": 4210
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": -1
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                  binary_expr: <
+                                    op: LogicalAnd
+                                    left: <
+                                      unary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Int64
+                                        >
+                                        op: GreaterEqual
+                                        value: <
+                                          int64_val: 4200
+                                        >
+                                      >
+                                    >
+                                    right: <
+                                      unary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Int64
+                                        >
+                                        op: LessThan
+                                        value: <
+                                          int64_val: 4210
+                                        >
+                                      >
+                                    >
+                                  >
+                                >
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: -1
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     // create place_holder_group
     int num_queries = 10;
@@ -3441,7 +3697,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -3544,22 +3801,33 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
-    const char* dsl_string = R"(
-    {
-         "bool": {
-             "vector": {
-                 "fakevec": {
-                     "metric_type": "L2",
-                     "params": {
-                         "nprobe": 10
-                     },
-                     "query": "$0",
-                     "topk": 5,
-                     "round_decimal": -1
-                 }
-             }
-         }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //      "bool": {
+    //          "vector": {
+    //              "fakevec": {
+    //                  "metric_type": "L2",
+    //                  "params": {
+    //                      "nprobe": 10
+    //                  },
+    //                  "query": "$0",
+    //                  "topk": 5,
+    //                  "round_decimal": -1
+    //              }
+    //          }
+    //      }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: -1
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     auto status = LoadFieldRawData(segment, 100, vec_data.data(), N);
     ASSERT_EQ(status.error_code, Success);
@@ -3577,7 +3845,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    status = CreateSearchPlan(collection, dsl_string, &plan);
+    status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -3939,29 +4208,41 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "IP",
-                    "params": {
-                        "nprobe": 10,
-                        "radius": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "IP",
+    //                 "params": {
+    //                     "nprobe": 10,
+    //                     "radius": 10
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal": 3
+    //             }
+    //         }
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             query_info: <
+                                               topk: 10
+                                               round_decimal: 3
+                                               metric_type: "IP"
+                                               search_params: "{\"nprobe\": 10,\"radius\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -4006,30 +4287,42 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "IP",
-                    "params": {
-                        "nprobe": 10,
-                        "radius": 10,
-                        "range_filter": 20
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "IP",
+    //                 "params": {
+    //                     "nprobe": 10,
+    //                     "radius": 10,
+    //                     "range_filter": 20
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal": 3
+    //             }
+    //         }
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             query_info: <
+                                               topk: 10
+                                               round_decimal: 3
+                                               metric_type: "IP"
+                                               search_params: "{\"nprobe\": 10,\"radius\": 10, \"range_filter\": 20}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -4074,29 +4367,41 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10,
-                        "radius": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "L2",
+    //                 "params": {
+    //                     "nprobe": 10,
+    //                     "radius": 10
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal": 3
+    //             }
+    //         }
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             query_info: <
+                                               topk: 10
+                                               round_decimal: 3
+                                               metric_type: "L2"
+                                               search_params: "{\"nprobe\": 10,\"radius\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -4141,30 +4446,42 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10,
-                        "radius": 20,
-                        "range_filter": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
+    // const char* dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "L2",
+    //                 "params": {
+    //                     "nprobe": 10,
+    //                     "radius": 20,
+    //                     "range_filter": 10
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal": 3
+    //             }
+    //         }
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                             field_id: 100
+                                             query_info: <
+                                               topk: 10
+                                               round_decimal: 3
+                                               metric_type: "L2"
+                                               search_params: "{\"nprobe\": 10,\"radius\": 20, \"range_filter\": 10}"
+                                             >
+                                             placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;

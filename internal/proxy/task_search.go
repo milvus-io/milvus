@@ -381,7 +381,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	t.SearchRequest.Dsl = t.request.Dsl
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 
 	// Set username of this search request for feature like task scheduling.
