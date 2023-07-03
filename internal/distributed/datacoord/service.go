@@ -441,3 +441,7 @@ func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest
 func (s *Server) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
 	return s.dataCoord.ListSegmentsInfo(ctx, req)
 }
+
+func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return s.dataCoord.ReportDataNodeTtMsgs(ctx, req)
+}

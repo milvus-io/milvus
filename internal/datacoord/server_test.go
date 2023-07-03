@@ -1893,7 +1893,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 	}
 	t.Run("Test segment flush after tt", func(t *testing.T) {
 		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
+		opt := SetEnableDataNodeTimeTickByRPC(false)
+		svr := newTestServer(t, ch, opt)
 		defer closeTestServer(t, svr)
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1963,7 +1964,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 	t.Run("flush segment with different channels", func(t *testing.T) {
 		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
+		opt := SetEnableDataNodeTimeTickByRPC(false)
+		svr := newTestServer(t, ch, opt)
 		defer closeTestServer(t, svr)
 		svr.meta.AddCollection(&collectionInfo{
 			ID:         0,
@@ -2043,7 +2045,8 @@ func TestDataNodeTtChannel(t *testing.T) {
 		helper := ServerHelper{
 			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
 		}
-		svr := newTestServer(t, nil, SetServerHelper(helper))
+		opt := SetEnableDataNodeTimeTickByRPC(false)
+		svr := newTestServer(t, nil, SetServerHelper(helper), opt)
 		defer closeTestServer(t, svr)
 
 		svr.meta.AddCollection(&collectionInfo{

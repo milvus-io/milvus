@@ -189,3 +189,7 @@ func (m *GrpcDataCoordClient) BroadcastAlteredCollection(ctx context.Context, in
 func (m *GrpcDataCoordClient) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest, opts ...grpc.CallOption) (*datapb.ListSegmentsInfoResponse, error) {
 	return &datapb.ListSegmentsInfoResponse{}, m.Err
 }
+
+func (m *GrpcDataCoordClient) ReportDataNodeTtMsgs(ctx context.Context, in *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

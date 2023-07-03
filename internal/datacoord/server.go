@@ -133,6 +133,8 @@ type Server struct {
 	indexCoord             types.IndexCoord
 
 	segReferManager *SegmentReferenceManager
+
+	enableDataNodeTimeTickByRPC bool
 }
 
 // ServerHelper datacoord server injection helper
@@ -184,19 +186,27 @@ func SetSegmentManager(manager Manager) Option {
 	}
 }
 
+// SetEnableDataNodeTimeTickByRPC returns an `Option` setting enableDataNodeTimeTickByRPC with provided value
+func SetEnableDataNodeTimeTickByRPC(enable bool) Option {
+	return func(svr *Server) {
+		svr.enableDataNodeTimeTickByRPC = enable
+	}
+}
+
 // CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                    ctx,
-		quitCh:                 make(chan struct{}),
-		factory:                factory,
-		flushCh:                make(chan UniqueID, 1024),
-		dataNodeCreator:        defaultDataNodeCreatorFunc,
-		rootCoordClientCreator: defaultRootCoordCreatorFunc,
-		helper:                 defaultServerHelper(),
-		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
-		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby,
+		ctx:                         ctx,
+		quitCh:                      make(chan struct{}),
+		factory:                     factory,
+		flushCh:                     make(chan UniqueID, 1024),
+		dataNodeCreator:             defaultDataNodeCreatorFunc,
+		rootCoordClientCreator:      defaultRootCoordCreatorFunc,
+		helper:                      defaultServerHelper(),
+		metricsCacheManager:         metricsinfo.NewMetricsCacheManager(),
+		enableActiveStandBy:         Params.DataCoordCfg.EnableActiveStandby,
+		enableDataNodeTimeTickByRPC: Params.DataNodeCfg.DataNodeTimeTickByRPC,
 	}
 
 	for _, opt := range opts {
@@ -492,8 +502,11 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopWg.Add(3)
-	s.startDataNodeTtLoop(s.serverLoopCtx)
+	s.serverLoopWg.Add(2)
+	if !s.enableDataNodeTimeTickByRPC {
+		s.serverLoopWg.Add(1)
+		s.startDataNodeTtLoop(s.serverLoopCtx)
+	}
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.garbageCollector.start()

@@ -131,16 +131,6 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			1, 0, "by-dev-rootcoord-dml-test_v1", 0,
 			1, 1, "by-dev-rootcoord-dml-test_v2", 0,
 			"add normal segments"},
-		{false, false, &mockMsgStreamFactory{true, false},
-			0, "by-dev-rootcoord-dml-test_v0",
-			0, 0, "", 0,
-			0, 0, "", 0,
-			"error when newinsertbufernode"},
-		{false, true, &mockMsgStreamFactory{true, false},
-			0, "by-dev-rootcoord-dml-test_v0",
-			0, 0, "", 0,
-			0, 0, "", 0,
-			"channel nil"},
 		{true, false, &mockMsgStreamFactory{true, true},
 			1, "by-dev-rootcoord-dml-test_v1",
 			1, 1, "by-dev-rootcoord-dml-test_v1", 0,
@@ -173,6 +163,8 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				cm,
 				newCompactionExecutor(),
 				genTestTickler(),
+				0,
+				nil,
 			)
 
 			if !test.isValidCase {
@@ -269,7 +261,9 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
+
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -423,7 +417,9 @@ func TestDataSyncService_Close(t *testing.T) {
 		syncPeriodically(),
 		syncMemoryTooHigh(),
 	}
-	syncService, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler())
+	atimeTickSender := newTimeTickSender(mockDataCoord, 0)
+	syncService, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
+
 	assert.Nil(t, err)
 
 	syncService.flushListener = make(chan *segmentFlushPack, 10)

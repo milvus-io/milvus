@@ -228,7 +228,11 @@ type DataCoordFactory struct {
 
 	AddSegmentError      bool
 	AddSegmentNotSuccess bool
-	AddSegmentEmpty      bool
+
+	ReportDataNodeTtMsgsError      bool
+	ReportDataNodeTtMsgsNotSuccess bool
+
+	AddSegmentEmpty bool
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
@@ -291,6 +295,20 @@ func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *da
 }
 
 func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	if ds.ReportDataNodeTtMsgsError {
+		return nil, errors.New("mock ReportDataNodeTtMsgs error")
+	}
+	if ds.ReportDataNodeTtMsgsNotSuccess {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

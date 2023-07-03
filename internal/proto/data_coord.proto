@@ -74,6 +74,8 @@ service DataCoord {
   rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
+  
+  rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -688,4 +690,9 @@ message GcConfirmRequest {
 message GcConfirmResponse {
   common.Status status = 1;
   bool gc_finished = 2;
+}
+
+message ReportDataNodeTtMsgsRequest {
+  common.MsgBase base = 1;
+  repeated DataNodeTtMsg msgs = 2;
 }

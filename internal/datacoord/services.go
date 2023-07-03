@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -1425,6 +1426,74 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+// ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
+func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if s.isClosed() {
+		log.Warn("failed to report dataNode ttMsgs on closed server")
+		setNotServingStatus(resp, s.GetStateCode())
+		return resp, nil
+	}
+
+	for _, ttMsg := range req.GetMsgs() {
+		sub := tsoutil.SubByNow(req.GetBase().GetTimestamp())
+		metrics.DataCoordConsumeDataNodeTimeTickLag.
+			WithLabelValues(fmt.Sprint(s.session.ServerID), ttMsg.GetChannelName()).
+			Set(float64(sub))
+		err := s.handleRPCTimetickMessage(ctx, ttMsg)
+		if err != nil {
+			log.Error("fail to handle Datanode Timetick Msg", zap.Int64("sourceID", ttMsg.GetBase().GetSourceID()), zap.String("channelName", ttMsg.GetChannelName()), zap.Error(err))
+			resp.Reason = err.Error()
+			return resp, nil
+		}
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *datapb.DataNodeTtMsg) error {
+	ch := ttMsg.GetChannelName()
+	ts := ttMsg.GetTimestamp()
+
+	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
+
+	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
+		return fmt.Errorf("expire allocations: %w", err)
+	}
+
+	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
+	if err != nil {
+		return fmt.Errorf("get flushable segments: %w", err)
+	}
+	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
+
+	if len(flushableSegments) == 0 {
+		return nil
+	}
+
+	log.Info("start flushing segments",
+		zap.Int64s("segment IDs", flushableIDs))
+	// update segment last update triggered time
+	// it's ok to fail flushing, since next timetick after duration will re-trigger
+	s.setLastFlushTime(flushableSegments)
+
+	finfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments))
+	for _, info := range flushableSegments {
+		finfo = append(finfo, info.SegmentInfo)
+	}
+	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
+	if err != nil {
+		log.Warn("failed to handle flush", zap.Any("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 // getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.

@@ -536,3 +536,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
+
+func TestReportDataNodeTtMsgs(t *testing.T) {
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.ReportDataNodeTtMsgs(context.TODO(), &datapb.ReportDataNodeTtMsgsRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+}
