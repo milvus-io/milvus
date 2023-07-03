@@ -113,6 +113,7 @@ var (
 			nodeIDLabelName,
 			queryTypeLabelName,
 			statusLabelName,
+			requestScope,
 		})
 
 	QueryNodeSQReqLatency = prometheus.NewHistogramVec(
