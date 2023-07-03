@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"plugin"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -433,6 +434,8 @@ func (node *QueryNode) SetAddress(address string) {
 type queryHook interface {
 	Run(map[string]any) error
 	Init(string) error
+	InitTuningConfig(map[string]string) error
+	DeleteTuningConfig(string) error
 }
 
 // initHook initializes parameter tuning hook.
@@ -461,8 +464,17 @@ func (node *QueryNode) initHook() error {
 	if err = hoo.Init(paramtable.Get().HookCfg.QueryNodePluginConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
+	if err = hoo.InitTuningConfig(paramtable.Get().HookCfg.QueryNodePluginTuningConfig.GetValue()); err != nil {
+		return fmt.Errorf("fail to init tuning configs for the hook, error: %s", err.Error())
+	}
 
 	node.queryHook = hoo
+	node.handleQueryHookEvent()
+
+	return nil
+}
+
+func (node *QueryNode) handleQueryHookEvent() {
 	onEvent := func(event *config.Event) {
 		if node.queryHook != nil {
 			if err := node.queryHook.Init(event.Value); err != nil {
@@ -470,7 +482,21 @@ func (node *QueryNode) initHook() error {
 			}
 		}
 	}
+	onEvent2 := func(event *config.Event) {
+		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix) {
+			realKey := strings.TrimPrefix(event.Key, paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix)
+			if event.EventType == config.CreateType || event.EventType == config.UpdateType {
+				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
+					log.Error("failed to refresh hook tuning config", zap.Error(err))
+				}
+			} else if event.EventType == config.DeleteType {
+				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
+					log.Error("failed to delete hook tuning config", zap.Error(err))
+				}
+			}
+		}
+	}
 	paramtable.Get().Watch(paramtable.Get().HookCfg.QueryNodePluginConfig.Key, config.NewHandler("queryHook", onEvent))
 
-	return nil
+	paramtable.Get().WatchKeyPrefix(paramtable.Get().HookCfg.QueryNodePluginTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
 }

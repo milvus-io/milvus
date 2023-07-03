@@ -87,6 +87,7 @@ const (
 	SearchParamKey = "search_param"
 	SegmentNumKey  = "segment_num"
 	WithFilterKey  = "with_filter"
+	CollectionKey  = "collection"
 
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"

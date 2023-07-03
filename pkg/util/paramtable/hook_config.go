@@ -9,9 +9,10 @@ import (
 const hookYamlFile = "hook.yaml"
 
 type hookConfig struct {
-	SoPath                ParamItem  `refreshable:"false"`
-	SoConfig              ParamGroup `refreshable:"false"`
-	QueryNodePluginConfig ParamItem  `refreshable:"true"`
+	SoPath                      ParamItem  `refreshable:"false"`
+	SoConfig                    ParamGroup `refreshable:"false"`
+	QueryNodePluginConfig       ParamItem  `refreshable:"true"`
+	QueryNodePluginTuningConfig ParamGroup `refreshable:"true"`
 }
 
 func (h *hookConfig) init(base *BaseTable) {
@@ -38,4 +39,10 @@ func (h *hookConfig) init(base *BaseTable) {
 		Version: "2.3.0",
 	}
 	h.QueryNodePluginConfig.Init(base.mgr)
+
+	h.QueryNodePluginTuningConfig = ParamGroup{
+		KeyPrefix: "autoindex.params.tuning.",
+		Version:   "2.3.0",
+	}
+	h.QueryNodePluginTuningConfig.Init(base.mgr)
 }

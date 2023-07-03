@@ -17,7 +17,10 @@
 package config
 
 import (
+	"os"
+	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +34,25 @@ func TestAllConfigFromManager(t *testing.T) {
 	mgr, _ = Init(WithEnvSource(formatKey))
 	all = mgr.GetConfigs()
 	assert.Less(t, 0, len(all))
+}
+
+func TestConfigChangeEvent(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "milvus")
+	os.WriteFile(path.Join(dir, "milvus.yaml"), []byte("a.b: 1\nc.d: 2"), 0600)
+	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 3"), 0600)
+
+	fs := NewFileSource(&FileInfo{[]string{path.Join(dir, "milvus.yaml"), path.Join(dir, "user.yaml")}, 1})
+	mgr, _ := Init()
+	err := mgr.AddSource(fs)
+	assert.NoError(t, err)
+	res, err := mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, res, "3")
+	os.WriteFile(path.Join(dir, "user.yaml"), []byte("a.b: 6"), 0600)
+	time.Sleep(3 * time.Second)
+	res, err = mgr.GetConfig("a.b")
+	assert.NoError(t, err)
+	assert.Equal(t, res, "6")
 }
 
 func TestAllDupliateSource(t *testing.T) {
