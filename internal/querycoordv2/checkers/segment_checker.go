@@ -129,13 +129,18 @@ func (c *SegmentChecker) getStreamingSegmentDiff(targetMgr *meta.TargetManager,
 		zap.Int64("replicaID", replica.ID))
 
 	leaders := distMgr.ChannelDistManager.GetShardLeadersByReplica(replica)
-	for leader, node := range leaders {
-		view := distMgr.LeaderViewManager.GetLeaderShardView(node, leader)
+	//	distMgr.LeaderViewManager.
+	for channelName, node := range leaders {
+		view := distMgr.LeaderViewManager.GetLeaderShardView(node, channelName)
+		if view == nil {
+			log.Info("leaderView is not ready, skip", zap.String("channelName", channelName), zap.Int64("node", node))
+			continue
+		}
 		targetVersion := targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(20, "before shard delegator update it's readable version, skip release segment",
-				zap.String("channelName", leader),
+				zap.String("channelName", channelName),
 				zap.Int64("nodeID", node),
 				zap.Int64("leaderVersion", view.TargetVersion),
 				zap.Int64("currentVersion", targetVersion),
