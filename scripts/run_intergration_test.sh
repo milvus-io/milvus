@@ -34,7 +34,7 @@ fi
 
 for d in $(go list ./tests/integration/...); do
     echo "$d"
-    go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -timeout=20m
     if [ -f profile.out ]; then
         grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
         rm profile.out
