@@ -130,6 +130,7 @@ class Json {
         return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
     }
 
+    // construct JSON pointer with provided path
     static std::string
     pointer(std::vector<std::string> nested_path) {
         std::for_each(
