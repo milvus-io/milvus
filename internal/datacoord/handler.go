@@ -374,7 +374,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 	ctx2, cancel := context.WithTimeout(ctx, time.Minute*30)
 	defer cancel()
 	if err := retry.Do(ctx2, func() error {
-		has, err := h.s.hasCollection(ctx2, collectionID)
+		has, err := h.s.broker.HasCollection(ctx2, collectionID)
 		if err != nil {
 			log.RatedInfo(60, "datacoord ServerHandler HasCollection retry failed", zap.Error(err))
 			return err

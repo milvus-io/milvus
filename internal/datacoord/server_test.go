@@ -188,6 +188,7 @@ func TestAssignSegmentID(t *testing.T) {
 			RootCoord: svr.rootCoordClient,
 			collID:    collID,
 		}
+
 		schema := newTestSchema()
 		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
@@ -3489,6 +3490,7 @@ func TestGetFlushAllState(t *testing.T) {
 			var err error
 			svr.meta = &meta{}
 			svr.rootCoordClient = mocks.NewRootCoord(t)
+			svr.broker = NewCoordinatorBroker(svr.rootCoordClient)
 			if test.ListDatabaseFailed {
 				svr.rootCoordClient.(*mocks.RootCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
 					Return(&milvuspb.ListDatabasesResponse{

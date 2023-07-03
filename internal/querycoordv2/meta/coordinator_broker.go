@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	brokerRPCTimeout = 10 * time.Second
+	brokerRPCTimeout = 5 * time.Second
 )
 
 type Broker interface {

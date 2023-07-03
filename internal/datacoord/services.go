@@ -643,18 +643,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		return resp, nil
 	}
 
-	dresp, err := s.rootCoordClient.DescribeCollectionInternal(s.ctx, &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collectionID,
-	})
-	if err = VerifyResponse(dresp, err); err != nil {
+	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
+	if err != nil {
 		log.Error("get collection info from rootcoord failed",
 			zap.Error(err))
-
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
@@ -781,15 +773,8 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		return resp, nil
 	}
 
-	dresp, err := s.rootCoordClient.DescribeCollectionInternal(s.ctx, &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collectionID,
-	})
-	if err = VerifyResponse(dresp, err); err != nil {
+	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
+	if err != nil {
 		log.Error("get collection info from rootcoord failed",
 			zap.Error(err))
 
@@ -1301,37 +1286,24 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		return resp, nil
 	}
 
-	dbsRsp, err := s.rootCoordClient.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
-		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
-	})
-	if err = VerifyResponse(dbsRsp, err); err != nil {
+	dbsRsp, err := s.broker.ListDatabases(ctx)
+	if err != nil {
 		log.Warn("failed to ListDatabases", zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
 
 	for _, dbName := range dbsRsp.DbNames {
-		showColRsp, err := s.rootCoordClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
-			),
-			DbName: dbName,
-		})
-		if err = VerifyResponse(showColRsp, err); err != nil {
+		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
+		if err != nil {
 			log.Warn("failed to ShowCollections", zap.Error(err))
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
 
 		for _, collection := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-				),
-				// please do not specify the collection name alone after database feature.
-				CollectionID: collection,
-			})
-			if err = VerifyResponse(describeColRsp, err); err != nil {
+			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collection)
+			if err != nil {
 				log.Warn("failed to DescribeCollectionInternal", zap.Error(err))
 				resp.Status.Reason = err.Error()
 				return resp, nil

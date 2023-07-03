@@ -32,7 +32,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -44,12 +43,10 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -145,6 +142,9 @@ type Server struct {
 	//segReferManager  *SegmentReferenceManager
 	indexBuilder     *indexBuilder
 	indexNodeManager *IndexNodeManager
+
+	// manage ways that data coord access other coord
+	broker Broker
 }
 
 // ServerHelper datacoord server injection helper
@@ -321,6 +321,8 @@ func (s *Server) initDataCoord() error {
 	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
+
+	s.broker = NewCoordinatorBroker(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {
@@ -1006,33 +1008,12 @@ func (s *Server) stopServerLoop() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	resp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collectionID,
-	})
-	if err = VerifyResponse(resp, err); err != nil {
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
 		return err
 	}
-	presp, err := s.rootCoordClient.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-			commonpbutil.WithMsgID(0),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		// please do not specify the collection name alone after database feature.
-		/*
-			DbName:         "",
-			CollectionName: resp.Schema.Name,
-		*/
-		CollectionID: resp.CollectionID,
-	})
-	if err = VerifyResponse(presp, err); err != nil {
-		log.Error("show partitions error", zap.String("collectionName", resp.Schema.Name),
-			zap.Int64("collectionID", resp.CollectionID), zap.Error(err))
+	partitionIDs, err := s.broker.ShowPartitionsInternal(ctx, collectionID)
+	if err != nil {
 		return err
 	}
 
@@ -1044,39 +1025,13 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	collInfo := &collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
-		Partitions:     presp.PartitionIDs,
+		Partitions:     partitionIDs,
 		StartPositions: resp.GetStartPositions(),
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil
-}
-
-// hasCollection communicates with RootCoord and check whether this collection exist from the user's perspective.
-func (s *Server) hasCollection(ctx context.Context, collectionID int64) (bool, error) {
-	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		DbName:       "",
-		CollectionID: collectionID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if resp == nil {
-		return false, errNilResponse
-	}
-	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
-		return true, nil
-	}
-	statusErr := common.NewStatusError(resp.Status.ErrorCode, resp.Status.Reason)
-	if common.IsCollectionNotExistError(statusErr) {
-		return false, nil
-	}
-	return false, statusErr
 }
 
 func (s *Server) reCollectSegmentStats(ctx context.Context) {
