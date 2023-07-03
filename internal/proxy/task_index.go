@@ -22,8 +22,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -58,6 +58,7 @@ type createIndexTask struct {
 	rootCoord types.RootCoord
 	datacoord types.DataCoord
 	result    *commonpb.Status
+	chMgr     channelsMgr
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
@@ -405,6 +406,23 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	if cit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(cit.result.Reason)
 	}
+
+	baseMQMsg, err := GetBaseMQMsg(ctx, cit.collectionID, cit.chMgr)
+	if err != nil {
+		return err
+	}
+	msgPack := &msgstream.MsgPack{
+		BeginTs: cit.BeginTs(),
+		EndTs:   cit.EndTs(),
+		Msgs: []msgstream.TsMsg{
+			&msgstream.CreateIndexMsg{
+				BaseMsg:            *baseMQMsg,
+				CreateIndexRequest: *cit.req,
+			},
+		},
+	}
+	err = SendMsgPack(ctx, cit.collectionID, cit.chMgr, msgPack)
+
 	return err
 }
 
@@ -651,6 +669,7 @@ type dropIndexTask struct {
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
+	chMgr      channelsMgr
 
 	collectionID UniqueID
 }
@@ -727,6 +746,13 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
+	ctxLog := log.Ctx(ctx)
+	ctxLog.Info("proxy drop index", zap.Int64("collID", dit.collectionID),
+		zap.String("field_name", dit.FieldName),
+		zap.String("index_name", dit.IndexName),
+		zap.String("db_name", dit.DbName),
+	)
+
 	var err error
 	dit.result, err = dit.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
@@ -734,12 +760,32 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		IndexName:    dit.IndexName,
 		DropAll:      false,
 	})
+	if err != nil {
+		ctxLog.Warn("drop index failed", zap.Error(err))
+		return err
+	}
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
 	if dit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Reason)
 	}
+	baseMQMsg, err := GetBaseMQMsg(ctx, dit.collectionID, dit.chMgr)
+	if err != nil {
+		ctxLog.Warn("get base mq msg failed", zap.Error(err))
+		return err
+	}
+	msgPack := &msgstream.MsgPack{
+		BeginTs: dit.BeginTs(),
+		EndTs:   dit.EndTs(),
+		Msgs: []msgstream.TsMsg{
+			&msgstream.DropIndexMsg{
+				BaseMsg:          *baseMQMsg,
+				DropIndexRequest: *dit.DropIndexRequest,
+			},
+		},
+	}
+	err = SendMsgPack(ctx, dit.collectionID, dit.chMgr, msgPack)
 	return err
 }
 

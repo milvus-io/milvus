@@ -768,6 +768,11 @@ func TestProxyCreateDatabase(t *testing.T) {
 	assert.NoError(t, err)
 	defer node.sched.Close()
 
+	rpcRequestChannel := Params.CommonCfg.RpcRequestChannel.GetValue()
+	node.rpcMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.rpcMsgStream.AsProducer([]string{rpcRequestChannel})
+
 	t.Run("create database fail", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)
 		rc.On("CreateDatabase", mock.Anything, mock.Anything).
@@ -823,6 +828,11 @@ func TestProxyDropDatabase(t *testing.T) {
 	err = node.sched.Start()
 	assert.NoError(t, err)
 	defer node.sched.Close()
+
+	rpcRequestChannel := Params.CommonCfg.RpcRequestChannel.GetValue()
+	node.rpcMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.rpcMsgStream.AsProducer([]string{rpcRequestChannel})
 
 	t.Run("drop database fail", func(t *testing.T) {
 		rc := mocks.NewRootCoord(t)

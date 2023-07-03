@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -26,10 +27,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -56,6 +53,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 const moduleName = "Proxy"
@@ -87,14 +87,45 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentS
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
 	}
+	latestPosition, err := node.getRpcRequestChannelPosition(ctx)
+	if err != nil {
+		stats.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "fail to get rpc request channel position",
+		}
+		return stats, nil
+	}
+	extraInfo := map[string]string{
+		"rpc_request_channel_position": latestPosition,
+	}
 	info := &milvuspb.ComponentInfo{
 		// NodeID:    Params.ProxyID, // will race with Proxy.Register()
 		NodeID:    nodeID,
 		Role:      typeutil.ProxyRole,
 		StateCode: code,
+		ExtraInfo: funcutil.Map2KeyValuePair(extraInfo),
 	}
 	stats.State = info
 	return stats, nil
+}
+
+func (node *Proxy) getRpcRequestChannelPosition(ctx context.Context) (string, error) {
+	if node.rpcMsgStream == nil {
+		return "", nil
+	}
+	ctxLog := log.Ctx(ctx)
+	rpcRequestChannel := Params.CommonCfg.RpcRequestChannel.GetValue()
+	position, err := msgstream.GetLatestMsgPosition(ctx, node.factory, rpcRequestChannel)
+	if err != nil {
+		ctxLog.Error("failed to get latest msg position", zap.Error(err))
+		return "", err
+	}
+	positionBytes, err := proto.Marshal(position)
+	if err != nil {
+		ctxLog.Warn("failed to marshal position", zap.Error(err))
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(positionBytes), nil
 }
 
 // GetStatisticsChannel gets statistics channel of Proxy.
@@ -172,11 +203,13 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		Condition:             NewTaskCondition(ctx),
 		CreateDatabaseRequest: request,
 		rootCoord:             node.rootCoord,
+		rpcMsgStream:          node.rpcMsgStream,
 	}
 
-	log := log.With(zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
-		zap.String("dbName", request.DbName))
+		zap.String("dbName", request.DbName),
+	)
 
 	log.Info(rpcReceived(method))
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
@@ -223,11 +256,13 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
 		rootCoord:           node.rootCoord,
+		rpcMsgStream:        node.rpcMsgStream,
 	}
 
-	log := log.With(zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
-		zap.String("dbName", request.DbName))
+		zap.String("dbName", request.DbName),
+	)
 
 	log.Info(rpcReceived(method))
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
@@ -540,6 +575,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		LoadCollectionRequest: request,
 		queryCoord:            node.queryCoord,
 		datacoord:             node.dataCoord,
+		chMgr:                 node.chMgr,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1788,6 +1824,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		req:       request,
 		rootCoord: node.rootCoord,
 		datacoord: node.dataCoord,
+		chMgr:     node.chMgr,
 	}
 
 	method := "CreateIndex"
@@ -2033,6 +2070,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		DropIndexRequest: request,
 		dataCoord:        node.dataCoord,
 		queryCoord:       node.queryCoord,
+		chMgr:            node.chMgr,
 	}
 
 	method := "DropIndex"

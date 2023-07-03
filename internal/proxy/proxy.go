@@ -28,26 +28,25 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -87,7 +86,8 @@ type Proxy struct {
 
 	multiRateLimiter *MultiRateLimiter
 
-	chMgr channelsMgr
+	chMgr        channelsMgr
+	rpcMsgStream msgstream.MsgStream
 
 	sched *taskScheduler
 
@@ -240,6 +240,16 @@ func (node *Proxy) Init() error {
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, node.factory)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
+
+	rpcRequestChannel := Params.CommonCfg.RpcRequestChannel.GetValue()
+	node.rpcMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	if err != nil {
+		log.Warn("failed to create rpc request msg stream",
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
+			zap.Error(err))
+		return err
+	}
+	node.rpcMsgStream.AsProducer([]string{rpcRequestChannel})
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
 	if err != nil {

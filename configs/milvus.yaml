@@ -441,6 +441,7 @@ common:
     dataCoordStatistic: datacoord-statistics-channel
     dataCoordTimeTick: datacoord-timetick-channel
     dataCoordSegmentInfo: segment-info-channel
+    rpcRequest: rpc-request
   subNamePrefix:
     proxySubNamePrefix: proxy
     rootCoordSubNamePrefix: rootCoord

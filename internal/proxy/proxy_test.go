@@ -4125,8 +4125,22 @@ func Test_GetFlushState(t *testing.T) {
 	})
 }
 
+func getProxy(t *testing.T) *Proxy {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+
+	rpcRequestChannel := Params.CommonCfg.RpcRequestChannel.GetValue()
+	node.rpcMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.rpcMsgStream.AsProducer([]string{rpcRequestChannel})
+	return node
+}
+
 func TestProxy_GetComponentStates(t *testing.T) {
-	n := &Proxy{}
+	n := getProxy(t)
 	n.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := n.GetComponentStates(context.Background())
 	assert.NoError(t, err)
@@ -4137,14 +4151,6 @@ func TestProxy_GetComponentStates(t *testing.T) {
 	resp, err = n.GetComponentStates(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-}
-
-func TestProxy_GetComponentStates_state_code(t *testing.T) {
-	p := &Proxy{}
-	p.stateCode.Store("not commonpb.StateCode")
-	states, err := p.GetComponentStates(context.Background())
-	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 }
 
 func TestProxy_Import(t *testing.T) {

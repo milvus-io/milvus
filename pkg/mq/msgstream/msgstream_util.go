@@ -18,6 +18,10 @@ package msgstream
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
+
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 
 	"go.uber.org/zap"
 
@@ -33,4 +37,26 @@ func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, c
 		log.Warn("failed to unsubscribe channels", zap.String("subname", subName), zap.Any("channels", channels), zap.Error(err))
 		panic(err)
 	}
+}
+
+func GetLatestMsgPosition(ctx context.Context, factory Factory, channel string) (*MsgPosition, error) {
+	ctxLog := log.Ctx(ctx).With(zap.String("channel", channel))
+	msgStream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		ctxLog.Warn("failed to create msg stream", zap.Error(err))
+		return nil, err
+	}
+	defer msgStream.Close()
+
+	subName := fmt.Sprintf("get_latest_msg_position_%s_%d", channel, rand.Int())
+	msgStream.AsConsumer([]string{channel}, subName, mqwrapper.SubscriptionPositionUnknown)
+	id, err := msgStream.GetLatestMsgID(channel)
+	if err != nil {
+		ctxLog.Warn("failed to get latest msg id", zap.Error(err))
+		return nil, err
+	}
+	return &MsgPosition{
+		ChannelName: channel,
+		MsgID:       id.Serialize(),
+	}, nil
 }

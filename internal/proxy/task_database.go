@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -13,9 +15,10 @@ import (
 type createDatabaseTask struct {
 	Condition
 	*milvuspb.CreateDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *commonpb.Status
+	ctx          context.Context
+	rootCoord    types.RootCoord
+	result       *commonpb.Status
+	rpcMsgStream msgstream.MsgStream
 }
 
 func (cdt *createDatabaseTask) TraceCtx() context.Context {
@@ -65,6 +68,22 @@ func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	cdt.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 	cdt.result, err = cdt.rootCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
+	if err == nil && cdt.result.ErrorCode == commonpb.ErrorCode_Success && cdt.rpcMsgStream != nil {
+		msgPack := &msgstream.MsgPack{
+			BeginTs: cdt.BeginTs(),
+			EndTs:   cdt.EndTs(),
+			Msgs: []msgstream.TsMsg{
+				&msgstream.CreateDatabaseMsg{
+					BaseMsg: msgstream.BaseMsg{
+						Ctx:        ctx,
+						HashValues: []uint32{0},
+					},
+					CreateDatabaseRequest: *cdt.CreateDatabaseRequest,
+				},
+			},
+		}
+		err = cdt.rpcMsgStream.Produce(msgPack)
+	}
 	return err
 }
 
@@ -75,9 +94,10 @@ func (cdt *createDatabaseTask) PostExecute(ctx context.Context) error {
 type dropDatabaseTask struct {
 	Condition
 	*milvuspb.DropDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *commonpb.Status
+	ctx          context.Context
+	rootCoord    types.RootCoord
+	rpcMsgStream msgstream.MsgStream
+	result       *commonpb.Status
 }
 
 func (ddt *dropDatabaseTask) TraceCtx() context.Context {
@@ -130,6 +150,23 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 
 	if ddt.result != nil && ddt.result.ErrorCode == commonpb.ErrorCode_Success {
 		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
+	}
+
+	if err == nil && ddt.result.ErrorCode == commonpb.ErrorCode_Success && ddt.rpcMsgStream != nil {
+		msgPack := &msgstream.MsgPack{
+			BeginTs: ddt.BeginTs(),
+			EndTs:   ddt.EndTs(),
+			Msgs: []msgstream.TsMsg{
+				&msgstream.DropDatabaseMsg{
+					BaseMsg: msgstream.BaseMsg{
+						Ctx:        ctx,
+						HashValues: []uint32{0},
+					},
+					DropDatabaseRequest: *ddt.DropDatabaseRequest,
+				},
+			},
+		}
+		err = ddt.rpcMsgStream.Produce(msgPack)
 	}
 	return err
 }

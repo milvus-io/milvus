@@ -61,6 +61,13 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
+	createIndexMsg := CreateIndexMsg{}
+	dropIndexMsg := DropIndexMsg{}
+	loadCollectionMsg := LoadCollectionMsg{}
+	releaseCollectionMsg := ReleaseCollectionMsg{}
+
+	createDatabaseMsg := CreateDatabaseMsg{}
+	dropDatabaseMsg := DropDatabaseMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -72,6 +79,12 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateIndex] = createIndexMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropIndex] = dropIndexMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_LoadCollection] = loadCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_ReleaseCollection] = releaseCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateDatabase] = createDatabaseMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropDatabase] = dropDatabaseMsg.Unmarshal
 
 	return p
 }

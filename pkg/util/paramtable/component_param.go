@@ -175,6 +175,7 @@ type commonConfig struct {
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
 	DataCoordTicklePath   ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
+	RpcRequestChannel     ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
 	DefaultIndexName     ParamItem `refreshable:"true"`
@@ -299,6 +300,16 @@ func (p *commonConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DataCoordSegmentInfo.Init(base.mgr)
+
+	p.RpcRequestChannel = ParamItem{
+		Key:          "msgChannel.chanNamePrefix.rpcRequestChannel",
+		Version:      "2.3.1",
+		DefaultValue: "rpc-request",
+		PanicIfEmpty: true,
+		Formatter:    chanNamePrefix,
+		Export:       true,
+	}
+	p.RpcRequestChannel.Init(base.mgr)
 
 	p.DataCoordSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataCoordSubNamePrefix",

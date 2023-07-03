@@ -1391,3 +1391,48 @@ func memsetLoop[T any](v T, numRows int) []T {
 
 	return ret
 }
+
+//func GetHashValuesForMsg(collectionID int64, channelNames []string) []uint32 {
+//	return typeutil.HashPK2Channels(&schemapb.IDs{
+//		IdField: &schemapb.IDs_IntId{
+//			IntId: &schemapb.LongArray{
+//				Data: []int64{collectionID},
+//			},
+//		},
+//	}, channelNames)
+//}
+
+func GetBaseMQMsg(ctx context.Context, collectionID int64, chMgr channelsMgr) (*msgstream.BaseMsg, error) {
+	channelNames, err := chMgr.getVChannels(collectionID)
+	if err != nil {
+		log.Ctx(ctx).Error("fail to get vchannels", zap.Error(err))
+		return nil, err
+	}
+
+	hashValues := typeutil.HashPK2Channels(&schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{collectionID},
+			},
+		},
+	}, channelNames)
+
+	return &msgstream.BaseMsg{
+		Ctx:        ctx,
+		HashValues: hashValues,
+	}, nil
+}
+
+func SendMsgPack(ctx context.Context, collectionID int64, chMgr channelsMgr, msgPack *msgstream.MsgPack) error {
+	stream, err := chMgr.getOrCreateDmlStream(collectionID)
+	if err != nil {
+		log.Ctx(ctx).Error("fail to get dml stream", zap.Error(err))
+		return err
+	}
+	err = stream.Produce(msgPack)
+	if err != nil {
+		log.Ctx(ctx).Error("fail to get produce the msg", zap.Error(err), zap.Any("msg_type", msgPack.Msgs[0].Type))
+		return err
+	}
+	return nil
+}
