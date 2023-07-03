@@ -102,10 +102,25 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			pos := deltaPosition
 			runningGroup.Go(func() error {
 				// reload data from dml channel
-				return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos,
-					lo.FilterMap(l.req.Infos, func(info *queryPb.SegmentLoadInfo, _ int) (int64, bool) {
-						return info.GetSegmentID(), funcutil.SliceContain(loadDoneSegmentIDs, info.SegmentID) && info.GetInsertChannel() == pos.GetChannelName()
-					}))
+				segments := lo.FilterMap(l.req.Infos, func(info *queryPb.SegmentLoadInfo, _ int) (int64, bool) {
+					return info.GetSegmentID(), funcutil.SliceContain(loadDoneSegmentIDs, info.SegmentID) && info.GetInsertChannel() == pos.GetChannelName()
+				})
+				err := l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos, segments)
+				if err != nil {
+					return err
+				}
+
+				for _, id := range segments {
+					segment, err := l.node.metaReplica.getSegmentByID(id, segmentTypeSealed)
+					if err != nil {
+						return err
+					}
+					err = segment.FlushDelete()
+					if err != nil {
+						return err
+					}
+				}
+				return nil
 			})
 		}
 		err = runningGroup.Wait()

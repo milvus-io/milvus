@@ -108,11 +108,9 @@ func (r *DeleteRecords) TryAppend(pks []primaryKey, timestamps []Timestamp) bool
 	return true
 }
 
-func (r *DeleteRecords) Flush() ([]primaryKey, []Timestamp) {
+func (r *DeleteRecords) Flush(handler func([]primaryKey, []Timestamp) error) error {
 	r.mut.Lock()
 	defer r.mut.Unlock()
-
-	r.flushed = true
 
 	sort.Sort(ByTimestamp(r.records))
 	pks := make([]primaryKey, len(r.records))
@@ -121,8 +119,16 @@ func (r *DeleteRecords) Flush() ([]primaryKey, []Timestamp) {
 		pks[i] = r.records[i].pk
 		timestamps[i] = r.records[i].timestamp
 	}
+
+	err := handler(pks, timestamps)
+	if err != nil {
+		return err
+	}
+
 	r.records = nil
-	return pks, timestamps
+	r.flushed = true
+
+	return nil
 }
 
 // Segment is a wrapper of the underlying C-structure segment.
@@ -136,10 +142,11 @@ type Segment struct {
 	version       UniqueID
 	startPosition *internalpb.MsgPosition // for growing segment release
 
-	vChannelID   Channel
-	lastMemSize  int64
-	lastRowCount int64
-	deleteBuffer DeleteRecords
+	vChannelID              Channel
+	lastMemSize             int64
+	lastRowCount            int64
+	deleteBuffer            DeleteRecords
+	flushedDeletedTimestamp Timestamp
 
 	recentlyModified  *atomic.Bool
 	segmentType       *atomic.Int32
@@ -336,7 +343,7 @@ func (s *Segment) getDeletedCount() int64 {
 		return -1
 	}
 
-	deletedCount := C.GetRowCount(s.segmentPtr)
+	deletedCount := C.GetDeletedCount(s.segmentPtr)
 
 	return int64(deletedCount)
 }
@@ -784,16 +791,26 @@ func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) 
 		return nil
 	}
 
+	return s.deleteImpl(entityIDs, timestamps)
+}
+
+func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
 		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
-	return s.deleteImpl(entityIDs, timestamps)
-}
+	start := sort.Search(len(timestamps), func(i int) bool {
+		return timestamps[i] >= s.flushedDeletedTimestamp+1
+	})
+	// all delete records have been applied, skip them
+	if start == len(timestamps) {
+		return nil
+	}
+	pks = pks[start:]
+	timestamps = timestamps[start:]
 
-func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 	offset := C.PreDelete(s.segmentPtr, cSize)
@@ -840,12 +857,19 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 }
 
 func (s *Segment) FlushDelete() error {
-	pks, tss := s.deleteBuffer.Flush()
-	if len(pks) == 0 {
-		return nil
-	}
+	return s.deleteBuffer.Flush(func(pks []primaryKey, tss []Timestamp) error {
+		if len(pks) == 0 {
+			return nil
+		}
 
-	return s.deleteImpl(pks, tss)
+		err := s.deleteImpl(pks, tss)
+		if err != nil {
+			return err
+		}
+
+		s.flushedDeletedTimestamp = tss[len(pks)-1]
+		return nil
+	})
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
