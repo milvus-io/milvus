@@ -39,7 +39,7 @@ type SearchPlan struct {
 }
 
 // createSearchPlan returns a new SearchPlan and error
-func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
+func createSearchPlan(col *Collection, dsl string, metricType string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
@@ -55,11 +55,15 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	}
 
 	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	newPlan.setMetricType(col.getMetricType())
+	if len(metricType) != 0 {
+		newPlan.setMetricType(metricType)
+	} else {
+		newPlan.setMetricType(col.getMetricType())
+	}
 	return newPlan, nil
 }
 
-func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
+func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
@@ -72,7 +76,11 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	}
 
 	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	newPlan.setMetricType(col.getMetricType())
+	if len(metricType) != 0 {
+		newPlan.setMetricType(metricType)
+	} else {
+		newPlan.setMetricType(col.getMetricType())
+	}
 	return newPlan, nil
 }
 
@@ -109,15 +117,16 @@ type searchRequest struct {
 func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*searchRequest, error) {
 	var err error
 	var plan *SearchPlan
+	metricType := req.Req.GetMetricType()
 	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := req.Req.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(collection, expr, metricType)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		dsl := req.Req.GetDsl()
-		plan, err = createSearchPlan(collection, dsl)
+		plan, err = createSearchPlan(collection, dsl, metricType)
 		if err != nil {
 			return nil, err
 		}
