@@ -65,6 +65,7 @@ func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Tim
 		baseStep:  baseStep{core: c.s},
 		pChannels: collMeta.PhysicalChannelNames,
 	})
+	redo.AddAsyncStep(newConfirmGCStep(c.s, collMeta.CollectionID, allPartition))
 	redo.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
@@ -125,6 +126,12 @@ func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels []string, par
 		collID:   partition.CollectionID,
 		partIDs:  []UniqueID{partition.PartitionID},
 	})
+	redo.AddAsyncStep(&deletePartitionDataStep{
+		baseStep:  baseStep{core: c.s},
+		pchans:    pChannels,
+		partition: partition,
+	})
+	redo.AddAsyncStep(newConfirmGCStep(c.s, partition.CollectionID, partition.PartitionID))
 	redo.AddAsyncStep(&removePartitionMetaStep{
 		baseStep:     baseStep{core: c.s},
 		dbID:         dbID,
