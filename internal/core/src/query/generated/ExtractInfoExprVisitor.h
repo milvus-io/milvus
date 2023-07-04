@@ -45,6 +45,9 @@ class ExtractInfoExprVisitor : public ExprVisitor {
     void
     visit(AlwaysTrueExpr& expr) override;
 
+    void
+    visit(JsonContainsExpr& expr) override;
+
  public:
     explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info)
         : plan_info_(plan_info) {

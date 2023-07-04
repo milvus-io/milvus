@@ -579,6 +579,91 @@ ProtoParser::ParseExistExpr(const proto::plan::ExistsExpr& expr_pb) {
     return result;
 }
 
+template <typename T>
+std::unique_ptr<JsonContainsExprImpl<T>>
+ExtractJsonContainsExprImpl(const proto::plan::JSONContainsExpr& expr_proto) {
+    static_assert(IsScalar<T> or std::is_same_v<T, proto::plan::GenericValue> or
+                  std::is_same_v<T, proto::plan::Array>);
+    auto size = expr_proto.elements_size();
+    std::vector<T> terms;
+    terms.reserve(size);
+    auto val_case = proto::plan::GenericValue::VAL_NOT_SET;
+    for (int i = 0; i < size; ++i) {
+        auto& value_proto = expr_proto.elements(i);
+        if constexpr (std::is_same_v<T, bool>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
+            terms.push_back(static_cast<T>(value_proto.bool_val()));
+            val_case = proto::plan::GenericValue::ValCase::kBoolVal;
+        } else if constexpr (std::is_integral_v<T>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
+            auto value = value_proto.int64_val();
+            if (out_of_range<T>(value)) {
+                continue;
+            }
+            terms.push_back(static_cast<T>(value));
+            val_case = proto::plan::GenericValue::ValCase::kInt64Val;
+        } else if constexpr (std::is_floating_point_v<T>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
+            terms.push_back(static_cast<T>(value_proto.float_val()));
+            val_case = proto::plan::GenericValue::ValCase::kFloatVal;
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
+            terms.push_back(static_cast<T>(value_proto.string_val()));
+            val_case = proto::plan::GenericValue::ValCase::kStringVal;
+        } else if constexpr (std::is_same_v<T, proto::plan::Array>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kArrayVal);
+            terms.push_back(static_cast<T>(value_proto.array_val()));
+            val_case = proto::plan::GenericValue::ValCase::kArrayVal;
+        } else if constexpr (std::is_same_v<T, proto::plan::GenericValue>) {
+            terms.push_back(value_proto);
+        } else {
+            static_assert(always_false<T>);
+        }
+    }
+
+    return std::make_unique<JsonContainsExprImpl<T>>(
+        expr_proto.column_info(),
+        terms,
+        expr_proto.elements_same_type(),
+        expr_proto.op(),
+        val_case);
+}
+
+ExprPtr
+ProtoParser::ParseJsonContainsExpr(
+    const proto::plan::JSONContainsExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+
+    // auto& field_meta = schema[field_offset];
+    auto result = [&]() -> ExprPtr {
+        if (expr_pb.elements_size() == 0) {
+            PanicInfo("no elements in expression");
+        }
+        if (expr_pb.elements_same_type()) {
+            switch (expr_pb.elements(0).val_case()) {
+                case proto::plan::GenericValue::kBoolVal:
+                    return ExtractJsonContainsExprImpl<bool>(expr_pb);
+                case proto::plan::GenericValue::kInt64Val:
+                    return ExtractJsonContainsExprImpl<int64_t>(expr_pb);
+                case proto::plan::GenericValue::kFloatVal:
+                    return ExtractJsonContainsExprImpl<double>(expr_pb);
+                case proto::plan::GenericValue::kStringVal:
+                    return ExtractJsonContainsExprImpl<std::string>(expr_pb);
+                case proto::plan::GenericValue::kArrayVal:
+                    return ExtractJsonContainsExprImpl<proto::plan::Array>(
+                        expr_pb);
+                default:
+                    PanicInfo("unsupported data type");
+            }
+        }
+        return ExtractJsonContainsExprImpl<proto::plan::GenericValue>(expr_pb);
+    }();
+    return result;
+}
+
 ExprPtr
 ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
     using ppe = proto::plan::Expr;
@@ -610,6 +695,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kAlwaysTrueExpr: {
             return CreateAlwaysTrueExpr();
+        }
+        case ppe::kJsonContainsExpr: {
+            return ParseJsonContainsExpr(expr_pb.json_contains_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

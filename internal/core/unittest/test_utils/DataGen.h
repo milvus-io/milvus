@@ -407,17 +407,20 @@ DataGenForJsonArray(SchemaPtr schema,
                     std::vector<std::string> doubleVec;
                     std::vector<std::string> stringVec;
                     std::vector<std::string> boolVec;
-                    for (int i = 0; i < array_len; ++i) {
+                    std::vector<std::string> arrayVec;
+                    for (int j = 0; j < array_len; ++j) {
                         intVec.push_back(std::to_string(er()));
                         doubleVec.push_back(
                             std::to_string(static_cast<double>(er())));
                         stringVec.push_back("\"" + std::to_string(er()) + "\"");
                         boolVec.push_back(i % 2 == 0 ? "true" : "false");
+                        arrayVec.push_back(fmt::format("[{}, {}, {}]", i, i+1, i+2));
                     }
                     auto str = R"({"int":[)" + join(intVec, ",") +
                                R"(],"double":[)" + join(doubleVec, ",") +
                                R"(],"string":[)" + join(stringVec, ",") +
-                               R"(],"bool": [)" + join(boolVec, ",") + "]}";
+                               R"(],"bool": [)" + join(boolVec, ",") +
+                               R"(],"array": [)" + join(arrayVec, ",") + "]}";
                     //std::cout << str << std::endl;
                     data[i] = str;
                 }

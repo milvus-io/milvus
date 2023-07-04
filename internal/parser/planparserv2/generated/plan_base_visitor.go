@@ -23,6 +23,10 @@ func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitLogicalOr(ctx *LogicalOrContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -88,6 +92,14 @@ func (v *BasePlanVisitor) VisitUnary(ctx *UnaryContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitInteger(ctx *IntegerContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitArray(ctx *ArrayContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitJSONContainsAny(ctx *JSONContainsAnyContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

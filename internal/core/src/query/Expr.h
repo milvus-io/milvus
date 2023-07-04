@@ -279,6 +279,30 @@ CreateAlwaysTrueExpr() {
     return std::make_unique<AlwaysTrueExpr>();
 }
 
+struct JsonContainsExpr : Expr {
+    const ColumnInfo column_;
+    bool same_type_;
+    ContainsType op_;
+    const proto::plan::GenericValue::ValCase val_case_;
+
+ protected:
+    JsonContainsExpr() = delete;
+
+    JsonContainsExpr(ColumnInfo column,
+                     const bool same_type,
+                     ContainsType op,
+                     proto::plan::GenericValue::ValCase val_case)
+        : column_(std::move(column)),
+          same_type_(same_type),
+          op_(op),
+          val_case_(val_case) {
+    }
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
 inline bool
 IsTermExpr(Expr* expr) {
     TermExpr* term_expr = dynamic_cast<TermExpr*>(expr);

@@ -45,5 +45,8 @@ class ExprVisitor {
 
     virtual void
     visit(AlwaysTrueExpr&) = 0;
+
+    virtual void
+    visit(JsonContainsExpr&) = 0;
 };
 }  // namespace milvus::query

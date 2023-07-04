@@ -56,6 +56,9 @@ class ExecExprVisitor : public ExprVisitor {
     void
     visit(AlwaysTrueExpr& expr) override;
 
+    void
+    visit(JsonContainsExpr& expr) override;
+
  public:
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
                     int64_t row_count,
@@ -154,6 +157,26 @@ class ExecExprVisitor : public ExprVisitor {
     auto
     ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func)
         -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecJsonContains(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    auto
+    ExecJsonContainsArray(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    auto
+    ExecJsonContainsWithDiffType(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    template <typename ExprValueType>
+    auto
+    ExecJsonContainsAll(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    auto
+    ExecJsonContainsAllArray(JsonContainsExpr& expr_raw) -> BitsetType;
+
+    auto
+    ExecJsonContainsAllWithDiffType(JsonContainsExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>
     BitsetType

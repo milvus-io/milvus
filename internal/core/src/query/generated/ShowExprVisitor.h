@@ -46,6 +46,9 @@ class ShowExprVisitor : public ExprVisitor {
     void
     visit(AlwaysTrueExpr& expr) override;
 
+    void
+    visit(JsonContainsExpr& expr) override;
+
  public:
     Json
 

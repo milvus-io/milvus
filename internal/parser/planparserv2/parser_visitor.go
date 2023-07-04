@@ -961,6 +961,9 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
 			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
 			path = path[1 : len(path)-1]
+			if path == "" {
+				return nil, fmt.Errorf("invalid identifier: %s", identifier)
+			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
 			return nil, fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
 		}
@@ -1052,14 +1055,142 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 			"json_contains operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 
-	values := make([]*planpb.GenericValue, 1)
-	values[0] = elementValue
+	elements := make([]*planpb.GenericValue, 1)
+	elements[0] = elementValue
+
 	expr := &planpb.Expr{
-		Expr: &planpb.Expr_TermExpr{
-			TermExpr: &planpb.TermExpr{
-				ColumnInfo: columnInfo,
-				Values:     values,
-				IsInField:  true,
+		Expr: &planpb.Expr_JsonContainsExpr{
+			JsonContainsExpr: &planpb.JSONContainsExpr{
+				ColumnInfo:       columnInfo,
+				Elements:         elements,
+				Op:               planpb.JSONContainsExpr_Contains,
+				ElementsSameType: true,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
+	allExpr := ctx.AllExpr()
+	array := make([]*planpb.GenericValue, 0, len(allExpr))
+	dType := schemapb.DataType_None
+	sameType := true
+	for i := 0; i < len(allExpr); i++ {
+		element := allExpr[i].Accept(v)
+		if err := getError(element); err != nil {
+			return err
+		}
+		elementValue := getGenericValue(element)
+		if elementValue == nil {
+			return fmt.Errorf("array element type must be generic value, but got: %s", allExpr[i].GetText())
+		}
+		array = append(array, getGenericValue(element))
+
+		if dType == schemapb.DataType_None {
+			dType = element.(*ExprWithType).dataType
+		} else if dType != element.(*ExprWithType).dataType {
+			sameType = false
+		}
+	}
+
+	return &ExprWithType{
+		dataType: schemapb.DataType_Array,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: &planpb.GenericValue{
+						Val: &planpb.GenericValue_ArrayVal{
+							ArrayVal: &planpb.Array{
+								Array:    array,
+								SameType: sameType,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext) interface{} {
+	field := ctx.Expr(0).Accept(v)
+	if err := getError(field); err != nil {
+		return err
+	}
+
+	columnInfo := toColumnInfo(field.(*ExprWithType))
+	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+		return fmt.Errorf(
+			"json_contains_all operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+	}
+
+	element := ctx.Expr(1).Accept(v)
+	if err := getError(element); err != nil {
+		return err
+	}
+	elementValue := getGenericValue(element)
+	if elementValue == nil {
+		return fmt.Errorf(
+			"json_contains_all operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+	}
+
+	if elementValue.GetArrayVal() == nil {
+		return fmt.Errorf("json_contains_all operation element must be an array")
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_JsonContainsExpr{
+			JsonContainsExpr: &planpb.JSONContainsExpr{
+				ColumnInfo:       columnInfo,
+				Elements:         elementValue.GetArrayVal().GetArray(),
+				Op:               planpb.JSONContainsExpr_ContainsAll,
+				ElementsSameType: elementValue.GetArrayVal().GetSameType(),
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext) interface{} {
+	field := ctx.Expr(0).Accept(v)
+	if err := getError(field); err != nil {
+		return err
+	}
+
+	columnInfo := toColumnInfo(field.(*ExprWithType))
+	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+		return fmt.Errorf(
+			"json_contains_any operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+	}
+
+	element := ctx.Expr(1).Accept(v)
+	if err := getError(element); err != nil {
+		return err
+	}
+	elementValue := getGenericValue(element)
+	if elementValue == nil {
+		return fmt.Errorf(
+			"json_contains_any operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+	}
+
+	if elementValue.GetArrayVal() == nil {
+		return fmt.Errorf("json_contains_any operation element must be an array")
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_JsonContainsExpr{
+			JsonContainsExpr: &planpb.JSONContainsExpr{
+				ColumnInfo:       columnInfo,
+				Elements:         elementValue.GetArrayVal().GetArray(),
+				Op:               planpb.JSONContainsExpr_ContainsAny,
+				ElementsSameType: elementValue.GetArrayVal().GetSameType(),
 			},
 		},
 	}

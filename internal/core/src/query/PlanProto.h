@@ -55,6 +55,9 @@ class ProtoParser {
     ParseExistExpr(const proto::plan::ExistsExpr& expr_pb);
 
     ExprPtr
+    ParseJsonContainsExpr(const proto::plan::JSONContainsExpr& expr_pb);
+
+    ExprPtr
     ParseExpr(const proto::plan::Expr& expr_pb);
 
     std::unique_ptr<VectorPlanNode>
