@@ -100,6 +100,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         results.unity_topK_ = topk;
         results.total_nq_ = num_queries;
     } else {
+        std::shared_lock<std::shared_mutex> read_chunk_mutex(
+            segment.get_chunk_mutex());
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_field_data_base(vecfield_id);

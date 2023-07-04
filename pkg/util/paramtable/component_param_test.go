@@ -330,7 +330,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(8192), chunkRows)
 
 		enableGrowingIndex := Params.EnableGrowingSegmentIndex.GetAsBool()
-		assert.Equal(t, false, enableGrowingIndex)
+		assert.Equal(t, true, enableGrowingIndex)
 
 		params.Save("queryNode.segcore.growing.enableIndex", "true")
 		enableGrowingIndex = Params.EnableGrowingSegmentIndex.GetAsBool()

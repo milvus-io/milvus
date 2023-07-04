@@ -66,6 +66,11 @@ class FieldIndexing {
     virtual bool
     sync_data_with_index() const = 0;
 
+    virtual bool
+    has_raw_data() const {
+        return true;
+    }
+
     const FieldMeta&
     get_field_meta() {
         return field_meta_;
@@ -192,6 +197,9 @@ class VectorFieldIndexing : public FieldIndexing {
     bool
     sync_data_with_index() const override;
 
+    bool
+    has_raw_data() const override;
+
     idx_t
     get_index_cursor() override;
 
@@ -203,6 +211,7 @@ class VectorFieldIndexing : public FieldIndexing {
 
  private:
     std::atomic<idx_t> index_cur_ = 0;
+    std::atomic<bool> build;
     std::atomic<bool> sync_with_index;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
@@ -323,6 +332,16 @@ class IndexingRecord {
         }
         return false;
     }
+
+    bool
+    HasRawData(FieldId fieldId) const {
+        if (is_in(fieldId)) {
+            const FieldIndexing& indexing = get_field_indexing(fieldId);
+            return indexing.has_raw_data();
+        }
+        return false;
+    }
+
     // concurrent
     int64_t
     get_finished_ack() const {
