@@ -1485,6 +1485,9 @@ type queryNodeConfig struct {
 	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
 	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
+
+	// CGOPoolSize ratio to MaxReadConcurrency
+	CGOPoolSizeRatio ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1839,6 +1842,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "Max pending task per user in scheduler",
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
+
+	p.CGOPoolSizeRatio = ParamItem{
+		Key:          "queryNode.segcore.cgoPoolSizeRatio",
+		Version:      "2.3.0",
+		DefaultValue: "2.0",
+		Doc:          "cgo pool size ratio to max read concurrency",
+	}
+	p.CGOPoolSizeRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

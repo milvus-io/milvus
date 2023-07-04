@@ -17,6 +17,7 @@
 package segments
 
 import (
+	"math"
 	"runtime"
 	"sync"
 
@@ -33,8 +34,9 @@ var (
 // InitPool initialize
 func InitPool() {
 	initOnce.Do(func() {
+		pt := paramtable.Get()
 		pool := conc.NewPool[any](
-			paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt(),
+			int(math.Ceil(pt.QueryNodeCfg.MaxReadConcurrency.GetAsFloat()*pt.QueryNodeCfg.CGOPoolSizeRatio.GetAsFloat())),
 			conc.WithPreAlloc(true),
 			conc.WithDisablePurge(true),
 		)

@@ -225,6 +225,7 @@ queryNode:
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
+    cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency 
     knowhereThreadPoolNumRatio: 4
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
