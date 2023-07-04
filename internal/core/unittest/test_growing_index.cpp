@@ -42,6 +42,7 @@ TEST(GrowingIndex, Correctness) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
     auto segment = CreateGrowingSegment(schema, metaPtr);
+    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
     // std::string dsl = R"({
     //     "bool": {
@@ -86,6 +87,17 @@ TEST(GrowingIndex, Correctness) {
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
+        auto filed_data = segmentImplPtr->get_insert_record()
+                              .get_field_data<milvus::FloatVector>(vec);
+
+        auto inserted = (i + 1) * per_batch;
+        //once index built, chunk data will be removed
+        if (i < 2) {
+            EXPECT_EQ(filed_data->num_chunk(),
+                      upper_div(inserted, filed_data->get_size_per_chunk()));
+        } else {
+            EXPECT_EQ(filed_data->num_chunk(), 0);
+        }
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
             *schema, plan_str.data(), plan_str.size());
@@ -102,16 +114,37 @@ TEST(GrowingIndex, Correctness) {
     }
 }
 
-TEST(GrowingIndex, GetVector) {
+using Param = const char*;
+
+class GrowingIndexGetVectorTest : public ::testing::TestWithParam<Param> {
+    void
+    SetUp() override {
+        auto param = GetParam();
+        metricType = param;
+    }
+
+ protected:
+    const char* metricType;
+};
+
+INSTANTIATE_TEST_CASE_P(IndexTypeParameters,
+                        GrowingIndexGetVectorTest,
+                        ::testing::Values(knowhere::metric::L2,
+                                          knowhere::metric::COSINE,
+                                          knowhere::metric::IP));
+
+TEST_P(GrowingIndexGetVectorTest, GetVector) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+        "embeddings", DataType::VECTOR_FLOAT, 128, metricType);
     schema->set_primary_field_id(pk);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
+        {"index_type", "IVF_FLAT"},
+        {"metric_type", metricType},
+        {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));

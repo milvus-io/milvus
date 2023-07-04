@@ -231,7 +231,7 @@ queryNode:
     # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
     growing: # growing a vector index for growing segment to accelerate search
-      enableIndex: false
+      enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
   loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments

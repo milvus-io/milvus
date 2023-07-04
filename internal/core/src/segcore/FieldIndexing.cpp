@@ -28,7 +28,10 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       config_(std::make_unique<VecIndexConfig>(
           segment_max_row_count, field_index_meta, segcore_config)),
+      build(false),
       sync_with_index(false) {
+    index_ = std::make_unique<index::VectorMemIndex>(config_->GetIndexType(),
+                                                     config_->GetMetricType());
 }
 
 void
@@ -87,7 +90,7 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
     auto per_chunk = source->get_size_per_chunk();
     //append vector [vector_id_beg, vector_id_end] into index
     //build index [vector_id_beg, build_threshold) when index not exist
-    if (!index_.get()) {
+    if (!build) {
         idx_t vector_id_beg = index_cur_.load();
         idx_t vector_id_end = get_build_threshold() - 1;
         auto chunk_id_beg = vector_id_beg / per_chunk;
@@ -122,13 +125,17 @@ VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset,
         }
         auto dataset = knowhere::GenDataSet(vec_num, dim, data_addr);
         dataset->SetIsOwner(false);
-        auto indexing = std::make_unique<index::VectorMemIndex>(
-            config_->GetIndexType(), config_->GetMetricType());
-        indexing->BuildWithDataset(dataset, conf);
+        try {
+            index_->BuildWithDataset(dataset, conf);
+        } catch (SegcoreError& error) {
+            LOG_SEGCORE_ERROR_ << " growing index build error : "
+                               << error.what();
+            return;
+        }
         index_cur_.fetch_add(vec_num);
-        index_ = std::move(indexing);
+        build = true;
     }
-    //append rest data when index exist
+    //append rest data when index has built
     idx_t vector_id_beg = index_cur_.load();
     idx_t vector_id_end = reserved_offset + size - 1;
     auto chunk_id_beg = vector_id_beg / per_chunk;
@@ -186,6 +193,11 @@ VectorFieldIndexing::get_index_cursor() {
 bool
 VectorFieldIndexing::sync_data_with_index() const {
     return sync_with_index.load();
+}
+
+bool
+VectorFieldIndexing::has_raw_data() const {
+    return index_->HasRawData();
 }
 
 template <typename T>

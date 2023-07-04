@@ -54,6 +54,21 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
 }
 
 void
+SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
+    //remove the chunk data to reduce memory consumption
+    if (indexing_record_.SyncDataWithIndex(fieldId)) {
+        auto vec_data_base =
+            dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
+                insert_record_.get_field_data_base(fieldId));
+        if (vec_data_base && vec_data_base->num_chunk() > 0 &&
+            chunk_mutex_.try_lock()) {
+            vec_data_base->clear();
+            chunk_mutex_.unlock();
+        }
+    }
+}
+
+void
 SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            int64_t size,
                            const int64_t* row_ids,
@@ -89,6 +104,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_data->fields_data(data_offset),
                 field_meta);
         }
+        //insert vector data into index
         if (segcore_config_.get_enable_growing_segment_index()) {
             indexing_record_.AppendingIndex(
                 reserved_offset,
@@ -97,6 +113,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_data->fields_data(data_offset),
                 insert_record_);
         }
+        try_remove_chunks(field_id);
     }
 
     // step 4: set pks to offset
@@ -174,6 +191,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                 offset += row_count;
             }
         }
+        try_remove_chunks(field_id);
 
         if (field_id == primary_field_id) {
             insert_record_.insert_pks(field_datas);
@@ -392,10 +410,7 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
     auto& vec = *vec_ptr;
     std::vector<uint8_t> empty(element_sizeof, 0);
 
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
-        indexing_record_.GetDataFromIndex(
-            field_id, seg_offsets, count, element_sizeof, output_raw);
-    } else {
+    auto copy_from_chunk = [&]() {
         auto output_base = reinterpret_cast<char*>(output_raw);
         for (int i = 0; i < count; ++i) {
             auto dst = output_base + i * element_sizeof;
@@ -406,7 +421,20 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
                      : (const uint8_t*)vec.get_element(offset));
             memcpy(dst, src, element_sizeof);
         }
+    };
+    //HasRawData interface guarantees that data can be fetched from growing segment
+    if (HasRawData(field_id.get())) {
+        //When data sync with index
+        if (indexing_record_.SyncDataWithIndex(field_id)) {
+            indexing_record_.GetDataFromIndex(
+                field_id, seg_offsets, count, element_sizeof, output_raw);
+        } else {
+            //Else copy from chunk
+            std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
+            copy_from_chunk();
+        }
     }
+    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 }
 
 template <typename S, typename T>
