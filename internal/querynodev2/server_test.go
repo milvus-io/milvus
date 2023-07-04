@@ -161,7 +161,6 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	mockHook := &MockQueryHook{}
 	suite.node.queryHook = mockHook
 	suite.node.handleQueryHookEvent()
-	defer func() { suite.node.queryHook = nil }()
 
 	yamlWriter := viper.New()
 	yamlWriter.SetConfigFile("../../configs/milvus.yaml")
