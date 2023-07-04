@@ -1441,6 +1441,7 @@ type dataCoordConfig struct {
 	DiskSegmentMaxSize             float64
 	SegmentSealProportion          float64
 	SegAssignmentExpiration        int64
+	AllocLatestExpireAttempt       uint
 	SegmentMaxLifetime             time.Duration
 	SegmentMaxIdleTime             time.Duration
 	SegmentMinSizeFromIdleToSealed float64
@@ -1486,6 +1487,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initDiskSegmentMaxSize()
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
+	p.initAllocLatestExpireAttempt()
 	p.initSegmentMaxLifetime()
 	p.initSegmentMaxIdleTime()
 	p.initSegmentMinSizeFromIdleToSealed()
@@ -1539,6 +1541,10 @@ func (p *dataCoordConfig) initSegmentSealProportion() {
 
 func (p *dataCoordConfig) initSegAssignmentExpiration() {
 	p.SegAssignmentExpiration = p.Base.ParseInt64WithDefault("dataCoord.segment.assignmentExpiration", 2000)
+}
+
+func (p *dataCoordConfig) initAllocLatestExpireAttempt() {
+	p.AllocLatestExpireAttempt = (uint)(p.Base.ParseIntWithDefault("dataCoord.segment.allocLatestExpireAttempt", 200))
 }
 
 func (p *dataCoordConfig) initSegmentMaxLifetime() {
