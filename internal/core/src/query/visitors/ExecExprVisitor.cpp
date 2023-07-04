@@ -589,7 +589,10 @@ auto
 ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
     BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
     // see also: https://github.com/milvus-io/milvus/issues/23646.
-    typedef std::conditional_t<std::is_integral_v<T>, int64_t, T>
+    typedef std::conditional_t<std::is_integral_v<T> &&
+                                   !std::is_same_v<bool, T>,
+                               int64_t,
+                               T>
         HighPrecisionType;
 
     auto& expr =
@@ -940,22 +943,22 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    auto& expr = static_cast<BinaryRangeExprImpl<IndexInnerType>&>(expr_raw);
-
-    bool lower_inclusive = expr.lower_inclusive_;
-    bool upper_inclusive = expr.upper_inclusive_;
 
     // see also: https://github.com/milvus-io/milvus/issues/23646.
-    typedef std::conditional_t<std::is_integral_v<IndexInnerType>,
+    typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
+                                   !std::is_same_v<bool, T>,
                                int64_t,
                                IndexInnerType>
         HighPrecisionType;
+    auto& expr = static_cast<BinaryRangeExprImpl<HighPrecisionType>&>(expr_raw);
 
+    bool lower_inclusive = expr.lower_inclusive_;
+    bool upper_inclusive = expr.upper_inclusive_;
     auto val1 = static_cast<HighPrecisionType>(expr.lower_value_);
     auto val2 = static_cast<HighPrecisionType>(expr.upper_value_);
 
     auto index_func = [&](Index* index) {
-        if constexpr (std::is_integral_v<T>) {
+        if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
             if (gt_ub<T>(val1)) {
                 return TargetBitmap(index->Size(), false);
             } else if (lt_lb<T>(val1)) {
