@@ -663,7 +663,7 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 			FieldsData: fieldData,
 		}
 		err = segment.fillIndexedFieldsData(ctx, defaultCollectionID, vecCM, result)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }
 
@@ -1048,5 +1048,43 @@ func TestDeleteBuff(t *testing.T) {
 		assert.NoError(t, err)
 		deletedCount = seg.getDeletedCount()
 		assert.EqualValues(t, 2, deletedCount)
+	})
+}
+
+func TestHasRawData(t *testing.T) {
+	t.Run("growing", func(t *testing.T) {
+		schema := genTestCollectionSchema()
+		collection := newCollection(defaultCollectionID, schema)
+		segment, err := newSegment(collection,
+			defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultDMLChannel,
+			segmentTypeGrowing,
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+		)
+		assert.Nil(t, err)
+
+		has := segment.hasRawData(simpleFloatVecField.id)
+		assert.True(t, has)
+	})
+
+	t.Run("sealed", func(t *testing.T) {
+		schema := genTestCollectionSchema()
+		collection := newCollection(defaultCollectionID, schema)
+		segment, err := newSegment(collection,
+			defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultDMLChannel,
+			segmentTypeSealed,
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+		)
+		assert.Nil(t, err)
+
+		has := segment.hasRawData(simpleFloatVecField.id)
+		assert.True(t, has)
 	})
 }

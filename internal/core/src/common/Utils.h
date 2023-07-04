@@ -75,6 +75,16 @@ PrefixMatch(const std::string_view str, const std::string_view prefix) {
     return true;
 }
 
+inline DatasetPtr
+GenIdsDataset(const int64_t count, const int64_t* ids) {
+    auto ret_ds = std::make_shared<knowhere::Dataset>();
+    knowhere::SetDatasetRows(ret_ds, count);
+    knowhere::SetDatasetDim(ret_ds, 1);
+    // INPUT_IDS will not be free in dataset destructor, which is similar to `SetIsOwner(false)`.
+    knowhere::SetDatasetInputIDs(ret_ds, ids);
+    return ret_ds;
+}
+
 inline bool
 PostfixMatch(const std::string_view str, const std::string_view postfix) {
     if (postfix.length() > str.length()) {

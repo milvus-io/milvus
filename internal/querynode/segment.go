@@ -214,6 +214,16 @@ func (s *Segment) setUnhealthy() {
 	s.destroyed.Store(true)
 }
 
+func (s *Segment) hasRawData(fieldID int64) bool {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+	if !s.healthy() {
+		return false
+	}
+	ret := C.HasRawData(s.segmentPtr, C.int64_t(fieldID))
+	return bool(ret)
+}
+
 func newSegment(collection *Collection,
 	segmentID UniqueID,
 	partitionID UniqueID,
@@ -614,10 +624,18 @@ func (s *Segment) fillIndexedFieldsData(ctx context.Context, collectionID Unique
 	vcm storage.ChunkManager, result *segcorepb.RetrieveResults) error {
 
 	for _, fieldData := range result.FieldsData {
-		// If the vector field doesn't have indexed. Vector data is in memory for
-		// brute force search. No need to download data from remote.
-		if fieldData.GetType() != schemapb.DataType_FloatVector && fieldData.GetType() != schemapb.DataType_BinaryVector ||
-			!s.hasLoadIndexForIndexedField(fieldData.FieldId) {
+		// If the field is not vector field, no need to download data from remote.
+		if !typeutil.IsVectorType(fieldData.GetType()) {
+			continue
+		}
+		// If the vector field doesn't have indexed, vector data is in memory
+		// for brute force search, no need to download data from remote.
+		if !s.hasLoadIndexForIndexedField(fieldData.FieldId) {
+			continue
+		}
+		// If the index has raw data, vector data could be obtained from index,
+		// no need to download data from remote.
+		if s.hasRawData(fieldData.FieldId) {
 			continue
 		}
 

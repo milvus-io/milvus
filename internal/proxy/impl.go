@@ -3019,9 +3019,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			ReqID: Params.ProxyCfg.GetNodeID(),
 		},
 		request:  request,
-		qc:       node.queryCoord,
 		tr:       timerecord.NewTimeRecorder("search"),
 		shardMgr: node.shardMgr,
+		qc:       node.queryCoord,
+		node:     node,
 	}
 
 	travelTs := request.TravelTimestamp
