@@ -56,7 +56,7 @@ func (suite *PlanSuite) TearDownTest() {
 func (suite *PlanSuite) TestPlanDSL() {
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
-	plan, err := createSearchPlan(suite.collection, dslString)
+	plan, err := createSearchPlan(suite.collection, dslString, "")
 	defer plan.delete()
 	suite.NoError(err)
 	suite.NotEqual(plan, nil)
@@ -73,7 +73,7 @@ func (suite *PlanSuite) TestPlanCreateByExpr() {
 	expr, err := proto.Marshal(planNode)
 	suite.NoError(err)
 
-	_, err = createSearchPlanByExpr(suite.collection, expr)
+	_, err = createSearchPlanByExpr(suite.collection, expr, "")
 	suite.Error(err)
 }
 
@@ -82,16 +82,16 @@ func (suite *PlanSuite) TestPlanFail() {
 		id: -1,
 	}
 
-	_, err := createSearchPlan(collection, "")
+	_, err := createSearchPlan(collection, "", "")
 	suite.Error(err)
 
-	_, err = createSearchPlanByExpr(collection, nil)
+	_, err = createSearchPlanByExpr(collection, nil, "")
 	suite.Error(err)
 }
 
 func (suite *PlanSuite) TestPlanPlaceholderGroup() {
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
-	plan, err := createSearchPlan(suite.collection, dslString)
+	plan, err := createSearchPlan(suite.collection, dslString, "")
 	suite.NoError(err)
 	suite.NotNil(plan)
 

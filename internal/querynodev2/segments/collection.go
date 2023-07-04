@@ -28,14 +28,14 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -71,7 +71,7 @@ func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionS
 	}
 
 	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
-	collection.metricType = loadMeta.GetMetricType()
+	collection.metricType.Store(loadMeta.GetMetricType())
 	collection.AddPartition(loadMeta.GetPartitionIDs()...)
 	m.collections[collectionID] = collection
 }
@@ -83,7 +83,7 @@ type Collection struct {
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
-	metricType    string
+	metricType    atomic.String
 	schema        *schemapb.CollectionSchema
 }
 
@@ -125,8 +125,12 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
 }
 
+func (c *Collection) SetMetricType(metricType string) {
+	c.metricType.Store(metricType)
+}
+
 func (c *Collection) GetMetricType() string {
-	return c.metricType
+	return c.metricType.Load()
 }
 
 // newCollection returns a new Collection

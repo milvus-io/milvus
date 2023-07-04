@@ -255,6 +255,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}, req.GetLoadMeta())
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
 		node.clusterManager, node.manager, node.tSafeManager, node.loader, node.factory, channel.GetSeekPosition().GetTimestamp())
 	if err != nil {
@@ -432,11 +434,6 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	// check metric type
-	if metricType == "" {
-		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
-		return merr.Status(err), nil
-	}
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
@@ -501,11 +498,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
-	}
-	// check metric type
-	if req.GetLoadMeta().GetMetricType() == "" {
-		err := fmt.Errorf("empty metric type, collection = %d", req.GetCollectionID())
-		return merr.Status(err), nil
 	}
 
 	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
