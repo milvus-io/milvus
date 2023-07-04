@@ -32,26 +32,19 @@ const auto schema = []() {
 }();
 
 const auto plan = [] {
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": -1
-                    }
-                }
-            }
-            ]
-        }
-    })";
-    auto plan = CreatePlan(*schema, dsl);
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: -1
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     return plan;
 }();
 auto ph_group = [] {

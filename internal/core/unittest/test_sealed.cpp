@@ -37,25 +37,17 @@ TEST(Sealed, without_predicate) {
     auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
 
     auto N = ROW_COUNT;
 
@@ -73,7 +65,9 @@ TEST(Sealed, without_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -149,33 +143,59 @@ TEST(Sealed, with_predicate) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "counter": {
-                        "GE": 4200,
-                        "LT": 4205
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 6
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "counter": {
+    //                     "GE": 4200,
+    //                     "LT": 4205
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 6
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                  binary_range_expr: <
+                                    column_info: <
+                                      field_id: 101
+                                      data_type: Int64
+                                    >
+                                    lower_inclusive: true,
+                                    upper_inclusive: false,
+                                    lower_value: <
+                                      int64_val: 4200
+                                    >
+                                    upper_value: <
+                                      int64_val: 4205
+                                    >
+                                  >
+                                >
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: 6
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+     >)";
 
     auto N = ROW_COUNT;
 
@@ -190,7 +210,9 @@ TEST(Sealed, with_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -262,40 +284,68 @@ TEST(Sealed, with_predicate_filter_all) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "counter": {
-                        "GE": 4200,
-                        "LT": 4199
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                       "round_decimal": 6
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "counter": {
+    //                     "GE": 4200,
+    //                     "LT": 4199
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                    "round_decimal": 6
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                  binary_range_expr: <
+                                    column_info: <
+                                      field_id: 101
+                                      data_type: Int64
+                                    >
+                                    lower_inclusive: true,
+                                    upper_inclusive: false,
+                                    lower_value: <
+                                      int64_val: 4200
+                                    >
+                                    upper_value: <
+                                      int64_val: 4199
+                                    >
+                                  >
+                                >
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: 6
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+     >)";
 
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -395,36 +445,64 @@ TEST(Sealed, LoadFieldData) {
     auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "double": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
 
     Timestamp time = 1000000;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -492,36 +570,64 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "double": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            } 
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
 
     Timestamp time = 1000000;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -583,36 +689,64 @@ TEST(Sealed, LoadScalarIndex) {
     auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "double": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
 
     Timestamp time = 1000000;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -697,36 +831,64 @@ TEST(Sealed, Delete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "double": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
 
     Timestamp time = 1000000;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -781,36 +943,64 @@ TEST(Sealed, OverlapDelete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "double": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "double": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 102
+                                          data_type: Double
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
 
     Timestamp time = 1000000;
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =

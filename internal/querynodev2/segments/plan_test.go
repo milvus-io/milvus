@@ -17,17 +17,14 @@
 package segments
 
 import (
-	"math"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type PlanSuite struct {
@@ -53,19 +50,6 @@ func (suite *PlanSuite) TearDownTest() {
 	DeleteCollection(suite.collection)
 }
 
-func (suite *PlanSuite) TestPlanDSL() {
-	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
-
-	plan, err := createSearchPlan(suite.collection, dslString, "")
-	defer plan.delete()
-	suite.NoError(err)
-	suite.NotEqual(plan, nil)
-	topk := plan.getTopK()
-	suite.Equal(int(topk), 10)
-	metricType := plan.getMetricType()
-	suite.Equal(metricType, "L2")
-}
-
 func (suite *PlanSuite) TestPlanCreateByExpr() {
 	planNode := &planpb.PlanNode{
 		OutputFieldIds: []int64{rowIDFieldID},
@@ -82,70 +66,8 @@ func (suite *PlanSuite) TestPlanFail() {
 		id: -1,
 	}
 
-	_, err := createSearchPlan(collection, "", "")
+	_, err := createSearchPlanByExpr(collection, nil, "")
 	suite.Error(err)
-
-	_, err = createSearchPlanByExpr(collection, nil, "")
-	suite.Error(err)
-}
-
-func (suite *PlanSuite) TestPlanPlaceholderGroup() {
-	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
-	plan, err := createSearchPlan(suite.collection, dslString, "")
-	suite.NoError(err)
-	suite.NotNil(plan)
-
-	var searchRawData1 []byte
-	var searchRawData2 []byte
-	var vec = generateFloatVectors(1, defaultDim)
-	for i, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
-		searchRawData1 = append(searchRawData1, buf...)
-	}
-	for i, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
-		searchRawData2 = append(searchRawData2, buf...)
-	}
-	placeholderValue := commonpb.PlaceholderValue{
-		Tag:    "$0",
-		Type:   commonpb.PlaceholderType_FloatVector,
-		Values: [][]byte{searchRawData1, searchRawData2},
-	}
-
-	placeholderGroup := commonpb.PlaceholderGroup{
-		Placeholders: []*commonpb.PlaceholderValue{&placeholderValue},
-	}
-
-	placeGroupByte, err := proto.Marshal(&placeholderGroup)
-	suite.Nil(err)
-	holder, err := parseSearchRequest(plan, placeGroupByte)
-	suite.NoError(err)
-	suite.NotNil(holder)
-	numQueries := holder.getNumOfQuery()
-	suite.Equal(int(numQueries), 2)
-
-	holder.Delete()
-}
-
-func (suite *PlanSuite) TestPlanNewSearchRequest() {
-	nq := int64(10)
-
-	iReq, _ := genSearchRequest(nq, IndexHNSW, suite.collection)
-	req := &querypb.SearchRequest{
-		Req:             iReq,
-		DmlChannels:     []string{"dml"},
-		SegmentIDs:      []int64{suite.segmentID},
-		FromShardLeader: true,
-		Scope:           querypb.DataScope_Historical,
-	}
-	searchReq, err := NewSearchRequest(suite.collection, req, req.Req.GetPlaceholderGroup())
-	suite.NoError(err)
-
-	suite.EqualValues(nq, searchReq.getNumOfQuery())
-
-	searchReq.Delete()
 }
 
 func TestPlan(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -145,9 +146,21 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
-
-	plan, err := createSearchPlan(suite.collection, dslString, "")
+	planStr := `vector_anns: <
+                 field_id: 107
+                 query_info: <
+                   topk: 10
+                   round_decimal: 6
+                   metric_type: "L2"
+                   search_params: "{\"nprobe\": 10}"
+                 >
+                 placeholder_tag: "$0"
+               >`
+	var planpb planpb.PlanNode
+	proto.UnmarshalText(planStr, &planpb)
+	serializedPlan, err := proto.Marshal(&planpb)
+	suite.NoError(err)
+	plan, err := createSearchPlanByExpr(suite.collection, serializedPlan, "")
 	suite.NoError(err)
 	searchReq, err := parseSearchRequest(plan, placeGroupByte)
 	searchReq.timestamp = 0

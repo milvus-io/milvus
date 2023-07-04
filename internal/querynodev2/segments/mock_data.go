@@ -955,18 +955,24 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 	if err != nil {
 		return nil, err
 	}
-	simpleDSL, err2 := genDSLByIndexType(collection.Schema(), indexType)
+	planStr, err2 := genDSLByIndexType(collection.Schema(), indexType)
 	if err2 != nil {
 		return nil, err2
 	}
+	var planpb planpb.PlanNode
+	proto.UnmarshalText(planStr, &planpb)
+	serializedPlan, err3 := proto.Marshal(&planpb)
+	if err3 != nil {
+		return nil, err3
+	}
 	return &internalpb.SearchRequest{
-		Base:             genCommonMsgBase(commonpb.MsgType_Search, 0),
-		CollectionID:     collection.ID(),
-		PartitionIDs:     collection.GetPartitions(),
-		Dsl:              simpleDSL,
-		PlaceholderGroup: placeHolder,
-		DslType:          commonpb.DslType_Dsl,
-		Nq:               nq,
+		Base:               genCommonMsgBase(commonpb.MsgType_Search, 0),
+		CollectionID:       collection.ID(),
+		PartitionIDs:       collection.GetPartitions(),
+		PlaceholderGroup:   placeHolder,
+		SerializedExprPlan: serializedPlan,
+		DslType:            commonpb.DslType_BoolExprV1,
+		Nq:                 nq,
 	}, nil
 }
 
@@ -1012,12 +1018,6 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 func genDSLByIndexType(schema *schemapb.CollectionSchema, indexType string) (string, error) {
 	if indexType == IndexFaissIDMap { // float vector
 		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
-	} else if indexType == IndexFaissBinIDMap {
-		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
-	} else if indexType == IndexFaissIVFFlat {
-		return genIVFFlatDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
-	} else if indexType == IndexFaissBinIVFFlat { // binary vector
-		return genIVFFlatDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
 	} else if indexType == IndexHNSW {
 		return genHNSWDSL(schema, ef, defaultTopK, defaultRoundDecimal)
 	}
@@ -1030,9 +1030,11 @@ func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecima
 	topKStr := strconv.FormatInt(topK, 10)
 	nProbStr := strconv.Itoa(defaultNProb)
 	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
+	var fieldID int64
 	for _, f := range schema.Fields {
 		if f.DataType == schemapb.DataType_FloatVector {
 			vecFieldName = f.Name
+			fieldID = f.FieldID
 			for _, p := range f.IndexParams {
 				if p.Key == metricTypeKey {
 					metricType = p.Value
@@ -1044,39 +1046,16 @@ func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecima
 		err := errors.New("invalid vector field name or metric type")
 		return "", err
 	}
-	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
-		"\": {\n \"metric_type\": \"" + metricType +
-		"\", \n \"params\": {\n \"nprobe\": " + nProbStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
-		" \n,\"round_decimal\": " + roundDecimalStr +
-		"\n } \n } \n } \n }", nil
-}
-
-func genIVFFlatDSL(schema *schemapb.CollectionSchema, nProb int, topK int64, roundDecimal int64) (string, error) {
-	var vecFieldName string
-	var metricType string
-	nProbStr := strconv.Itoa(nProb)
-	topKStr := strconv.FormatInt(topK, 10)
-	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
-	for _, f := range schema.Fields {
-		if f.DataType == schemapb.DataType_FloatVector {
-			vecFieldName = f.Name
-			for _, p := range f.IndexParams {
-				if p.Key == metricTypeKey {
-					metricType = p.Value
-				}
-			}
-		}
-	}
-	if vecFieldName == "" || metricType == "" {
-		err := errors.New("invalid vector field name or metric type")
-		return "", err
-	}
-
-	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
-		"\": {\n \"metric_type\": \"" + metricType +
-		"\", \n \"params\": {\n \"nprobe\": " + nProbStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
-		" \n,\"round_decimal\": " + roundDecimalStr +
-		"\n } \n } \n } \n }", nil
+	return `vector_anns: <
+              field_id: ` + fmt.Sprintf("%d", fieldID) + `
+              query_info: <
+                topk: ` + topKStr + `
+                round_decimal: ` + roundDecimalStr + `
+                metric_type: "` + metricType + `"
+                search_params: "{\"nprobe\": ` + nProbStr + `}"
+              >
+              placeholder_tag: "$0"
+            >`, nil
 }
 
 func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDecimal int64) (string, error) {
@@ -1085,9 +1064,11 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
 	efStr := strconv.Itoa(ef)
 	topKStr := strconv.FormatInt(topK, 10)
 	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
+	var fieldID int64
 	for _, f := range schema.Fields {
 		if f.DataType == schemapb.DataType_FloatVector {
 			vecFieldName = f.Name
+			fieldID = f.FieldID
 			for _, p := range f.IndexParams {
 				if p.Key == metricTypeKey {
 					metricType = p.Value
@@ -1099,11 +1080,16 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
 		err := errors.New("invalid vector field name or metric type")
 		return "", err
 	}
-	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
-		"\": {\n \"metric_type\": \"" + metricType +
-		"\", \n \"params\": {\n \"ef\": " + efStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
-		" \n,\"round_decimal\": " + roundDecimalStr +
-		"\n } \n } \n } \n }", nil
+	return `vector_anns: <
+              field_id: ` + fmt.Sprintf("%d", fieldID) + `
+              query_info: <
+                topk: ` + topKStr + `
+                round_decimal: ` + roundDecimalStr + `
+                metric_type: "` + metricType + `"
+                search_params: "{\"ef\": ` + efStr + `}"
+              >
+              placeholder_tag: "$0"
+            >`, nil
 }
 
 func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) error {
