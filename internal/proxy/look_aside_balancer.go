@@ -102,7 +102,7 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 		}
 
 		score := b.calculateScore(cost, executingNQ.Load())
-		metrics.ProxyWorkLoadScore.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(score)
+		metrics.ProxyWorkLoadScore.WithLabelValues(strconv.FormatInt(node, 10)).Set(score)
 
 		if targetNode == -1 || score < targetScore {
 			targetScore = score

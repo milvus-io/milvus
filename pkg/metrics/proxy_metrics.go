@@ -249,14 +249,15 @@ var (
 		}, []string{usernameLabelName})
 
 	// ProxyWorkLoadScore record the score that measured query node's workload.
-	ProxyWorkLoadScore = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	ProxyWorkLoadScore = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "workload_score",
 			Help:      "score that measured query node's workload",
-			Buckets:   buckets,
-		}, []string{nodeIDLabelName})
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 // RegisterProxy registers Proxy metrics
