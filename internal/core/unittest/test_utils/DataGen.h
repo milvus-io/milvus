@@ -623,8 +623,8 @@ GenHNSWIndex(int64_t N, int64_t dim, const float* vec) {
                                  {knowhere::indexparam::M, "16"},
                                  {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataset(N, dim, vec);
-    auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_HNSW,
-                                                              knowhere::metric::L2, IndexMode::MODE_CPU);
+    auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2,
+                                                            IndexMode::MODE_CPU);
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }
