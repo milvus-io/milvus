@@ -530,6 +530,11 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 			ChannelName:         "channel-1",
 			UnflushedSegmentIds: []int64{22, 33},
 		},
+		{
+			CollectionID:        collectionID,
+			ChannelName:         "channel-2",
+			UnflushedSegmentIds: []int64{44},
+		},
 	}
 
 	nextTargetSegments := []*datapb.SegmentInfo{
@@ -538,6 +543,11 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 			PartitionID:   1,
 			InsertChannel: "channel-1",
 		},
+		{
+			ID:            12,
+			PartitionID:   1,
+			InsertChannel: "channel-2",
+		},
 	}
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
@@ -545,7 +555,7 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 	suite.observer.target.UpdateCollectionCurrentTarget(collectionID)
 	TargetVersion := suite.observer.target.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
 
-	view := utils.CreateTestLeaderView(1, collectionID, "test-channel", nil, nil)
+	view := utils.CreateTestLeaderView(1, collectionID, "channel-1", nil, nil)
 	view.TargetVersion = TargetVersion
 	action := observer.checkNeedUpdateTargetVersion(view)
 	suite.Nil(action)

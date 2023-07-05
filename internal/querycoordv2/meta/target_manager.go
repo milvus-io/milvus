@@ -385,6 +385,29 @@ func (mgr *TargetManager) GetStreamingSegmentsByCollection(collectionID int64,
 	return segments
 }
 
+func (mgr *TargetManager) GetStreamingSegmentsByChannel(collectionID int64,
+	channelName string,
+	scope TargetScope) typeutil.UniqueSet {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+
+	segments := typeutil.NewUniqueSet()
+	for _, channel := range collectionTarget.GetAllDmChannels() {
+		if channel.ChannelName == channelName {
+			segments.Insert(channel.GetUnflushedSegmentIds()...)
+		}
+	}
+
+	return segments
+}
+
 func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
 	scope TargetScope) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()
@@ -397,6 +420,29 @@ func (mgr *TargetManager) GetHistoricalSegmentsByCollection(collectionID int64,
 		return nil
 	}
 	return collectionTarget.GetAllSegments()
+}
+
+func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
+	channelName string,
+	scope TargetScope) map[int64]*datapb.SegmentInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+
+	ret := make(map[int64]*datapb.SegmentInfo)
+	for k, v := range collectionTarget.GetAllSegments() {
+		if v.GetInsertChannel() == channelName {
+			ret[k] = v
+		}
+	}
+
+	return ret
 }
 
 func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
