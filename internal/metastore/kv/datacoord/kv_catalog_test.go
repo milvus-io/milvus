@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -374,7 +375,12 @@ func Test_AlterSegments(t *testing.T) {
 
 		catalog := NewCatalog(txn, rootPath, "")
 		assert.Panics(t, func() {
-			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment})
+			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
+				Segment:    invalidSegment,
+				Insertlogs: invalidSegment.Binlogs,
+				Statslogs:  invalidSegment.Statslogs,
+				Deltalogs:  invalidSegment.Deltalogs,
+			})
 		})
 	})
 
@@ -402,7 +408,12 @@ func Test_AlterSegments(t *testing.T) {
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 
-		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1})
+		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1}, metastore.BinlogsIncrement{
+			Segment:    segment1,
+			Insertlogs: segment1.Binlogs,
+			Statslogs:  segment1.Statslogs,
+			Deltalogs:  segment1.Deltalogs,
+		})
 		assert.NoError(t, err)
 
 		_, ok := savedKvs[k4]
@@ -459,7 +470,13 @@ func Test_AlterSegments(t *testing.T) {
 			Statslogs:    statslogs,
 		}
 
-		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL})
+		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL},
+			metastore.BinlogsIncrement{
+				Segment:    segmentXL,
+				Insertlogs: segmentXL.Binlogs,
+				Statslogs:  segmentXL.Statslogs,
+				Deltalogs:  segmentXL.Deltalogs,
+			})
 		assert.NoError(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
 		assert.Equal(t, 3, opGroupCount)

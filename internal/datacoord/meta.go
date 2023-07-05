@@ -593,7 +593,13 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	for _, seg := range modSegments {
 		segments = append(segments, seg.SegmentInfo)
 	}
-	if err := m.catalog.AlterSegments(m.ctx, segments); err != nil {
+	if err := m.catalog.AlterSegments(m.ctx, segments,
+		metastore.BinlogsIncrement{
+			Segment:    clonedSegment.SegmentInfo,
+			Insertlogs: binlogs,
+			Statslogs:  statslogs,
+			Deltalogs:  deltalogs,
+		}); err != nil {
 		log.Error("meta update: update flush segments info - failed to store flush segment info into Etcd",
 			zap.Error(err))
 		return err
