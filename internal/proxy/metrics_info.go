@@ -49,6 +49,7 @@ func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
 		})
 	}
 	getRateMetric(internalpb.RateType_DMLInsert.String())
+	getRateMetric(internalpb.RateType_DMLUpsert.String())
 	getRateMetric(internalpb.RateType_DMLDelete.String())
 	getRateMetric(internalpb.RateType_DQLSearch.String())
 	getRateMetric(internalpb.RateType_DQLQuery.String())
