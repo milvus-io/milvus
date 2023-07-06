@@ -108,7 +108,7 @@ type Session struct {
 	registered           atomic.Value
 	disconnected         atomic.Value
 	retryKeepAlive       atomic.Value
-	enableRetryKeepAlive bool
+	enableRetryKeepAlive atomic.Value
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -206,11 +206,11 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		Version:  common.Version,
 
 		// options
-		sessionTTL:           paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
-		sessionRetryTimes:    paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
-		reuseNodeID:          true,
-		enableRetryKeepAlive: true,
+		sessionTTL:        paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
+		sessionRetryTimes: paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
+		reuseNodeID:       true,
 	}
+	session.SetEnableRetryKeepAlive(true)
 
 	// integration test create cluster with different nodeId in one process
 	if paramtable.Get().IntegrationTestCfg.IntegrationMode.GetAsBool() {
@@ -464,7 +464,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					if !s.enableRetryKeepAlive {
+					if !s.enableRetryKeepAlive.Load().(bool) {
 						s.safeCloseLiveCh()
 						return
 					}
@@ -784,7 +784,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				return
 			case <-ctx.Done():
 				log.Debug("liveness exits due to context done")
-				s.enableRetryKeepAlive = false
+				s.SetEnableRetryKeepAlive(false)
 				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
@@ -900,7 +900,7 @@ func (s *Session) updateStandby(b bool) {
 }
 
 func (s *Session) SetEnableRetryKeepAlive(enable bool) {
-	s.enableRetryKeepAlive = enable
+	s.enableRetryKeepAlive.Store(enable)
 }
 
 func (s *Session) isRetryingKeepAlive() bool {
