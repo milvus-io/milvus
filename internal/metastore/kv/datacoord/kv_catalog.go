@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -253,50 +254,85 @@ func (kc *Catalog) LoadFromSegmentPath(colID, partID, segID typeutil.UniqueID) (
 	return segInfo, nil
 }
 
-func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo) error {
+func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
 	if len(newSegments) == 0 {
 		return nil
 	}
-	kvsBySeg := make(map[int64]map[string]string)
+	kvs := make(map[string]string)
 	for _, segment := range newSegments {
 		kc.collectMetrics(segment)
-		segmentKvs, err := buildSegmentAndBinlogsKvs(segment)
+
+		// we don't persist binlog fields, but instead store binlogs as independent kvs
+		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
+		resetBinlogFields(cloned)
+
+		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
+		if cloned.GetNumOfRows() != rowCount {
+			cloned.NumOfRows = rowCount
+		}
+
+		k, v, err := buildSegmentKv(cloned)
 		if err != nil {
 			return err
 		}
-		kvsBySeg[segment.GetID()] = make(map[string]string)
-		maps.Copy(kvsBySeg[segment.GetID()], segmentKvs)
+		kvs[k] = v
 	}
-	// Split kvs into multiple operations to avoid over-sized operations.
-	// Also make sure kvs of the same segment are not split into different operations.
-	kvsPiece := make(map[string]string)
-	currSize := 0
+
+	for _, b := range binlogs {
+		segment := b.Segment
+		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(),
+			segment.GetID(), cloneLogs(b.Insertlogs), cloneLogs(b.Deltalogs), cloneLogs(b.Statslogs), len(segment.GetCompactionFrom()) > 0)
+		if err != nil {
+			return err
+		}
+		maps.Copy(kvs, binlogKvs)
+	}
+
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	for _, kvs := range kvsBySeg {
-		if currSize+len(kvs) >= maxEtcdTxnNum {
-			if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
-				log.Error("failed to save by batch", zap.Error(err))
-				return err
-			}
-			kvsPiece = make(map[string]string)
-			currSize = 0
-		}
-		maps.Copy(kvsPiece, kvs)
-		currSize += len(kvs)
-		if len(kvs) >= maxEtcdTxnNum {
-			log.Warn("a single segment's Etcd save has over maxEtcdTxnNum operations." +
-				" Please double check your <proxy.maxFieldNum> config")
-		}
-	}
-	if currSize > 0 {
-		if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
+	if len(kvs) <= maxEtcdTxnNum {
+		if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
 			log.Error("failed to save by batch", zap.Error(err))
 			return err
 		}
+	} else {
+		// Split kvs into multiple operations to avoid over-sized operations.
+		// Also make sure kvs of the same segment are not split into different operations.
+		batch := make(map[string]string)
+		for k, v := range kvs {
+			if len(batch) == maxEtcdTxnNum {
+				if err := etcd.SaveByBatch(batch, saveFn); err != nil {
+					log.Error("failed to save by batch", zap.Error(err))
+					return err
+				}
+				maps.Clear(batch)
+			}
+			batch[k] = v
+		}
+
+		if len(batch) > 0 {
+			if err := etcd.SaveByBatch(batch, saveFn); err != nil {
+				log.Error("failed to save by batch", zap.Error(err))
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func resetBinlogFields(segment *datapb.SegmentInfo) {
+	segment.Binlogs = nil
+	segment.Deltalogs = nil
+	segment.Statslogs = nil
+}
+
+func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	var res []*datapb.FieldBinlog
+	for _, log := range binlogs {
+		res = append(res, proto.Clone(log).(*datapb.FieldBinlog))
+	}
+	return res
 }
 
 func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error {
