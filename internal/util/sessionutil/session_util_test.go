@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -939,6 +940,151 @@ func (s *SessionSuite) TestSafeCloseLiveCh() {
 	assert.NotPanics(s.T(), func() {
 		session.safeCloseLiveCh()
 	})
+}
+
+func (s *SessionSuite) TestSessionWatchNode() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("datanode", "normal", false, false)
+	session.Register()
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	session.LivenessCheck(ctx, func() {
+		wg.Done()
+	})
+	session.etcdCli.Delete(ctx, session.getSessionKey())
+	wg.Wait()
+}
+
+func (s *SessionSuite) TestSessionWatchNormalCoord() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("rootcoord", "normal", true, false)
+	session.Register()
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	session.LivenessCheck(ctx, func() {
+		wg.Done()
+	})
+	session.etcdCli.Delete(ctx, session.getSessionKey())
+	wg.Wait()
+}
+
+// coord session will quit when session key with or without serverId is deleted
+func (s *SessionSuite) TestSessionWatchActiveCoord() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("rootcoord", "normal", true, false)
+	session.SetEnableActiveStandBy(true)
+	session.Register()
+	session.ProcessActiveStandBy(nil)
+
+	keyWithId := fmt.Sprintf("%s-%d", session.ServerName, session.ServerID)
+	keyWithId = path.Join(s.metaRoot, DefaultServiceRoot, keyWithId)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	session.LivenessCheck(ctx, func() {
+		wg.Done()
+	})
+
+	session.etcdCli.Delete(ctx, keyWithId)
+	wg.Wait()
+	session.Stop()
+	log.Info("test1 finished")
+
+	session2 := NewSession(ctx, s.metaRoot, s.client)
+	session2.Init("rootcoord", "normal", true, false)
+	session2.SetEnableActiveStandBy(true)
+	session2.Register()
+	session2.ProcessActiveStandBy(nil)
+
+	keyWithoutId := path.Join(s.metaRoot, DefaultServiceRoot, session2.ServerName)
+
+	wg.Add(1)
+	session2.LivenessCheck(ctx, func() {
+		wg.Done()
+	})
+	session2.etcdCli.Delete(ctx, keyWithoutId)
+	wg.Wait()
+}
+
+// when session key without serverId is deleted, only active coord will quit
+func (s *SessionSuite) TestSessionWatchActiveStandbyDeleteActiveKey() {
+	ctx := context.Background()
+	// active
+	session := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session.Init("rootcoord", "normal", true, false)
+	session.SetEnableActiveStandBy(true)
+	session.Register()
+	session.ProcessActiveStandBy(nil)
+
+	// standby
+	session2 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session2.Init("rootcoord", "normal", true, false)
+	session2.SetEnableActiveStandBy(true)
+	session2.Register()
+	go session2.ProcessActiveStandBy(nil)
+	// wait for a while to make sure session2 enter standby mode
+	time.Sleep(time.Second)
+
+	count := atomic.Int32{}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	session.LivenessCheck(ctx, func() {
+		wg.Done()
+		count.Add(1)
+	})
+
+	session2.LivenessCheck(ctx, func() {
+		count.Add(1)
+	})
+
+	keyWithoutId := path.Join(s.metaRoot, DefaultServiceRoot, session2.ServerName)
+	session2.etcdCli.Delete(ctx, keyWithoutId)
+
+	wg.Wait()
+	assert.Equal(s.T(), int32(1), count.Load())
+}
+
+// when standby session key with serverId is deleted, only standby coord will quit
+func (s *SessionSuite) TestSessionWatchActiveStandbyDeleteStandbyKey() {
+	ctx := context.Background()
+	// active
+	session := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session.Init("rootcoord", "normal", true, false)
+	session.SetEnableActiveStandBy(true)
+	session.Register()
+	session.ProcessActiveStandBy(nil)
+
+	// standby
+	session2 := NewSession(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session2.Init("rootcoord", "normal", true, false)
+	session2.SetEnableActiveStandBy(true)
+	session2.Register()
+	go session2.ProcessActiveStandBy(nil)
+	// wait for a while to make sure session2 enter standby mode
+	time.Sleep(time.Second)
+
+	count := atomic.Int32{}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	session.LivenessCheck(ctx, func() {
+		count.Add(1)
+	})
+
+	session2.LivenessCheck(ctx, func() {
+		wg.Done()
+		count.Add(1)
+	})
+
+	keyWithId := path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", session2.ServerName, session2.ServerID))
+	session2.etcdCli.Delete(ctx, keyWithId)
+
+	wg.Wait()
+	assert.Equal(s.T(), int32(1), count.Load())
 }
 
 func TestSessionSuite(t *testing.T) {

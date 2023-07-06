@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,12 +97,11 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveChOnce        sync.Once
-	liveCh            chan bool
-	etcdCli           *clientv3.Client
-	leaseID           *clientv3.LeaseID
-	watchSessionKeyCh clientv3.WatchChan
-	wg                sync.WaitGroup
+	liveChOnce sync.Once
+	liveCh     chan bool
+	etcdCli    *clientv3.Client
+	leaseID    *clientv3.LeaseID
+	wg         sync.WaitGroup
 
 	metaRoot string
 
@@ -271,6 +271,13 @@ func (s *Session) Register() {
 	}
 	s.liveCh = make(chan bool)
 	s.processKeepAliveResponse(ch)
+
+	watchChan, _, err := s.initWatchSessionCh()
+	if err != nil {
+		log.Error("Watch session key failed", zap.Error(err))
+		panic(err)
+	}
+	s.processSessionExistCheck(watchChan)
 	s.UpdateRegistered(true)
 }
 
@@ -359,21 +366,33 @@ func (s *Session) getSessionKey() string {
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
 }
 
-func (s *Session) initWatchSessionCh() {
+func (s *Session) initWatchSessionCh() (clientv3.WatchChan, *clientv3.GetResponse, error) {
 	var (
-		err     error
-		getResp *clientv3.GetResponse
+		err       error
+		getResp   *clientv3.GetResponse
+		watchChan clientv3.WatchChan
 	)
 
-	err = retry.Do(context.Background(), func() error {
-		getResp, err = s.etcdCli.Get(context.Background(), s.getSessionKey())
+	err = retry.Do(s.ctx, func() error {
+		if s.Exclusive && s.enableActiveStandBy {
+			getResp, err = s.etcdCli.Get(s.ctx, s.getSessionKey(), clientv3.WithPrefix())
+		} else {
+			getResp, err = s.etcdCli.Get(s.ctx, s.getSessionKey())
+		}
 		log.Warn("fail to get the session key from the etcd", zap.Error(err))
 		return err
 	}, retry.Attempts(100))
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+	// coordinators enabled ActiveStandBy watch with prefix to watch both active key and session key
+	// others watch without prefix
+	if s.Exclusive && s.enableActiveStandBy {
+		watchChan = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithPrefix(), clientv3.WithRev(getResp.Header.Revision))
+	} else {
+		watchChan = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+	}
+	return watchChan, getResp, nil
 }
 
 // registerService registers the service to etcd so that other services
@@ -450,6 +469,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
 func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
+	log := log.With(zap.String("serverName", s.ServerName), zap.Int64("serverID", s.ServerID))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -468,7 +488,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 						s.safeCloseLiveCh()
 						return
 					}
-					log.Info("start try to KeepAliveOnce", zap.String("serverName", s.ServerName))
+					log.Info("start try to KeepAliveOnce")
 					s.retryKeepAlive.Store(true)
 					// have to KeepAliveOnce before KeepAlive because KeepAlive won't throw error even when lease OT
 					var keepAliveOnceResp *clientv3.LeaseKeepAliveResponse
@@ -483,11 +503,11 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					}, retry.Attempts(3))
 
 					if err != nil {
-						log.Warn("fail to retry keepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Error(err))
+						log.Warn("fail to retry keepAliveOnce", zap.Int64("leaseID", int64(*s.leaseID)), zap.Error(err))
 						s.safeCloseLiveCh()
 						return
 					}
-					log.Info("succeed to KeepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Any("resp", keepAliveOnceResp))
+					log.Info("succeed to KeepAliveOnce", zap.Int64("leaseID", int64(*s.leaseID)), zap.Any("resp", keepAliveOnceResp))
 
 					var chNew <-chan *clientv3.LeaseKeepAliveResponse
 					err = retry.Do(s.keepAliveCtx, func() error {
@@ -764,7 +784,6 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
-	s.initWatchSessionCh()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -790,10 +809,32 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					s.keepAliveCancel()
 				}
 				return
-			case resp, ok := <-s.watchSessionKeyCh:
+			}
+		}
+	}()
+}
+
+func (s *Session) processSessionExistCheck(watchChan clientv3.WatchChan) {
+	getIDFromSession := func(key string) (int64, error) {
+		if strings.HasSuffix(key, s.ServerName) {
+			return 0, nil
+		} else {
+			idStr := strings.Split(key, path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-", s.ServerName)))[1]
+			id, err := strconv.ParseInt(idStr, 10, 64)
+			return id, err
+		}
+	}
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				log.Debug("session context closed")
+				return
+			case resp, ok := <-watchChan:
 				if !ok {
 					log.Warn("watch session key channel closed")
 					if s.keepAliveCancel != nil {
+						s.SetEnableRetryKeepAlive(false)
 						s.keepAliveCancel()
 					}
 					return
@@ -804,33 +845,63 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 						//close event channel
 						log.Warn("Watch service found error", zap.Error(resp.Err()))
 						if s.keepAliveCancel != nil {
+							s.SetEnableRetryKeepAlive(false)
 							s.keepAliveCancel()
 						}
 						return
 					}
 					log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
-					getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
+					watchChan, getResp, err := s.initWatchSessionCh()
 					if err != nil || len(getResp.Kvs) == 0 {
 						if s.keepAliveCancel != nil {
+							s.SetEnableRetryKeepAlive(false)
 							s.keepAliveCancel()
 						}
 						return
 					}
-					s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
-					continue
+					s.processSessionExistCheck(watchChan)
+					return
 				}
 				for _, event := range resp.Events {
 					switch event.Type {
 					case mvccpb.PUT:
-						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+						log.Info("session key is added", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 					case mvccpb.DELETE:
 						if s.isRetryingKeepAlive() {
 							log.Info("session key is deleted during re register, ignore this DELETE event", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 							continue
 						}
-						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-						if s.keepAliveCancel != nil {
+						// for coordinator enabled Active-Standby, watch both session keys(serverRole, serverRole-serverID)
+						var doQuit bool
+						if s.Exclusive && s.enableActiveStandBy {
+							id, err := getIDFromSession(string(event.Kv.Key))
+							if err != nil {
+								if s.keepAliveCancel != nil {
+									s.SetEnableRetryKeepAlive(false)
+									s.keepAliveCancel()
+								}
+								return
+							}
+							if !s.isStandby.Load().(bool) {
+								// 1, active coordinator, quit when active key delete or serverID match
+								if id == 0 || id == s.ServerID {
+									doQuit = true
+								}
+							} else {
+								// 2, standby coordinator, only quit when serverID match
+								if id == s.ServerID {
+									doQuit = true
+								}
+							}
+						} else {
+							// 3, nodes, only quit when serverID match
+							doQuit = true
+						}
+						log.Info("session key is deleted", zap.Bool("quit", doQuit), zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+						if doQuit && s.keepAliveCancel != nil {
+							s.SetEnableRetryKeepAlive(false)
 							s.keepAliveCancel()
+							return
 						}
 					}
 				}
