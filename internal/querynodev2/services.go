@@ -696,6 +696,14 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 	defer node.lifetime.Done()
 
+	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+		}
+	}()
+
 	log.Debug("start to search segments on worker",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
@@ -708,19 +716,23 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
 		log.Warn("failed to search segments", zap.Error(segments.ErrCollectionNotFound))
-		return nil, segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
+		err := segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
+		failRet.Status.Reason = err.Error()
+		return failRet, err
 	}
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
-		return nil, err
+		failRet.Status.Reason = err.Error()
+		return failRet, err
 	}
 
 	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to search segments", zap.Error(err))
-		return nil, err
+		failRet.Status.Reason = err.Error()
+		return failRet, err
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
@@ -729,9 +741,10 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	))
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
 	result := task.Result()
 	if result.CostAggregation != nil {
@@ -777,8 +790,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return WrapSearchResult(commonpb.ErrorCode_NodeIDNotMatch,
 			common.WrapNodeIDNotMatchMsg(targetID, paramtable.GetNodeID())), nil
 	}
-
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
 
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
@@ -835,7 +846,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		})
 	}
 	if err := runningGp.Wait(); err != nil {
-		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		return failRet, nil
 	}
 
@@ -865,7 +875,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 // only used for delegator query segments from worker
 func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "")
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
@@ -877,18 +886,19 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		zap.String("scope", req.GetScope().String()),
 	)
 
-	defer func() {
-		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
-		}
-	}()
-
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		err := merr.WrapErrServiceUnavailable(fmt.Sprintf("node id: %d is unhealthy", paramtable.GetNodeID()))
 		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 	defer node.lifetime.Done()
+
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+		}
+	}()
 
 	log.Debug("start do query segments",
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
@@ -917,7 +927,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 	results.CostAggregation = &internalpb.CostAggregation{
 		ServiceTime:  latency.Milliseconds(),
 		ResponseTime: latency.Milliseconds(),
