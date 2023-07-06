@@ -105,7 +105,7 @@ type tickler struct {
 	progress *atomic.Int32
 	version  int64
 
-	kv        kv.MetaKv
+	kv        kv.WatchKV
 	path      string
 	watchInfo *datapb.ChannelWatchInfo
 
@@ -175,7 +175,7 @@ func (t *tickler) stop() {
 	t.closeWg.Wait()
 }
 
-func newTickler(version int64, path string, watchInfo *datapb.ChannelWatchInfo, kv kv.MetaKv, interval time.Duration) *tickler {
+func newTickler(version int64, path string, watchInfo *datapb.ChannelWatchInfo, kv kv.WatchKV, interval time.Duration) *tickler {
 	return &tickler{
 		progress:  atomic.NewInt32(0),
 		path:      path,
