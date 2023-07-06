@@ -831,7 +831,7 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 
 	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
-	offset := C.PreDelete(s.segmentPtr, cSize)
+	offset := C.int64_t(0)
 
 	ids := &schemapb.IDs{}
 	pkType := pks[0].Type()

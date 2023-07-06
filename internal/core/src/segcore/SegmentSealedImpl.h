@@ -96,9 +96,6 @@ class SegmentSealedImpl : public SegmentSealed {
     std::string
     debug() const override;
 
-    int64_t
-    PreDelete(int64_t size) override;
-
     Status
     Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
 

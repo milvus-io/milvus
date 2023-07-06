@@ -612,9 +612,7 @@ TEST(Sealed, Delete) {
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
     std::vector<idx_t> new_timestamps{10, 10, 10};
-    auto reserved_offset = segment->PreDelete(new_count);
-    ASSERT_EQ(reserved_offset, row_count);
-    segment->Delete(reserved_offset, new_count, new_ids.get(),
+    segment->Delete(0, new_count, new_ids.get(),
                     reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 }
 
@@ -757,13 +755,10 @@ TEST(Sealed, DeleteCount) {
     auto segment = CreateSealedSegment(schema);
 
     int64_t c = 10;
-    auto offset = segment->PreDelete(c);
-    ASSERT_EQ(offset, 0);
-
     Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
     auto pks = GenPKs(c, 0);
-    auto status = segment->Delete(offset, c, pks.get(), tss.data());
+    auto status = segment->Delete(0, c, pks.get(), tss.data());
     ASSERT_TRUE(status.ok());
 
     auto cnt = segment->get_deleted_count();
@@ -786,28 +781,22 @@ TEST(Sealed, RealCount) {
 
     // delete half.
     auto half = c / 2;
-    auto del_offset1 = segment->PreDelete(half);
-    ASSERT_EQ(del_offset1, 0);
     auto del_ids1 = GenPKs(pks.begin(), pks.begin() + half);
     auto del_tss1 = GenTss(half, c);
-    auto status = segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
+    auto status = segment->Delete(0, half, del_ids1.get(), del_tss1.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 
     // delete duplicate.
-    auto del_offset2 = segment->PreDelete(half);
-    ASSERT_EQ(del_offset2, half);
     auto del_tss2 = GenTss(half, c + half);
-    status = segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
+    status = segment->Delete(0, half, del_ids1.get(), del_tss2.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 
     // delete all.
-    auto del_offset3 = segment->PreDelete(c);
-    ASSERT_EQ(del_offset3, half * 2);
     auto del_ids3 = GenPKs(pks.begin(), pks.end());
     auto del_tss3 = GenTss(c, c + half * 2);
-    status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
+    status = segment->Delete(0, c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
 }

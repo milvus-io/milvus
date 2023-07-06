@@ -54,7 +54,6 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->PreDelete(N);
 }
 
 // Test insert column-based data
