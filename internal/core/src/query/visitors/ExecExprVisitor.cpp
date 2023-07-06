@@ -957,20 +957,27 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
     auto val1 = static_cast<HighPrecisionType>(expr.lower_value_);
     auto val2 = static_cast<HighPrecisionType>(expr.upper_value_);
 
-    auto index_func = [&](Index* index) {
-        if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
-            if (gt_ub<T>(val1)) {
-                return TargetBitmap(index->Size(), false);
-            } else if (lt_lb<T>(val1)) {
-                val1 = std::numeric_limits<T>::min();
-            }
-
-            if (gt_ub<T>(val2)) {
-                val2 = std::numeric_limits<T>::max();
-            } else if (lt_lb<T>(val2)) {
-                return TargetBitmap(index->Size(), false);
-            }
+    if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
+        if (gt_ub<T>(val1)) {
+            BitsetType r(row_count_);
+            r.reset();
+            return r;
+        } else if (lt_lb<T>(val1)) {
+            val1 = std::numeric_limits<T>::min();
+            lower_inclusive = true;
         }
+
+        if (gt_ub<T>(val2)) {
+            val2 = std::numeric_limits<T>::max();
+            upper_inclusive = true;
+        } else if (lt_lb<T>(val2)) {
+            BitsetType r(row_count_);
+            r.reset();
+            return r;
+        }
+    }
+
+    auto index_func = [=](Index* index) {
         return index->Range(val1, lower_inclusive, val2, upper_inclusive);
     };
 
