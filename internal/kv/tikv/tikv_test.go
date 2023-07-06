@@ -177,7 +177,6 @@ func TestTiKV_Load(te *testing.T) {
 		err := kv.MultiSave(multiSaveTests)
 		assert.NoError(t, err)
 		for k, v := range multiSaveTests {
-			fmt.Println("debug 0", k, v)
 			actualV, err := kv.Load(k)
 			assert.NoError(t, err)
 			assert.Equal(t, v, actualV)

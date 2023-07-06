@@ -215,7 +215,6 @@ func (kv *tiKV) MultiSave(kvs map[string]string) error {
 
 	for key, value := range kvs {
 		key = path.Join(kv.rootPath, key)
-		fmt.Println("debug 1", key, value)
 		err = txn.Set([]byte(key), []byte(value))
 		if err != nil {
 			return err
