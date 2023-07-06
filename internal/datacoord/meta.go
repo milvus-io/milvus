@@ -388,7 +388,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	// Update segment state and prepare segment metric update.
 	updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
+		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
 			log.Error("meta update: setting segment state - failed to alter segments",
 				zap.Int64("segment ID", segmentID),
 				zap.String("target state", targetState.String()),
@@ -420,7 +420,7 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	clonedSegment := curSegInfo.Clone()
 	clonedSegment.IsImporting = false
 	if isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
+		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
 			log.Error("meta update: unsetting isImport state of segment - failed to unset segment isImporting state",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))
@@ -928,7 +928,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
+		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
 			log.Error("meta update: add allocation failed",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))
