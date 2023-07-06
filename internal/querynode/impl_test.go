@@ -947,6 +947,15 @@ func TestImpl_GetCollectionStatistics(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel},
 	})
 	assert.NoError(t, err)
+
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err := node.GetStatistics(ctx, &queryPb.GetStatisticsRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	})
+	assert.NoError(t, err)
+	assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
 func TestImpl_GetPartitionStatistics(t *testing.T) {
@@ -1286,4 +1295,48 @@ func TestGetDataDistribution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, resp.GetStatus().GetErrorCode())
 	})
+}
+
+func TestIsUnavailableCode(t *testing.T) {
+	node, err := genSimpleQueryNode(context.Background())
+	defer node.Stop()
+	assert.NoError(t, err)
+
+	{
+		failStatus := &commonpb.Status{}
+		_, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+		assert.False(t, isUnavailable)
+	}
+
+	{
+		failRet := &internalpb.GetStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}
+		_, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+		assert.False(t, isUnavailable)
+	}
+
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+	{
+		failStatus := &commonpb.Status{}
+		failResp, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+		assert.True(t, isUnavailable)
+		assert.Equal(t, failStatus, failResp)
+	}
+
+	{
+		failRet := &internalpb.GetStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}
+		failResp, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, func() {
+			t.Log("logger is called")
+		})
+		assert.True(t, isUnavailable)
+		assert.Equal(t, failRet, failResp)
+	}
 }

@@ -87,7 +87,7 @@ type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
-	wg sync.WaitGroup
+	rpcLock sync.RWMutex
 
 	stateCode atomic.Value
 	stopOnce  sync.Once
@@ -421,7 +421,8 @@ func (node *QueryNode) Stop() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		node.wg.Wait()
+		node.rpcLock.Lock()
+		defer node.rpcLock.Unlock()
 		node.queryNodeLoopCancel()
 
 		// close services

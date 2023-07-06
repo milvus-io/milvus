@@ -48,6 +48,29 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+func isUnavailableCode[T any](node *QueryNode, failResp T, failStatus *commonpb.Status, fn func()) (T, bool) {
+	isUnavailableCode := func() bool {
+		if !commonpbutil.IsHealthy(node.stateCode) {
+			node.NotReadyServeResp(failStatus)
+			if fn != nil {
+				fn()
+			}
+			return true
+		}
+		return false
+	}
+
+	if isUnavailableCode() {
+		return failResp, true
+	}
+	node.rpcLock.RLock()
+	defer node.rpcLock.RUnlock()
+	if isUnavailableCode() {
+		return failResp, true
+	}
+	return failResp, false
+}
+
 func (node *QueryNode) GetStateCode() commonpb.StateCode {
 	code := node.stateCode.Load()
 	if code == nil {
@@ -176,12 +199,10 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 		},
 	}
 
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		node.NotReadyServeResp(failRet.Status)
+	failRet, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+	if isUnavailable {
 		return failRet, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	msgID := req.GetReq().GetBase().GetMsgID()
 	log.Debug("received GetStatisticRequest",
@@ -300,14 +321,11 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	// check node healthy
-	if !commonpbutil.IsHealthy(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if in.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
@@ -391,14 +409,12 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannelName()),
 	)
-	// check node healthy
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if req.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
@@ -450,13 +466,11 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// check node healthy
-	if !commonpbutil.IsHealthy(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if in.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
@@ -533,13 +547,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	dct := &releaseCollectionTask{
 		baseTask: baseTask{
@@ -578,13 +590,11 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.Releas
 
 // ReleasePartitions clears all data related to this partition on the querynode
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	dct := &releasePartitionsTask{
 		baseTask: baseTask{
@@ -623,13 +633,11 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if in.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
@@ -675,15 +683,14 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		res := &querypb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{},
-		}
-		node.NotReadyServeResp(res.GetStatus())
-		return res, nil
+	failRes := &querypb.GetSegmentInfoResponse{
+		Status: &commonpb.Status{},
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
+
+	failRes, isUnavailable := isUnavailableCode(node, failRes, failRes.Status, nil)
+	if isUnavailable {
+		return failRes, nil
+	}
 
 	var segmentInfos []*querypb.SegmentInfo
 
@@ -843,12 +850,11 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		node.NotReadyServeResp(failRet.GetStatus())
+
+	failRet, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+	if isUnavailable {
 		return failRet, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
@@ -1019,12 +1025,11 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		node.NotReadyServeResp(failRet.GetStatus())
+
+	failRet, isUnavailable := isUnavailableCode(node, failRet, failRet.Status, nil)
+	if isUnavailable {
 		return failRet, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	msgID := req.GetReq().GetBase().GetMsgID()
 	log.Ctx(ctx).Debug("queryWithDmlChannel receives query request",
@@ -1224,13 +1229,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 // SyncReplicaSegments syncs replica node & segments states
 func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
-	if !commonpbutil.IsHealthy(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	log.Info("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
 
@@ -1250,20 +1253,19 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+	failResp := &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{},
+	}
+
+	failResp, isUnavailable := isUnavailableCode(node, failResp, failResp.Status, func() {
 		log.Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Pattern),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
-
-		resp := &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{},
-		}
-		node.NotReadyServeResp(resp.GetStatus())
-		return resp, nil
+	})
+	if isUnavailable {
+		return failResp, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	return getComponentConfigurations(ctx, req), nil
 }
@@ -1274,17 +1276,17 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.GetRequest()))
 
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+	failResp := &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{},
+	}
+
+	failResp, isUnavailable := isUnavailableCode(node, failResp, failResp.Status, func() {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
-		resp := &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{},
-		}
-		node.NotReadyServeResp(resp.GetStatus())
-		return resp, nil
+	})
+	if isUnavailable {
+		return failResp, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
@@ -1332,17 +1334,17 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		zap.Int64("msg-id", req.GetBase().GetMsgID()),
 		zap.Int64("node-id", Params.QueryNodeCfg.GetNodeID()),
 	)
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+
+	failResp := &querypb.GetDataDistributionResponse{
+		Status: &commonpb.Status{},
+	}
+	failResp, isUnavailable := isUnavailableCode(node, failResp, failResp.Status, func() {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
-		resp := &querypb.GetDataDistributionResponse{
-			Status: &commonpb.Status{},
-		}
-		node.NotReadyServeResp(resp.GetStatus())
-		return resp, nil
+	})
+	if isUnavailable {
+		return failResp, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if req.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
@@ -1422,13 +1424,11 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
 	// check node healthy
-	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
-		status := &commonpb.Status{}
-		node.NotReadyServeResp(status)
-		return status, nil
+	failStatus := &commonpb.Status{}
+	failStatus, isUnavailable := isUnavailableCode(node, failStatus, failStatus, nil)
+	if isUnavailable {
+		return failStatus, nil
 	}
-	node.wg.Add(1)
-	defer node.wg.Done()
 
 	// check target matches
 	if req.GetBase().GetTargetID() != Params.QueryNodeCfg.GetNodeID() {
