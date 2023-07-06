@@ -79,6 +79,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute loadCollection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -98,6 +99,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test empty metric type", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -118,6 +120,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute repeated watchDmChannelTask", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -142,6 +145,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute loadPartition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -166,6 +170,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute loadPartition without init collection and partition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -186,6 +191,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute seek error", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -242,6 +248,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -267,6 +274,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test add excluded segment for dropped segment", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -292,6 +300,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test load growing segment", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -350,6 +359,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	t.Run("test execute", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		/*
 			err = node.queryService.addQueryCollection(defaultCollectionID)
@@ -366,6 +376,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	t.Run("test execute no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
@@ -381,6 +392,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		/*
 			err = node.queryService.addQueryCollection(defaultCollectionID)
@@ -437,6 +449,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 
 	t.Run("test isAllPartitionsReleased", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
+		defer node.metaReplica.freeAll()
 		assert.NoError(t, err)
 
 		task := releasePartitionsTask{
@@ -460,6 +473,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	t.Run("test execute", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		/*
 			err = node.queryService.addQueryCollection(defaultCollectionID)
@@ -478,6 +492,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	t.Run("test execute no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),
@@ -493,6 +508,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	t.Run("test execute no partition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),
@@ -508,6 +524,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	t.Run("test execute non-exist partition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		req := genReleasePartitionsRequest()
 		req.PartitionIDs = []int64{-1}
@@ -523,6 +540,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	t.Run("test execute remove deltaVChannel", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.metaReplica.freeAll()
 
 		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)

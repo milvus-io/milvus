@@ -262,6 +262,7 @@ func (q *queryNodeFlowGraph) close() {
 	q.flowGraph.Close()
 	if q.dmlStream != nil && q.consumerCnt > 0 {
 		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(q.consumerCnt))
+		q.consumerCnt = 0
 	}
 	log.Info("stop query node flow graph",
 		zap.Int64("collectionID", q.collectionID),

@@ -405,12 +405,12 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
 		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
+			log.Warn("handle put event: new data sync service failed", zap.String("vChanName", vChanName), zap.Error(err))
 			watchInfo.State = datapb.ChannelWatchState_WatchFailure
-			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
+		} else {
+			log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+			watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 		}
-		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
-		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
-
 	case datapb.ChannelWatchState_ToRelease:
 		// there is no reason why we release fail
 		node.tryToReleaseFlowgraph(vChanName)
@@ -453,6 +453,7 @@ func (node *DataNode) handleDeleteEvent(vChanName string) {
 func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
 	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
 	node.flowgraphManager.release(vChanName)
+	log.Info("release flowgraph success", zap.String("vChanName", vChanName))
 }
 
 // BackGroundGC runs in background to release datanode resources
