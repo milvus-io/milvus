@@ -335,18 +335,6 @@ func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	return res
 }
 
-func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error {
-	kvs := make(map[string]string)
-	segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
-	if err != nil {
-		return err
-	}
-	maps.Copy(kvs, segmentKvs)
-
-	kc.collectMetrics(newSegment)
-	return kc.MetaKv.MultiSave(kvs)
-}
-
 func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
 	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
 		cnt := 0
