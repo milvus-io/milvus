@@ -476,6 +476,16 @@ GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     return count;
 }
 
+size_t
+GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info) {
+    if (load_info.field_infos.empty()) {
+        return 0;
+    }
+
+    auto& field = load_info.field_infos.begin()->second;
+    return field.row_count;
+}
+
 void
 ReleaseArrowUnused() {
     static std::mutex release_mutex;

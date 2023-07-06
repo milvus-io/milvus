@@ -31,6 +31,7 @@
 #include "mmap/Column.h"
 #include "index/ScalarIndex.h"
 #include "sys/mman.h"
+#include "common/Types.h"
 
 namespace milvus::segcore {
 
@@ -57,10 +58,9 @@ class SegmentSealedImpl : public SegmentSealed {
     HasFieldData(FieldId field_id) const override;
 
     void
-    LoadFieldData(FieldId field_id, const FieldDataInfo& data_info) override;
-
+    LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
     void
-    MapFieldData(const FieldId field_id, const FieldDataInfo& data);
+    MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
 
     int64_t
     get_segment_id() const override {
@@ -243,8 +243,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, Column> fixed_fields_;
-    std::unordered_map<FieldId, std::unique_ptr<ColumnBase>> variable_fields_;
+    std::unordered_map<FieldId, std::shared_ptr<ColumnBase>> fields_;
 };
 
 inline SegmentSealedPtr

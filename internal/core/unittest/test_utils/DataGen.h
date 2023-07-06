@@ -687,20 +687,20 @@ SealedLoadFieldData(const GeneratedData& dataset,
         auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
             DataType::INT64);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
-        auto field_data_info = FieldDataInfo{
+        auto field_data_info = FieldDataInfo(
             RowFieldID.get(),
-            int64_t(row_count),
-            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+            row_count,
+            std::vector<milvus::storage::FieldDataPtr>{field_data});
         seg.LoadFieldData(RowFieldID, field_data_info);
     }
     {
         auto field_data = std::make_shared<milvus::storage::FieldData<int64_t>>(
             DataType::INT64);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
-        auto field_data_info = FieldDataInfo{
+        auto field_data_info = FieldDataInfo(
             TimestampFieldID.get(),
-            int64_t(row_count),
-            std::vector<milvus::storage::FieldDataPtr>{field_data}};
+            row_count,
+            std::vector<milvus::storage::FieldDataPtr>{field_data});
         seg.LoadFieldData(TimestampFieldID, field_data_info);
     }
     for (auto& iter : dataset.schema_->get_fields()) {
@@ -710,7 +710,7 @@ SealedLoadFieldData(const GeneratedData& dataset,
         }
     }
     auto fields = dataset.schema_->get_fields();
-    for (auto field_data : dataset.raw_->fields_data()) {
+    for (auto& field_data : dataset.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
         if (exclude_fields.find(field_id) != exclude_fields.end()) {
             continue;
@@ -722,10 +722,15 @@ SealedLoadFieldData(const GeneratedData& dataset,
         info.field_id = field_data.field_id();
         info.row_count = row_count;
         auto field_meta = fields.at(FieldId(field_id));
-        info.datas.emplace_back(
+        info.channel->push(
             CreateFieldDataFromDataArray(row_count, &field_data, field_meta));
+        info.channel->close();
 
-        seg.LoadFieldData(FieldId(field_id), info);
+        if (with_mmap) {
+            seg.MapFieldData(FieldId(field_id), info);
+        } else {
+            seg.LoadFieldData(FieldId(field_id), info);
+        }
     }
 }
 

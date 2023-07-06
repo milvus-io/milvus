@@ -1230,16 +1230,17 @@ TEST(Expr, TestCompareExpr) {
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
-    int N = 1000;
+    size_t N = 1000;
     auto raw_data = DataGen(schema, N);
     auto fields = schema->get_fields();
     for (auto field_data : raw_data.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
 
-        auto info = FieldDataInfo{field_data.field_id(), N, {}, "/tmp/a"};
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
         auto field_meta = fields.at(FieldId(field_id));
-        info.datas.emplace_back(
+        info.channel->push(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
 
         seg->LoadFieldData(FieldId(field_id), info);
     }
@@ -1385,10 +1386,11 @@ TEST(Expr, TestExprs) {
     for (auto field_data : raw_data.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
 
-        auto info = FieldDataInfo{field_data.field_id(), N, {}, "/tmp/a"};
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
         auto field_meta = fields.at(FieldId(field_id));
-        info.datas.emplace_back(
+        info.channel->push(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
 
         seg->LoadFieldData(FieldId(field_id), info);
     }

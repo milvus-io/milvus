@@ -10,11 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+
+#include <memory>
 #include <string>
 
 #include "index/ScalarIndex.h"
+#include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "common/Common.h"
+#include "storage/ThreadPool.h"
 #include "storage/Util.h"
 #include "mmap/Utils.h"
 
@@ -545,8 +549,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
 }
 // init segcore storage config first, and create default remote chunk manager
 // segcore use default remote chunk manager to load data from minio/s3
-std::vector<storage::FieldDataPtr>
-LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
+void
+LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
+                         storage::FieldDataChannelPtr channel) {
+    auto parallel_degree =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+
+    // set the capacity to 2x parallel_degree, so the memory usage will not be greater than 2x DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+    // which is 128 MiB
+    channel->set_capacity(parallel_degree * 2);
+
     auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
     std::sort(remote_files.begin(),
@@ -556,15 +568,12 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
                          std::stol(b.substr(b.find_last_of('/') + 1));
               });
 
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
-    std::vector<storage::FieldDataPtr> field_datas;
 
     auto FetchRawData = [&]() {
-        auto raw_datas = GetObjectData(rcm.get(), batch_files);
-        for (auto& data : raw_datas) {
-            field_datas.emplace_back(data);
+        auto result = storage::GetObjectData(rcm.get(), batch_files);
+        for (auto& data : result) {
+            channel->push(data);
         }
     };
 
@@ -581,9 +590,17 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files) {
         FetchRawData();
     }
 
-    AssertInfo(field_datas.size() == remote_files.size(),
-               "inconsistent file num and raw data num!");
-    return field_datas;
+    channel->close();
+}
+
+std::vector<storage::FieldDataPtr>
+CollectFieldDataChannel(storage::FieldDataChannelPtr& channel) {
+    std::vector<storage::FieldDataPtr> result;
+    storage::FieldDataPtr field_data;
+    while (channel->pop(field_data)) {
+        result.push_back(field_data);
+    }
+    return result;
 }
 
 }  // namespace milvus::segcore

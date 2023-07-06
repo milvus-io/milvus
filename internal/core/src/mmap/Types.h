@@ -16,6 +16,7 @@
 #pragma once
 
 #include <unistd.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include "storage/FieldData.h"
@@ -23,9 +24,65 @@
 namespace milvus {
 
 struct FieldDataInfo {
+    FieldDataInfo() {
+        channel = std::make_shared<storage::FieldDataChannel>();
+    }
+
+    FieldDataInfo(int64_t field_id,
+                  size_t row_count,
+                  std::string mmap_dir_path = "")
+        : field_id(field_id),
+          row_count(row_count),
+          mmap_dir_path(std::move(mmap_dir_path)) {
+        channel = std::make_shared<storage::FieldDataChannel>();
+    }
+
+    FieldDataInfo(int64_t field_id,
+                  size_t row_count,
+                  storage::FieldDataChannelPtr channel)
+        : field_id(field_id),
+          row_count(row_count),
+          channel(std::move(channel)) {
+    }
+
+    FieldDataInfo(int64_t field_id,
+                  size_t row_count,
+                  std::string mmap_dir_path,
+                  storage::FieldDataChannelPtr channel)
+        : field_id(field_id),
+          row_count(row_count),
+          mmap_dir_path(std::move(mmap_dir_path)),
+          channel(std::move(channel)) {
+    }
+
+    FieldDataInfo(int64_t field_id,
+                  size_t row_count,
+                  const std::vector<storage::FieldDataPtr>& batch)
+        : field_id(field_id), row_count(row_count) {
+        channel = std::make_shared<storage::FieldDataChannel>();
+        for (auto& data : batch) {
+            channel->push(data);
+        }
+        channel->close();
+    }
+
+    FieldDataInfo(int64_t field_id,
+                  size_t row_count,
+                  std::string mmap_dir_path,
+                  const std::vector<storage::FieldDataPtr>& batch)
+        : field_id(field_id),
+          row_count(row_count),
+          mmap_dir_path(std::move(mmap_dir_path)) {
+        channel = std::make_shared<storage::FieldDataChannel>();
+        for (auto& data : batch) {
+            channel->push(data);
+        }
+        channel->close();
+    }
+
     int64_t field_id;
-    int64_t row_count;
-    std::vector<storage::FieldDataPtr> datas;
+    size_t row_count;
     std::string mmap_dir_path;
+    storage::FieldDataChannelPtr channel;
 };
 }  // namespace milvus

@@ -672,7 +672,7 @@ TEST(Sealed, LoadFieldDataMmap) {
 
 TEST(Sealed, LoadScalarIndex) {
     auto dim = 16;
-    auto N = ROW_COUNT;
+    size_t N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
@@ -1087,7 +1087,7 @@ TEST(Sealed, BF) {
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    int64_t N = 100000;
+    size_t N = 100000;
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
@@ -1144,7 +1144,7 @@ TEST(Sealed, BF_Overflow) {
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    int64_t N = 10;
+    size_t N = 10;
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);

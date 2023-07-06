@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <queue>
 #include <thread>
@@ -23,8 +24,10 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::segcore {
 
@@ -149,42 +152,38 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                    infos.field_infos.end(),
                "primary field data should be included");
 
-    int64_t num_rows = 0;
-    for (auto& field : infos.field_infos) {
-        num_rows = field.second.row_count;
-        break;
-    }
+    size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
-        auto field_datas = LoadFieldDatasFromRemote(insert_files);
-        AssertInfo(
-            num_rows == storage::GetTotalNumRowsForFieldDatas(field_datas),
-            "inconsistent num row between multi fields");
-
+        auto channel = std::make_shared<storage::FieldDataChannel>();
+        auto& pool = ThreadPool::GetInstance();
+        auto load_future =
+            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+        auto field_data = CollectFieldDataChannel(channel);
         if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
             // step 3: fill into Segment.ConcurrentVector
             insert_record_.timestamps_.set_data_raw(reserved_offset,
-                                                    field_datas);
+                                                    field_data);
             continue;
         }
 
         if (field_id == RowFieldID) {
-            insert_record_.row_ids_.set_data_raw(reserved_offset, field_datas);
+            insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
             continue;
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
-                reserved_offset, field_datas);
+                reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_growing_segment_index()) {
             auto offset = reserved_offset;
-            for (auto data : field_datas) {
+            for (auto& data : field_data) {
                 auto row_count = data->get_num_rows();
                 indexing_record_.AppendingIndex(
                     offset, row_count, field_id, data, insert_record_);
@@ -194,7 +193,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         try_remove_chunks(field_id);
 
         if (field_id == primary_field_id) {
-            insert_record_.insert_pks(field_datas);
+            insert_record_.insert_pks(field_data);
         }
     }
 

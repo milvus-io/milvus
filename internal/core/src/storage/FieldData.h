@@ -19,7 +19,10 @@
 #include <string>
 #include <memory>
 
+#include <oneapi/tbb/concurrent_queue.h>
+
 #include "storage/FieldDataInterface.h"
+#include "common/Channel.h"
 
 namespace milvus::storage {
 
@@ -83,5 +86,7 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
 };
 
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
+using FieldDataChannel = Channel<storage::FieldDataPtr>;
+using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
 }  // namespace milvus::storage
