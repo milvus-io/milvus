@@ -906,7 +906,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader).Inc()
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader).Inc()
 		}
 	}()
 
@@ -1015,12 +1015,14 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
 
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "queryRequestReduce")
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
-
 	ret, err := reducer.Reduce(ctx, toMergeResults)
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	if !req.FromShardLeader {
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
