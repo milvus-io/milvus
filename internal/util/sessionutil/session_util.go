@@ -8,7 +8,6 @@ import (
 	"path"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -19,6 +18,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -93,7 +93,7 @@ type Session struct {
 	registered           atomic.Value
 	disconnected         atomic.Value
 	retryKeepAlive       atomic.Value
-	enableRetryKeepAlive bool
+	enableRetryKeepAlive *atomic.Bool
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -192,7 +192,7 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		useCustomConfig:      false,
 		sessionTTL:           60,
 		sessionRetryTimes:    30,
-		enableRetryKeepAlive: true,
+		enableRetryKeepAlive: atomic.NewBool(true),
 	}
 
 	session.apply(opts...)
@@ -433,7 +433,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					if !s.enableRetryKeepAlive {
+					if !s.enableRetryKeepAlive.Load() {
 						s.safeCloseLiveCh()
 						return
 					}
@@ -752,8 +752,8 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				}
 				return
 			case <-ctx.Done():
-				log.Info("liveness exits due to context done")
-				s.enableRetryKeepAlive = false
+				log.Debug("liveness exits due to context done")
+				s.enableRetryKeepAlive.Store(false)
 				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
@@ -869,7 +869,7 @@ func (s *Session) updateStandby(b bool) {
 }
 
 func (s *Session) SetEnableRetryKeepAlive(enable bool) {
-	s.enableRetryKeepAlive = enable
+	s.enableRetryKeepAlive.Store(enable)
 }
 
 func (s *Session) isRetryingKeepAlive() bool {
@@ -893,7 +893,8 @@ func (s *Session) safeCloseLiveCh() {
 // 2, Try to register to active key.
 // 3, If 2. return true, this service becomes ACTIVE. Exit STANDBY mode.
 // 4, If 2. return false, which means an ACTIVE service already exist.
-//    Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
+//
+//	Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
 //
 // activateFunc is the function to re-active the service.
 func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
