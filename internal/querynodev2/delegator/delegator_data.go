@@ -456,6 +456,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	if err != nil {
 		return nil, err
 	}
+	defer stream.Close()
 	vchannelName := position.ChannelName
 	pChannelName := funcutil.ToPhysicalChannel(vchannelName)
 	position.ChannelName = pChannelName

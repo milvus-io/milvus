@@ -300,6 +300,32 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
+
+	// load sealed
+	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     1000,
+				CollectionID:  s.collectionID,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5000},
+			},
+		},
+	})
+	s.Require().NoError(err)
+
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {

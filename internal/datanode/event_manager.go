@@ -73,7 +73,11 @@ func (e *channelEventManager) Run() {
 			case event := <-e.eventChan:
 				switch event.eventType {
 				case putEventType:
-					e.handlePutEvent(event.info, event.version)
+					err := e.handlePutEvent(event.info, event.version)
+					if err != nil {
+						// logging the error is convenient for follow-up investigation of problems
+						log.Warn("handle put event failed", zap.String("vChanName", event.vChanName), zap.Error(err))
+					}
 				case deleteEventType:
 					e.handleDeleteEvent(event.vChanName)
 				}
