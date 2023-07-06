@@ -193,10 +193,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	etcdEndpoints := strings.Split(endpoints, ",")
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 	require.NoError(t, err)
-	s := &Session{
-		etcdCli:  etcdCli,
-		metaRoot: metaRoot,
-	}
+	s := NewSession(context.Background(), metaRoot, etcdCli)
 	ctx := context.Background()
 	ch := make(chan bool)
 	s.liveCh = ch
