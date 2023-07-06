@@ -67,7 +67,6 @@ type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
 	LoadWithPrefix(key string) ([]string, []string, error)
-	CompareVersionAndSwap(key string, version int64, target string) (bool, error)
 	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
@@ -76,6 +75,7 @@ type MetaKv interface {
 //go:generate mockery --name=WatchKV --with-expecter
 type WatchKV interface {
 	MetaKv
+	CompareVersionAndSwap(key string, version int64, target string) (bool, error)
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	WatchWithRevision(key string, revision int64) clientv3.WatchChan
