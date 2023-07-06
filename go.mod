@@ -34,6 +34,7 @@ require (
 	github.com/sbinet/npyio v0.6.0
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.8.3
+	github.com/tikv/client-go/v2 v2.0.7
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
@@ -56,7 +57,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/apache/thrift v0.15.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
@@ -82,7 +82,6 @@ require (
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 // indirect
 	github.com/tiancaiamao/gp v0.0.0-20221230034425-4025bc8a4d4a // indirect
-	github.com/tikv/client-go/v2 v2.0.7 // indirect
 	github.com/tikv/pd/client v0.0.0-20230329114254-1948c247c2b1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/twmb/murmur3 v1.1.3 // indirect
@@ -131,7 +130,7 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.2
