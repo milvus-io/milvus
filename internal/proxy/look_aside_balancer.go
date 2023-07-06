@@ -37,6 +37,7 @@ import (
 
 var (
 	checkQueryNodeHealthInterval = 500 * time.Millisecond
+	CostMetricsExpireTime        = 1000 * time.Millisecond
 )
 
 type LookAsideBalancer struct {
@@ -101,7 +102,7 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 			b.executingTaskTotalNQ.Insert(node, executingNQ)
 		}
 
-		score := b.calculateScore(cost, executingNQ.Load())
+		score := b.calculateScore(node, cost, executingNQ.Load())
 		metrics.ProxyWorkLoadScore.WithLabelValues(strconv.FormatInt(node, 10)).Set(score)
 
 		if targetNode == -1 || score < targetScore {
@@ -138,10 +139,18 @@ func (b *LookAsideBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostA
 
 // calculateScore compute the query node's workload score
 // https://www.usenix.org/conference/nsdi15/technical-sessions/presentation/suresh
-func (b *LookAsideBalancer) calculateScore(cost *internalpb.CostAggregation, executingNQ int64) float64 {
+func (b *LookAsideBalancer) calculateScore(node int64, cost *internalpb.CostAggregation, executingNQ int64) float64 {
 	if cost == nil || cost.ResponseTime == 0 || cost.ServiceTime == 0 {
 		return math.Pow(float64(1+executingNQ), 3.0)
 	}
+
+	// for multi-replica cases, when there are no task which waiting in queue,
+	// the response time will effect the score, to prevent the score based on a too old value
+	// we expire the cost metrics by second if no task in queue.
+	if executingNQ == 0 && cost.TotalNQ == 0 && b.isNodeCostMetricsTooOld(node) {
+		return 0
+	}
+
 	executeSpeed := float64(cost.ResponseTime) - float64(1)/float64(cost.ServiceTime)
 	workload := math.Pow(float64(1+cost.TotalNQ+executingNQ), 3.0) / float64(cost.ServiceTime)
 	if workload < 0.0 {
@@ -149,6 +158,16 @@ func (b *LookAsideBalancer) calculateScore(cost *internalpb.CostAggregation, exe
 	}
 
 	return executeSpeed + workload
+}
+
+// if the node cost metrics hasn't been updated for a second, we think the metrics is too old
+func (b *LookAsideBalancer) isNodeCostMetricsTooOld(node int64) bool {
+	lastUpdateTs, ok := b.metricsUpdateTs.Get(node)
+	if !ok || lastUpdateTs == 0 {
+		return false
+	}
+
+	return time.Now().UnixMilli()-lastUpdateTs > CostMetricsExpireTime.Milliseconds()
 }
 
 func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
