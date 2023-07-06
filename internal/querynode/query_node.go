@@ -405,18 +405,27 @@ func (node *QueryNode) Stop() error {
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))
 		} else {
+			timeout := time.After(time.Duration(Params.QueryNodeCfg.GracefulStopTimeout) * time.Second)
 			noSegmentChan := node.metaReplica.getNoSegmentChan()
 			select {
 			case <-noSegmentChan:
-			case <-time.After(time.Duration(Params.QueryNodeCfg.GracefulStopTimeout) * time.Second):
-				log.Warn("migrate data timed out", zap.Int64("server_id", Params.QueryNodeCfg.GetNodeID()),
-					zap.Int64s("sealed_segment", lo.Map[*Segment, int64](node.metaReplica.getSealedSegments(), func(t *Segment, i int) int64 {
+			case <-timeout:
+				log.Warn("migrate segment data timed out", zap.Int64("ServerID", Params.QueryNodeCfg.GetNodeID()),
+					zap.Int64s("sealedSegments", lo.Map[*Segment, int64](node.metaReplica.getSealedSegments(), func(t *Segment, i int) int64 {
 						return t.ID()
 					})),
-					zap.Int64s("growing_segment", lo.Map[*Segment, int64](node.metaReplica.getGrowingSegments(), func(t *Segment, i int) int64 {
+					zap.Int64s("growingSegments", lo.Map[*Segment, int64](node.metaReplica.getGrowingSegments(), func(t *Segment, i int) int64 {
 						return t.ID()
 					})),
 				)
+			}
+
+			for !node.queryShardService.Empty() {
+				select {
+				case <-timeout:
+					log.Warn("migrate channel data timed out", zap.Int("channelNum", node.queryShardService.Num()))
+				case <-time.After(time.Second):
+				}
 			}
 		}
 
