@@ -26,9 +26,9 @@ import (
 	"github.com/cockroachdb/errors"
 	tikv "github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
+	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"go.uber.org/zap"
 
-	//"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -96,6 +96,13 @@ func (kv *tiKV) MultiLoad(keys []string) ([]string, error) {
 		return nil, errors.Wrap(err, fmt.Sprintf("Failed to build transaction for MultiLoad"))
 	}
 
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	var values []string
 	invalid := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -106,7 +113,7 @@ func (kv *tiKV) MultiLoad(keys []string) ([]string, error) {
 		}
 		values = append(values, string(value))
 	}
-	err = txn.Commit(context.Background())
+	err = kv.executeTxn(txn, ctx)
 
 	if len(invalid) != 0 {
 		log.Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
@@ -124,6 +131,17 @@ func (kv *tiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	defer cancel()
 
 	txn, err := kv.txn.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	// Retrieve key-value pairs with the specified prefix
 	startKey := []byte(prefix)
 	endKey := tikv.PrefixNextKey([]byte(prefix))
@@ -135,7 +153,6 @@ func (kv *tiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 
 	var keys []string
 	var values []string
-
 	// Iterate over the key-value pairs
 	for iter.Valid() {
 		keys = append(keys, string(iter.Key()))
@@ -145,7 +162,7 @@ func (kv *tiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 			return nil, nil, err
 		}
 	}
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv LoadWithPrefix error", zap.String("prefix", prefix), zap.Error(err))
 	}
@@ -189,6 +206,13 @@ func (kv *tiKV) MultiSave(kvs map[string]string) error {
 		return err
 	}
 
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	for key, value := range kvs {
 		key = path.Join(kv.rootPath, key)
 		fmt.Println("debug 1", key, value)
@@ -198,7 +222,7 @@ func (kv *tiKV) MultiSave(kvs map[string]string) error {
 		}
 	}
 
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
 	}
@@ -242,16 +266,22 @@ func (kv *tiKV) MultiRemove(keys []string) error {
 		return err
 	}
 
-	for _, key := range keys {
-		key = path.Join(kv.rootPath, key)
-		err := txn.Delete([]byte(key))
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
 		if err != nil {
 			txn.Rollback()
+		}
+	}()
+
+	for _, key := range keys {
+		key = path.Join(kv.rootPath, key)
+		err = txn.Delete([]byte(key))
+		if err != nil {
 			return err
 		}
 	}
 
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv MultiRemove error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
 	}
@@ -284,23 +314,28 @@ func (kv *tiKV) MultiSaveAndRemove(saves map[string]string, removals []string) e
 		return err
 	}
 
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	for key, value := range saves {
 		key = path.Join(kv.rootPath, key)
-		if err := txn.Set([]byte(key), []byte(value)); err != nil {
-			txn.Rollback()
+		if err = txn.Set([]byte(key), []byte(value)); err != nil {
 			return err
 		}
 	}
 
 	for _, key := range removals {
 		key = path.Join(kv.rootPath, key)
-		if err := txn.Delete([]byte(key)); err != nil {
-			txn.Rollback()
+		if err = txn.Delete([]byte(key)); err != nil {
 			return err
 		}
 	}
 
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv MultiSaveAndRemove error",
 			zap.Any("saves", saves),
@@ -324,6 +359,13 @@ func (kv *tiKV) MultiRemoveWithPrefix(prefixes []string) error {
 		return err
 	}
 
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	for _, prefix := range prefixes {
 		prefix = path.Join(kv.rootPath, prefix)
 		// Get the start and end keys for the prefix range
@@ -339,7 +381,7 @@ func (kv *tiKV) MultiRemoveWithPrefix(prefixes []string) error {
 		// Iterate over keys and delete them
 		for iter.Valid() {
 			key := iter.Key()
-			err := txn.Delete(key)
+			err = txn.Delete(key)
 			if err != nil {
 				return err
 			}
@@ -352,7 +394,7 @@ func (kv *tiKV) MultiRemoveWithPrefix(prefixes []string) error {
 		}
 	}
 
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv MultiRemoveWithPrefix error", zap.Strings("keys", prefixes), zap.Int("len", len(prefixes)), zap.Error(err))
 	}
@@ -403,7 +445,7 @@ func (kv *tiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals [
 		// Iterate over keys and delete them
 		for iter.Valid() {
 			key := iter.Key()
-			err := txn.Delete(key)
+			err = txn.Delete(key)
 			if err != nil {
 				return err
 			}
@@ -416,7 +458,7 @@ func (kv *tiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals [
 		}
 	}
 
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv MultiSaveAndRemoveWithPrefix error",
 			zap.Any("saves", saves),
@@ -436,6 +478,16 @@ func (kv *tiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte
 	defer cancel()
 
 	txn, err := kv.txn.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
 	// Retrieve key-value pairs with the specified prefix
 	startKey := []byte(prefix)
 	endKey := tikv.PrefixNextKey([]byte(prefix))
@@ -456,7 +508,7 @@ func (kv *tiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte
 			return err
 		}
 	}
-	err = txn.Commit(ctx)
+	err = kv.executeTxn(txn, ctx)
 	if err != nil {
 		log.Warn("TiKv WalkWithPagination error", zap.String("prefix", prefix), zap.Error(err))
 	}
@@ -503,13 +555,12 @@ func CheckTnxStringValueSizeAndWarn(kvs map[string]string) bool {
 	return CheckTnxBytesValueSizeAndWarn(newKvs)
 }
 
-/*
-func (kv *tiKV) executeTxn(tx tikv.Pipeliner, ctx context.Context) error {
+func (kv *tiKV) executeTxn(tx *transaction.KVTxn, ctx context.Context) error {
 	start := timerecord.NewTimeRecorder("executeTxn")
 
 	elapsed := start.ElapseSpan()
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.TotalLabel).Inc()
-	_, err := tx.Exec(ctx)
+	err := tx.Commit(ctx)
 	if err == nil {
 		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaTxnLabel).Observe(float64(elapsed.Milliseconds()))
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.SuccessLabel).Inc()
@@ -519,7 +570,6 @@ func (kv *tiKV) executeTxn(tx tikv.Pipeliner, ctx context.Context) error {
 
 	return err
 }
-*/
 
 func (kv *tiKV) getTiKVMeta(ctx context.Context, key string) (string, error) {
 	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
@@ -531,6 +581,13 @@ func (kv *tiKV) getTiKVMeta(ctx context.Context, key string) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, fmt.Sprintf("Failed to build transaction for getTiKVMeta"))
 	}
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	val, err := txn.Get(ctx1, []byte(key))
 	if err != nil {
 		return "", errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in getTiKVMeta", key))
@@ -562,6 +619,13 @@ func (kv *tiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to build transaction for putTiKVMeta"))
 	}
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	err = txn.Set([]byte(key), []byte(val))
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in putTiKVMeta", key))
@@ -591,6 +655,13 @@ func (kv *tiKV) removeTiKVMeta(ctx context.Context, key string) error {
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to build transaction for putTiKVMeta"))
 	}
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
 	err = txn.Delete([]byte(key))
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to get value for key %s in putTiKVMeta", key))
