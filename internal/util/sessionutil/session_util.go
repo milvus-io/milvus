@@ -93,7 +93,7 @@ type Session struct {
 	registered           atomic.Value
 	disconnected         atomic.Value
 	retryKeepAlive       atomic.Value
-	enableRetryKeepAlive bool
+	enableRetryKeepAlive atomic.Value
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -186,14 +186,14 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 // etcdEndpoints is to init etcdCli when NewSession
 func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	session := &Session{
-		ctx:                  ctx,
-		metaRoot:             metaRoot,
-		Version:              common.Version,
-		useCustomConfig:      false,
-		sessionTTL:           60,
-		sessionRetryTimes:    30,
-		enableRetryKeepAlive: true,
+		ctx:               ctx,
+		metaRoot:          metaRoot,
+		Version:           common.Version,
+		useCustomConfig:   false,
+		sessionTTL:        60,
+		sessionRetryTimes: 30,
 	}
+	session.SetEnableRetryKeepAlive(true)
 
 	session.apply(opts...)
 
@@ -433,7 +433,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					if !s.enableRetryKeepAlive {
+					if !s.enableRetryKeepAlive.Load().(bool) {
 						s.safeCloseLiveCh()
 						return
 					}
@@ -753,7 +753,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				return
 			case <-ctx.Done():
 				log.Info("liveness exits due to context done")
-				s.enableRetryKeepAlive = false
+				s.SetEnableRetryKeepAlive(false)
 				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
@@ -869,7 +869,7 @@ func (s *Session) updateStandby(b bool) {
 }
 
 func (s *Session) SetEnableRetryKeepAlive(enable bool) {
-	s.enableRetryKeepAlive = enable
+	s.enableRetryKeepAlive.Store(enable)
 }
 
 func (s *Session) isRetryingKeepAlive() bool {
