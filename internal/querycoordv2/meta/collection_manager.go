@@ -297,17 +297,13 @@ func (m *CollectionManager) CalculateLoadPercentage(collectionID UniqueID) int32
 }
 
 func (m *CollectionManager) calculateLoadPercentage(collectionID UniqueID) int32 {
-	collection, ok := m.collections[collectionID]
+	_, ok := m.collections[collectionID]
 	if ok {
 		partitions := m.getPartitionsByCollection(collectionID)
 		if len(partitions) > 0 {
 			return lo.SumBy(partitions, func(partition *Partition) int32 {
 				return partition.LoadPercentage
 			}) / int32(len(partitions))
-		}
-		if collection.GetLoadType() == querypb.LoadType_LoadCollection {
-			// no partition exists
-			return 100
 		}
 	}
 	return -1

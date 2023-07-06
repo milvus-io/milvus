@@ -225,13 +225,14 @@ queryNode:
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
+    cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency 
     knowhereThreadPoolNumRatio: 4
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.
     chunkRows: 1024 # The number of vectors in a chunk.
     growing: # growing a vector index for growing segment to accelerate search
-      enableIndex: false
+      enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
   loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments

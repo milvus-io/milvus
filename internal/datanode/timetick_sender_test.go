@@ -22,8 +22,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 func TestTimetickManagerNormal(t *testing.T) {
@@ -158,4 +162,26 @@ func TestTimetickManagerSendNotSuccess(t *testing.T) {
 	manager.update(channelName1, ts, segmentStats)
 	err := manager.sendReport(ctx, 100)
 	assert.Error(t, err)
+}
+
+func TestTimetickManagerSendReport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockDataCoord := types.NewMockDataCoord(t)
+	tsInMill := time.Now().UnixMilli()
+
+	validTs := atomic.NewBool(false)
+	mockDataCoord.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) {
+		if req.GetBase().Timestamp > uint64(tsInMill) {
+			validTs.Store(true)
+		}
+	}).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil)
+	manager := newTimeTickManager(mockDataCoord, 0)
+	go manager.start(ctx)
+
+	assert.Eventually(t, func() bool {
+		return validTs.Load()
+	}, 2*time.Second, 500*time.Millisecond)
 }

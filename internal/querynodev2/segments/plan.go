@@ -31,7 +31,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -41,28 +40,7 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-// createSearchPlan returns a new SearchPlan and error
-func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
-	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
-	}
-
-	cDsl := C.CString(dsl)
-	defer C.free(unsafe.Pointer(cDsl))
-	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlan(col.collectionPtr, cDsl, &cPlan)
-
-	err1 := HandleCStatus(&status, "Create Plan failed")
-	if err1 != nil {
-		return nil, err1
-	}
-
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	newPlan.setMetricType(col.GetMetricType())
-	return newPlan, nil
-}
-
-func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
+func createSearchPlanByExpr(col *Collection, expr []byte, metricType string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
@@ -75,7 +53,11 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	}
 
 	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	newPlan.setMetricType(col.GetMetricType())
+	if len(metricType) != 0 {
+		newPlan.setMetricType(metricType)
+	} else {
+		newPlan.setMetricType(col.GetMetricType())
+	}
 	return newPlan, nil
 }
 
@@ -112,18 +94,11 @@ type SearchRequest struct {
 func NewSearchRequest(collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	var err error
 	var plan *SearchPlan
-	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
-		expr := req.Req.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		dsl := req.Req.GetDsl()
-		plan, err = createSearchPlan(collection, dsl)
-		if err != nil {
-			return nil, err
-		}
+	metricType := req.GetReq().GetMetricType()
+	expr := req.Req.SerializedExprPlan
+	plan, err = createSearchPlanByExpr(collection, expr, metricType)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(placeholderGrp) == 0 {

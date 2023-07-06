@@ -148,8 +148,8 @@ func (o *LeaderObserver) checkNeedUpdateTargetVersion(leaderView *meta.LeaderVie
 		zap.Int64("newVersion", targetVersion),
 	)
 
-	sealedSegments := o.target.GetHistoricalSegmentsByCollection(leaderView.CollectionID, meta.CurrentTarget)
-	growingSegments := o.target.GetStreamingSegmentsByCollection(leaderView.CollectionID, meta.CurrentTarget)
+	sealedSegments := o.target.GetHistoricalSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	growingSegments := o.target.GetStreamingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
 
 	return &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,

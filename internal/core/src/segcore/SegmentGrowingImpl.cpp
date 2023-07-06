@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <queue>
 #include <thread>
@@ -23,8 +24,10 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/FieldData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::segcore {
 
@@ -51,6 +54,21 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
     AssertInfo(delete_bitset.size() == bitset.size(),
                "Deleted bitmap size not equal to filtered bitmap size");
     bitset |= delete_bitset;
+}
+
+void
+SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
+    //remove the chunk data to reduce memory consumption
+    if (indexing_record_.SyncDataWithIndex(fieldId)) {
+        auto vec_data_base =
+            dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
+                insert_record_.get_field_data_base(fieldId));
+        if (vec_data_base && vec_data_base->num_chunk() > 0 &&
+            chunk_mutex_.try_lock()) {
+            vec_data_base->clear();
+            chunk_mutex_.unlock();
+        }
+    }
 }
 
 void
@@ -89,6 +107,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_data->fields_data(data_offset),
                 field_meta);
         }
+        //insert vector data into index
         if (segcore_config_.get_enable_growing_segment_index()) {
             indexing_record_.AppendingIndex(
                 reserved_offset,
@@ -97,6 +116,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_data->fields_data(data_offset),
                 insert_record_);
         }
+        try_remove_chunks(field_id);
     }
 
     // step 4: set pks to offset
@@ -132,51 +152,48 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                    infos.field_infos.end(),
                "primary field data should be included");
 
-    int64_t num_rows = 0;
-    for (auto& field : infos.field_infos) {
-        num_rows = field.second.row_count;
-        break;
-    }
+    size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
-        auto field_datas = LoadFieldDatasFromRemote(insert_files);
-        AssertInfo(
-            num_rows == storage::GetTotalNumRowsForFieldDatas(field_datas),
-            "inconsistent num row between multi fields");
-
+        auto channel = std::make_shared<storage::FieldDataChannel>();
+        auto& pool = ThreadPool::GetInstance();
+        auto load_future =
+            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+        auto field_data = CollectFieldDataChannel(channel);
         if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
             // step 3: fill into Segment.ConcurrentVector
             insert_record_.timestamps_.set_data_raw(reserved_offset,
-                                                    field_datas);
+                                                    field_data);
             continue;
         }
 
         if (field_id == RowFieldID) {
-            insert_record_.row_ids_.set_data_raw(reserved_offset, field_datas);
+            insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
             continue;
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
-                reserved_offset, field_datas);
+                reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_growing_segment_index()) {
             auto offset = reserved_offset;
-            for (auto data : field_datas) {
+            for (auto& data : field_data) {
                 auto row_count = data->get_num_rows();
                 indexing_record_.AppendingIndex(
                     offset, row_count, field_id, data, insert_record_);
                 offset += row_count;
             }
         }
+        try_remove_chunks(field_id);
 
         if (field_id == primary_field_id) {
-            insert_record_.insert_pks(field_datas);
+            insert_record_.insert_pks(field_data);
         }
     }
 
@@ -392,10 +409,7 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
     auto& vec = *vec_ptr;
     std::vector<uint8_t> empty(element_sizeof, 0);
 
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
-        indexing_record_.GetDataFromIndex(
-            field_id, seg_offsets, count, element_sizeof, output_raw);
-    } else {
+    auto copy_from_chunk = [&]() {
         auto output_base = reinterpret_cast<char*>(output_raw);
         for (int i = 0; i < count; ++i) {
             auto dst = output_base + i * element_sizeof;
@@ -406,7 +420,20 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
                      : (const uint8_t*)vec.get_element(offset));
             memcpy(dst, src, element_sizeof);
         }
+    };
+    //HasRawData interface guarantees that data can be fetched from growing segment
+    if (HasRawData(field_id.get())) {
+        //When data sync with index
+        if (indexing_record_.SyncDataWithIndex(field_id)) {
+            indexing_record_.GetDataFromIndex(
+                field_id, seg_offsets, count, element_sizeof, output_raw);
+        } else {
+            //Else copy from chunk
+            std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
+            copy_from_chunk();
+        }
     }
+    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 }
 
 template <typename S, typename T>

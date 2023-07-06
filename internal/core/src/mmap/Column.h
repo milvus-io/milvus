@@ -105,11 +105,6 @@ class ColumnBase {
         return data_;
     }
 
-    size_t
-    Size() const {
-        return size_;
-    }
-
     virtual SpanBase
     Span() const = 0;
 
@@ -181,6 +176,11 @@ class Column : public ColumnBase {
 
     ~Column() override = default;
 
+    size_t
+    NumRows() const {
+        return num_rows_;
+    }
+
     SpanBase
     Span() const override {
         return SpanBase(data_, num_rows_, size_ / num_rows_);
@@ -213,6 +213,11 @@ class VariableColumn : public ColumnBase {
     }
 
     ~VariableColumn() override = default;
+
+    size_t
+    NumRows() const {
+        return indices_.size();
+    }
 
     SpanBase
     Span() const override {

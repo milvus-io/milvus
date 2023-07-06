@@ -76,14 +76,14 @@ FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
     return dest;
 }
 
-inline ssize_t
-WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr data) {
-    ssize_t total_written{0};
+inline size_t
+WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr& data) {
+    size_t total_written{0};
     if (datatype_is_variable(data_type)) {
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING: {
-                for (ssize_t i = 0; i < data->get_num_rows(); ++i) {
+                for (auto i = 0; i < data->get_num_rows(); ++i) {
                     auto str =
                         static_cast<const std::string*>(data->RawValue(i));
                     ssize_t written = write(fd, str->data(), str->size());
@@ -116,117 +116,5 @@ WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr data) {
     }
 
     return total_written;
-}
-
-// CreateMap creates a memory mapping,
-// if mmap enabled, this writes field data to disk and create a map to the file,
-// otherwise this just alloc memory
-inline void*
-CreateMap(int64_t segment_id,
-          const FieldMeta& field_meta,
-          const FieldDataInfo& info) {
-    static int mmap_flags = MAP_PRIVATE;
-#ifdef MAP_POPULATE
-    // macOS doesn't support MAP_POPULATE
-    mmap_flags |= MAP_POPULATE;
-#endif
-
-    // simdjson requires a padding following the json data
-    size_t padding = field_meta.get_data_type() == DataType::JSON
-                         ? simdjson::SIMDJSON_PADDING
-                         : 0;
-    auto data_size = GetDataSize(info.datas);
-    // Allocate memory
-    if (info.mmap_dir_path.empty()) {
-        auto data_type = field_meta.get_data_type();
-        if (data_size == 0)
-            return nullptr;
-
-        // Use anon mapping so we are able to free these memory with munmap only
-        void* map = mmap(nullptr,
-                         data_size + padding,
-                         PROT_READ | PROT_WRITE,
-                         mmap_flags | MAP_ANON,
-                         -1,
-                         0);
-        AssertInfo(
-            map != MAP_FAILED,
-            fmt::format("failed to create anon map, err: {}", strerror(errno)));
-        auto dst = map;
-        for (auto data : info.datas) {
-            dst = FillField(data_type, data, dst);
-        }
-        return map;
-    }
-
-    auto filepath = std::filesystem::path(info.mmap_dir_path) /
-                    std::to_string(segment_id) / std::to_string(info.field_id);
-    auto dir = filepath.parent_path();
-    std::filesystem::create_directories(dir);
-
-    int fd =
-        open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    AssertInfo(fd != -1,
-               fmt::format("failed to create mmap file {}", filepath.c_str()));
-
-    auto data_type = field_meta.get_data_type();
-    ssize_t total_written{0};
-    for (auto data : info.datas) {
-        auto written = WriteFieldData(fd, data_type, data);
-        if (written != data->Size()) {
-            break;
-        }
-        total_written += written;
-    }
-    AssertInfo(
-        total_written == data_size ||
-            total_written != -1 &&
-                datatype_is_variable(field_meta.get_data_type()),
-        fmt::format(
-            "failed to write data file {}, written {} but total {}, err: {}",
-            filepath.c_str(),
-            total_written,
-            data_size,
-            strerror(errno)));
-    int ok = fsync(fd);
-    AssertInfo(ok == 0,
-               fmt::format("failed to fsync mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-
-    // Empty field
-    if (total_written == 0) {
-        return nullptr;
-    }
-
-    auto map =
-        mmap(nullptr, total_written + padding, PROT_READ, mmap_flags, fd, 0);
-    AssertInfo(map != MAP_FAILED,
-               fmt::format("failed to create map for data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-
-#ifndef MAP_POPULATE
-    // Manually access the mapping to populate it
-    const size_t page_size = getpagesize();
-    char* begin = (char*)map;
-    char* end = begin + total_written;
-    for (char* page = begin; page < end; page += page_size) {
-        char value = page[0];
-    }
-#endif
-    // unlink this data file so
-    // then it will be auto removed after we don't need it again
-    ok = unlink(filepath.c_str());
-    AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-    ok = close(fd);
-    AssertInfo(ok == 0,
-               fmt::format("failed to close data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-    return map;
 }
 }  // namespace milvus

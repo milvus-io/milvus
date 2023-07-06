@@ -386,18 +386,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			FieldID:      100,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -483,18 +471,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, errors.New("index not ready"))
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			FieldID:      100,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}, nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -691,18 +667,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			FieldID:      100,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
@@ -803,18 +767,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			FieldID:      100,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task
@@ -894,18 +846,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collection,
-			FieldID:      100,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}, nil)
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test load segment task

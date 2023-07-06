@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "pb/plan.pb.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
@@ -41,26 +42,38 @@ TEST(GrowingIndex, Correctness) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
     auto segment = CreateGrowingSegment(schema, metaPtr);
+    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "embeddings": {
-                        "metric_type": "l2",
-                        "params": {
-                            "nprobe": 16
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal":3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "embeddings": {
+    //                     "metric_type": "l2",
+    //                     "params": {
+    //                         "nprobe": 16
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal":3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_is_binary(false);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(102);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("l2");
+    query_info->set_search_params(R"({"nprobe": 16})");
+    auto plan_str = plan_node.SerializeAsString();
 
     int64_t per_batch = 10000;
     int64_t n_batch = 20;
@@ -74,8 +87,20 @@ TEST(GrowingIndex, Correctness) {
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
+        auto filed_data = segmentImplPtr->get_insert_record()
+                              .get_field_data<milvus::FloatVector>(vec);
 
-        auto plan = milvus::query::CreatePlan(*schema, dsl);
+        auto inserted = (i + 1) * per_batch;
+        //once index built, chunk data will be removed
+        if (i < 2) {
+            EXPECT_EQ(filed_data->num_chunk(),
+                      upper_div(inserted, filed_data->get_size_per_chunk()));
+        } else {
+            EXPECT_EQ(filed_data->num_chunk(), 0);
+        }
+
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            *schema, plan_str.data(), plan_str.size());
         auto num_queries = 5;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, 128, 1024);
         auto ph_group =
@@ -89,16 +114,37 @@ TEST(GrowingIndex, Correctness) {
     }
 }
 
-TEST(GrowingIndex, GetVector) {
+using Param = const char*;
+
+class GrowingIndexGetVectorTest : public ::testing::TestWithParam<Param> {
+    void
+    SetUp() override {
+        auto param = GetParam();
+        metricType = param;
+    }
+
+ protected:
+    const char* metricType;
+};
+
+INSTANTIATE_TEST_CASE_P(IndexTypeParameters,
+                        GrowingIndexGetVectorTest,
+                        ::testing::Values(knowhere::metric::L2,
+                                          knowhere::metric::COSINE,
+                                          knowhere::metric::IP));
+
+TEST_P(GrowingIndexGetVectorTest, GetVector) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto random = schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField(
-        "embeddings", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+        "embeddings", DataType::VECTOR_FLOAT, 128, metricType);
     schema->set_primary_field_id(pk);
 
     std::map<std::string, std::string> index_params = {
-        {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
+        {"index_type", "IVF_FLAT"},
+        {"metric_type", metricType},
+        {"nlist", "128"}};
     std::map<std::string, std::string> type_params = {{"dim", "128"}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));

@@ -15,34 +15,6 @@
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 
-CStatus
-CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
-
-    try {
-        auto res = milvus::query::CreatePlan(*col->get_schema(), dsl);
-
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        auto plan = (CSearchPlan)res.release();
-        *res_plan = plan;
-        return status;
-    } catch (milvus::SegcoreError& e) {
-        auto status = CStatus();
-        status.error_code = e.get_error_code();
-        status.error_msg = strdup(e.what());
-        *res_plan = nullptr;
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        *res_plan = nullptr;
-        return status;
-    }
-}
-
 // Note: serialized_expr_plan is of binary format
 CStatus
 CreateSearchPlanByExpr(CCollection c_col,

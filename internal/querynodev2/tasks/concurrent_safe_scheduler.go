@@ -82,7 +82,8 @@ func (s *scheduler) schedule(ctx context.Context) {
 		s.setupReadyLenMetric()
 
 		var execChan chan Task
-		task, execChan = s.setupExecListener(task)
+		nq := int64(0)
+		task, nq, execChan = s.setupExecListener(task)
 
 		select {
 		case <-ctx.Done():
@@ -94,6 +95,8 @@ func (s *scheduler) schedule(ctx context.Context) {
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum)
 		case execChan <- task:
 			// Task sent, drop the ownership of sent task.
+			// Update waiting task counter.
+			s.updateWaitingTaskCounter(-1, -nq)
 			// And produce new task into execChan as much as possible.
 			task = s.produceExecChan()
 		}
@@ -146,10 +149,13 @@ func (s *scheduler) produceExecChan() Task {
 	var task Task
 	for {
 		var execChan chan Task
-		task, execChan = s.setupExecListener(task)
+		nq := int64(0)
+		task, nq, execChan = s.setupExecListener(task)
 
 		select {
 		case execChan <- task:
+			// Update waiting task counter.
+			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
 			task = nil
 		default:
@@ -187,7 +193,6 @@ func (s *scheduler) exec(ctx context.Context) {
 				err := t.Execute()
 
 				// Update all metric after task finished.
-				s.updateWaitingTaskCounter(-1, -t.NQ())
 				metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 				collector.Counter.Dec(metricsinfo.ExecuteQueueType, -1)
 
@@ -200,8 +205,9 @@ func (s *scheduler) exec(ctx context.Context) {
 }
 
 // setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask Task) (Task, chan Task) {
+func (s *scheduler) setupExecListener(lastWaitingTask Task) (Task, int64, chan Task) {
 	var execChan chan Task
+	nq := int64(0)
 	if lastWaitingTask == nil {
 		// No task is waiting to send to execChan, schedule a new one from queue.
 		lastWaitingTask = s.policy.Pop()
@@ -209,8 +215,10 @@ func (s *scheduler) setupExecListener(lastWaitingTask Task) (Task, chan Task) {
 	if lastWaitingTask != nil {
 		// Try to sent task to execChan if there is a task ready to run.
 		execChan = s.execChan
+		nq = lastWaitingTask.NQ()
 	}
-	return lastWaitingTask, execChan
+
+	return lastWaitingTask, nq, execChan
 }
 
 // setupReadyLenMetric update the read task ready len metric.

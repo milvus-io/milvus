@@ -89,6 +89,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return deleted_record_;
     }
 
+    std::shared_mutex&
+    get_chunk_mutex() const {
+        return chunk_mutex_;
+    }
+
     const SealedIndexingRecord&
     get_sealed_indexing_record() const {
         return sealed_indexing_record_;
@@ -123,6 +128,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     size_per_chunk() const final {
         return segcore_config_.get_chunk_rows();
     }
+
+    void
+    try_remove_chunks(FieldId fieldId);
 
  public:
     int64_t
@@ -228,6 +236,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasRawData(int64_t field_id) const override {
+        //growing index hold raw data when
+        // 1. growing index enabled and it holds raw data
+        // 2. growing index disabled then raw data held by chunk
+        if (indexing_record_.is_in(FieldId(field_id))) {
+            return indexing_record_.HasRawData(FieldId(field_id));
+        }
         return true;
     }
 
@@ -254,6 +268,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
+
+    mutable std::shared_mutex chunk_mutex_;
 
     // deleted pks
     mutable DeletedRecord deleted_record_;

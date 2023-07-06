@@ -93,19 +93,19 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 		TotalNQ:      0,
 	}
 
-	score1 := suite.balancer.calculateScore(costMetrics1, 0)
-	score2 := suite.balancer.calculateScore(costMetrics2, 0)
-	score3 := suite.balancer.calculateScore(costMetrics3, 0)
-	score4 := suite.balancer.calculateScore(costMetrics4, 0)
+	score1 := suite.balancer.calculateScore(-1, costMetrics1, 0)
+	score2 := suite.balancer.calculateScore(-1, costMetrics2, 0)
+	score3 := suite.balancer.calculateScore(-1, costMetrics3, 0)
+	score4 := suite.balancer.calculateScore(-1, costMetrics4, 0)
 	suite.Equal(float64(12), score1)
 	suite.Equal(float64(8.5), score2)
 	suite.Equal(float64(17), score3)
 	suite.Equal(float64(5), score4)
 
-	score5 := suite.balancer.calculateScore(costMetrics1, 5)
-	score6 := suite.balancer.calculateScore(costMetrics2, 5)
-	score7 := suite.balancer.calculateScore(costMetrics3, 5)
-	score8 := suite.balancer.calculateScore(costMetrics4, 5)
+	score5 := suite.balancer.calculateScore(-1, costMetrics1, 5)
+	score6 := suite.balancer.calculateScore(-1, costMetrics2, 5)
+	score7 := suite.balancer.calculateScore(-1, costMetrics3, 5)
+	score8 := suite.balancer.calculateScore(-1, costMetrics4, 5)
 	suite.Equal(float64(347), score5)
 	suite.Equal(float64(176), score6)
 	suite.Equal(float64(352), score7)
@@ -118,8 +118,16 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 		TotalNQ:      math.MaxInt64,
 	}
 
-	score9 := suite.balancer.calculateScore(costMetrics5, math.MaxInt64)
+	score9 := suite.balancer.calculateScore(-1, costMetrics5, math.MaxInt64)
 	suite.Equal(math.MaxFloat64, score9)
+
+	// test metrics expire
+	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli())
+	score10 := suite.balancer.calculateScore(1, costMetrics4, 0)
+	suite.Equal(float64(5), score10)
+	suite.balancer.metricsUpdateTs.Insert(1, time.Now().UnixMilli()-5000)
+	score11 := suite.balancer.calculateScore(1, costMetrics4, 0)
+	suite.Equal(float64(0), score11)
 }
 
 func (suite *LookAsideBalancerSuite) TestSelectNode() {

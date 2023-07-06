@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 
 #include "storage/ChunkManager.h"

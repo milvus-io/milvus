@@ -19,9 +19,11 @@
 #include <vector>
 
 #include "common/QueryResult.h"
+#include "common/Types.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "index/Index.h"
+#include "storage/FieldData.h"
 
 namespace milvus::segcore {
 
@@ -146,7 +148,11 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      int64_t count,
                      const FieldMeta& field_meta);
 
+void
+LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
+                         storage::FieldDataChannelPtr channel);
+
 std::vector<storage::FieldDataPtr>
-LoadFieldDatasFromRemote(std::vector<std::string>& remote_files);
+CollectFieldDataChannel(storage::FieldDataChannelPtr& channel);
 
 }  // namespace milvus::segcore

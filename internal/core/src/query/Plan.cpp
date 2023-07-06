@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "Parser.h"
 #include "Plan.h"
 #include "PlanProto.h"
 #include "generated/ShowPlanNodeVisitor.h"
@@ -61,14 +60,6 @@ ParsePlaceholderGroup(const Plan* plan,
         result->emplace_back(std::move(element));
     }
     return result;
-}
-
-std::unique_ptr<Plan>
-CreatePlan(const Schema& schema, const std::string_view dsl_str) {
-    Json dsl;
-    dsl = json::parse(dsl_str);
-    auto plan = Parser(schema).CreatePlanImpl(dsl);
-    return plan;
 }
 
 std::unique_ptr<Plan>

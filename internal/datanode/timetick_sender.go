@@ -66,7 +66,7 @@ func (m *timeTickSender) start(ctx context.Context) {
 			log.Info("timeTickSender context done")
 			return
 		case t := <-ticker.C:
-			m.sendReport(ctx, uint64(t.Unix()))
+			m.sendReport(ctx, uint64(t.UnixMilli()))
 		}
 	}
 }

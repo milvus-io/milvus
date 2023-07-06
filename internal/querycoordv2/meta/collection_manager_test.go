@@ -71,7 +71,7 @@ func (suite *CollectionManagerSuite) SetupSuite() {
 		querypb.LoadType_LoadCollection,
 	}
 	suite.replicaNumber = []int32{1, 2, 3, 1}
-	suite.colLoadPercent = []int32{0, 50, 100, 100}
+	suite.colLoadPercent = []int32{0, 50, 100, -1}
 	suite.parLoadPercent = map[int64][]int32{
 		100: {0},
 		101: {0, 100},

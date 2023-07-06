@@ -206,6 +206,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			)
 			return err
 		}
+		log.Info("load segment done", zap.Int64("segmentID", segmentID))
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
@@ -243,11 +244,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return nil, errors.New("segment was removed from the loading map early")
 		}
 
+		log.Info("wait segment loaded...", zap.Int64("segmentID", segment.GetSegmentID()))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-waitCh:
 		}
+		log.Info("segment loaded...", zap.Int64("segmentID", segment.GetSegmentID()))
 	}
 
 	loaded := make([]Segment, 0, len(newSegments))
@@ -255,6 +258,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		loaded = append(loaded, segment)
 	}
 	loader.manager.Segment.Put(segmentType, loaded...)
+	log.Info("all segment load done")
 	return loaded, nil
 }
 

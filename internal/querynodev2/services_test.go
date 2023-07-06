@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -514,9 +516,6 @@ func (suite *ServiceSuite) TestLoadSegments_Int64() {
 		Schema:         schema,
 		DeltaPositions: []*msgpb.MsgPosition{{Timestamp: 20000}},
 		NeedTransfer:   true,
-		LoadMeta: &querypb.LoadMetaInfo{
-			MetricType: defaultMetricType,
-		},
 	}
 
 	// LoadSegment
@@ -534,7 +533,6 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
-		MetricType:   defaultMetricType,
 	}
 	suite.node.manager.Collection = segments.NewCollectionManager()
 	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, loadMeta)
@@ -574,9 +572,6 @@ func (suite *ServiceSuite) TestLoadDeltaInt64() {
 		Schema:       schema,
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
-		LoadMeta: &querypb.LoadMetaInfo{
-			MetricType: defaultMetricType,
-		},
 	}
 
 	// LoadSegment
@@ -601,9 +596,6 @@ func (suite *ServiceSuite) TestLoadDeltaVarchar() {
 		Schema:       schema,
 		NeedTransfer: true,
 		LoadScope:    querypb.LoadScope_Delta,
-		LoadMeta: &querypb.LoadMetaInfo{
-			MetricType: defaultMetricType,
-		},
 	}
 
 	// LoadSegment
@@ -626,9 +618,6 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 		Infos:        suite.genSegmentLoadInfos(schema),
 		Schema:       schema,
 		NeedTransfer: true,
-		LoadMeta: &querypb.LoadMetaInfo{
-			MetricType: defaultMetricType,
-		},
 	}
 
 	// Delegator not found
@@ -648,14 +637,6 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	status, err = suite.node.LoadSegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
-
-	// no metric type
-	req.LoadMeta = nil
-	req.Base.TargetID = paramtable.GetNodeID()
-	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
-	status, err = suite.node.LoadSegments(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
@@ -679,9 +660,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			Infos:        suite.genSegmentLoadInfos(schema),
 			Schema:       schema,
 			NeedTransfer: true,
-			LoadMeta: &querypb.LoadMetaInfo{
-				MetricType: defaultMetricType,
-			},
 		}
 
 		// LoadSegment
@@ -703,9 +681,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			Infos:        suite.genSegmentLoadInfos(schema),
 			Schema:       schema,
 			NeedTransfer: true,
-			LoadMeta: &querypb.LoadMetaInfo{
-				MetricType: defaultMetricType,
-			},
 		}
 
 		// LoadSegment
@@ -732,9 +707,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 			Infos:        suite.genSegmentLoadInfos(schema),
 			Schema:       schema,
 			NeedTransfer: true,
-			LoadMeta: &querypb.LoadMetaInfo{
-				MetricType: defaultMetricType,
-			},
 		}
 
 		// LoadSegment
@@ -940,7 +912,13 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 	if err != nil {
 		return nil, err
 	}
-	simpleDSL, err2 := genDSLByIndexType(schema, indexType)
+	planStr, err := genDSLByIndexType(schema, indexType)
+	if err != nil {
+		return nil, err
+	}
+	var planpb planpb.PlanNode
+	proto.UnmarshalText(planStr, &planpb)
+	serializedPlan, err2 := proto.Marshal(&planpb)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -950,12 +928,12 @@ func (suite *ServiceSuite) genCSearchRequest(nq int64, indexType string, schema 
 			MsgID:    rand.Int63(),
 			TargetID: suite.node.session.ServerID,
 		},
-		CollectionID:     suite.collectionID,
-		PartitionIDs:     suite.partitionIDs,
-		Dsl:              simpleDSL,
-		PlaceholderGroup: placeHolder,
-		DslType:          commonpb.DslType_Dsl,
-		Nq:               nq,
+		CollectionID:       suite.collectionID,
+		PartitionIDs:       suite.partitionIDs,
+		SerializedExprPlan: serializedPlan,
+		PlaceholderGroup:   placeHolder,
+		DslType:            commonpb.DslType_BoolExprV1,
+		Nq:                 nq,
 	}, nil
 }
 
@@ -1591,23 +1569,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	status, err = suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-	// empty metric type
-	req.IndexInfoList = []*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collectionID,
-			FieldID:      vecField.GetFieldID(),
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "",
-				},
-			},
-		},
-	}
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 
 	// collection not exist and schema is not nil
 	req.IndexInfoList = []*indexpb.IndexInfo{

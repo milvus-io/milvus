@@ -53,84 +53,40 @@ TEST(Query, ShowExecutor) {
     std::cout << dup.dump(4);
 }
 
-TEST(Query, DSL) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-    ShowPlanNodeVisitor shower;
-
-    std::string dsl_string = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10,
-                        "round_decimal": 3
-                    }
-                }
-            }
-        ]
-    }
-})";
-
-    auto schema = std::make_shared<Schema>();
-    schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-
-    auto plan = CreatePlan(*schema, dsl_string);
-    auto res = shower.call_child(*plan->plan_node_);
-    std::cout << res.dump(4) << std::endl;
-
-    std::string dsl_string2 = R"(
-{
-    "bool": {
-        "vector": {
-            "fakevec": {
-                "metric_type": "L2",
-                "params": {
-                    "nprobe": 10
-                },
-                "query": "$0",
-                "topk": 10,
-                "round_decimal": 3
-            }
-        }
-    }
-})";
-    auto plan2 = CreatePlan(*schema, dsl_string2);
-    auto res2 = shower.call_child(*plan2->plan_node_);
-    std::cout << res2.dump(4) << std::endl;
-    ASSERT_EQ(res, res2);
-}
-
 TEST(Query, ParsePlaceholderGroup) {
-    std::string dsl_string = R"(
-{
-    "bool": {
-        "vector": {
-            "fakevec": {
-                "metric_type": "L2",
-                "params": {
-                    "nprobe": 10
-                },
-                "query": "$0",
-                "topk": 10,
-                "round_decimal":3
-            }
-        }
-    }
-})";
+    //     std::string dsl_string = R"(
+    // {
+    //     "bool": {
+    //         "vector": {
+    //             "fakevec": {
+    //                 "metric_type": "L2",
+    //                 "params": {
+    //                     "nprobe": 10
+    //                 },
+    //                 "query": "$0",
+    //                 "topk": 10,
+    //                 "round_decimal":3
+    //             }
+    //         }
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                query_info: <
+                                  topk: 10
+                                  round_decimal: 3
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+     >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    auto plan = CreatePlan(*schema, dsl_string);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     int64_t num_queries = 100000;
     int dim = 16;
     auto raw_group = CreatePlaceholderGroup(num_queries, dim);
@@ -147,33 +103,59 @@ TEST(Query, ExecWithPredicateLoader) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto counter_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(counter_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "age": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "age": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Float
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -184,7 +166,9 @@ TEST(Query, ExecWithPredicateLoader) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -231,33 +215,59 @@ TEST(Query, ExecWithPredicateSmallN) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "age": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "age": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Float
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     int64_t N = 177;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -268,7 +278,9 @@ TEST(Query, ExecWithPredicateSmallN) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 7, 1024);
     auto ph_group =
@@ -291,33 +303,59 @@ TEST(Query, ExecWithPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "age": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "age": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Float
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -328,7 +366,9 @@ TEST(Query, ExecWithPredicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -375,33 +415,51 @@ TEST(Query, ExecTerm) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "term": {
-                    "age": {
-                        "values": [],
-                        "is_in_field": false
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "term": {
+    //                 "age": {
+    //                     "values": [],
+    //                     "is_in_field": false
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      term_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Float
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -412,7 +470,9 @@ TEST(Query, ExecTerm) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -435,28 +495,40 @@ TEST(Query, ExecEmpty) {
     schema->AddDebugField("age", DataType::FLOAT);
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 101
+                                query_info: <
+                                  topk: 5
+                                  round_decimal: 3
+                                  metric_type: "L2"
+                                  search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+        >)";
     int64_t N = ROW_COUNT;
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -483,26 +555,38 @@ TEST(Query, ExecWithoutPredicateFlat) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
-    auto plan = CreatePlan(*schema, dsl);
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -535,26 +619,38 @@ TEST(Query, ExecWithoutPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "l2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal":3
-                    }
-                }
-            }
-            ]
-        }
-    })";
-    auto plan = CreatePlan(*schema, dsl);
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "l2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal":3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -609,32 +705,44 @@ TEST(Query, InnerProduct) {
     constexpr auto topk = 10;
     auto num_queries = 5;
     auto schema = std::make_shared<Schema>();
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "normalized": {
-                        "metric_type": "ip",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal":3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "normalized": {
+    //                     "metric_type": "ip",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal":3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "IP"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
     auto vec_fid = schema->AddDebugField(
         "normalized", DataType::VECTOR_FLOAT, dim, knowhere::metric::IP);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -734,26 +842,38 @@ TEST(Query, FillSegment) {
         return segment;
     }());
 
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
-    auto plan = CreatePlan(*schema, dsl);
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "L2",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto ph_proto = CreatePlaceholderGroup(10, 16, 443);
     auto ph = ParsePlaceholderGroup(plan.get(), ph_proto.SerializeAsString());
     Timestamp ts = N * 2UL;
@@ -826,33 +946,59 @@ TEST(Query, ExecWithPredicateBinary) {
     auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "range": {
-                    "age": {
-                        "GE": -1,
-                        "LT": 1
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "JACCARD",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5,
-                        "round_decimal": 3
-                    }
-                }
-            }
-            ]
-        }
-    })";
+    // std::string dsl = R"({
+    //     "bool": {
+    //         "must": [
+    //         {
+    //             "range": {
+    //                 "age": {
+    //                     "GE": -1,
+    //                     "LT": 1
+    //                 }
+    //             }
+    //         },
+    //         {
+    //             "vector": {
+    //                 "fakevec": {
+    //                     "metric_type": "JACCARD",
+    //                     "params": {
+    //                         "nprobe": 10
+    //                     },
+    //                     "query": "$0",
+    //                     "topk": 5,
+    //                     "round_decimal": 3
+    //                 }
+    //             }
+    //         }
+    //         ]
+    //     }
+    // })";
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      binary_range_expr: <
+                                        column_info: <
+                                          field_id: 101
+                                          data_type: Float
+                                        >
+                                        lower_inclusive: true,
+                                        upper_inclusive: false,
+                                        lower_value: <
+                                          float_val: -1
+                                        >
+                                        upper_value: <
+                                          float_val: 1
+                                        >
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "JACCARD"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -864,7 +1010,9 @@ TEST(Query, ExecWithPredicateBinary) {
                     dataset.raw_);
     auto vec_ptr = dataset.get_col<uint8_t>(vec_fid);
 
-    auto plan = CreatePlan(*schema, dsl);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(
         num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);

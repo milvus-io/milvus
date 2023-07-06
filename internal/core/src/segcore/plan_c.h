@@ -23,9 +23,6 @@ typedef void* CSearchPlan;
 typedef void* CPlaceholderGroup;
 typedef void* CRetrievePlan;
 
-CStatus
-CreateSearchPlan(CCollection col, const char* dsl, CSearchPlan* res_plan);
-
 // Note: serialized_expr_plan is of binary format
 CStatus
 CreateSearchPlanByExpr(CCollection col,

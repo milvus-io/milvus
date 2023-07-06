@@ -32,7 +32,6 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_init.cpp
         test_parquet_c.cpp
-        test_plan_proto.cpp
         test_query.cpp
         test_reduce.cpp
         test_reduce_c.cpp
@@ -51,6 +50,7 @@ set(MILVUS_TEST_FILES
         test_tracer.cpp
         test_local_chunk_manager.cpp
         test_disk_file_manager_test.cpp
+        test_integer_overflow.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
