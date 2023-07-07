@@ -20,7 +20,7 @@ class MilvusConan(ConanFile):
         "aws-c-sdkutils/0.1.3@milvus/dev",
         "aws-checksums/0.1.13@milvus/dev",
         "aws-c-cal/0.5.20@milvus/dev",
-        "aws-c-io/0.10.20@milvus/dev",
+        "aws-c-io/0.13.4@milvus/dev",
         "aws-c-http/0.6.13@milvus/dev",
         "aws-c-auth/0.6.11@milvus/dev",
         "aws-sdk-cpp/1.9.234",
