@@ -143,8 +143,8 @@ func (c *LRU[K, V]) Add(key K, value V) {
 
 // Get returns value for provided key.
 func (c *LRU[K, V]) Get(key K) (value V, ok bool) {
-	c.m.RLock()
-	defer c.m.RUnlock()
+	c.m.Lock()
+	defer c.m.Unlock()
 
 	var zeroV V
 	if c.closed() {
