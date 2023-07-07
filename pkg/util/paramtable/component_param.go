@@ -2008,7 +2008,7 @@ the number of binlog file reaches to max value.`,
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable data segment compaction",
 		Export:       true,
 	}
