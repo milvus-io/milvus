@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 )
 
 func TestMetaReloadFromKV(t *testing.T) {
@@ -269,17 +271,26 @@ func TestMeta_Basic(t *testing.T) {
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
 		// inject error for `Save`
-		memoryKV := NewMetaMemoryKV()
-		fkv := &saveFailKV{MetaKv: memoryKV}
-		catalog := datacoord.NewCatalog(fkv, "", "")
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		catalog := datacoord.NewCatalog(metakv, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.Error(t, err)
 
-		fkv2 := &removeFailKV{MetaKv: memoryKV}
-		catalog = datacoord.NewCatalog(fkv2, "", "")
+		metakv2 := mockkv.NewMetaKv(t)
+		metakv2.EXPECT().Save(mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv2.EXPECT().MultiSave(mock.Anything).Return(nil).Maybe()
+		metakv2.EXPECT().Remove(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv2.EXPECT().MultiRemove(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv2.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv2.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		catalog = datacoord.NewCatalog(metakv2, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 		// nil, since no segment yet
@@ -292,7 +303,7 @@ func TestMeta_Basic(t *testing.T) {
 		err = meta.DropSegment(0)
 		assert.Error(t, err)
 
-		catalog = datacoord.NewCatalog(fkv, "", "")
+		catalog = datacoord.NewCatalog(metakv, "", "")
 		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 	})
@@ -484,9 +495,12 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("test save etcd failed", func(t *testing.T) {
-		kv := NewMetaMemoryKV()
-		failedKv := &saveFailKV{kv}
-		catalog := datacoord.NewCatalog(failedKv, "", "")
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mocked fail")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("mocked fail")).Maybe()
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		catalog := datacoord.NewCatalog(metakv, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
 

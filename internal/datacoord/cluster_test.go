@@ -24,11 +24,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"stathat.com/c/consistent"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -163,20 +165,11 @@ func TestClusterCreate(t *testing.T) {
 	t.Run("loadKv Fails", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
-		fkv := &loadPrefixFailKV{WatchKV: kv}
-		_, err := NewChannelManager(fkv, newMockHandler())
+		metakv := mocks.NewWatchKV(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("failed"))
+		_, err := NewChannelManager(metakv, newMockHandler())
 		assert.Error(t, err)
 	})
-}
-
-// a mock kv that always fail when LoadWithPrefix
-type loadPrefixFailKV struct {
-	kv.WatchKV
-}
-
-// LoadWithPrefix override behavior
-func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	return []string{}, []string{}, errors.New("mocked fail")
 }
 
 func TestRegister(t *testing.T) {

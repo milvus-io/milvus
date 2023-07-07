@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 )
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
@@ -341,8 +343,12 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 
 	plans := map[int64]*compactionTask{1: task}
 
+	metakv := mockkv.NewMetaKv(t)
+	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
 	errMeta := &meta{
-		catalog: &datacoord.Catalog{MetaKv: &saveFailKV{MetaKv: NewMetaMemoryKV()}},
+		catalog: &datacoord.Catalog{MetaKv: metakv},
 		segments: &SegmentsInfo{
 			map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},

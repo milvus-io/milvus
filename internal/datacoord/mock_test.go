@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -135,30 +134,6 @@ func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
 		return 0, nil
 	}
 	return 0, errors.New("always fail")
-}
-
-// a mock kv that always fail when do `Save`
-type saveFailKV struct{ kv.MetaKv }
-
-// Save override behavior
-func (kv *saveFailKV) Save(key, value string) error {
-	return errors.New("mocked fail")
-}
-
-func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
-	return errors.New("mocked fail")
-}
-
-// a mock kv that always fail when do `Remove`
-type removeFailKV struct{ kv.MetaKv }
-
-// Remove override behavior, inject error
-func (kv *removeFailKV) MultiRemove(key []string) error {
-	return errors.New("mocked fail")
-}
-
-func (kv *removeFailKV) Remove(key string) error {
-	return errors.New("mocked fail")
 }
 
 func newMockAllocator() *MockAllocator {
