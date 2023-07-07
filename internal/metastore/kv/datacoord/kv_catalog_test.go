@@ -199,6 +199,7 @@ func (mc *MockedTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
 }
 
 func (mc *MockedTxnKV) MultiRemove(keys []string) error {
+
 	return mc.multiRemove(keys)
 }
 

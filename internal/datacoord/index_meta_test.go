@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -387,10 +388,14 @@ func TestMeta_GetIndexIDByName(t *testing.T) {
 			},
 		}
 	)
+	metakv := mockkv.NewMetaKv(t)
+	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
 	m := &meta{
 		RWMutex:              sync.RWMutex{},
 		ctx:                  context.Background(),
-		catalog:              &datacoord.Catalog{MetaKv: &saveFailKV{}},
+		catalog:              &datacoord.Catalog{MetaKv: metakv},
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 	}
@@ -445,10 +450,14 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 			},
 		}
 	)
+	metakv := mockkv.NewMetaKv(t)
+	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
 	m := &meta{
 		RWMutex:              sync.RWMutex{},
 		ctx:                  context.Background(),
-		catalog:              &datacoord.Catalog{MetaKv: &saveFailKV{}},
+		catalog:              &datacoord.Catalog{MetaKv: metakv},
 		indexes:              map[UniqueID]map[UniqueID]*model.Index{},
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		segments: &SegmentsInfo{
@@ -1122,8 +1131,11 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 
 	t.Run("fail", func(t *testing.T) {
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
 		m.catalog = &datacoord.Catalog{
-			MetaKv: &saveFailKV{},
+			MetaKv: metakv,
 		}
 		err := m.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID:        buildID,

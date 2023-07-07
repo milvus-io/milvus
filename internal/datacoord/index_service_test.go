@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -135,8 +136,11 @@ func TestServer_CreateIndex(t *testing.T) {
 	})
 
 	t.Run("save index fail", func(t *testing.T) {
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
 		s.meta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
-		s.meta.catalog = &datacoord.Catalog{MetaKv: &saveFailKV{}}
+		s.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 		req.IndexParams = []*commonpb.KeyValuePair{
 			{
 				Key:   common.IndexTypeKey,
