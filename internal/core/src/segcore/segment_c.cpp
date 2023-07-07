@@ -196,13 +196,6 @@ Delete(CSegmentInterface c_segment,
     }
 }
 
-int64_t
-PreDelete(CSegmentInterface c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-
-    return segment->PreDelete(size);
-}
-
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo c_load_field_data_info) {

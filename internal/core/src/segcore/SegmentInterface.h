@@ -73,9 +73,6 @@ class SegmentInterface {
     virtual SegmentType
     type() const = 0;
 
-    virtual int64_t
-    PreDelete(int64_t size) = 0;
-
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) = 0;
 

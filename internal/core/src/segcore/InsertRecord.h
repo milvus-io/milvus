@@ -345,6 +345,11 @@ struct InsertRecord {
         fields_data_.erase(field_id);
     }
 
+    int64_t
+    num() const {
+        return reserved;
+    }
+
  private:
     //    std::vector<std::unique_ptr<VectorBase>> fields_data_;
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_;

@@ -272,25 +272,7 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 		}
 	}
 
-	// 2. do preDelete
-	for segmentID := range delData.deleteIDs {
-		_, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
-		if err != nil {
-			if errors.Is(err, ErrSegmentNotFound) {
-				log.Warn("segment not found when do preDelete, it may have been released due to compaction",
-					zap.Int64("segmentID", segmentID),
-					zap.Error(err),
-				)
-				continue
-			}
-
-			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
-		}
-	}
-
-	// 3. do delete
+	// 2. do delete
 	for segmentID := range delData.deleteIDs {
 		segmentID := segmentID
 		wg.Add(1)

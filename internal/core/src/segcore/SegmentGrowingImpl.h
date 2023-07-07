@@ -49,9 +49,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
            const Timestamp* timestamps,
            const InsertData* insert_data) override;
 
-    int64_t
-    PreDelete(int64_t size) override;
-
     // TODO: add id into delete log, possibly bitmap
     Status
     Delete(int64_t reserverd_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
@@ -137,7 +134,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     get_deleted_count() const override {
-        return deleted_record_.ack_responder_.GetAck();
+        return deleted_record_.num();
     }
 
     int64_t

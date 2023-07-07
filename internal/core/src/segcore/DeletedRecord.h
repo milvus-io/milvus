@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "AckResponder.h"
 #include "common/Schema.h"
@@ -69,13 +70,42 @@ struct DeletedRecord {
         lru_ = std::move(new_entry);
     }
 
+    void
+    push(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        std::lock_guard lck(buffer_mutex_);
+
+        auto size = pks.size();
+        ssize_t divide_point = 0;
+        auto n = n_.load();
+        // Truncate the overlapping prefix
+        if (n > 0) {
+            auto last = timestamps_[n - 1];
+            divide_point = std::lower_bound(timestamps, timestamps + size, last) - timestamps;
+        }
+
+        // All these delete records have been applied
+        if (divide_point == size) {
+            return;
+        }
+
+        size -= divide_point;
+        pks_.set_data_raw(n, pks.data() + divide_point, size);
+        timestamps_.set_data_raw(n, timestamps + divide_point, size);
+        n_ += size;
+    }
+
+    int64_t
+    num() const {
+        return n_;
+    }
+
  public:
-    std::atomic<int64_t> reserved = 0;
-    AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<PkType> pks_;
 
  private:
+    std::shared_mutex buffer_mutex_;
+    std::atomic<int64_t> n_ = 0;
     std::shared_ptr<TmpBitmap> lru_;
     std::shared_mutex shared_mutex_;
 };
