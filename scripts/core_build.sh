@@ -220,6 +220,11 @@ if [ "$OS_NAME" == "ubuntu20.04" ] ; then
   BUILD_DISK_ANN=ON
 fi
 
+if [ "${BUILD_TYPE}" == "Debug" ] ; then
+  USE_ASAN="ON"
+  echo "debug build with address sanitizer"
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
 # Remove make cache since build.sh -l use default variables
@@ -256,7 +261,7 @@ case "${unameOut}" in
     ;;
   Linux*)
     ;;
-  *)   
+  *)
     echo "Cannot build on windows"
     ;;
 esac

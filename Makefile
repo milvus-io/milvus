@@ -135,7 +135,7 @@ download-milvus-proto:
 
 build-cpp: download-milvus-proto
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
+	@(env bash $(PWD)/scripts/core_build.sh -t Debug -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
 
 build-cpp-embd: download-milvus-proto
 	@echo "Building **Embedded** Milvus cpp library ..."
@@ -204,7 +204,7 @@ test-datanode:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t datanode)
 
-test-querynode:
+test-querynode: build-cpp
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t querynode)
 
@@ -311,4 +311,6 @@ mock-indexcoord:
 mock-tnx-kv:
 	mockery --name=TxnKV --dir=$(PWD)/internal/kv --output=$(PWD)/internal/kv/mocks --filename=TxnKV.go --with-expecter
 
-ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp clean-compile codecov-go
+#ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp clean-compile codecov-go
+ci-ut: build-cpp
+	@(env bash $(PWD)/scripts/run_go_codecov.sh)

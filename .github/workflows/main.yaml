@@ -66,6 +66,8 @@ jobs:
         run: |
             echo "useasan=true" >> $GITHUB_ENV
             echo "Setup USE_ASAN to true since cpp file(s) changed"
+            #- name: 'Setup upterm session'
+            #  uses: lhotari/action-upterm@v1
       - name: 'Generate CCache Hash'
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}

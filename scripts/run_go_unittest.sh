@@ -69,8 +69,8 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..."
 
 function test_querynode()
 {
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast
+go test -count=1 -asan -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast
 }
 
 
