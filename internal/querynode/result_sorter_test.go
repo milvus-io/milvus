@@ -36,6 +36,20 @@ func TestResultSorter_ByIntPK(t *testing.T) {
 				[]float32{5, 4, 3, 2, 9, 8, 7, 6}, 1),
 			genFieldData("binary vector field", 107, schemapb.DataType_BinaryVector,
 				[]byte{5, 4, 3, 2, 9, 8, 7, 6}, 8),
+			genFieldData("json field", 108, schemapb.DataType_JSON,
+				[][]byte{[]byte("{\"5\": 5}"), []byte("{\"4\": 4}"), []byte("{\"3\": 3}"), []byte("{\"2\": 2}"),
+					[]byte("{\"9\": 9}"), []byte("{\"8\": 8}"), []byte("{\"7\": 7}"), []byte("{\"6\": 6}")}, 1),
+			genFieldData("json field", 108, schemapb.DataType_Array,
+				[]*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{5, 6, 7}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{4, 5, 6}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{3, 4, 5}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{2, 3, 4}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{9, 10, 11}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{8, 9, 10}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{7, 8, 9}}}},
+					{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{6, 7, 8}}}},
+				}, 1),
 		},
 	}
 
@@ -51,4 +65,16 @@ func TestResultSorter_ByIntPK(t *testing.T) {
 	assert.Equal(t, []int32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[5].GetScalars().GetIntData().Data)
 	assert.InDeltaSlice(t, []float32{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[6].GetVectors().GetFloatVector().GetData(), 10e-10)
 	assert.Equal(t, []byte{2, 3, 4, 5, 6, 7, 8, 9}, result.FieldsData[7].GetVectors().GetBinaryVector())
+	assert.Equal(t, [][]byte{[]byte("{\"2\": 2}"), []byte("{\"3\": 3}"), []byte("{\"4\": 4}"), []byte("{\"5\": 5}"),
+		[]byte("{\"6\": 6}"), []byte("{\"7\": 7}"), []byte("{\"8\": 8}"), []byte("{\"9\": 9}")}, result.FieldsData[8].GetScalars().GetJsonData().GetData())
+	assert.Equal(t, []*schemapb.ScalarField{
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{2, 3, 4}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{3, 4, 5}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{4, 5, 6}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{5, 6, 7}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{6, 7, 8}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{7, 8, 9}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{8, 9, 10}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{9, 10, 11}}}},
+	}, result.FieldsData[9].GetScalars().GetArrayData().GetData())
 }
