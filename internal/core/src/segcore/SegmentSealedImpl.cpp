@@ -938,7 +938,6 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
 SegmentSealedImpl::search_ids(const IdArray& id_array,
                               Timestamp timestamp) const {
-    AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
