@@ -1694,7 +1694,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "50000",
+		DefaultValue: "1000",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
