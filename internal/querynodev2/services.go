@@ -1213,6 +1213,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			if segment == nil {
 				log.Warn("leader view growing not found", zap.String("channel", key), zap.Int64("segmentID", entry.SegmentID))
 				growingSegments[entry.SegmentID] = &msgpb.MsgPosition{}
+				continue
 			}
 			growingSegments[entry.SegmentID] = segment.StartPosition()
 		}
