@@ -395,12 +395,21 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	// block all flow graph so it's safe to remove segment
-	ds.fg.Blockall()
+	// block all flow graph, so it's safe to remove segment
+	if !ds.fg.TryBlockAll(ctx) {
+		log.Ctx(ctx).Error("Cannot block flowGraph for sync segments, "+
+			"release generated segment meta and stats log", zap.Int64("planID", req.GetPlanID()),
+			zap.Int64("target segmentID", req.GetCompactedTo()))
+		targetSeg.historyStats = nil
+		node.compactionExecutor.injectDone(req.GetPlanID(), false)
+		reason := "failed to block flowgraph"
+		return merr.Status(errors.New(reason)), errors.New(reason)
+	}
 	defer ds.fg.Unblock()
 	if err := channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
 		node.compactionExecutor.injectDone(req.GetPlanID(), false)
-		return merr.Status(err), nil
+		return merr.Status(err), err
 	}
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Status(nil), nil
