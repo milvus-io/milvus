@@ -801,21 +801,26 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          ct.err_msg: "Field int63 not exist"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"]])
+    @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"],
+                                               [default_int64_field_name, default_search_field]])
     def test_search_output_field_vector(self, output_fields):
         """
         target: test search with vector as output field
         method: search with one vector output_field or
                 wildcard for vector
-        expected: raise exception and report the error
+        expected: Retrieve vectors successfully
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
         # 2. search
         log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=output_fields)
+                            default_search_exp, output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
@@ -4031,7 +4036,6 @@ class TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_is_primary_true(self, dim, _async, enable_dynamic_field):
         """
@@ -4060,7 +4064,6 @@ class TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async})
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_mix_expr(self, dim, auto_id, _async, enable_dynamic_field):
@@ -4205,7 +4208,6 @@ class TestsearchString(TestcaseBase):
                                          "limit": 2,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_binary(self, auto_id, dim, _async):
         """
@@ -4304,8 +4306,7 @@ class TestsearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
-                                         "_async": _async}
-                            )
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_all_index_with_compare_expr(self, _async):
@@ -5054,8 +5055,7 @@ class  TestsearchDiskann(TestcaseBase):
                             travel_timestamp=0,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"}
-                            )
+                                         "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6553])
@@ -5086,8 +5086,7 @@ class  TestsearchDiskann(TestcaseBase):
                             travel_timestamp=0,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "fail to search on all shard leaders"}
-                            )
+                                         "err_msg": "fail to search on all shard leaders"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self, dim, enable_dynamic_field):
@@ -5111,7 +5110,8 @@ class  TestsearchDiskann(TestcaseBase):
         search_list = 20
         default_search_params = {"metric_type": "L2", "params": {"search_list": search_list}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        output_fields = [default_int64_field_name, default_float_field_name,
+                         default_string_field_name, default_search_field]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, 
                             default_search_exp,
@@ -5120,8 +5120,7 @@ class  TestsearchDiskann(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit}
-                            )
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_delete_data(self, dim, auto_id, _async, enable_dynamic_field):
@@ -5201,7 +5200,8 @@ class  TestsearchDiskann(TestcaseBase):
         collection_w.delete(tmp_expr)
         default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        output_fields = [default_int64_field_name, default_float_field_name,
+                         default_string_field_name, default_search_field]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, 
                             default_search_exp,
