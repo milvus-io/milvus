@@ -631,6 +631,13 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s1, s2, _ = s.dist.GetSegments(false)
 	s.Len(s1[0].Segments, 3)
 	s.Len(s2, 3)
+
+	s.dist.serviceable.Store(true)
+	s.dist.SyncTargetVersion(2, []int64{222}, []int64{})
+	s.True(s.dist.Serviceable())
+
+	s.dist.SyncTargetVersion(2, []int64{}, []int64{333})
+	s.False(s.dist.Serviceable())
 }
 
 func TestDistributionSuite(t *testing.T) {
