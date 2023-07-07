@@ -286,7 +286,7 @@ func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) 
 	tsKey := ss.composeTSKey(key, ts)
 
 	// provided key value is latest
-	// stores both tsKey and orignal key
+	// stores both tsKey and original key
 	after, err := ss.checkKeyTS(key, ts)
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 	for key, value := range kvs {
 		tsKey := ss.composeTSKey(key, ts)
 		// provided key value is latest
-		// stores both tsKey and orignal key
+		// stores both tsKey and original key
 		after, err = ss.checkKeyTS(key, ts)
 		if err != nil {
 			return nil, nil, err
@@ -530,7 +530,7 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 			return err
 		}
 
-		// add tombstone to orignal key and add ts entry
+		// add tombstone to original key and add ts entry
 		for _, key := range keys {
 			key = ss.hideRootPrefix(key)
 			execute[key] = string(SuffixSnapshotTombstone)
