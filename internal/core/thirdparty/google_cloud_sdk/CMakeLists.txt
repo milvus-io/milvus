@@ -21,7 +21,8 @@ macro(build_google_sdk_s3)
 
     set(GOOGLE_ABSEIL_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-    set(GOOGLE_ABSEIL_BUILD_COMMAND make -j $(nproc))
+    set(GOOGLE_ABSEIL_BUILD_COMMAND make  ${MAKE_BUILD_ARGS})
+
     set(GOOGLE_ABSEIL_INSTALL_COMMAND make install)
     if (LINUX)
         set(GOOGLE_PATCH_COMMAND sed -i "s/^#define ABSL_OPTION_USE_\\(.*\\) 2/#define ABSL_OPTION_USE_\\1 0/" "absl/base/options.h")
@@ -46,7 +47,7 @@ macro(build_google_sdk_s3)
 
     set(GOOGLE_CRC32_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-    set(GOOGLE_CRC32_BUILD_COMMAND make -j $(nproc))
+    set(GOOGLE_CRC32_BUILD_COMMAND  make ${MAKE_BUILD_ARGS})
     set(GOOGLE_CRC32_INSTALL_COMMAND make install)
 
     set(GOOGLE_CRC32_CMAKE_ARGS
@@ -69,7 +70,7 @@ macro(build_google_sdk_s3)
 
     set(GOOGLE_JSON_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-    set(GOOGLE_JSON_BUILD_COMMAND make -j $(nproc))
+    set(GOOGLE_JSON_BUILD_COMMAND make  ${MAKE_BUILD_ARGS})
     set(GOOGLE_JSON_INSTALL_COMMAND make install)
 
     set(GOOGLE_JSON_CMAKE_ARGS
@@ -91,7 +92,7 @@ macro(build_google_sdk_s3)
 
     set(GOOGLE_SDK_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-    set(GOOGLE_SDK_BUILD_COMMAND make)
+    set(GOOGLE_SDK_BUILD_COMMAND make ${MAKE_BUILD_ARGS})
     set(GOOGLE_SDK_INSTALL_COMMAND make install)
 
     if (APPLE)
