@@ -345,6 +345,18 @@ var (
 			indexCountLabelName,
 		})
 
+	QueryNodeEntitiesSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "entity_size",
+			Help:      "entities' memory size, clustered by collection and state",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentStateLabelName,
+		})
+
 	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.
 	QueryNodeConsumeCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -427,6 +439,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSearchTopK)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 	registry.MustRegister(QueryNodeNumEntities)
+	registry.MustRegister(QueryNodeEntitiesSize)
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)

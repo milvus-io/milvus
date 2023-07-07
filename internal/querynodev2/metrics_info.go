@@ -18,6 +18,7 @@ package querynodev2
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -102,10 +104,31 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
 
+	var totalGrowingSize int64
 	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
-	growingSegmentsSize := lo.SumBy(growingSegments, func(seg segments.Segment) int64 {
-		return seg.MemSize()
+	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
+		return seg.Collection()
 	})
+	for collection, segs := range growingGroupByCollection {
+		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
+			return seg.MemSize()
+		})
+		totalGrowingSize += size
+		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			fmt.Sprint(collection), segments.SegmentTypeGrowing.String()).Set(float64(size))
+	}
+
+	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
+	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
+		return seg.Collection()
+	})
+	for collection, segs := range sealedGroupByCollection {
+		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
+			return seg.MemSize()
+		})
+		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
+	}
 
 	allSegments := node.manager.Segment.GetBy()
 	collections := typeutil.NewUniqueSet()
@@ -123,7 +146,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		},
 		SearchQueue:         sqms,
 		QueryQueue:          qqms,
-		GrowingSegmentsSize: growingSegmentsSize,
+		GrowingSegmentsSize: totalGrowingSize,
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        paramtable.GetNodeID(),
 			CollectionIDs: collections.Collect(),
