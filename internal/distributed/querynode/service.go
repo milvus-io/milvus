@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -63,6 +65,7 @@ type Server struct {
 	grpcServer *grpc.Server
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -110,6 +113,10 @@ func (s *Server) init() error {
 	s.SetEtcdClient(etcdCli)
 	s.querynode.SetAddress(Params.GetAddress())
 	log.Debug("QueryNode connect to etcd successfully")
+
+	s.tikvCli, _ = tikv.GetTiKVClient()
+	s.SetTiKVClient(s.tikvCli)
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
@@ -228,6 +235,9 @@ func (s *Server) Stop() error {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
+	if s.tikvCli != nil {
+		defer s.tikvCli.Close()
+	}
 
 	s.cancel()
 	if s.grpcServer != nil {
@@ -241,6 +251,10 @@ func (s *Server) Stop() error {
 // SetEtcdClient sets the etcd client for QueryNode component.
 func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 	s.querynode.SetEtcdClient(etcdCli)
+}
+
+func (s *Server) SetTiKVClient(client *txnkv.Client) {
+       s.querynode.SetTiKVClient(client)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.

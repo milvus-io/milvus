@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -41,7 +42,7 @@ const (
 )
 
 // implementation assertion
-// var _ kv.MetaKv = (*tiKV)(nil)
+var _ kv.MetaKv = (*tiKV)(nil)
 
 // tiKV implements TxnKV interface, it supports to process multiple kvs in a transaction.
 type tiKV struct {

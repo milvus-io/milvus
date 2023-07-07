@@ -24,10 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -64,6 +66,9 @@ func (m *MockRootCoord) Register() error {
 func (m *MockRootCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
+func (m *MockRootCoord) SetTiKVClient(client *txnkv.Client) {
+}
+
 func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
@@ -84,11 +89,12 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockQN := types.NewMockQueryNode(t)
+	mockQN := mocks.NewQueryNodeComponent(t)
 	mockQN.EXPECT().Start().Return(nil).Maybe()
 	mockQN.EXPECT().Stop().Return(nil).Maybe()
 	mockQN.EXPECT().Register().Return(nil).Maybe()
 	mockQN.EXPECT().SetEtcdClient(mock.Anything).Maybe()
+	mockQN.EXPECT().SetTiKVClient(mock.Anything).Maybe()
 	mockQN.EXPECT().SetAddress(mock.Anything).Maybe()
 	mockQN.EXPECT().UpdateStateCode(mock.Anything).Maybe()
 	mockQN.EXPECT().Init().Return(nil).Maybe()
@@ -260,11 +266,12 @@ func Test_Run(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockQN := types.NewMockQueryNode(t)
+	mockQN := mocks.NewQueryNodeComponent(t)
 	mockQN.EXPECT().Start().Return(errors.New("Failed")).Maybe()
 	mockQN.EXPECT().Stop().Return(errors.New("Failed")).Maybe()
 	mockQN.EXPECT().Register().Return(errors.New("Failed")).Maybe()
 	mockQN.EXPECT().SetEtcdClient(mock.Anything).Maybe()
+	mockQN.EXPECT().SetTiKVClient(mock.Anything).Maybe()
 	mockQN.EXPECT().SetAddress(mock.Anything).Maybe()
 	mockQN.EXPECT().UpdateStateCode(mock.Anything).Maybe()
 	mockQN.EXPECT().Init().Return(nil).Maybe()

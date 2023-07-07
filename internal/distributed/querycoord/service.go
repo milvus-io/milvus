@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
 // Server is the grpc server of QueryCoord.
@@ -63,6 +65,7 @@ type Server struct {
 	factory dependency.Factory
 
 	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
 
 	dataCoord types.DataCoord
 	rootCoord types.RootCoord
@@ -121,6 +124,9 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
 	s.queryCoord.SetAddress(Params.GetAddress())
+
+	s.tikvCli, _ = tikv.GetTiKVClient()
+	s.SetTiKVClient(s.tikvCli)
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
@@ -270,6 +276,10 @@ func (s *Server) Stop() error {
 // SetRootCoord sets root coordinator's client
 func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
 	s.queryCoord.SetEtcdClient(etcdClient)
+}
+
+func (s *Server) SetTiKVClient(client *txnkv.Client) {
+	s.queryCoord.SetTiKVClient(client)
 }
 
 // SetRootCoord sets the RootCoord's client for QueryCoord component.

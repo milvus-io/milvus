@@ -23,7 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/types"
+	types "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -139,7 +139,7 @@ func Test_NewServer(t *testing.T) {
 		mqc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
 			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
-				Role:      "MockQueryCoord",
+				Role:      "QueryCoord",
 				StateCode: commonpb.StateCode_Healthy,
 			},
 			Status: successStatus,
@@ -349,10 +349,11 @@ func TestServer_Run2(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func getQueryCoord() *types.MockQueryCoord {
-	mqc := &types.MockQueryCoord{}
+func getQueryCoord() *types.QueryCoordComponent {
+	mqc := &types.QueryCoordComponent{}
 	mqc.EXPECT().Init().Return(nil)
 	mqc.EXPECT().SetEtcdClient(mock.Anything)
+	mqc.EXPECT().SetTiKVClient(mock.Anything)
 	mqc.EXPECT().SetAddress(mock.Anything)
 	mqc.EXPECT().SetRootCoord(mock.Anything).Return(nil)
 	mqc.EXPECT().SetDataCoord(mock.Anything).Return(nil)
