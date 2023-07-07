@@ -210,24 +210,25 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
+
 	for _, segmentID := range growingInTarget {
 		entry, ok := d.growingSegments[segmentID]
 		if !ok {
-			log.Error("readable growing segment lost, make it unserviceable",
+			log.Warn("readable growing segment lost, consume from dml seems too slow",
 				zap.Int64("segmentID", segmentID))
-			d.serviceable.Store(false)
 			continue
 		}
 		entry.TargetVersion = newVersion
 		d.growingSegments[segmentID] = entry
 	}
 
+	available := true
 	for _, segmentID := range sealedInTarget {
 		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
 			log.Error("readable sealed segment lost, make it unserviceable",
 				zap.Int64("segmentID", segmentID))
-			d.serviceable.Store(false)
+			available = false
 			continue
 		}
 		entry.TargetVersion = newVersion
@@ -237,6 +238,8 @@ func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int
 	oldValue := d.targetVersion.Load()
 	d.targetVersion.Store(newVersion)
 	d.genSnapshot()
+	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
+	d.serviceable.Store(available)
 	log.Info("Update readable segment version",
 		zap.Int64("oldVersion", oldValue),
 		zap.Int64("newVersion", newVersion),
