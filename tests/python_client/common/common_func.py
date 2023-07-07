@@ -1101,17 +1101,7 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 
 def get_wildcard_output_field_names(collection_w, output_fields):
     all_fields = collection_w.schema.fields
-    scalar_fields = []
-    vector_field = []
-    for field in all_fields:
-        if field.dtype == DataType.FLOAT_VECTOR:
-            vector_field.append(field.name)
-        else:
-            scalar_fields.append(field.name)
     if "*" in output_fields:
         output_fields.remove("*")
-        output_fields.extend(scalar_fields)
-    if "%" in output_fields:
-        output_fields.remove("%")
-        output_fields.extend(vector_field)
+        output_fields.extend(all_fields)
     return output_fields
