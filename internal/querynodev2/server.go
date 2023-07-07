@@ -374,8 +374,8 @@ func (node *QueryNode) Stop() error {
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 
 		outer:
-			for (node.manager == nil || node.manager.Segment.Empty()) &&
-				(node.pipelineManager == nil || node.pipelineManager.Num() == 0) {
+			for (node.manager != nil && !node.manager.Segment.Empty()) ||
+				(node.pipelineManager != nil && node.pipelineManager.Num() != 0) {
 				select {
 				case <-timeoutCh:
 					var (
