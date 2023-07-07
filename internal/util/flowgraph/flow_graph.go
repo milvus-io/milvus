@@ -20,16 +20,27 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/lock"
+	"go.uber.org/zap"
+)
+
+const (
+	TryLockNodeInterval = 1 * time.Second
+	TryLockRetryCount   = 5
 )
 
 // Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.
 
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
 type TimeTickedFlowGraph struct {
-	nodeCtx   map[NodeName]*nodeCtx
-	stopOnce  sync.Once
-	startOnce sync.Once
-	closeWg   *sync.WaitGroup
+	nodeCtx      map[NodeName]*nodeCtx
+	nodeSequence []string
+	stopOnce     sync.Once
+	startOnce    sync.Once
+	closeWg      *sync.WaitGroup
 }
 
 // AddNode add Node into flowgraph
@@ -40,6 +51,7 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 		closeWg: fg.closeWg,
 	}
 	fg.nodeCtx[node.Name()] = &nodeCtx
+	fg.nodeSequence = append(fg.nodeSequence, node.Name())
 }
 
 // SetEdges set directed edges from in nodes to out nodes
@@ -74,8 +86,10 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, out []string) error {
 // Start starts all nodes in timetick flowgragh
 func (fg *TimeTickedFlowGraph) Start() {
 	fg.startOnce.Do(func() {
-		for _, v := range fg.nodeCtx {
-			v.Start()
+		for _, name := range fg.nodeSequence {
+			if fg.nodeCtx[name] != nil {
+				fg.nodeCtx[name].Start()
+			}
 		}
 	})
 }
@@ -84,6 +98,28 @@ func (fg *TimeTickedFlowGraph) Blockall() {
 	for _, v := range fg.nodeCtx {
 		v.Block()
 	}
+}
+
+func (fg *TimeTickedFlowGraph) TryBlockAll(ctx context.Context) bool {
+	lockedNodes := make([]string, 0)
+	beforeTryLockAll := time.Now()
+	for _, nodeName := range fg.nodeSequence {
+		flowGraphNode := fg.nodeCtx[nodeName]
+
+		if flowGraphNode != nil && !flowGraphNode.node.IsInputNode() {
+			if !lock.TryLock(ctx, "flowGraph", &flowGraphNode.blockMutex, TryLockNodeInterval, TryLockRetryCount, false) {
+				log.Error("Cannot block flowGraph, give up attempting", zap.String("nodeName", nodeName))
+				for _, lockedNode := range lockedNodes {
+					fg.nodeCtx[lockedNode].Unblock()
+				}
+				return false
+			}
+			lockedNodes = append(lockedNodes, nodeName)
+		}
+	}
+	log.Debug("Successfully obtained all flowgraph node locks",
+		zap.Duration("time_cost", time.Since(beforeTryLockAll)))
+	return true
 }
 
 func (fg *TimeTickedFlowGraph) Unblock() {
@@ -95,9 +131,10 @@ func (fg *TimeTickedFlowGraph) Unblock() {
 // Close closes all nodes in flowgraph
 func (fg *TimeTickedFlowGraph) Close() {
 	fg.stopOnce.Do(func() {
-		for _, v := range fg.nodeCtx {
-			if v.node.IsInputNode() {
-				v.Close()
+		for _, name := range fg.nodeSequence {
+			node := fg.nodeCtx[name].node
+			if node != nil && node.IsInputNode() {
+				node.Close()
 			}
 		}
 		fg.closeWg.Wait()
@@ -107,8 +144,9 @@ func (fg *TimeTickedFlowGraph) Close() {
 // NewTimeTickedFlowGraph create timetick flowgraph
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	flowGraph := TimeTickedFlowGraph{
-		nodeCtx: make(map[string]*nodeCtx),
-		closeWg: &sync.WaitGroup{},
+		nodeCtx:      make(map[string]*nodeCtx),
+		closeWg:      &sync.WaitGroup{},
+		nodeSequence: make([]string, 0),
 	}
 
 	return &flowGraph
