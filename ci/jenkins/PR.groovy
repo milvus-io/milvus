@@ -79,7 +79,7 @@ pipeline {
                 axes {
                     axis {
                         name 'MILVUS_SERVER_TYPE'
-                        values 'standalone', 'distributed'
+                        values 'standalone', 'distributed', 'standalone-kafka'
                     }
                     axis {
                         name 'MILVUS_CLIENT'
@@ -96,7 +96,7 @@ pipeline {
                                     script {
                                         sh 'printenv'
                                         def clusterEnabled = "false"
-                                        if ("${MILVUS_SERVER_TYPE}" == 'distributed') {
+                                        if ("${MILVUS_SERVER_TYPE}".contains('distributed')) {
                                             clusterEnabled = "true"
                                         }
                                         sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
@@ -112,6 +112,23 @@ pipeline {
                                                         exit 1
                                                     }
                                                 }
+                                            }
+                                            // modify values file to enable kafka
+                                            if ("${MILVUS_SERVER_TYPE}".contains("kafka")) {
+                                                sh '''
+                                                    apt-get update
+                                                    apt-get install wget -y
+                                                    wget https://github.com/mikefarah/yq/releases/download/v4.34.1/yq_linux_amd64 -O /usr/bin/yq
+                                                    chmod +x /usr/bin/yq
+                                                '''
+                                                sh """
+
+                                                    yq -i '.pulsar.enabled=false' values/ci/pr.yaml
+                                                    yq -i '.kafka.enabled=true' values/ci/pr.yaml
+                                                    yq -i '.kafka.metrics.kafka.enabled=true' values/ci/pr.yaml
+                                                    yq -i '.kafka.metrics.jmx.enabled=true' values/ci/pr.yaml
+                                                    yq -i '.kafka.metrics.serviceMonitor.enabled=true' values/ci/pr.yaml
+                                                """
                                             }
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                 sh """
@@ -167,7 +184,7 @@ pipeline {
                                     script {
                                         def release_name=sh(returnStdout: true, script: './get_release_name.sh')
                                         def clusterEnabled = 'false'
-                                        if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                        if ("${MILVUS_SERVER_TYPE}".contains("distributed")) {
                                             clusterEnabled = "true"
                                         }
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {

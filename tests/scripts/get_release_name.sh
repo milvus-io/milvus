@@ -31,6 +31,9 @@ function milvus_ci_release_name(){
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-kafka" ]]; then
         # Distributed kafka mode
        name+="dk"
+    elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-kafka" ]]; then
+        # Standalone kafka mode
+        name+="sk"
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed" ]]; then
         # Distributed mode
        name+="d"
