@@ -295,7 +295,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	defer node.lifetime.Done()
 
 	failRet := WrapSearchResult(commonpb.ErrorCode_UnexpectedError, "")
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.Leader).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.Leader).Inc()
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.Leader).Inc()
