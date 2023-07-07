@@ -610,6 +610,21 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 		}
 
+		// when we try to release a segment, add it to pipeline's exclude list first
+		// in case of consumed it's growing segment again
+		pipeline := node.pipelineManager.Get(req.GetShard())
+		if pipeline != nil {
+			droppedInfos := lo.Map(req.GetSegmentIDs(), func(id int64, _ int) *datapb.SegmentInfo {
+				return &datapb.SegmentInfo{
+					ID: id,
+					DmlPosition: &msgpb.MsgPosition{
+						Timestamp: typeutil.MaxTimestamp,
+					},
+				}
+			})
+			pipeline.ExcludedSegments(droppedInfos...)
+		}
+
 		req.NeedTransfer = false
 		err := delegator.ReleaseSegments(ctx, req, false)
 		if err != nil {
