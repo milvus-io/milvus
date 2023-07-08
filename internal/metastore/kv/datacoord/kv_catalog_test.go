@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -45,17 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-type MockedTxnKV struct {
-	kv.MetaKv
-	multiSave      func(kvs map[string]string) error
-	save           func(key, value string) error
-	loadWithPrefix func(key string) ([]string, []string, error)
-	load           func(key string) (string, error)
-	multiRemove    func(keys []string) error
-	walkWithPrefix func(prefix string, paginationSize int, fn func([]byte, []byte) error) error
-	remove         func(key string) error
-}
 
 var (
 	logID        = int64(99)
@@ -186,43 +174,12 @@ var (
 	}
 )
 
-func (mc *MockedTxnKV) MultiSave(kvs map[string]string) error {
-	return mc.multiSave(kvs)
-}
-
-func (mc *MockedTxnKV) Save(key, value string) error {
-	return mc.save(key, value)
-}
-
-func (mc *MockedTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	return mc.loadWithPrefix(key)
-}
-
-func (mc *MockedTxnKV) MultiRemove(keys []string) error {
-
-	return mc.multiRemove(keys)
-}
-
-func (mc *MockedTxnKV) Load(key string) (string, error) {
-	return mc.load(key)
-}
-
-func (mc *MockedTxnKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	return mc.walkWithPrefix(prefix, paginationSize, fn)
-}
-
-func (mc *MockedTxnKV) Remove(key string) error {
-	return mc.remove(key)
-}
-
 func Test_ListSegments(t *testing.T) {
 	t.Run("load failed", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.walkWithPrefix = func(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		ret, err := catalog.ListSegments(context.TODO())
 		assert.Nil(t, ret)
 		assert.Error(t, err)
@@ -255,18 +212,18 @@ func Test_ListSegments(t *testing.T) {
 	}
 
 	t.Run("test compatibility", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		segBytes, err := proto.Marshal(segment1)
 		assert.NoError(t, err)
 
-		txn.walkWithPrefix = func(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-			if strings.HasPrefix(k5, prefix) {
-				return fn([]byte(k5), segBytes)
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+			if strings.HasPrefix(k5, s) {
+				return f([]byte(k5), segBytes)
 			}
 			return nil
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		ret, err := catalog.ListSegments(context.TODO())
 		assert.NotNil(t, ret)
 		assert.NoError(t, err)
@@ -275,35 +232,36 @@ func Test_ListSegments(t *testing.T) {
 	})
 
 	t.Run("list successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		var savedKvs map[string]string
-		txn.multiSave = func(kvs map[string]string) error {
-			savedKvs = kvs
-			return nil
-		}
 
-		catalog := NewCatalog(txn, rootPath, "")
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 
-		txn.walkWithPrefix = func(prefix string, paginationSize int, fn func(k []byte, v []byte) error) error {
-			if strings.HasPrefix(k5, prefix) {
-				return fn([]byte(k5), []byte(savedKvs[k5]))
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+			if strings.HasPrefix(k5, s) {
+				return f([]byte(k5), []byte(savedKvs[k5]))
 			}
 
-			if strings.HasPrefix(k1, prefix) {
-				return fn([]byte(k1), []byte(savedKvs[k1]))
+			if strings.HasPrefix(k1, s) {
+				return f([]byte(k1), []byte(savedKvs[k1]))
 			}
 
-			if strings.HasPrefix(k2, prefix) {
-				return fn([]byte(k2), []byte(savedKvs[k2]))
+			if strings.HasPrefix(k2, s) {
+				return f([]byte(k2), []byte(savedKvs[k2]))
 			}
-			if strings.HasPrefix(k3, prefix) {
-				return fn([]byte(k3), []byte(savedKvs[k3]))
+			if strings.HasPrefix(k3, s) {
+				return f([]byte(k3), []byte(savedKvs[k3]))
 
 			}
 			return errors.New("should not reach here")
-		}
+		})
 
 		ret, err := catalog.ListSegments(context.TODO())
 		assert.NotNil(t, ret)
@@ -315,43 +273,39 @@ func Test_ListSegments(t *testing.T) {
 
 func Test_AddSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiSave = func(kvs map[string]string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		assert.Panics(t, func() {
 			catalog.AddSegment(context.TODO(), invalidSegment)
 		})
 	})
 
 	t.Run("save error", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiSave = func(kvs map[string]string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.Error(t, err)
 	})
 
 	t.Run("save successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		savedKvs := make(map[string]string)
-		txn.multiSave = func(kvs map[string]string) error {
-			savedKvs = kvs
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+			savedKvs = m
 			return nil
-		}
-		txn.load = func(key string) (string, error) {
-			if v, ok := savedKvs[key]; ok {
+		})
+		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
+			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
 			return "", errors.New("key not found")
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 		adjustedSeg, err := catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
@@ -369,12 +323,10 @@ func Test_AddSegments(t *testing.T) {
 
 func Test_AlterSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiSave = func(kvs map[string]string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		assert.Panics(t, func() {
 			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
 				Segment:    invalidSegment,
@@ -386,26 +338,24 @@ func Test_AlterSegments(t *testing.T) {
 	})
 
 	t.Run("save error", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiSave = func(kvs map[string]string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1})
 
 		assert.Error(t, err)
 	})
 
 	t.Run("save successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		var savedKvs map[string]string
-		txn.multiSave = func(kvs map[string]string) error {
-			savedKvs = kvs
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+			savedKvs = m
 			return nil
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 
@@ -424,26 +374,26 @@ func Test_AlterSegments(t *testing.T) {
 	})
 
 	t.Run("save large ops successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		savedKvs := make(map[string]string)
 		opGroupCount := 0
-		txn.multiSave = func(kvs map[string]string) error {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
 			var ks []string
-			for k := range kvs {
+			for k := range m {
 				ks = append(ks, k)
 			}
-			maps.Copy(savedKvs, kvs)
+			maps.Copy(savedKvs, m)
 			opGroupCount++
 			return nil
-		}
-		txn.load = func(key string) (string, error) {
-			if v, ok := savedKvs[key]; ok {
+		})
+		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
+			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
 			return "", errors.New("key not found")
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 
@@ -492,45 +442,39 @@ func Test_AlterSegments(t *testing.T) {
 
 func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 	t.Run("save error", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiSave = func(kvs map[string]string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{}, segment1)
 		assert.Error(t, err)
 	})
 
 	t.Run("get prefix fail", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.loadWithPrefix = func(key string) ([]string, []string, error) {
-			return nil, nil, errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("save successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		savedKvs := make(map[string]string, 0)
-		txn.multiSave = func(kvs map[string]string) error {
-			maps.Copy(savedKvs, kvs)
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+			maps.Copy(savedKvs, m)
 			return nil
-		}
-		txn.loadWithPrefix = func(key string) ([]string, []string, error) {
-			return []string{}, []string{}, nil
-		}
-		txn.load = func(key string) (string, error) {
-			if v, ok := savedKvs[key]; ok {
+		})
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{}, []string{}, nil)
+		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
+			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
 			return "", errors.New("key not found")
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
 		assert.NoError(t, err)
 
@@ -554,27 +498,25 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 
 func Test_DropSegment(t *testing.T) {
 	t.Run("remove failed", func(t *testing.T) {
-		txn := &MockedTxnKV{}
-		txn.multiRemove = func(keys []string) error {
-			return errors.New("error")
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiRemove(mock.Anything).Return(errors.New("error"))
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.DropSegment(context.TODO(), segment1)
 		assert.Error(t, err)
 	})
 
 	t.Run("remove successfully", func(t *testing.T) {
-		txn := &MockedTxnKV{}
 		removedKvs := make(map[string]struct{}, 0)
-		txn.multiRemove = func(keys []string) error {
-			for _, key := range keys {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiRemove(mock.Anything).RunAndReturn(func(s []string) error {
+			for _, key := range s {
 				removedKvs[key] = struct{}{}
 			}
 			return nil
-		}
+		})
 
-		catalog := NewCatalog(txn, rootPath, "")
+		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.DropSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 
@@ -899,14 +841,11 @@ func verifySavedKvsForDroppedSegment(t *testing.T, savedKvs map[string]string) {
 
 func TestCatalog_CreateIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.CreateIndex(context.Background(), &model.Index{})
@@ -914,14 +853,11 @@ func TestCatalog_CreateIndex(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return errors.New("error")
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.CreateIndex(context.Background(), &model.Index{})
@@ -931,27 +867,27 @@ func TestCatalog_CreateIndex(t *testing.T) {
 
 func TestCatalog_ListIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				i := &indexpb.FieldIndex{
-					IndexInfo: &indexpb.IndexInfo{
-						CollectionID: 0,
-						FieldID:      0,
-						IndexName:    "",
-						IndexID:      0,
-						TypeParams:   nil,
-						IndexParams:  nil,
-					},
-					Deleted:    false,
-					CreateTime: 0,
-				}
-				v, err := proto.Marshal(i)
-				assert.NoError(t, err)
-				return []string{"1"}, []string{string(v)}, nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).RunAndReturn(func(s string) ([]string, []string, error) {
+			i := &indexpb.FieldIndex{
+				IndexInfo: &indexpb.IndexInfo{
+					CollectionID: 0,
+					FieldID:      0,
+					IndexName:    "",
+					IndexID:      0,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+				Deleted:    false,
+				CreateTime: 0,
+			}
+			v, err := proto.Marshal(i)
+			assert.NoError(t, err)
+			return []string{"1"}, []string{string(v)}, nil
+		})
+
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 		indexes, err := catalog.ListIndexes(context.Background())
 		assert.NoError(t, err)
@@ -959,11 +895,8 @@ func TestCatalog_ListIndexes(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				return []string{}, []string{}, errors.New("error")
-			},
-		}
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
@@ -972,11 +905,9 @@ func TestCatalog_ListIndexes(t *testing.T) {
 	})
 
 	t.Run("unmarshal failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				return []string{"1"}, []string{"invalid"}, nil
-			},
-		}
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"1"}, []string{"invalid"}, nil)
+
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
@@ -997,11 +928,9 @@ func TestCatalog_AlterIndex(t *testing.T) {
 		IndexParams:  nil,
 	}
 	t.Run("add", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return nil
-			},
-		}
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
@@ -1023,13 +952,10 @@ func TestCatalog_AlterIndexes(t *testing.T) {
 		IndexParams:  nil,
 	}
 
-	txn := &MockedTxnKV{
-		multiSave: func(kvs map[string]string) error {
-			return nil
-		},
-	}
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
 	catalog := &Catalog{
-		MetaKv: txn,
+		MetaKv: metakv,
 	}
 
 	err := catalog.AlterIndexes(context.Background(), []*model.Index{i})
@@ -1038,13 +964,10 @@ func TestCatalog_AlterIndexes(t *testing.T) {
 
 func TestCatalog_DropIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			remove: func(key string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Remove(mock.Anything).Return(nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.DropIndex(context.Background(), 0, 0)
@@ -1052,13 +975,10 @@ func TestCatalog_DropIndex(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			remove: func(key string) error {
-				return errors.New("error")
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Remove(mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.DropIndex(context.Background(), 0, 0)
@@ -1085,13 +1005,10 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.CreateSegmentIndex(context.Background(), segIdx)
@@ -1099,13 +1016,10 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return errors.New("error")
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.CreateSegmentIndex(context.Background(), segIdx)
@@ -1134,13 +1048,10 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 		v, err := proto.Marshal(segIdx)
 		assert.NoError(t, err)
 
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				return []string{"key"}, []string{string(v)}, nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key"}, []string{string(v)}, nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		segIdxes, err := catalog.ListSegmentIndexes(context.Background())
@@ -1149,13 +1060,10 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				return []string{}, []string{}, errors.New("error")
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{}, []string{}, errors.New("error"))
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		_, err := catalog.ListSegmentIndexes(context.Background())
@@ -1163,13 +1071,10 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 	})
 
 	t.Run("unmarshal failed", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			loadWithPrefix: func(key string) ([]string, []string, error) {
-				return []string{"key"}, []string{"invalid"}, nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{"key"}, []string{"invalid"}, nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		_, err := catalog.ListSegmentIndexes(context.Background())
@@ -1196,13 +1101,10 @@ func TestCatalog_AlterSegmentIndex(t *testing.T) {
 	}
 
 	t.Run("add", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			save: func(key, value string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.AlterSegmentIndex(context.Background(), segIdx)
@@ -1229,13 +1131,10 @@ func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 	}
 
 	t.Run("add", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			multiSave: func(kvs map[string]string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.AlterSegmentIndexes(context.Background(), []*model.SegmentIndex{segIdx})
@@ -1245,13 +1144,10 @@ func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 
 func TestCatalog_DropSegmentIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			remove: func(key string) error {
-				return nil
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Remove(mock.Anything).Return(nil)
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.DropSegmentIndex(context.Background(), 0, 0, 0, 0)
@@ -1259,13 +1155,10 @@ func TestCatalog_DropSegmentIndex(t *testing.T) {
 	})
 
 	t.Run("fail", func(t *testing.T) {
-		txn := &MockedTxnKV{
-			remove: func(key string) error {
-				return errors.New("error")
-			},
-		}
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Remove(mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
-			MetaKv: txn,
+			MetaKv: metakv,
 		}
 
 		err := catalog.DropSegmentIndex(context.Background(), 0, 0, 0, 0)
