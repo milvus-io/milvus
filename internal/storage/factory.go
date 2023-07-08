@@ -46,6 +46,9 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 	case "local":
 		return NewLocalChunkManager(RootPath(f.config.rootPath)), nil
 	case "minio":
+		if f.config.cloudProvider == CloudProviderAzure {
+			return newAzureChunkManagerWithConfig(ctx, f.config)
+		}
 		return newMinioChunkManagerWithConfig(ctx, f.config)
 	default:
 		return nil, errors.New("no chunk manager implemented with engine: " + engine)

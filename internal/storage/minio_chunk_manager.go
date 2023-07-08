@@ -48,6 +48,7 @@ const (
 	CloudProviderGCP    = "gcp"
 	CloudProviderAWS    = "aws"
 	CloudProviderAliyun = "aliyun"
+	CloudProviderAzure  = "azure"
 )
 
 func WrapErrNoSuchKey(key string) error {
