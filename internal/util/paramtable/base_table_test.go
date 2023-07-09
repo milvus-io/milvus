@@ -241,6 +241,20 @@ func TestBaseTable_Parse(t *testing.T) {
 		assert.Nil(t, baseParams.Save("key", "2"))
 		assert.Equal(t, int(2), baseParams.ParseIntWithDefault("key", 1))
 	})
+
+	t.Run("ParseUInt16WithDefault", func(t *testing.T) {
+		baseParams.Remove("key")
+		assert.Equal(t, "", baseParams.Get("key"))
+		assert.Equal(t, uint16(10), baseParams.ParseUInt16WithDefault("key", 10))
+		baseParams.Save("key", "65535")
+		assert.Equal(t, uint16(65535), baseParams.ParseUInt16WithDefault("key", 10))
+		baseParams.Save("key", "65536")
+		assert.Panics(t, func() { baseParams.ParseUInt16WithDefault("key", 10) })
+		baseParams.Save("key", "-3")
+		assert.Panics(t, func() { baseParams.ParseUInt16WithDefault("key", 10) })
+		baseParams.Save("key", "300")
+		assert.Equal(t, uint16(300), baseParams.ParseUInt16WithDefault("key", 10))
+	})
 }
 
 func Test_ConvertRangeToIntSlice(t *testing.T) {

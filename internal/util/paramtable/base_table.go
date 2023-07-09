@@ -365,6 +365,15 @@ func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
 	return value
 }
 
+func (gp *BaseTable) ParseUInt16WithDefault(key string, defaultValue uint16) uint16 {
+	valueStr := gp.LoadWithDefault(key, strconv.FormatUint(uint64(defaultValue), 10))
+	value, err := strconv.ParseUint(valueStr, 10, 16)
+	if err != nil {
+		panic(err)
+	}
+	return uint16(value)
+}
+
 // package methods
 // ConvertRangeToIntRange converts a range of strings to a range of ints.
 func ConvertRangeToIntRange(rangeStr, sep string) []int {
