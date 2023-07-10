@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -819,8 +820,8 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("fail to get md from the context")
 	}
-	authorization := md[strings.ToLower(util.HeaderAuthorize)]
-	if len(authorization) < 1 {
+	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
+	if !ok || len(authorization) < 1 {
 		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
 	}
 	token := authorization[0]
@@ -853,6 +854,10 @@ func GetRole(username string) ([]string, error) {
 		return []string{}, ErrProxyNotReady()
 	}
 	return globalMetaCache.GetUserRole(username), nil
+}
+
+func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
+	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
 }
 
 // PasswordVerify verify password

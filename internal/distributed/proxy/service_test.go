@@ -1127,12 +1127,14 @@ func waitForGrpcReady(opt *WaitOption) {
 				ch <- err
 				return
 			}
-			_, err = grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
+			conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
 			ch <- err
+			conn.Close()
 			return
 		}
-		if _, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
+		if conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
 			ch <- err
+			conn.Close()
 		}
 	}()
 
@@ -1703,7 +1705,7 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 			t.Fatalf("test should have panicked but did not")
 		}
 	}()
-	// if disable workds path not registered, so it shall not panic
+	// if disable works path not registered, so it shall not panic
 	server.registerHTTPServer()
 }
 
@@ -1729,6 +1731,7 @@ func Test_NewServer_TLS_TwoWay(t *testing.T) {
 	Params.ServerPemPath = "../../../configs/cert/server.pem"
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
+	HTTPParams.InitOnce()
 	HTTPParams.Enabled = false
 
 	err := runAndWaitForServerReady(server)
@@ -1745,6 +1748,7 @@ func Test_NewServer_TLS_OneWay(t *testing.T) {
 	Params.TLSMode = 1
 	Params.ServerPemPath = "../../../configs/cert/server.pem"
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	HTTPParams.InitOnce()
 	HTTPParams.Enabled = false
 
 	err := runAndWaitForServerReady(server)
@@ -1761,7 +1765,77 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	Params.TLSMode = 1
 	Params.ServerPemPath = "../not/existed/server.pem"
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	HTTPParams.InitOnce()
 	HTTPParams.Enabled = false
+	err := runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.TLSMode = 2
+	Params.ServerPemPath = "../not/existed/server.pem"
+	Params.CaPemPath = "../../../configs/cert/ca.pem"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.CaPemPath = "../not/existed/ca.pem"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.CaPemPath = "service.go"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+}
+
+func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 2
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	Params.CaPemPath = "../../../configs/cert/ca.pem"
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = true
+
+	err := runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	assert.NotNil(t, server.grpcExternalServer)
+	time.Sleep(100 * time.Second)
+	err = server.Stop()
+	assert.Nil(t, err)
+}
+
+func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 1
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = true
+
+	err := runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	assert.NotNil(t, server.grpcExternalServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+}
+
+func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 1
+	Params.ServerPemPath = "../not/existed/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = true
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
