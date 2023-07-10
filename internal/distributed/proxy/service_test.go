@@ -680,6 +680,10 @@ func (m *MockDataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSe
 	return nil, nil
 }
 
+func (m *MockDataCoord) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase

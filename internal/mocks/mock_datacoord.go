@@ -34,10 +34,6 @@ func (_m *DataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.Acquire
 	ret := _m.Called(ctx, req)
 
 	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
-	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AcquireSegmentLockRequest) *commonpb.Status); ok {
 		r0 = rf(ctx, req)
 	} else {
@@ -46,6 +42,7 @@ func (_m *DataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.Acquire
 		}
 	}
 
+	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AcquireSegmentLockRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
@@ -61,8 +58,8 @@ type DataCoord_AcquireSegmentLock_Call struct {
 }
 
 // AcquireSegmentLock is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.AcquireSegmentLockRequest
+//  - ctx context.Context
+//  - req *datapb.AcquireSegmentLockRequest
 func (_e *DataCoord_Expecter) AcquireSegmentLock(ctx interface{}, req interface{}) *DataCoord_AcquireSegmentLock_Call {
 	return &DataCoord_AcquireSegmentLock_Call{Call: _e.mock.On("AcquireSegmentLock", ctx, req)}
 }
@@ -76,11 +73,6 @@ func (_c *DataCoord_AcquireSegmentLock_Call) Run(run func(ctx context.Context, r
 
 func (_c *DataCoord_AcquireSegmentLock_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_AcquireSegmentLock_Call {
 	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoord_AcquireSegmentLock_Call) RunAndReturn(run func(context.Context, *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)) *DataCoord_AcquireSegmentLock_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -113,8 +105,8 @@ type DataCoord_AssignSegmentID_Call struct {
 }
 
 // AssignSegmentID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.AssignSegmentIDRequest
+//  - ctx context.Context
+//  - req *datapb.AssignSegmentIDRequest
 func (_e *DataCoord_Expecter) AssignSegmentID(ctx interface{}, req interface{}) *DataCoord_AssignSegmentID_Call {
 	return &DataCoord_AssignSegmentID_Call{Call: _e.mock.On("AssignSegmentID", ctx, req)}
 }
@@ -160,8 +152,8 @@ type DataCoord_BroadcastAlteredCollection_Call struct {
 }
 
 // BroadcastAlteredCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.AlterCollectionRequest
+//  - ctx context.Context
+//  - req *datapb.AlterCollectionRequest
 func (_e *DataCoord_Expecter) BroadcastAlteredCollection(ctx interface{}, req interface{}) *DataCoord_BroadcastAlteredCollection_Call {
 	return &DataCoord_BroadcastAlteredCollection_Call{Call: _e.mock.On("BroadcastAlteredCollection", ctx, req)}
 }
@@ -207,8 +199,8 @@ type DataCoord_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.CheckHealthRequest
+//  - ctx context.Context
+//  - req *milvuspb.CheckHealthRequest
 func (_e *DataCoord_Expecter) CheckHealth(ctx interface{}, req interface{}) *DataCoord_CheckHealth_Call {
 	return &DataCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
 }
@@ -222,11 +214,6 @@ func (_c *DataCoord_CheckHealth_Call) Run(run func(ctx context.Context, req *mil
 
 func (_c *DataCoord_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthResponse, _a1 error) *DataCoord_CheckHealth_Call {
 	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoord_CheckHealth_Call) RunAndReturn(run func(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)) *DataCoord_CheckHealth_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -259,8 +246,8 @@ type DataCoord_DropVirtualChannel_Call struct {
 }
 
 // DropVirtualChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.DropVirtualChannelRequest
+//  - ctx context.Context
+//  - req *datapb.DropVirtualChannelRequest
 func (_e *DataCoord_Expecter) DropVirtualChannel(ctx interface{}, req interface{}) *DataCoord_DropVirtualChannel_Call {
 	return &DataCoord_DropVirtualChannel_Call{Call: _e.mock.On("DropVirtualChannel", ctx, req)}
 }
@@ -306,8 +293,8 @@ type DataCoord_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.FlushRequest
+//  - ctx context.Context
+//  - req *datapb.FlushRequest
 func (_e *DataCoord_Expecter) Flush(ctx interface{}, req interface{}) *DataCoord_Flush_Call {
 	return &DataCoord_Flush_Call{Call: _e.mock.On("Flush", ctx, req)}
 }
@@ -353,8 +340,8 @@ type DataCoord_GcConfirm_Call struct {
 }
 
 // GcConfirm is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *datapb.GcConfirmRequest
+//  - ctx context.Context
+//  - request *datapb.GcConfirmRequest
 func (_e *DataCoord_Expecter) GcConfirm(ctx interface{}, request interface{}) *DataCoord_GcConfirm_Call {
 	return &DataCoord_GcConfirm_Call{Call: _e.mock.On("GcConfirm", ctx, request)}
 }
@@ -400,8 +387,8 @@ type DataCoord_GetCollectionStatistics_Call struct {
 }
 
 // GetCollectionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetCollectionStatisticsRequest
+//  - ctx context.Context
+//  - req *datapb.GetCollectionStatisticsRequest
 func (_e *DataCoord_Expecter) GetCollectionStatistics(ctx interface{}, req interface{}) *DataCoord_GetCollectionStatistics_Call {
 	return &DataCoord_GetCollectionStatistics_Call{Call: _e.mock.On("GetCollectionStatistics", ctx, req)}
 }
@@ -447,8 +434,8 @@ type DataCoord_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetCompactionStateRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetCompactionStateRequest
 func (_e *DataCoord_Expecter) GetCompactionState(ctx interface{}, req interface{}) *DataCoord_GetCompactionState_Call {
 	return &DataCoord_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", ctx, req)}
 }
@@ -494,8 +481,8 @@ type DataCoord_GetCompactionStateWithPlans_Call struct {
 }
 
 // GetCompactionStateWithPlans is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetCompactionPlansRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetCompactionPlansRequest
 func (_e *DataCoord_Expecter) GetCompactionStateWithPlans(ctx interface{}, req interface{}) *DataCoord_GetCompactionStateWithPlans_Call {
 	return &DataCoord_GetCompactionStateWithPlans_Call{Call: _e.mock.On("GetCompactionStateWithPlans", ctx, req)}
 }
@@ -541,7 +528,7 @@ type DataCoord_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *DataCoord_Expecter) GetComponentStates(ctx interface{}) *DataCoord_GetComponentStates_Call {
 	return &DataCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
 }
@@ -587,8 +574,8 @@ type DataCoord_GetFlushAllState_Call struct {
 }
 
 // GetFlushAllState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetFlushAllStateRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetFlushAllStateRequest
 func (_e *DataCoord_Expecter) GetFlushAllState(ctx interface{}, req interface{}) *DataCoord_GetFlushAllState_Call {
 	return &DataCoord_GetFlushAllState_Call{Call: _e.mock.On("GetFlushAllState", ctx, req)}
 }
@@ -634,8 +621,8 @@ type DataCoord_GetFlushState_Call struct {
 }
 
 // GetFlushState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetFlushStateRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetFlushStateRequest
 func (_e *DataCoord_Expecter) GetFlushState(ctx interface{}, req interface{}) *DataCoord_GetFlushState_Call {
 	return &DataCoord_GetFlushState_Call{Call: _e.mock.On("GetFlushState", ctx, req)}
 }
@@ -681,8 +668,8 @@ type DataCoord_GetFlushedSegments_Call struct {
 }
 
 // GetFlushedSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetFlushedSegmentsRequest
+//  - ctx context.Context
+//  - req *datapb.GetFlushedSegmentsRequest
 func (_e *DataCoord_Expecter) GetFlushedSegments(ctx interface{}, req interface{}) *DataCoord_GetFlushedSegments_Call {
 	return &DataCoord_GetFlushedSegments_Call{Call: _e.mock.On("GetFlushedSegments", ctx, req)}
 }
@@ -696,11 +683,6 @@ func (_c *DataCoord_GetFlushedSegments_Call) Run(run func(ctx context.Context, r
 
 func (_c *DataCoord_GetFlushedSegments_Call) Return(_a0 *datapb.GetFlushedSegmentsResponse, _a1 error) *DataCoord_GetFlushedSegments_Call {
 	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoord_GetFlushedSegments_Call) RunAndReturn(run func(context.Context, *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)) *DataCoord_GetFlushedSegments_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -733,8 +715,8 @@ type DataCoord_GetInsertBinlogPaths_Call struct {
 }
 
 // GetInsertBinlogPaths is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetInsertBinlogPathsRequest
+//  - ctx context.Context
+//  - req *datapb.GetInsertBinlogPathsRequest
 func (_e *DataCoord_Expecter) GetInsertBinlogPaths(ctx interface{}, req interface{}) *DataCoord_GetInsertBinlogPaths_Call {
 	return &DataCoord_GetInsertBinlogPaths_Call{Call: _e.mock.On("GetInsertBinlogPaths", ctx, req)}
 }
@@ -780,8 +762,8 @@ type DataCoord_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetMetricsRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetMetricsRequest
 func (_e *DataCoord_Expecter) GetMetrics(ctx interface{}, req interface{}) *DataCoord_GetMetrics_Call {
 	return &DataCoord_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
 }
@@ -827,8 +809,8 @@ type DataCoord_GetPartitionStatistics_Call struct {
 }
 
 // GetPartitionStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetPartitionStatisticsRequest
+//  - ctx context.Context
+//  - req *datapb.GetPartitionStatisticsRequest
 func (_e *DataCoord_Expecter) GetPartitionStatistics(ctx interface{}, req interface{}) *DataCoord_GetPartitionStatistics_Call {
 	return &DataCoord_GetPartitionStatistics_Call{Call: _e.mock.On("GetPartitionStatistics", ctx, req)}
 }
@@ -874,8 +856,8 @@ type DataCoord_GetRecoveryInfo_Call struct {
 }
 
 // GetRecoveryInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetRecoveryInfoRequest
+//  - ctx context.Context
+//  - req *datapb.GetRecoveryInfoRequest
 func (_e *DataCoord_Expecter) GetRecoveryInfo(ctx interface{}, req interface{}) *DataCoord_GetRecoveryInfo_Call {
 	return &DataCoord_GetRecoveryInfo_Call{Call: _e.mock.On("GetRecoveryInfo", ctx, req)}
 }
@@ -921,8 +903,8 @@ type DataCoord_GetRecoveryInfoV2_Call struct {
 }
 
 // GetRecoveryInfoV2 is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetRecoveryInfoRequestV2
+//  - ctx context.Context
+//  - req *datapb.GetRecoveryInfoRequestV2
 func (_e *DataCoord_Expecter) GetRecoveryInfoV2(ctx interface{}, req interface{}) *DataCoord_GetRecoveryInfoV2_Call {
 	return &DataCoord_GetRecoveryInfoV2_Call{Call: _e.mock.On("GetRecoveryInfoV2", ctx, req)}
 }
@@ -936,11 +918,6 @@ func (_c *DataCoord_GetRecoveryInfoV2_Call) Run(run func(ctx context.Context, re
 
 func (_c *DataCoord_GetRecoveryInfoV2_Call) Return(_a0 *datapb.GetRecoveryInfoResponseV2, _a1 error) *DataCoord_GetRecoveryInfoV2_Call {
 	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoord_GetRecoveryInfoV2_Call) RunAndReturn(run func(context.Context, *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error)) *DataCoord_GetRecoveryInfoV2_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -973,8 +950,8 @@ type DataCoord_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetSegmentInfoRequest
+//  - ctx context.Context
+//  - req *datapb.GetSegmentInfoRequest
 func (_e *DataCoord_Expecter) GetSegmentInfo(ctx interface{}, req interface{}) *DataCoord_GetSegmentInfo_Call {
 	return &DataCoord_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", ctx, req)}
 }
@@ -1020,7 +997,7 @@ type DataCoord_GetSegmentInfoChannel_Call struct {
 }
 
 // GetSegmentInfoChannel is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *DataCoord_Expecter) GetSegmentInfoChannel(ctx interface{}) *DataCoord_GetSegmentInfoChannel_Call {
 	return &DataCoord_GetSegmentInfoChannel_Call{Call: _e.mock.On("GetSegmentInfoChannel", ctx)}
 }
@@ -1066,8 +1043,8 @@ type DataCoord_GetSegmentStates_Call struct {
 }
 
 // GetSegmentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetSegmentStatesRequest
+//  - ctx context.Context
+//  - req *datapb.GetSegmentStatesRequest
 func (_e *DataCoord_Expecter) GetSegmentStates(ctx interface{}, req interface{}) *DataCoord_GetSegmentStates_Call {
 	return &DataCoord_GetSegmentStates_Call{Call: _e.mock.On("GetSegmentStates", ctx, req)}
 }
@@ -1113,8 +1090,8 @@ type DataCoord_GetSegmentsByStates_Call struct {
 }
 
 // GetSegmentsByStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.GetSegmentsByStatesRequest
+//  - ctx context.Context
+//  - req *datapb.GetSegmentsByStatesRequest
 func (_e *DataCoord_Expecter) GetSegmentsByStates(ctx interface{}, req interface{}) *DataCoord_GetSegmentsByStates_Call {
 	return &DataCoord_GetSegmentsByStates_Call{Call: _e.mock.On("GetSegmentsByStates", ctx, req)}
 }
@@ -1160,7 +1137,7 @@ type DataCoord_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *DataCoord_Expecter) GetStatisticsChannel(ctx interface{}) *DataCoord_GetStatisticsChannel_Call {
 	return &DataCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
 }
@@ -1206,7 +1183,7 @@ type DataCoord_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *DataCoord_Expecter) GetTimeTickChannel(ctx interface{}) *DataCoord_GetTimeTickChannel_Call {
 	return &DataCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", ctx)}
 }
@@ -1252,8 +1229,8 @@ type DataCoord_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ImportTaskRequest
+//  - ctx context.Context
+//  - req *datapb.ImportTaskRequest
 func (_e *DataCoord_Expecter) Import(ctx interface{}, req interface{}) *DataCoord_Import_Call {
 	return &DataCoord_Import_Call{Call: _e.mock.On("Import", ctx, req)}
 }
@@ -1306,20 +1283,11 @@ func (_c *DataCoord_Init_Call) Return(_a0 error) *DataCoord_Init_Call {
 	return _c
 }
 
-func (_c *DataCoord_Init_Call) RunAndReturn(run func() error) *DataCoord_Init_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ListSegmentsInfo provides a mock function with given fields: ctx, req
 func (_m *DataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
 	ret := _m.Called(ctx, req)
 
 	var r0 *datapb.ListSegmentsInfoResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error)); ok {
-		return rf(ctx, req)
-	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSegmentsInfoRequest) *datapb.ListSegmentsInfoResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
@@ -1328,6 +1296,7 @@ func (_m *DataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegme
 		}
 	}
 
+	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListSegmentsInfoRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
@@ -1343,8 +1312,8 @@ type DataCoord_ListSegmentsInfo_Call struct {
 }
 
 // ListSegmentsInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ListSegmentsInfoRequest
+//  - ctx context.Context
+//  - req *datapb.ListSegmentsInfoRequest
 func (_e *DataCoord_Expecter) ListSegmentsInfo(ctx interface{}, req interface{}) *DataCoord_ListSegmentsInfo_Call {
 	return &DataCoord_ListSegmentsInfo_Call{Call: _e.mock.On("ListSegmentsInfo", ctx, req)}
 }
@@ -1358,11 +1327,6 @@ func (_c *DataCoord_ListSegmentsInfo_Call) Run(run func(ctx context.Context, req
 
 func (_c *DataCoord_ListSegmentsInfo_Call) Return(_a0 *datapb.ListSegmentsInfoResponse, _a1 error) *DataCoord_ListSegmentsInfo_Call {
 	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoord_ListSegmentsInfo_Call) RunAndReturn(run func(context.Context, *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error)) *DataCoord_ListSegmentsInfo_Call {
-	_c.Call.Return(run)
 	return _c
 }
 
@@ -1395,8 +1359,8 @@ type DataCoord_ManualCompaction_Call struct {
 }
 
 // ManualCompaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.ManualCompactionRequest
+//  - ctx context.Context
+//  - req *milvuspb.ManualCompactionRequest
 func (_e *DataCoord_Expecter) ManualCompaction(ctx interface{}, req interface{}) *DataCoord_ManualCompaction_Call {
 	return &DataCoord_ManualCompaction_Call{Call: _e.mock.On("ManualCompaction", ctx, req)}
 }
@@ -1442,8 +1406,8 @@ type DataCoord_MarkSegmentsDropped_Call struct {
 }
 
 // MarkSegmentsDropped is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.MarkSegmentsDroppedRequest
+//  - ctx context.Context
+//  - req *datapb.MarkSegmentsDroppedRequest
 func (_e *DataCoord_Expecter) MarkSegmentsDropped(ctx interface{}, req interface{}) *DataCoord_MarkSegmentsDropped_Call {
 	return &DataCoord_MarkSegmentsDropped_Call{Call: _e.mock.On("MarkSegmentsDropped", ctx, req)}
 }
@@ -1496,20 +1460,11 @@ func (_c *DataCoord_Register_Call) Return(_a0 error) *DataCoord_Register_Call {
 	return _c
 }
 
-func (_c *DataCoord_Register_Call) RunAndReturn(run func() error) *DataCoord_Register_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ReleaseSegmentLock provides a mock function with given fields: ctx, req
 func (_m *DataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
 
 	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)); ok {
-		return rf(ctx, req)
-	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ReleaseSegmentLockRequest) *commonpb.Status); ok {
 		r0 = rf(ctx, req)
 	} else {
@@ -1518,6 +1473,7 @@ func (_m *DataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.Release
 		}
 	}
 
+	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ReleaseSegmentLockRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
@@ -1533,8 +1489,8 @@ type DataCoord_ReleaseSegmentLock_Call struct {
 }
 
 // ReleaseSegmentLock is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.ReleaseSegmentLockRequest
+//  - ctx context.Context
+//  - req *datapb.ReleaseSegmentLockRequest
 func (_e *DataCoord_Expecter) ReleaseSegmentLock(ctx interface{}, req interface{}) *DataCoord_ReleaseSegmentLock_Call {
 	return &DataCoord_ReleaseSegmentLock_Call{Call: _e.mock.On("ReleaseSegmentLock", ctx, req)}
 }
@@ -1551,8 +1507,50 @@ func (_c *DataCoord_ReleaseSegmentLock_Call) Return(_a0 *commonpb.Status, _a1 er
 	return _c
 }
 
-func (_c *DataCoord_ReleaseSegmentLock_Call) RunAndReturn(run func(context.Context, *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)) *DataCoord_ReleaseSegmentLock_Call {
-	_c.Call.Return(run)
+// ReportDataNodeTtMsgs provides a mock function with given fields: ctx, req
+func (_m *DataCoord) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ReportDataNodeTtMsgsRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ReportDataNodeTtMsgsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_ReportDataNodeTtMsgs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportDataNodeTtMsgs'
+type DataCoord_ReportDataNodeTtMsgs_Call struct {
+	*mock.Call
+}
+
+// ReportDataNodeTtMsgs is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.ReportDataNodeTtMsgsRequest
+func (_e *DataCoord_Expecter) ReportDataNodeTtMsgs(ctx interface{}, req interface{}) *DataCoord_ReportDataNodeTtMsgs_Call {
+	return &DataCoord_ReportDataNodeTtMsgs_Call{Call: _e.mock.On("ReportDataNodeTtMsgs", ctx, req)}
+}
+
+func (_c *DataCoord_ReportDataNodeTtMsgs_Call) Run(run func(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest)) *DataCoord_ReportDataNodeTtMsgs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ReportDataNodeTtMsgsRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_ReportDataNodeTtMsgs_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_ReportDataNodeTtMsgs_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
@@ -1585,8 +1583,8 @@ type DataCoord_SaveBinlogPaths_Call struct {
 }
 
 // SaveBinlogPaths is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.SaveBinlogPathsRequest
+//  - ctx context.Context
+//  - req *datapb.SaveBinlogPathsRequest
 func (_e *DataCoord_Expecter) SaveBinlogPaths(ctx interface{}, req interface{}) *DataCoord_SaveBinlogPaths_Call {
 	return &DataCoord_SaveBinlogPaths_Call{Call: _e.mock.On("SaveBinlogPaths", ctx, req)}
 }
@@ -1632,8 +1630,8 @@ type DataCoord_SaveImportSegment_Call struct {
 }
 
 // SaveImportSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.SaveImportSegmentRequest
+//  - ctx context.Context
+//  - req *datapb.SaveImportSegmentRequest
 func (_e *DataCoord_Expecter) SaveImportSegment(ctx interface{}, req interface{}) *DataCoord_SaveImportSegment_Call {
 	return &DataCoord_SaveImportSegment_Call{Call: _e.mock.On("SaveImportSegment", ctx, req)}
 }
@@ -1679,8 +1677,8 @@ type DataCoord_SetSegmentState_Call struct {
 }
 
 // SetSegmentState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.SetSegmentStateRequest
+//  - ctx context.Context
+//  - req *datapb.SetSegmentStateRequest
 func (_e *DataCoord_Expecter) SetSegmentState(ctx interface{}, req interface{}) *DataCoord_SetSegmentState_Call {
 	return &DataCoord_SetSegmentState_Call{Call: _e.mock.On("SetSegmentState", ctx, req)}
 }
@@ -1726,8 +1724,8 @@ type DataCoord_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *internalpb.ShowConfigurationsRequest
+//  - ctx context.Context
+//  - req *internalpb.ShowConfigurationsRequest
 func (_e *DataCoord_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *DataCoord_ShowConfigurations_Call {
 	return &DataCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
 }
@@ -1845,8 +1843,8 @@ type DataCoord_UnsetIsImportingState_Call struct {
 }
 
 // UnsetIsImportingState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.UnsetIsImportingStateRequest
+//  - ctx context.Context
+//  - req *datapb.UnsetIsImportingStateRequest
 func (_e *DataCoord_Expecter) UnsetIsImportingState(ctx interface{}, req interface{}) *DataCoord_UnsetIsImportingState_Call {
 	return &DataCoord_UnsetIsImportingState_Call{Call: _e.mock.On("UnsetIsImportingState", ctx, req)}
 }
@@ -1892,8 +1890,8 @@ type DataCoord_UpdateChannelCheckpoint_Call struct {
 }
 
 // UpdateChannelCheckpoint is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.UpdateChannelCheckpointRequest
+//  - ctx context.Context
+//  - req *datapb.UpdateChannelCheckpointRequest
 func (_e *DataCoord_Expecter) UpdateChannelCheckpoint(ctx interface{}, req interface{}) *DataCoord_UpdateChannelCheckpoint_Call {
 	return &DataCoord_UpdateChannelCheckpoint_Call{Call: _e.mock.On("UpdateChannelCheckpoint", ctx, req)}
 }
@@ -1939,8 +1937,8 @@ type DataCoord_UpdateSegmentStatistics_Call struct {
 }
 
 // UpdateSegmentStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.UpdateSegmentStatisticsRequest
+//  - ctx context.Context
+//  - req *datapb.UpdateSegmentStatisticsRequest
 func (_e *DataCoord_Expecter) UpdateSegmentStatistics(ctx interface{}, req interface{}) *DataCoord_UpdateSegmentStatistics_Call {
 	return &DataCoord_UpdateSegmentStatistics_Call{Call: _e.mock.On("UpdateSegmentStatistics", ctx, req)}
 }
@@ -1986,8 +1984,8 @@ type DataCoord_WatchChannels_Call struct {
 }
 
 // WatchChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.WatchChannelsRequest
+//  - ctx context.Context
+//  - req *datapb.WatchChannelsRequest
 func (_e *DataCoord_Expecter) WatchChannels(ctx interface{}, req interface{}) *DataCoord_WatchChannels_Call {
 	return &DataCoord_WatchChannels_Call{Call: _e.mock.On("WatchChannels", ctx, req)}
 }

@@ -861,3 +861,16 @@ func (c *Client) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsI
 	}
 	return ret.(*datapb.ListSegmentsInfoResponse), err
 }
+
+func (c *Client) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.ReportDataNodeTtMsgs(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

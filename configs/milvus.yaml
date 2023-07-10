@@ -355,6 +355,9 @@ dataNode:
     watermarkStandalone: 0.2 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
     watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
 
+  timetick:
+    byRPC: true # 'true' to use RPC instead of msgstream to report datanode timetick message
+
 # Configures the system log output.
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.

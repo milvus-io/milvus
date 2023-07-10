@@ -1719,6 +1719,7 @@ type dataNodeConfig struct {
 	// io concurrency to fetch stats logs
 	IOConcurrency int
 
+	DataNodeTimeTickByRPC bool
 	// datanote send timetick interval per channel
 	DataNodeTimeTickInterval int
 
@@ -1746,6 +1747,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initSyncPeriod()
 	p.initCpLagPeriod()
 	p.initIOConcurrency()
+	p.initDataNodeTimeTickByRPC()
 	p.initDataNodeTimeTickInterval()
 
 	p.initSkipBFStatsLoad()
@@ -1817,6 +1819,10 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 
 func (p *dataNodeConfig) initIOConcurrency() {
 	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
+}
+
+func (p *dataNodeConfig) initDataNodeTimeTickByRPC() {
+	p.DataNodeTimeTickByRPC = p.Base.ParseBool("datanode.timetick.byRPC", true)
 }
 
 func (p *dataNodeConfig) initDataNodeTimeTickInterval() {

@@ -63,9 +63,13 @@ type insertBufferNode struct {
 	ttLogger       *timeTickLogger
 	ttMerger       *mergedTimeTickerSender
 
+	timeTickSender *timeTickSender
+
 	lastTimestamp Timestamp
 }
 
+// Deprecated
+// todo delete them after run for a long time
 type timeTickLogger struct {
 	start        atomic.Uint64
 	counter      atomic.Int32
@@ -96,7 +100,9 @@ func (ibNode *insertBufferNode) Name() string {
 }
 
 func (ibNode *insertBufferNode) Close() {
-	ibNode.ttMerger.close()
+	if ibNode.ttMerger != nil {
+		ibNode.ttMerger.close()
+	}
 
 	if ibNode.timeTickStream != nil {
 		ibNode.timeTickStream.Close()
@@ -670,8 +676,22 @@ func (ibNode *insertBufferNode) WriteTimeTick(ts Timestamp, segmentIDs []int64) 
 	default:
 	}
 
-	ibNode.ttLogger.LogTs(ts)
-	ibNode.ttMerger.bufferTs(ts, segmentIDs)
+	if Params.DataNodeCfg.DataNodeTimeTickByRPC {
+		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
+		for _, sid := range segmentIDs {
+			stat, err := ibNode.channel.getSegmentStatisticsUpdates(sid)
+			if err != nil {
+				log.Warn("failed to get segment statistics info", zap.Int64("segmentID", sid), zap.Error(err))
+				continue
+			}
+			stats = append(stats, stat)
+		}
+		ibNode.timeTickSender.update(ibNode.channelName, ts, stats)
+	} else {
+		ibNode.ttLogger.LogTs(ts)
+		ibNode.ttMerger.bufferTs(ts, segmentIDs)
+	}
+
 	rateCol.updateFlowGraphTt(ibNode.channelName, ts)
 }
 
@@ -680,11 +700,30 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 }
 
 func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DeltaBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
-	fm flushManager, flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
+	fm flushManager, flushingSegCache *Cache, config *nodeConfig, timeTickManager *timeTickSender) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
+
+	if Params.DataNodeCfg.DataNodeTimeTickByRPC {
+		return &insertBufferNode{
+			ctx:      ctx,
+			BaseNode: baseNode,
+
+			flushMap:         sync.Map{},
+			flushChan:        flushCh,
+			resendTTChan:     resendTTCh,
+			flushingSegCache: flushingSegCache,
+			flushManager:     fm,
+
+			delBufferManager: delBufManager,
+			channel:          config.channel,
+			idAllocator:      config.allocator,
+			channelName:      config.vChannelName,
+			timeTickSender:   timeTickManager,
+		}, nil
+	}
 
 	//input stream, data node time tick
 	wTt, err := config.msFactory.NewMsgStream(ctx)
