@@ -614,7 +614,6 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1 := NewSession(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
-	s1.SetEnableRetryKeepAlive(false)
 	s1.Register()
 	wg.Add(1)
 	s1.liveCh = ch
@@ -635,7 +634,6 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2 := NewSession(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
-	s2.SetEnableRetryKeepAlive(false)
 	s2.Register()
 	wg.Add(1)
 	go s2.ProcessActiveStandBy(func() error {
@@ -794,29 +792,6 @@ func (s *SessionSuite) TestDisconnected() {
 	}
 }
 
-func (s *SessionSuite) TestRetryKeepAlive() {
-	st := &Session{}
-	st.retryKeepAlive.Store(true)
-	sf := &Session{}
-	sf.retryKeepAlive.Store(false)
-
-	cases := []struct {
-		tag    string
-		input  *Session
-		expect bool
-	}{
-		{"not_set", &Session{}, false},
-		{"set_true", st, true},
-		{"set_false", sf, false},
-	}
-
-	for _, c := range cases {
-		s.Run(c.tag, func() {
-			s.Equal(c.expect, c.input.isRetryingKeepAlive())
-		})
-	}
-}
-
 func (s *SessionSuite) TestGoingStop() {
 	ctx := context.Background()
 	sdisconnect := NewSession(ctx, s.metaRoot, s.client)
@@ -886,7 +861,7 @@ func (s *SessionSuite) TestRevoke() {
 	}
 }
 
-func (s *SessionSuite) TestKeepAliveRetryEnable() {
+func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ctx := context.Background()
 	session := NewSession(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
@@ -896,38 +871,43 @@ func (s *SessionSuite) TestKeepAliveRetryEnable() {
 	if err != nil {
 		panic(err)
 	}
-	session.SetEnableRetryKeepAlive(true)
 	session.liveCh = make(chan bool)
 	session.processKeepAliveResponse(ch)
 	session.LivenessCheck(ctx, nil)
-	session.keepAliveCancel()
-
-	// sleep a while wait goroutine process
-	time.Sleep(time.Millisecond * 100)
-	// expected Disconnected = false, means session is not closed
-	assert.Equal(s.T(), false, session.Disconnected())
-}
-
-func (s *SessionSuite) TestKeepAliveRetryDisable() {
-	ctx := context.Background()
-	session := NewSession(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
-
-	// Register
-	ch, err := session.registerService()
-	if err != nil {
-		panic(err)
-	}
-	session.SetEnableRetryKeepAlive(false)
-	session.liveCh = make(chan bool)
-	session.processKeepAliveResponse(ch)
-	session.LivenessCheck(ctx, nil)
+	// active cancel, should not retry connect
 	session.keepAliveCancel()
 
 	// sleep a while wait goroutine process
 	time.Sleep(time.Millisecond * 100)
 	// expected Disconnected = true, means session is closed
 	assert.Equal(s.T(), true, session.Disconnected())
+}
+
+func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
+	ctx := context.Background()
+	session := NewSession(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+
+	// Register
+	_, err := session.registerService()
+	if err != nil {
+		panic(err)
+	}
+	session.liveCh = make(chan bool)
+	closeChan := make(chan *clientv3.LeaseKeepAliveResponse)
+	sendChan := (<-chan *clientv3.LeaseKeepAliveResponse)(closeChan)
+	session.processKeepAliveResponse(sendChan)
+	session.LivenessCheck(ctx, nil)
+	// close channel, should retry connect
+	close(closeChan)
+
+	// sleep a while wait goroutine process
+	time.Sleep(time.Millisecond * 100)
+	// expected Disconnected = false, means session is not closed
+	assert.Equal(s.T(), false, session.Disconnected())
+	time.Sleep(time.Second * 1)
+	// expected Disconnected = false, means session is not closed, keepalive keeps working
+	assert.Equal(s.T(), false, session.Disconnected())
 }
 
 func (s *SessionSuite) TestSafeCloseLiveCh() {
