@@ -70,6 +70,7 @@ var METRICS = []string{L2, IP, COSINE} // const
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
 var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
 var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
+var HnswMetrics = []string{L2, IP, COSINE, HAMMING, JACCARD}                               // const
 var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
 var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
 
