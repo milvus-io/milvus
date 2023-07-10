@@ -253,11 +253,9 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	changed := false
 	for _, sealed := range sealedSegments {
 		if d.offlines.Contain(sealed.SegmentID) {
 			d.offlines.Remove(sealed.SegmentID)
-			changed = true
 		}
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
@@ -265,7 +263,6 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		}
 		if entry.NodeID == sealed.NodeID || sealed.NodeID == wildcardNodeID {
 			delete(d.sealedSegments, sealed.SegmentID)
-			changed = true
 		}
 	}
 
@@ -276,14 +273,10 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		}
 
 		delete(d.growingSegments, growing.SegmentID)
-		changed = true
 	}
 
-	if !changed {
-		// no change made, return closed signal channel
-		return getClosedCh()
-	}
-
+	// wait previous read even not distribution changed
+	// in case of segment balance caused segment lost track
 	return d.genSnapshot()
 }
 
