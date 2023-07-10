@@ -353,3 +353,9 @@ func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	}
 	return nil
 }
+
+func (kv *MemoryKV) Has(key string) (bool, error) {
+	kv.Lock()
+	defer kv.Unlock()
+	return kv.tree.Has(memoryKVItem{key: key}), nil
+}

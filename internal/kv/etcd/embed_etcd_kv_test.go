@@ -838,4 +838,31 @@ func TestEmbedEtcd(te *testing.T) {
 			testFn(100)
 		})
 	})
+
+	te.Run("test has", func(t *testing.T) {
+		rootPath := "/etcd/test/root/has"
+		kv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
+		assert.NoError(t, err)
+
+		defer kv.Close()
+		defer kv.RemoveWithPrefix("")
+
+		has, err := kv.Has("key1")
+		assert.NoError(t, err)
+		assert.False(t, has)
+
+		err = kv.Save("key1", "value1")
+		assert.NoError(t, err)
+
+		has, err = kv.Has("key1")
+		assert.NoError(t, err)
+		assert.True(t, has)
+
+		err = kv.Remove("key1")
+		assert.NoError(t, err)
+
+		has, err = kv.Has("key1")
+		assert.NoError(t, err)
+		assert.False(t, has)
+	})
 }

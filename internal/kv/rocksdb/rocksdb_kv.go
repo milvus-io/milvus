@@ -162,6 +162,22 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+func (kv *RocksdbKV) Has(key string) (bool, error) {
+	if kv.DB == nil {
+		return false, fmt.Errorf("rocksdb instance is nil when check if has %s", key)
+	}
+
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+
+	value, err := kv.DB.Get(option, []byte(key))
+	if err != nil {
+		return false, err
+	}
+
+	return value.Size() != 0, nil
+}
+
 func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, error) {
 	if kv.DB == nil {
 		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)

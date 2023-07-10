@@ -198,3 +198,25 @@ func TestMemoryKV_MultiSaveBytesAndRemoveWithPrefix(t *testing.T) {
 	assert.ElementsMatch(t, values, _values)
 	assert.NoError(t, err)
 }
+
+func TestHas(t *testing.T) {
+	kv := NewMemoryKV()
+
+	has, err := kv.Has("key1")
+	assert.NoError(t, err)
+	assert.False(t, has)
+
+	err = kv.Save("key1", "value1")
+	assert.NoError(t, err)
+
+	has, err = kv.Has("key1")
+	assert.NoError(t, err)
+	assert.True(t, has)
+
+	err = kv.Remove("key1")
+	assert.NoError(t, err)
+
+	has, err = kv.Has("key1")
+	assert.NoError(t, err)
+	assert.False(t, has)
+}

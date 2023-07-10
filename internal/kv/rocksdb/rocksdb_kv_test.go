@@ -341,3 +341,25 @@ func TestRocksdbKV_CornerCase(t *testing.T) {
 	err = rocksdbkv.DeleteRange("a", "a")
 	assert.Error(t, err)
 }
+
+func TestHas(t *testing.T) {
+	dir := t.TempDir()
+	db, err := rocksdbkv.NewRocksdbKV(dir)
+	assert.NoError(t, err)
+	defer db.Close()
+	defer db.RemoveWithPrefix("")
+
+	has, err := db.Has("key1")
+	assert.NoError(t, err)
+	assert.False(t, has)
+	err = db.Save("key1", "value1")
+	assert.NoError(t, err)
+	has, err = db.Has("key1")
+	assert.NoError(t, err)
+	assert.True(t, has)
+	err = db.Remove("key1")
+	assert.NoError(t, err)
+	has, err = db.Has("key1")
+	assert.NoError(t, err)
+	assert.False(t, has)
+}
