@@ -201,6 +201,58 @@ func (_c *WatchKV_Has_Call) RunAndReturn(run func(string) (bool, error)) *WatchK
 	return _c
 }
 
+// HasPrefix provides a mock function with given fields: prefix
+func (_m *WatchKV) HasPrefix(prefix string) (bool, error) {
+	ret := _m.Called(prefix)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(prefix)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(prefix)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(prefix)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// WatchKV_HasPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasPrefix'
+type WatchKV_HasPrefix_Call struct {
+	*mock.Call
+}
+
+// HasPrefix is a helper method to define mock.On call
+//   - prefix string
+func (_e *WatchKV_Expecter) HasPrefix(prefix interface{}) *WatchKV_HasPrefix_Call {
+	return &WatchKV_HasPrefix_Call{Call: _e.mock.On("HasPrefix", prefix)}
+}
+
+func (_c *WatchKV_HasPrefix_Call) Run(run func(prefix string)) *WatchKV_HasPrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *WatchKV_HasPrefix_Call) Return(_a0 bool, _a1 error) *WatchKV_HasPrefix_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *WatchKV_HasPrefix_Call) RunAndReturn(run func(string) (bool, error)) *WatchKV_HasPrefix_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Load provides a mock function with given fields: key
 func (_m *WatchKV) Load(key string) (string, error) {
 	ret := _m.Called(key)

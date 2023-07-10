@@ -151,6 +151,21 @@ func (kv *EmbedEtcdKV) Has(key string) (bool, error) {
 	return resp.Count != 0, nil
 }
 
+func (kv *EmbedEtcdKV) HasPrefix(prefix string) (bool, error) {
+	prefix = path.Join(kv.rootPath, prefix)
+	log.Debug("HasPrefix", zap.String("prefix", prefix))
+
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	resp, err := kv.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithCountOnly(), clientv3.WithLimit(1))
+	if err != nil {
+		return false, err
+	}
+
+	return resp.Count != 0, nil
+}
+
 // LoadBytesWithPrefix returns all the keys and values with the given key prefix
 func (kv *EmbedEtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	key = path.Join(kv.rootPath, key)
