@@ -1419,6 +1419,36 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_JSON:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_JSON,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{
+							Data: fieldValue.([][]byte),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_Array:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data: fieldValue.([]*schemapb.ScalarField),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
 	default:
 		log.Error("not supported field type", zap.String("field type", fieldType.String()))
 	}
