@@ -94,6 +94,7 @@ func newAzureChunkManagerWithConfig(ctx context.Context, c *config) (*AzureChunk
 		if !bucketExists {
 			if c.createBucket {
 				log.Info("blob bucket not exist, create bucket.", zap.Any("bucket name", c.bucketName))
+
 				//err := minIOClient.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
 				if err != nil {
 					log.Warn("failed to create blob bucket", zap.String("bucket", c.bucketName), zap.Error(err))
@@ -336,3 +337,4 @@ func (i *AzureChunkManager) RemoveWithPrefix(ctx context.Context, prefix string)
 	}
 	return nil
 }
+
