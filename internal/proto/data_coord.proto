@@ -108,6 +108,9 @@ service DataNode {
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
   rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
+
+  rpc NotifyChannelOperation(ChannelWatchInfo) returns(common.Status) {}
+  rpc CheckChannelOperationProgress(ChannelOperationProgressRequest) returns(ChannelOperationProgressResponse) {}
 }
 
 message FlushRequest {
@@ -668,4 +671,13 @@ message GcConfirmResponse {
 message ReportDataNodeTtMsgsRequest {
   common.MsgBase base = 1;
   repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}
+
+message ChannelOperationProgressRequest {
+  VchannelInfo vchan = 1;
+}
+
+message ChannelOperationProgressResponse {
+  ChannelWatchState state = 1;
+  int32 progress = 2;
 }

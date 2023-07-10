@@ -303,6 +303,14 @@ func (c *mockDataNodeClient) SyncSegments(ctx context.Context, req *datapb.SyncS
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelWatchInfo) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (c *mockDataNodeClient) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelOperationProgressRequest) (*datapb.ChannelOperationProgressResponse, error) {
+	return &datapb.ChannelOperationProgressResponse{}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil

@@ -199,7 +199,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 
-	mockDataNode := &mocks.DataNode{}
+	mockDataNode := &mocks.MockDataNode{}
 	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
 	c := &compactionPlanHandler{
@@ -286,7 +286,7 @@ func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 }
 
 func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
-	mockDataNode := &mocks.DataNode{}
+	mockDataNode := &mocks.MockDataNode{}
 	call := mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 	dataNodeID := UniqueID(111)
@@ -441,7 +441,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 	})
 
 	t.Run("test complete merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.DataNode{}
+		mockDataNode := &mocks.MockDataNode{}
 		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 		dataNodeID := UniqueID(111)
@@ -533,7 +533,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 	})
 
 	t.Run("test empty result merge compaction task", func(t *testing.T) {
-		mockDataNode := &mocks.DataNode{}
+		mockDataNode := &mocks.MockDataNode{}
 		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 		dataNodeID := UniqueID(111)

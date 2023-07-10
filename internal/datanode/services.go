@@ -406,6 +406,19 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	return merr.Status(nil), nil
 }
 
+func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelWatchInfo) (*commonpb.Status, error) {
+	// TODO
+	return merr.Status(nil), nil
+}
+
+func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelOperationProgressRequest) (*datapb.ChannelOperationProgressResponse, error) {
+	// TODO
+	return &datapb.ChannelOperationProgressResponse{
+		State:    datapb.ChannelWatchState_Complete,
+		Progress: 0,
+	}, nil
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	log.Info("DataNode receive import request",

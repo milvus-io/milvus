@@ -148,6 +148,14 @@ func (m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegment
 	return m.status, m.err
 }
 
+func (m *MockDataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelWatchInfo) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
+func (m *MockDataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelOperationProgressRequest) (*datapb.ChannelOperationProgressResponse, error) {
+	return &datapb.ChannelOperationProgressResponse{}, m.err
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoord
@@ -321,6 +329,24 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.AddImportSegment(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("NotifyChannelOperation", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.NotifyChannelOperation(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("CheckChannelOperationProgress", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.CheckChannelOperationProgress(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
