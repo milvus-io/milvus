@@ -345,6 +345,7 @@ func TestProxy(t *testing.T) {
 	defer os.RemoveAll(path)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	ctx = GetContext(ctx, "root:123456")
 	localMsg := true
 	factory := dependency.MockDefaultFactory(localMsg, Params)
@@ -3437,7 +3438,6 @@ func TestProxy(t *testing.T) {
 	testServer.gracefulStop()
 
 	wg.Wait()
-	cancel()
 }
 
 func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {

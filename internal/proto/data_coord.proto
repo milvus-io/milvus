@@ -83,7 +83,7 @@ service DataCoord {
   rpc GetIndexBuildProgress(index.GetIndexBuildProgressRequest) returns (index.GetIndexBuildProgressResponse) {}
 
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
-  
+
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 }
 
@@ -108,6 +108,9 @@ service DataNode {
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
   rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
+
+  rpc NotifyChannelOperation(ChannelOperations) returns(common.Status) {}
+  rpc CheckChannelOperationProgress(ChannelWatchInfo) returns(ChannelOperationProgressResponse) {}
 }
 
 message FlushRequest {
@@ -429,8 +432,9 @@ message ChannelWatchInfo {
     int64 timeoutTs = 4;
     // the schema of the collection to watch, to avoid get schema rpc issues.
     schema.CollectionSchema schema = 5;
-    // watch progress
+    // watch progress, deprecated
     int32 progress = 6;
+    int64 opID = 7;
 }
 
 enum CompactionType {
@@ -503,7 +507,7 @@ message WatchChannelsRequest {
   int64 collectionID = 1;
   repeated string channelNames = 2;
   repeated common.KeyDataPair start_positions = 3;
-  schema.CollectionSchema schema = 4; 
+  schema.CollectionSchema schema = 4;
   uint64 create_timestamp = 5;
 }
 
@@ -676,4 +680,15 @@ message GcConfirmResponse {
 message ReportDataNodeTtMsgsRequest {
   common.MsgBase base = 1;
   repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}
+
+message ChannelOperations {
+  repeated ChannelWatchInfo infos = 1;
+}
+
+message ChannelOperationProgressResponse {
+  common.Status status = 1;
+  int64 opID = 2;
+  ChannelWatchState state = 3;
+  int32 progress = 4;
 }

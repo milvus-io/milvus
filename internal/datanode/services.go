@@ -127,7 +127,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		}
 		// Get the flush channel for the given segment ID.
 		// If no flush channel is found, report an error.
-		flushCh, err := node.flowgraphManager.getFlushCh(segID)
+		flushCh, err := node.channelManager.runningFlowgraphs.getFlushCh(segID)
 		if err != nil {
 			log.Error("no flush channel found for the segment, unable to flush", zap.Int64("segmentID", segID), zap.Error(err))
 			return merr.Status(err), nil
@@ -169,7 +169,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
 	log.Info("start resending segment stats, if any",
 		zap.Int64("DataNode ID", paramtable.GetNodeID()))
-	segResent := node.flowgraphManager.resendTT()
+	segResent := node.channelManager.runningFlowgraphs.resendTT()
 	log.Info("found segment(s) with stats to resend",
 		zap.Int64s("segment IDs", segResent))
 	return &datapb.ResendSegmentStatsResponse{
@@ -273,7 +273,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(err), nil
 	}
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
+	ds, ok := node.channelManager.runningFlowgraphs.getFlowgraphService(req.GetChannel())
 	if !ok {
 		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
@@ -365,7 +365,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
-		channel, err = node.flowgraphManager.getChannel(fromSegment)
+		channel, err = node.channelManager.runningFlowgraphs.getChannel(fromSegment)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
 			continue
@@ -397,6 +397,32 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	return merr.Status(nil), nil
+}
+
+func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperations) (*commonpb.Status, error) {
+	for _, info := range req.GetInfos() {
+		log.Info("DataNode receive channel operation notification",
+			zap.String("state", info.GetState().String()),
+			zap.String("channel", info.GetVchan().GetChannelName()),
+		)
+		node.channelManager.Submit(info)
+	}
+	return merr.Status(nil), nil
+}
+
+func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	resp := node.channelManager.GetProgress(req)
+	resp.Status = merr.Status(nil)
+	if resp.GetProgress() != 0 {
+		log.Info("DataNode check channel operation progress",
+			zap.String("operation", req.GetState().String()),
+			zap.String("operationState", resp.GetState().String()),
+			zap.Int64("opID", req.GetOpID()),
+			zap.String("channel", req.GetVchan().GetChannelName()),
+			zap.Int32("progress", resp.GetProgress()),
+		)
+	}
+	return resp, nil
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
@@ -576,7 +602,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	// Retry in case the channel hasn't been watched yet.
 	err := retry.Do(ctx, func() error {
 		var ok bool
-		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+		ds, ok = node.channelManager.runningFlowgraphs.getFlowgraphService(req.GetChannelName())
 		if !ok {
 			return errors.New("channel not found")
 		}

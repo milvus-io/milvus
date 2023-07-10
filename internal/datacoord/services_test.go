@@ -395,9 +395,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
+		err = svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)

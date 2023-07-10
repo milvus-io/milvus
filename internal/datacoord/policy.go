@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"context"
 	"math"
 	"sort"
 	"strconv"
@@ -541,14 +540,6 @@ func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) C
 	return ret
 }
 
-// ChannelBGChecker check nodes' channels and return the channels needed to be reallocated.
-type ChannelBGChecker func(ctx context.Context)
-
-// EmptyBgChecker does nothing
-func EmptyBgChecker(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
-	return nil, nil
-}
-
 type ReAllocates []*NodeChannelInfo
 
 func (rallocates ReAllocates) MarshalLogArray(enc zapcore.ArrayEncoder) error {
@@ -602,7 +593,6 @@ func BgBalanceCheck(nodeChannels []*NodeChannelInfo, ts time.Time) ([]*NodeChann
 		}
 		reAllocations = append(reAllocations, reallocate)
 	}
-	log.Info("Channel Balancer got new reAllocations:", zap.Array("reAllocations", reAllocations))
 	return reAllocations, nil
 }
 

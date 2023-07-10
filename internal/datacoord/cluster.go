@@ -60,18 +60,18 @@ func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
 // Register registers a new node in cluster
 func (c *Cluster) Register(node *NodeInfo) error {
 	c.sessionManager.AddSession(node)
-	return c.channelManager.AddNode(node.NodeID)
+	return c.channelManager.RegisterNode(node.NodeID)
 }
 
 // UnRegister removes a node from cluster
 func (c *Cluster) UnRegister(node *NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
-	return c.channelManager.DeleteNode(node.NodeID)
+	return c.channelManager.UnregisterNode(node.NodeID)
 }
 
 // Watch tries to add a channel in datanode cluster
 func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
-	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
+	return c.channelManager.AddChannel(&channel{Name: ch, CollectionID: collectionID})
 }
 
 // Flush sends flush requests to dataNodes specified

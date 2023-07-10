@@ -25,16 +25,12 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"path"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -42,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -93,12 +88,11 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`clearSignal` is a signal channel for releasing the flowgraph resources.
 //	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	Role             string
-	stateCode        atomic.Value // commonpb.StateCode_Initializing
-	flowgraphManager *flowgraphManager
-	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
+	ctx            context.Context
+	cancel         context.CancelFunc
+	Role           string
+	stateCode      atomic.Value // commonpb.StateCode_Initializing
+	channelManager *ChannelManager
 
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
@@ -144,12 +138,12 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		clearSignal: make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
+
+	node.channelManager = NewChannelManager(node)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
 }
@@ -274,218 +268,14 @@ func (node *DataNode) Init() error {
 	return initError
 }
 
-// StartWatchChannels start loop to watch channel allocation status via kv(etcd for now)
-func (node *DataNode) StartWatchChannels(ctx context.Context) {
-	defer node.wg.Done()
-	defer logutil.LogPanic()
-	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	// TODO, this is risky, we'd better watch etcd with revision rather simply a path
-	watchPrefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID))
-	log.Info("Start watch channel", zap.String("prefix", watchPrefix))
-	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
-	// after watch, first check all exists nodes first
-	err := node.checkWatchedList()
-	if err != nil {
-		log.Warn("StartWatchChannels failed", zap.Error(err))
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("watch etcd loop quit")
-			return
-		case event, ok := <-evtChan:
-			if !ok {
-				log.Warn("datanode failed to watch channel, return")
-				go node.StartWatchChannels(ctx)
-				return
-			}
-
-			if err := event.Err(); err != nil {
-				log.Warn("datanode watch channel canceled", zap.Error(event.Err()))
-				// https://github.com/etcd-io/etcd/issues/8980
-				if event.Err() == v3rpc.ErrCompacted {
-					go node.StartWatchChannels(ctx)
-					return
-				}
-				// if watch loop return due to event canceled, the datanode is not functional anymore
-				log.Panic("datanode is not functional for event canceled", zap.Error(err))
-				return
-			}
-			for _, evt := range event.Events {
-				// We need to stay in order until events enqueued
-				node.handleChannelEvt(evt)
-			}
-		}
-	}
-}
-
-// checkWatchedList list all nodes under [prefix]/channel/{node_id} and make sure all nodeds are watched
-// serves the corner case for etcd connection lost and missing some events
-func (node *DataNode) checkWatchedList() error {
-	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()))
-	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
-	if err != nil {
-		return err
-	}
-	for i, val := range values {
-		node.handleWatchInfo(&event{eventType: putEventType}, keys[i], []byte(val))
-	}
-	return nil
-}
-
-// handleChannelEvt handles event from kv watch event
-func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
-	var e *event
-	switch evt.Type {
-	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		e = &event{
-			eventType: putEventType,
-			version:   evt.Kv.Version,
-		}
-
-	case clientv3.EventTypeDelete:
-		e = &event{
-			eventType: deleteEventType,
-			version:   evt.Kv.Version,
-		}
-	}
-	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
-}
-
-func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
-	switch e.eventType {
-	case putEventType:
-		watchInfo, err := parsePutEventData(data)
-		if err != nil {
-			log.Warn("fail to handle watchInfo", zap.Int("event type", e.eventType), zap.String("key", key), zap.Error(err))
-			return
-		}
-
-		if isEndWatchState(watchInfo.State) {
-			log.Info("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
-			return
-		}
-
-		if watchInfo.Progress != 0 {
-			log.Info("DataNode received a PUT event with tickler update progress", zap.String("channel", watchInfo.Vchan.ChannelName), zap.Int64("version", e.version))
-			return
-		}
-
-		e.info = watchInfo
-		e.vChanName = watchInfo.GetVchan().GetChannelName()
-		log.Info("DataNode is handling watchInfo PUT event", zap.String("key", key), zap.Any("watch state", watchInfo.GetState().String()))
-	case deleteEventType:
-		e.vChanName = parseDeleteEventKey(key)
-		log.Info("DataNode is handling watchInfo DELETE event", zap.String("key", key))
-	}
-
-	actualManager, loaded := node.eventManagerMap.GetOrInsert(e.vChanName, newChannelEventManager(
-		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
-	))
-
-	if !loaded {
-		actualManager.Run()
-	}
-
-	actualManager.handleEvent(*e)
-
-	// Whenever a delete event comes, this eventManager will be removed from map
-	if e.eventType == deleteEventType {
-		if m, loaded := node.eventManagerMap.GetAndRemove(e.vChanName); loaded {
-			m.Close()
-		}
-	}
-}
-
-func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
-	watchInfo := datapb.ChannelWatchInfo{}
-	err := proto.Unmarshal(data, &watchInfo)
-	if err != nil {
-		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, err: %v", err)
-	}
-
-	if watchInfo.Vchan == nil {
-		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
-	}
-	reviseVChannelInfo(watchInfo.GetVchan())
-	return &watchInfo, nil
-}
-
-func parseDeleteEventKey(key string) string {
-	parts := strings.Split(key, "/")
-	vChanName := parts[len(parts)-1]
-	return vChanName
-}
-
-func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
-	vChanName := watchInfo.GetVchan().GetChannelName()
-	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID), vChanName)
-	tickler := newTickler(version, key, watchInfo, node.watchKv, Params.DataNodeCfg.WatchEventTicklerInterval.GetAsDuration(time.Second))
-
-	switch watchInfo.State {
-	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
-		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
-			log.Warn("handle put event: new data sync service failed", zap.String("vChanName", vChanName), zap.Error(err))
-			watchInfo.State = datapb.ChannelWatchState_WatchFailure
-		} else {
-			log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
-			watchInfo.State = datapb.ChannelWatchState_WatchSuccess
-		}
-	case datapb.ChannelWatchState_ToRelease:
-		// there is no reason why we release fail
-		node.tryToReleaseFlowgraph(vChanName)
-		watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
-	}
-
-	v, err := proto.Marshal(watchInfo)
-	if err != nil {
-		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
-	}
-
-	success, err := node.watchKv.CompareVersionAndSwap(key, tickler.version, string(v))
-	// etcd error
-	if err != nil {
-		// flow graph will leak if not release, causing new datanode failed to subscribe
-		node.tryToReleaseFlowgraph(vChanName)
-		log.Warn("fail to update watch state to etcd", zap.String("vChanName", vChanName),
-			zap.String("state", watchInfo.State.String()), zap.Error(err))
-		return err
-	}
-	// etcd valid but the states updated.
-	if !success {
-		log.Info("handle put event: failed to compare version and swap, release flowgraph",
-			zap.String("key", key), zap.String("state", watchInfo.State.String()),
-			zap.String("vChanName", vChanName))
-		// flow graph will leak if not release, causing new datanode failed to subscribe
-		node.tryToReleaseFlowgraph(vChanName)
-		return nil
-	}
-	log.Info("handle put event success", zap.String("key", key),
-		zap.String("state", watchInfo.State.String()), zap.String("vChanName", vChanName))
-	return nil
-}
-
-func (node *DataNode) handleDeleteEvent(vChanName string) {
-	node.tryToReleaseFlowgraph(vChanName)
-}
-
-// tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
-	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
-	node.flowgraphManager.release(vChanName)
-}
-
 // BackGroundGC runs in background to release datanode resources
-// GOOSE TODO: remove background GC, using ToRelease for drop-collection after #15846
 func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	defer node.wg.Done()
 	log.Info("DataNode Background GC Start")
 	for {
 		select {
 		case vchanName := <-vChannelCh:
-			node.tryToReleaseFlowgraph(vchanName)
+			node.channelManager.Release(vchanName)
 		case <-node.ctx.Done():
 			log.Warn("DataNode context done, exiting background GC")
 			return
@@ -548,11 +338,7 @@ func (node *DataNode) Start() error {
 			go node.timeTickSender.start(node.ctx)
 		}
 
-		node.wg.Add(1)
-		// Start node watch node
-		go node.StartWatchChannels(node.ctx)
-
-		go node.flowgraphManager.start()
+		go node.channelManager.Start()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -588,12 +374,9 @@ func (node *DataNode) Stop() error {
 		node.cancel()
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		node.flowgraphManager.close()
-
-		node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
-			m.Close()
-			return true
-		})
+		if node.channelManager != nil {
+			node.channelManager.Close()
+		}
 
 		if node.allocator != nil {
 			log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))

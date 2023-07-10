@@ -1332,5 +1332,5 @@ func genTimestamp() typeutil.Timestamp {
 }
 
 func genTestTickler() *tickler {
-	return newTickler(0, "", nil, nil, 0)
+	return newTickler()
 }

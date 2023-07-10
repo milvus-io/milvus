@@ -88,7 +88,7 @@ func (suite *ClusterSuite) TestCreate() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -124,7 +124,7 @@ func (suite *ClusterSuite) TestCreate() {
 		suite.NoError(err)
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -143,7 +143,7 @@ func (suite *ClusterSuite) TestCreate() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 
@@ -164,7 +164,7 @@ func (suite *ClusterSuite) TestCreate() {
 		cluster.Close()
 
 		sessionManager2 := NewSessionManager()
-		channelManager2, err := NewChannelManager(kv, newMockHandler())
+		channelManager2, err := NewChannelManager(kv, newMockHandler(), sessionManager2, newMockAllocator())
 		suite.NoError(err)
 		clusterReload := NewCluster(sessionManager2, channelManager2)
 		defer clusterReload.Close()
@@ -191,7 +191,7 @@ func (suite *ClusterSuite) TestCreate() {
 
 		metakv := mocks.NewWatchKV(suite.T())
 		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("failed"))
-		_, err := NewChannelManager(metakv, newMockHandler())
+		_, err := NewChannelManager(metakv, newMockHandler(), NewSessionManager(), newMockAllocator())
 		suite.Error(err)
 	})
 }
@@ -206,7 +206,7 @@ func (suite *ClusterSuite) TestRegister() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -233,9 +233,9 @@ func (suite *ClusterSuite) TestRegister() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
-		err = channelManager.Watch(&channel{
+		err = channelManager.AddChannel(&channel{
 			Name:         "ch1",
 			CollectionID: 0,
 		})
@@ -268,7 +268,7 @@ func (suite *ClusterSuite) TestRegister() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		addr := "localhost:8080"
@@ -283,7 +283,7 @@ func (suite *ClusterSuite) TestRegister() {
 		cluster.Close()
 
 		sessionManager2 := NewSessionManager()
-		channelManager2, err := NewChannelManager(kv, newMockHandler())
+		channelManager2, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		restartCluster := NewCluster(sessionManager2, channelManager2)
 		defer restartCluster.Close()
@@ -304,7 +304,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -331,7 +331,7 @@ func (suite *ClusterSuite) TestUnregister() {
 		defer cancel()
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -371,7 +371,7 @@ func (suite *ClusterSuite) TestUnregister() {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		suite.NoError(err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -418,7 +418,7 @@ func TestWatchIfNeeded(t *testing.T) {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -442,7 +442,7 @@ func TestWatchIfNeeded(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -468,7 +468,7 @@ func TestConsistentHashPolicy(t *testing.T) {
 	sessionManager := NewSessionManager()
 	chash := consistent.New()
 	factory := NewConsistentHashChannelPolicyFactory(chash)
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(factory))
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactory(factory))
 	assert.NoError(t, err)
 	cluster := NewCluster(sessionManager, channelManager)
 	defer cluster.Close()
@@ -550,7 +550,7 @@ func TestCluster_Flush(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 	sessionManager := NewSessionManager()
-	channelManager, err := NewChannelManager(kv, newMockHandler())
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 	assert.NoError(t, err)
 	cluster := NewCluster(sessionManager, channelManager)
 	defer cluster.Close()
@@ -597,7 +597,7 @@ func TestCluster_Import(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
 	defer cancel()
 	sessionManager := NewSessionManager()
-	channelManager, err := NewChannelManager(kv, newMockHandler())
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 	assert.NoError(t, err)
 	cluster := NewCluster(sessionManager, channelManager)
 	defer cluster.Close()
@@ -633,7 +633,7 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 			return newMockDataNodeClient(1, nil)
 		}
 		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()
@@ -659,7 +659,7 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 		cluster := NewCluster(sessionManager, channelManager)
 		defer cluster.Close()

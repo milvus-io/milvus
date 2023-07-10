@@ -1,5 +1,4 @@
 // Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
 // to you under the Apache License, Version 2.0 (the
@@ -274,13 +273,9 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 			})
-			if err != nil {
-				log.Info("Get State failed", zap.Error(err))
-				return
-			}
 
-			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Info("Get State failed", zap.String("Reason", resp.GetStatus().GetReason()))
+			if err := VerifyResponse(resp, err); err != nil {
+				log.Info("Get Compaction State failed", zap.Error(err))
 				return
 			}
 			for _, rst := range resp.GetResults() {
@@ -298,6 +293,46 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	})
 
 	return rst
+}
+
+func (c *SessionManager) NotifyChannelOperation(ctx context.Context, nodeID int64, infos *datapb.ChannelOperations) error {
+	log := log.With(zap.Int64("DataNode ID", nodeID))
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get dataNode client", zap.Error(err))
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	resp, err := cli.NotifyChannelOperation(ctx, infos)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Info("Notify channel operations failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (c *SessionManager) CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	log := log.With(
+		zap.Int64("DataNode ID", nodeID),
+		zap.String("channel", info.GetVchan().GetChannelName()),
+		zap.String("operation", info.GetState().String()),
+	)
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get dataNode client", zap.Error(err))
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.ChannelOperationRPCTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	resp, err := cli.CheckChannelOperationProgress(ctx, info)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Info("Check channel operation failed", zap.Error(err))
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {

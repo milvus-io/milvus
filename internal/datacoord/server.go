@@ -329,6 +329,7 @@ func (s *Server) initDataCoord() error {
 	}
 
 	s.broker = NewCoordinatorBroker(s.rootCoordClient)
+	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {
@@ -344,8 +345,6 @@ func (s *Server) initDataCoord() error {
 	if err = s.initCluster(); err != nil {
 		return err
 	}
-
-	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	s.initIndexNodeManager()
 
@@ -406,13 +405,14 @@ func (s *Server) initCluster() error {
 		return nil
 	}
 
+	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
+
 	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory),
-		withStateChecker(), withBgChecker())
+	s.channelManager, err = NewChannelManager(s.kv, s.handler, s.sessionManager, s.allocator, withMsgstreamFactory(s.factory),
+		withBalanceChecker(), withOperationChecker())
 	if err != nil {
 		return err
 	}
-	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
 	s.cluster = NewCluster(s.sessionManager, s.channelManager)
 	return nil
 }

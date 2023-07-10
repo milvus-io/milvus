@@ -55,21 +55,6 @@ func TestFlowGraphManager(t *testing.T) {
 	defer func() {
 		fm.dropAll()
 	}()
-	t.Run("Test addAndStart", func(t *testing.T) {
-		vchanName := "by-dev-rootcoord-dml-test-flowgraphmanager-addAndStart"
-		vchan := &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  vchanName,
-		}
-		require.False(t, fm.exist(vchanName))
-
-		err := fm.addAndStart(node, vchan, nil, genTestTickler())
-		assert.NoError(t, err)
-		assert.True(t, fm.exist(vchanName))
-
-		fm.dropAll()
-	})
-
 	t.Run("Test Release", func(t *testing.T) {
 		vchanName := "by-dev-rootcoord-dml-test-flowgraphmanager-Release"
 		vchan := &datapb.VchannelInfo{

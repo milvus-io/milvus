@@ -1227,7 +1227,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			Schema:          req.GetSchema(),
 			CreateTimestamp: req.GetCreateTimestamp(),
 		}
-		err := s.channelManager.Watch(ch)
+		err := s.channelManager.AddChannel(ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
 			resp.Status.Reason = err.Error()

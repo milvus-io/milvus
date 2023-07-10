@@ -123,9 +123,6 @@ func newDataSyncService(ctx context.Context,
 	if err := service.initNodes(vchan, tickler); err != nil {
 		return nil, err
 	}
-	if tickler.isWatchFailed.Load() {
-		return nil, errors.Errorf("tickler watch failed")
-	}
 	return service, nil
 }
 
@@ -200,6 +197,8 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 
 // initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tickler *tickler) error {
+	defer tickler.close()
+
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.channel,
@@ -222,11 +221,14 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 	}
 
 	//tickler will update addSegment progress to watchInfo
-	tickler.watch()
-	defer tickler.stop()
 	futures := make([]*conc.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
+	tickler.setTotal(int32(len(unflushedSegmentInfos) + len(flushedSegmentInfos)))
 
 	for _, us := range unflushedSegmentInfos {
+		if tickler.closed() {
+			return fmt.Errorf("Flowgraph init closed from outside")
+		}
+
 		if us.CollectionID != dsService.collectionID ||
 			us.GetInsertChannel() != vchanInfo.ChannelName {
 			log.Warn("Collection ID or ChannelName not match",

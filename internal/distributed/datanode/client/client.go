@@ -227,3 +227,15 @@ func (c *Client) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsReque
 		return client.SyncSegments(ctx, req)
 	})
 }
+
+func (c *Client) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperations) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
+		return client.NotifyChannelOperation(ctx, req)
+	})
+}
+
+func (c *Client) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.ChannelOperationProgressResponse, error) {
+		return client.CheckChannelOperationProgress(ctx, req)
+	})
+}
