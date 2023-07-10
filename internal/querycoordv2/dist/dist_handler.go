@@ -131,6 +131,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 				Node:               resp.GetNodeID(),
 				Version:            s.GetVersion(),
 				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
+				IndexInfo:          s.GetIndexInfo(),
 			}
 		} else {
 			segment = &meta.Segment{
@@ -138,6 +139,7 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 				Node:               resp.GetNodeID(),
 				Version:            s.GetVersion(),
 				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
+				IndexInfo:          s.GetIndexInfo(),
 			}
 		}
 		updates = append(updates, segment)
