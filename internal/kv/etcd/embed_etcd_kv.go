@@ -139,6 +139,18 @@ func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+func (kv *EmbedEtcdKV) Has(key string) (bool, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("Has", zap.String("key", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithCountOnly())
+	if err != nil {
+		return false, err
+	}
+	return resp.Count != 0, nil
+}
+
 // LoadBytesWithPrefix returns all the keys and values with the given key prefix
 func (kv *EmbedEtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	key = path.Join(kv.rootPath, key)

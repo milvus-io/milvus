@@ -49,6 +49,58 @@ func (_c *TxnKV_Close_Call) RunAndReturn(run func()) *TxnKV_Close_Call {
 	return _c
 }
 
+// Has provides a mock function with given fields: key
+func (_m *TxnKV) Has(key string) (bool, error) {
+	ret := _m.Called(key)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(key)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(key)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(key)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// TxnKV_Has_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Has'
+type TxnKV_Has_Call struct {
+	*mock.Call
+}
+
+// Has is a helper method to define mock.On call
+//   - key string
+func (_e *TxnKV_Expecter) Has(key interface{}) *TxnKV_Has_Call {
+	return &TxnKV_Has_Call{Call: _e.mock.On("Has", key)}
+}
+
+func (_c *TxnKV_Has_Call) Run(run func(key string)) *TxnKV_Has_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_Has_Call) Return(_a0 bool, _a1 error) *TxnKV_Has_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *TxnKV_Has_Call) RunAndReturn(run func(string) (bool, error)) *TxnKV_Has_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Load provides a mock function with given fields: key
 func (_m *TxnKV) Load(key string) (string, error) {
 	ret := _m.Called(key)
