@@ -74,8 +74,9 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              "failed to range search, " +
-                                  MatchKnowhereError(res.error()));
+                              fmt::format("failed to range search: {}: {}",
+                                          KnowhereStatusString(res.error()),
+                                          res.what()));
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, nq, dataset.metric_type);
@@ -95,7 +96,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 
             if (stat != knowhere::Status::success) {
                 throw std::invalid_argument("invalid metric type, " +
-                                            MatchKnowhereError(stat));
+                                            KnowhereStatusString(stat));
             }
         }
     } catch (std::exception& e) {

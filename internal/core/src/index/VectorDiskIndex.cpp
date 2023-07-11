@@ -82,7 +82,7 @@ VectorDiskAnnIndex<T>::Load(const Config& config) {
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,
-            "failed to Deserialize index, " + MatchKnowhereError(stat));
+            "failed to Deserialize index, " + KnowhereStatusString(stat));
 
     SetDim(index_.Dim());
 }
@@ -178,7 +178,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Build(*ds_ptr, build_config);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
-                      "failed to build index, " + MatchKnowhereError(stat));
+                      "failed to build index, " + KnowhereStatusString(stat));
     local_chunk_manager->RemoveDir(
         storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
 
@@ -235,17 +235,19 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              "failed to range search, " +
-                                  MatchKnowhereError(res.error()));
+                              fmt::format("failed to range search: {}: {}",
+                                          KnowhereStatusString(res.error()),
+                                          res.what()));
             }
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_config, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(
-                    ErrorCodeEnum::UnexpectedError,
-                    "failed to search, " + MatchKnowhereError(res.error()));
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                              fmt::format("failed to search: {}: {}",
+                                          KnowhereStatusString(res.error()),
+                                          res.what()));
             }
             return res.value();
         }
@@ -287,9 +289,10 @@ std::vector<uint8_t>
 VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(*dataset);
     if (!res.has_value()) {
-        PanicCodeInfo(
-            ErrorCodeEnum::UnexpectedError,
-            "failed to get vector, " + MatchKnowhereError(res.error()));
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                      fmt::format("failed to get vector: {}: {}",
+                                  KnowhereStatusString(res.error()),
+                                  res.what()));
     }
     auto index_type = GetIndexType();
     auto tensor = res.value()->GetTensor();

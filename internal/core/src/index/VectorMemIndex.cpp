@@ -64,8 +64,9 @@ VectorMemIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                      "failed to serialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to serialize index, " + KnowhereStatusString(stat));
     Disassemble(ret);
 
     return ret;
@@ -78,7 +79,7 @@ VectorMemIndex::LoadWithoutAssemble(const BinarySet& binary_set,
     if (stat != knowhere::Status::success)
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,
-            "failed to Deserialize index, " + MatchKnowhereError(stat));
+            "failed to Deserialize index, " + KnowhereStatusString(stat));
     SetDim(index_.Dim());
 }
 
@@ -119,7 +120,7 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Build(*dataset, index_config);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
-                      "failed to build index, " + MatchKnowhereError(stat));
+                      "failed to build index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
@@ -171,7 +172,7 @@ VectorMemIndex::AddWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Add(*dataset, index_config);
     if (stat != knowhere::Status::success)
         PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
-                      "failed to append index, " + MatchKnowhereError(stat));
+                      "failed to append index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
 }
 
@@ -199,17 +200,19 @@ VectorMemIndex::Query(const DatasetPtr dataset,
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              "failed to range search, " +
-                                  MatchKnowhereError(res.error()));
+                              fmt::format("failed to range search: {}: {}",
+                                          KnowhereStatusString(res.error()),
+                                          res.what()));
             }
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_conf, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(
-                    ErrorCodeEnum::UnexpectedError,
-                    "failed to search, " + MatchKnowhereError(res.error()));
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                              fmt::format("failed to search: {}: {}",
+                                          KnowhereStatusString(res.error()),
+                                          res.what()));
             }
             return res.value();
         }
@@ -250,7 +253,7 @@ VectorMemIndex::GetVector(const DatasetPtr dataset) const {
     if (!res.has_value()) {
         PanicCodeInfo(
             ErrorCodeEnum::UnexpectedError,
-            "failed to get vector, " + MatchKnowhereError(res.error()));
+            "failed to get vector, " + KnowhereStatusString(res.error()));
     }
     auto index_type = GetIndexType();
     auto tensor = res.value()->GetTensor();
