@@ -346,7 +346,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	metakv := mockkv.NewMetaKv(t)
 	metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 	metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-	metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+	metakv.EXPECT().HasPrefix(mock.Anything).Return(false, nil).Maybe()
 	errMeta := &meta{
 		catalog: &datacoord.Catalog{MetaKv: metakv},
 		segments: &SegmentsInfo{

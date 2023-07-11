@@ -355,26 +355,26 @@ func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
 }
 
 func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
-	binlogsKey, _, err := kc.getBinlogsWithPrefix(storage.InsertBinlog, segment.CollectionID, segment.PartitionID, segment.ID)
+	collectionID, partitionID, segmentID := segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()
+	prefix := buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID)
+	hasBinlogPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
 	}
 
-	deltalogsKey, _, err := kc.getBinlogsWithPrefix(storage.DeleteBinlog, segment.CollectionID, segment.PartitionID, segment.ID)
+	prefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID)
+	hasDeltaPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
 	}
 
-	statslogsKey, _, err := kc.getBinlogsWithPrefix(storage.StatsBinlog, segment.CollectionID, segment.PartitionID, segment.ID)
+	prefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
+	hasStatsPrefix, err := kc.MetaKv.HasPrefix(prefix)
 	if err != nil {
 		return false, err
 	}
 
-	if len(binlogsKey) == 0 && len(deltalogsKey) == 0 && len(statslogsKey) == 0 {
-		return false, nil
-	}
-
-	return true, nil
+	return hasBinlogPrefix || hasDeltaPrefix || hasStatsPrefix, nil
 }
 
 func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error {
