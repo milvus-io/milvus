@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
@@ -71,7 +70,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	tr := timerecord.NewTimeRecorder("add dmChannel")
 	collection := m.dataManager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, segments.WrapCollectionNotFound(collectionID)
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	if pipeline, ok := m.channel2Pipeline[channel]; ok {

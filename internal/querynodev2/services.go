@@ -740,9 +740,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		log.Warn("failed to search segments", zap.Error(segments.ErrCollectionNotFound))
-		err := segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
-		failRet.Status.Reason = err.Error()
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to search segments", zap.Error(err))
+		failRet.Status = merr.Status(err)
 		return failRet, err
 	}
 

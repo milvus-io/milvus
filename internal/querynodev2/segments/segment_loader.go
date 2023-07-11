@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -171,7 +172,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 		collection := loader.manager.Collection.Get(collectionID)
 		if collection == nil {
-			err := WrapCollectionNotFound(collectionID)
+			err := merr.WrapErrCollectionNotFound(collectionID)
 			log.Warn("failed to get collection", zap.Error(err))
 			clearAll()
 			return nil, err
@@ -345,7 +346,7 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
-		err := WrapCollectionNotFound(collectionID)
+		err := merr.WrapErrCollectionNotFound(collectionID)
 		log.Warn("failed to get collection while loading segment", zap.Error(err))
 		return nil, err
 	}
@@ -403,7 +404,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {
-		err := WrapCollectionNotFound(segment.Collection())
+		err := merr.WrapErrCollectionNotFound(segment.Collection())
 		log.Warn("failed to get collection while loading segment", zap.Error(err))
 		return err
 	}
@@ -613,7 +614,7 @@ func (loader *segmentLoader) insertIntoSegment(segment *LocalSegment,
 	}
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {
-		err := WrapCollectionNotFound(segment.Collection())
+		err := merr.WrapErrCollectionNotFound(segment.Collection())
 		log.Warn("failed to get collection while inserting data into segment", zap.Error(err))
 		return err
 	}
@@ -911,7 +912,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 func (loader *segmentLoader) getFieldType(segment *LocalSegment, fieldID int64) (schemapb.DataType, error) {
 	collection := loader.manager.Collection.Get(segment.collectionID)
 	if collection == nil {
-		return 0, WrapCollectionNotFound(segment.Collection())
+		return 0, merr.WrapErrCollectionNotFound(segment.Collection())
 	}
 
 	for _, field := range collection.Schema().GetFields() {
@@ -919,7 +920,7 @@ func (loader *segmentLoader) getFieldType(segment *LocalSegment, fieldID int64) 
 			return field.GetDataType(), nil
 		}
 	}
-	return 0, WrapFieldNotFound(fieldID)
+	return 0, merr.WrapErrFieldNotFound(fieldID)
 }
 
 func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {

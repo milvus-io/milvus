@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -178,7 +179,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.sealed.ID()})
-	suite.ErrorIs(err, ErrSegmentReleased)
+	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
 }
 

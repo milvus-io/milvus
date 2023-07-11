@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter SegmentFilter) ([]int64, []int64, error) {
@@ -34,7 +35,7 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, nil, WrapCollectionNotFound(collectionID)
+		return nil, nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	//validate partition
