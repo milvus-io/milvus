@@ -48,6 +48,7 @@ type BaseKV interface {
 	MultiRemove(keys []string) error
 	RemoveWithPrefix(key string) error
 	Has(key string) (bool, error)
+	HasPrefix(prefix string) (bool, error)
 	Close()
 }
 

@@ -862,3 +862,41 @@ func TestHas(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
+
+func TestHasPrefix(t *testing.T) {
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	defer etcdCli.Close()
+	assert.NoError(t, err)
+	rootPath := "/etcd/test/root/hasprefix"
+	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	err = kv.RemoveWithPrefix("")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix("")
+
+	has, err := kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.False(t, has)
+
+	err = kv.Save("key1", "value1")
+	assert.NoError(t, err)
+
+	has, err = kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.True(t, has)
+
+	err = kv.Remove("key1")
+	assert.NoError(t, err)
+
+	has, err = kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.False(t, has)
+}

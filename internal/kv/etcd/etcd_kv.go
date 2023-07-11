@@ -135,6 +135,21 @@ func (kv *etcdKV) Has(key string) (bool, error) {
 	return resp.Count != 0, nil
 }
 
+func (kv *etcdKV) HasPrefix(prefix string) (bool, error) {
+	start := time.Now()
+	prefix = path.Join(kv.rootPath, prefix)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	resp, err := kv.getEtcdMeta(ctx, prefix, clientv3.WithPrefix(), clientv3.WithLimit(1), clientv3.WithCountOnly())
+	if err != nil {
+		return false, err
+	}
+
+	CheckElapseAndWarn(start, "Slow etcd operation has", zap.String("prefix", prefix))
+	return resp.Count != 0, nil
+}
+
 // LoadBytesWithPrefix returns all the keys and values with the given key prefix.
 func (kv *etcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	start := time.Now()

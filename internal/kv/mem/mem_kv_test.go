@@ -220,3 +220,25 @@ func TestHas(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
+
+func TestHasPrefix(t *testing.T) {
+	kv := NewMemoryKV()
+
+	has, err := kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.False(t, has)
+
+	err = kv.Save("key1", "value1")
+	assert.NoError(t, err)
+
+	has, err = kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.True(t, has)
+
+	err = kv.Remove("key1")
+	assert.NoError(t, err)
+
+	has, err = kv.HasPrefix("key")
+	assert.NoError(t, err)
+	assert.False(t, has)
+}
