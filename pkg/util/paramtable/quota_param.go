@@ -64,12 +64,16 @@ type quotaConfig struct {
 	DMLLimitEnabled                 ParamItem `refreshable:"true"`
 	DMLMaxInsertRate                ParamItem `refreshable:"true"`
 	DMLMinInsertRate                ParamItem `refreshable:"true"`
+	DMLMaxUpsertRate                ParamItem `refreshable:"true"`
+	DMLMinUpsertRate                ParamItem `refreshable:"true"`
 	DMLMaxDeleteRate                ParamItem `refreshable:"true"`
 	DMLMinDeleteRate                ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRate              ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRate              ParamItem `refreshable:"true"`
 	DMLMaxInsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMinInsertRatePerCollection   ParamItem `refreshable:"true"`
+	DMLMaxUpsertRatePerCollection   ParamItem `refreshable:"true"`
+	DMLMinUpsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxDeleteRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMinDeleteRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRatePerCollection ParamItem `refreshable:"true"`
@@ -376,6 +380,94 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DMLMinInsertRatePerCollection.Init(base.mgr)
+
+	p.DMLMaxUpsertRate = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.max",
+		Version:      "2.3.0",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return max
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxUpsertRate.Init(base.mgr)
+
+	p.DMLMinUpsertRate = ParamItem{
+		Key:          "quotaAndLimits.dml.UpsertRate.min",
+		Version:      "2.3.0",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRate.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinUpsertRate.Init(base.mgr)
+
+	p.DMLMaxUpsertRatePerCollection = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.collection.max",
+		Version:      "2.3.0",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxUpsertRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxUpsertRatePerCollection.Init(base.mgr)
+
+	p.DMLMinUpsertRatePerCollection = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.collection.min",
+		Version:      "2.3.0",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerCollection.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinUpsertRatePerCollection.Init(base.mgr)
 
 	p.DMLMaxDeleteRate = ParamItem{
 		Key:          "quotaAndLimits.dml.deleteRate.max",

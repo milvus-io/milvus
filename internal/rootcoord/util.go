@@ -143,6 +143,10 @@ func getCollectionRateLimitConfigDefaultValue(configKey string) float64 {
 		return Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
 	case common.CollectionInsertRateMinKey:
 		return Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat()
+	case common.CollectionUpsertRateMaxKey:
+		return Params.QuotaConfig.DMLMaxUpsertRatePerCollection.GetAsFloat()
+	case common.CollectionUpsertRateMinKey:
+		return Params.QuotaConfig.DMLMinUpsertRatePerCollection.GetAsFloat()
 	case common.CollectionDeleteRateMaxKey:
 		return Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat()
 	case common.CollectionDeleteRateMinKey:
@@ -176,6 +180,10 @@ func getCollectionRateLimitConfig(properties map[string]string, configKey string
 		case common.CollectionInsertRateMaxKey:
 			return megaBytes2Bytes(rate)
 		case common.CollectionInsertRateMinKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionUpsertRateMaxKey:
+			return megaBytes2Bytes(rate)
+		case common.CollectionUpsertRateMinKey:
 			return megaBytes2Bytes(rate)
 		case common.CollectionDeleteRateMaxKey:
 			return megaBytes2Bytes(rate)

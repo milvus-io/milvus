@@ -62,6 +62,12 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
 		assert.Equal(t, collection, int64(0))
 
+		collection, rt, size, err = getRequestInfo(&milvuspb.UpsertRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
+		assert.Equal(t, internalpb.RateType_DMLUpsert, rt)
+		assert.Equal(t, collection, int64(0))
+
 		collection, rt, size, err = getRequestInfo(&milvuspb.DeleteRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.DeleteRequest{}), size)

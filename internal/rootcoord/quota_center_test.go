@@ -131,10 +131,12 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, 1, 2, 3, 4)
 		for _, collection := range quotaCenter.writableCollections {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLUpsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLBulkLoad])
 		}
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLUpsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLDelete])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[4][internalpb.RateType_DMLBulkLoad])
 	})
@@ -229,6 +231,8 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "10.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "100.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "0.0")
+		paramtable.Get().Save(Params.QuotaConfig.DMLMaxUpsertRatePerCollection.Key, "100.0")
+		paramtable.Get().Save(Params.QuotaConfig.DMLMinUpsertRatePerCollection.Key, "0.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMaxDeleteRatePerCollection.Key, "100.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMinDeleteRatePerCollection.Key, "0.0")
 
@@ -350,6 +354,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.NoError(t, err)
 		for _, collection := range quotaCenter.writableCollections {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLUpsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 		}
 		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, forceBak)
@@ -499,6 +504,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.checkDiskQuota()
 		for _, collection := range quotaCenter.writableCollections {
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLInsert])
+			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLUpsert])
 			assert.Equal(t, Limit(0), quotaCenter.currentRates[collection][internalpb.RateType_DMLDelete])
 		}
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, quotaBackup.GetValue())
@@ -512,10 +518,13 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota()
 		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLInsert])
+		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLUpsert])
 		assert.NotEqual(t, Limit(0), quotaCenter.currentRates[1][internalpb.RateType_DMLDelete])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLUpsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[2][internalpb.RateType_DMLDelete])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLUpsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[3][internalpb.RateType_DMLDelete])
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, colQuotaBackup.GetValue())
 	})
@@ -614,6 +623,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.resetAllCurrentRates()
 
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLInsert]), Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLUpsert]), Params.QuotaConfig.DMLMaxUpsertRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLDelete]), Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLBulkLoad]), Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DQLSearch]), Params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
@@ -646,6 +656,10 @@ func TestQuotaCenter(t *testing.T) {
 					Key:   common.CollectionSearchRateMaxKey,
 					Value: "5",
 				},
+				{
+					Key:   common.CollectionUpsertRateMaxKey,
+					Value: "6",
+				},
 			},
 		}, nil)
 		quotaCenter.resetAllCurrentRates()
@@ -654,6 +668,6 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLBulkLoad]), float64(3*1024*1024))
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DQLQuery]), float64(4))
 		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DQLSearch]), float64(5))
-
+		assert.Equal(t, float64(quotaCenter.currentRates[1][internalpb.RateType_DMLUpsert]), float64(6*1024*1024))
 	})
 }
