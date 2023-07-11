@@ -235,7 +235,7 @@ queryNode:
       enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
-  loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
+  loadMemoryUsageFactor: 2 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:

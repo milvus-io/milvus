@@ -1599,7 +1599,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",
 		Version:      "2.0.0",
-		DefaultValue: "3",
+		DefaultValue: "2",
 		PanicIfEmpty: true,
 		Doc:          "The multiply factor of calculating the memory usage while loading segments",
 		Export:       true,
