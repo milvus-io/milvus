@@ -159,7 +159,7 @@ func createBinlogBuf(t *testing.T, dataType schemapb.DataType, data interface{})
 	return buf
 }
 
-func Test_NewBinlogFile(t *testing.T) {
+func Test_BinlogFileNew(t *testing.T) {
 	// nil chunkManager
 	file, err := NewBinlogFile(nil)
 	assert.Error(t, err)
@@ -304,6 +304,12 @@ func Test_BinlogFileBool(t *testing.T) {
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
 
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, err = binlogFile.ReadBool()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
 	binlogFile.Close()
 }
 
@@ -351,6 +357,12 @@ func Test_BinlogFileInt8(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
+	data, err = binlogFile.ReadInt8()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
 	data, err = binlogFile.ReadInt8()
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
@@ -407,6 +419,12 @@ func Test_BinlogFileInt16(t *testing.T) {
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
 
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, err = binlogFile.ReadInt16()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
 	binlogFile.Close()
 }
 
@@ -454,6 +472,12 @@ func Test_BinlogFileInt32(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
+	data, err = binlogFile.ReadInt32()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
 	data, err = binlogFile.ReadInt32()
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
@@ -509,6 +533,12 @@ func Test_BinlogFileInt64(t *testing.T) {
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
 
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, err = binlogFile.ReadInt64()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
 	binlogFile.Close()
 }
 
@@ -556,6 +586,12 @@ func Test_BinlogFileFloat(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
+	data, err = binlogFile.ReadFloat()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
 	data, err = binlogFile.ReadFloat()
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
@@ -611,6 +647,12 @@ func Test_BinlogFileDouble(t *testing.T) {
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
 
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, err = binlogFile.ReadDouble()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
 	binlogFile.Close()
 }
 
@@ -649,6 +691,12 @@ func Test_BinlogFileVarchar(t *testing.T) {
 
 	d, err := binlogFile.ReadJSON()
 	assert.Zero(t, len(d))
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, err = binlogFile.ReadVarchar()
+	assert.Zero(t, len(data))
 	assert.Error(t, err)
 
 	binlogFile.Close()
@@ -699,6 +747,12 @@ func Test_BinlogFileJSON(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
+	data, err = binlogFile.ReadJSON()
+	assert.Zero(t, len(data))
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
 	data, err = binlogFile.ReadJSON()
 	assert.Zero(t, len(data))
 	assert.Error(t, err)
@@ -764,6 +818,13 @@ func Test_BinlogFileBinaryVector(t *testing.T) {
 	assert.Zero(t, d)
 	assert.Error(t, err)
 
+	// failed to iterate events reader
+	binlogFile.reader.Close()
+	data, d, err = binlogFile.ReadBinaryVector()
+	assert.Zero(t, len(data))
+	assert.Zero(t, d)
+	assert.Error(t, err)
+
 	binlogFile.Close()
 }
 
@@ -819,6 +880,13 @@ func Test_BinlogFileFloatVector(t *testing.T) {
 	err = binlogFile.Open("dummy")
 	assert.NoError(t, err)
 
+	data, d, err = binlogFile.ReadFloatVector()
+	assert.Zero(t, len(data))
+	assert.Zero(t, d)
+	assert.Error(t, err)
+
+	// failed to iterate events reader
+	binlogFile.reader.Close()
 	data, d, err = binlogFile.ReadFloatVector()
 	assert.Zero(t, len(data))
 	assert.Zero(t, d)

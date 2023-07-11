@@ -1820,37 +1820,31 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 			}
 			return ret, nil
 		}
-	} else {
-		// In v2.2.9, bulkdinsert cannot support partition key, return error to client.
-		// Remove the following lines after bulkinsert can support partition key
-		for _, field := range colInfo.Fields {
-			if field.IsPartitionKey {
-				log.Info("partition key is not yet supported by bulkinsert",
-					zap.String("collection name", req.GetCollectionName()),
-					zap.String("partition key", field.Name))
-				ret := &milvuspb.ImportResponse{
-					Status: failStatus(commonpb.ErrorCode_UnexpectedError,
-						fmt.Sprintf("the collection '%s' contains partition key '%s', partition key is not yet supported by bulkinsert",
-							req.GetCollectionName(), field.Name)),
-				}
-				return ret, nil
-			}
-		}
-		// Remove the upper lines after bulkinsert can support partition key
 	}
 
 	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
-	if req.GetPartitionName() == "" {
-		req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+
+	hasPartitionKey := false
+	for _, field := range colInfo.Fields {
+		if field.IsPartitionKey {
+			hasPartitionKey = true
+			break
+		}
 	}
 	var pID UniqueID
-	if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-		log.Error("failed to get partition ID from its name",
-			zap.String("partition name", req.GetPartitionName()),
-			zap.Error(err))
-		return nil, err
+	if !hasPartitionKey {
+		if req.GetPartitionName() == "" {
+			req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+		}
+		if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
+			log.Error("failed to get partition ID from its name",
+				zap.String("partition name", req.GetPartitionName()),
+				zap.Error(err))
+			return nil, err
+		}
 	}
+
 	log.Info("RootCoord receive import request",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),

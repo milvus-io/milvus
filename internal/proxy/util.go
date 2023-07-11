@@ -1316,19 +1316,9 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	}
 
 	// Make sure the order of the partition names got every time is the same
-	partitionNames := make([]string, len(partitions))
-	for partitionName := range partitions {
-		splits := strings.Split(partitionName, "_")
-		if len(splits) < 2 {
-			err = fmt.Errorf("bad default partion name in partition ket mode: %s", partitionName)
-			return nil, err
-		}
-		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		partitionNames[index] = partitionName
+	partitionNames, _, err := typeutil.RearrangePartitionsForPartitionKey(partitions)
+	if err != nil {
+		return nil, err
 	}
 
 	return partitionNames, nil

@@ -210,6 +210,11 @@ type RootCoordFactory struct {
 
 	ReportImportErr        bool
 	ReportImportNotSuccess bool
+
+	ShowPartitionsErr        bool
+	ShowPartitionsNotSuccess bool
+	ShowPartitionsNames      []string
+	ShowPartitionsIDs        []int64
 }
 
 type DataCoordFactory struct {
@@ -1083,6 +1088,33 @@ func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *m
 	resp.ShardsNum = common.DefaultShardsNum
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	if m.ShowPartitionsErr {
+		return &milvuspb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}, fmt.Errorf("mock show partitions error")
+	}
+
+	if m.ShowPartitionsNotSuccess {
+		return &milvuspb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "not success",
+			},
+		}, nil
+	}
+
+	return &milvuspb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		PartitionNames: m.ShowPartitionsNames,
+		PartitionIDs:   m.ShowPartitionsIDs,
+	}, nil
 }
 
 func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
