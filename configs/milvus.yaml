@@ -338,11 +338,13 @@ dataCoord:
     enableAutoCompaction: true
     rpcTimeout: 10 # compaction rpc request timeout in seconds
     maxParallelTaskNum: 100 # max parallel compaction task number
+    indexBasedCompaction: true
+
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 10800 # file meta missing tolerance duration in seconds, 10800
-    dropTolerance: 3600 # file belongs to dropped entity tolerance duration in seconds. 3600
+    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
+    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
   port: 13333
   grpc:

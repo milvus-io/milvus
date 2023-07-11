@@ -365,6 +365,9 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
 		}
+		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
+		}
 
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
@@ -771,6 +774,10 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
+	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+		segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
+	}
+
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
