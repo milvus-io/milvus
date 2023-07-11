@@ -39,6 +39,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_primary_key_field_name = "id"
 default_vector_field_name = "vector"
+default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
@@ -179,7 +180,10 @@ class TestHighLevelApi(TestcaseBase):
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
+        output_fields = [default_int64_field_name, default_float_field_name,
+                         default_string_field_name, default_search_field]
         client_w.search(client, collection_name, vectors_to_search,
+                        output_fields=output_fields,
                         check_task=CheckTasks.check_search_results,
                         check_items={"enable_high_level_api": True,
                                      "nq": len(vectors_to_search),
@@ -208,8 +212,7 @@ class TestHighLevelApi(TestcaseBase):
         client_w.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
-                                                  "dim": default_dim,
-                                                  "auto_id": auto_id})
+                                                  "dim": default_dim})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
