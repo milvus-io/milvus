@@ -202,6 +202,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
+			reduceLevelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(

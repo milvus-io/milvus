@@ -61,6 +61,9 @@ const (
 	HookAfter  = "after"
 	HookMock   = "mock"
 
+	ReduceSegments = "segments"
+	ReduceShards   = "shards"
+
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
@@ -80,6 +83,7 @@ const (
 	indexCountLabelName      = "indexed_field_count"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
+	reduceLevelName          = "reduce_level"
 )
 
 var (
