@@ -22,14 +22,16 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type Segment struct {
 	*datapb.SegmentInfo
-	Node               int64  // Node the segment is in
-	Version            int64  // Version is the timestamp of loading segment
-	LastDeltaTimestamp uint64 // The timestamp of the last delta record
+	Node               int64                             // Node the segment is in
+	Version            int64                             // Version is the timestamp of loading segment
+	LastDeltaTimestamp uint64                            // The timestamp of the last delta record
+	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {
