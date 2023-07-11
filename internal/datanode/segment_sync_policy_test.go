@@ -22,7 +22,11 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 )
@@ -98,6 +102,8 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 
 func TestSyncCpLagBehindTooMuch(t *testing.T) {
 	nowTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+	paramtable.Get().Save(Params.DataNodeCfg.CpLagPeriod.Key, "60")
+	paramtable.Get().Save(Params.DataNodeCfg.CpLagSyncLimit.Key, "2")
 	laggedTs := tsoutil.AddPhysicalDurationOnTs(nowTs, -2*Params.DataNodeCfg.CpLagPeriod.GetAsDuration(time.Second))
 	tests := []struct {
 		testName  string
@@ -153,12 +159,50 @@ func TestSyncCpLagBehindTooMuch(t *testing.T) {
 			},
 			[]int64{1, 2},
 		},
+		{"test_cp_sync_limit",
+			[]*Segment{
+				{
+					segmentID: 1,
+					historyInsertBuf: []*BufferData{
+						{
+							startPos: &msgpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -3*time.Second),
+							},
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &msgpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -2*time.Second),
+							},
+						},
+					},
+				},
+				{
+					segmentID: 3,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &msgpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -1*time.Second),
+							},
+						},
+					},
+				},
+			},
+			[]int64{1, 2},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
+			lo.ForEach(test.segments, func(segment *Segment, _ int) {
+				segment.setType(datapb.SegmentType_Flushed)
+			})
 			policy := syncCPLagTooBehind()
 			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
-			assert.ElementsMatch(t, test.idsToSync, ids)
+			assert.Exactly(t, test.idsToSync, ids)
 		})
 	}
 }
