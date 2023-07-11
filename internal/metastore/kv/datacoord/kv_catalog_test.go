@@ -452,7 +452,7 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 
 	t.Run("get prefix fail", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("error"))
+		metakv.EXPECT().HasPrefix(mock.Anything).Return(false, errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, nil)
@@ -466,13 +466,13 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 			maps.Copy(savedKvs, m)
 			return nil
 		})
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{}, []string{}, nil)
 		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
 			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
 			return "", errors.New("key not found")
 		})
+		metakv.EXPECT().HasPrefix(mock.Anything).Return(false, nil)
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
