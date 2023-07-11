@@ -98,7 +98,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 	}
-	suite.node.manager.Collection.Put(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
 	suite.worker = NewLocalWorker(suite.node)
 }
 

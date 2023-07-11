@@ -74,7 +74,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.loader = &segments.MockLoader{}
 
 	// init schema
-	s.manager.Collection.Put(s.collectionID, &schemapb.CollectionSchema{
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 		Name: "TestCollection",
 		Fields: []*schemapb.FieldSchema{
 			{
