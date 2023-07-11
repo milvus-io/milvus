@@ -372,6 +372,7 @@ func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, 
 	m.collInfo[database][collectionName].collID = coll.CollectionID
 	m.collInfo[database][collectionName].createdTimestamp = coll.CreatedTimestamp
 	m.collInfo[database][collectionName].createdUtcTimestamp = coll.CreatedUtcTimestamp
+	m.collInfo[database][collectionName].consistencyLevel = coll.ConsistencyLevel
 }
 
 func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error) {
