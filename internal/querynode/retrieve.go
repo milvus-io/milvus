@@ -22,10 +22,12 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"go.uber.org/zap"
 )
 
 // retrieveOnSegments performs retrieve on listed segments
@@ -52,6 +54,7 @@ func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType s
 		if err != nil {
 			return nil, err
 		}
+		log.Info("retrive result", zap.Any("len", len(result.Offset)), zap.Any("segment", segID), zap.Any("collection", collID))
 		if err := seg.fillIndexedFieldsData(ctx, collID, vcm, result); err != nil {
 			return nil, err
 		}
