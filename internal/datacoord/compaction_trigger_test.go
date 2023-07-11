@@ -439,7 +439,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				hasPlan = false
 			}
-			assert.Equal(t, true, hasPlan)
+			assert.Equal(t, false, hasPlan)
 		})
 
 		t.Run(tt.name+" with meta error", func(t *testing.T) {

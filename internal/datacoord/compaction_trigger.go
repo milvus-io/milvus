@@ -364,6 +364,13 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
 		}
+		if Params.DataCoordCfg.GetIndexBasedCompaction() {
+			group.segments, err = FilterInIndexedSegments(t.handler, t.indexCoord, group.segments...)
+			if err != nil {
+				log.Warn("filter indexed segments failed", zap.Error(err))
+				return
+			}
+		}
 
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
@@ -704,6 +711,15 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
+	var err error
+	if Params.DataCoordCfg.GetIndexBasedCompaction() {
+		segments, err = FilterInIndexedSegments(t.handler, t.indexCoord, segments...)
+		if err != nil {
+			log.Warn("failed to get indexed segments getting compaction candidates", zap.Error(err))
+			return nil
+		}
+	}
+
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
