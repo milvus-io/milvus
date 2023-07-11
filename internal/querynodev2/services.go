@@ -882,7 +882,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
@@ -1036,7 +1036,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	if !req.FromShardLeader {

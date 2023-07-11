@@ -206,7 +206,8 @@ func (t *SearchTask) Execute() error {
 
 		metrics.QueryNodeReduceLatency.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel).
+			metrics.SearchLabel,
+			metrics.ReduceSegments).
 			Observe(float64(reduceRecord.ElapseSpan().Milliseconds()))
 
 		task.result = &internalpb.SearchResults{
