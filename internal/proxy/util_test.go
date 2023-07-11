@@ -1084,7 +1084,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case1.schema, case1.insertMsg)
+	err = fillFieldsDataBySchema(case1.schema, case1.insertMsg, true)
 	assert.Equal(t, nil, err)
 
 	// schema has two fields, msg has no field. fields will be filled in
@@ -1115,7 +1115,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case2.schema, case2.insertMsg)
+	err = fillFieldsDataBySchema(case2.schema, case2.insertMsg, true)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(case2.insertMsg.FieldsData), 2)
 
@@ -1148,7 +1148,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case3.schema, case3.insertMsg)
+	err = fillFieldsDataBySchema(case3.schema, case3.insertMsg, true)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(case3.insertMsg.FieldsData), 1)
 
@@ -1182,7 +1182,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case4.schema, case4.insertMsg)
+	err = fillFieldsDataBySchema(case4.schema, case4.insertMsg, true)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case4.insertMsg.FieldsData), 1)
 
@@ -1221,7 +1221,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case5.schema, case5.insertMsg)
+	err = fillFieldsDataBySchema(case5.schema, case5.insertMsg, true)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case5.insertMsg.FieldsData), 3)
 
@@ -1236,7 +1236,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 			Type:      schemapb.DataType_Int64,
 		},
 	}
-	err = fillFieldsDataBySchema(case5.schema, case5.insertMsg)
+	err = fillFieldsDataBySchema(case5.schema, case5.insertMsg, true)
 	assert.Error(t, err)
 
 	// not pk, but autoid == true
@@ -1269,7 +1269,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case6.schema, case6.insertMsg)
+	err = fillFieldsDataBySchema(case6.schema, case6.insertMsg, true)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case6.insertMsg.FieldsData), 0)
 
@@ -1303,7 +1303,7 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case7.schema, case7.insertMsg)
+	err = fillFieldsDataBySchema(case7.schema, case7.insertMsg, true)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case7.insertMsg.FieldsData), 0)
 
@@ -1336,9 +1336,51 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 		},
 	}
 
-	err = fillFieldsDataBySchema(case8.schema, case8.insertMsg)
+	err = fillFieldsDataBySchema(case8.schema, case8.insertMsg, true)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case8.insertMsg.FieldsData), 0)
+
+	// upsert need pass pk field data even pk autoid == true
+	case9 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_fillFieldsDataBySchema",
+			Description: "TestUpsertTask_fillFieldsDataBySchema",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "a",
+					AutoID:       true,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: msgpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "test",
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err = fillFieldsDataBySchema(case9.schema, case9.insertMsg, false)
+	assert.Equal(t, nil, err)
 }
 
 func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
@@ -1630,7 +1672,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 	_, err = checkPrimaryFieldData(case3.schema, case3.result, case3.insertMsg, false)
 	assert.NotEqual(t, nil, err)
 
-	// autoID == true, upsert don't support it
+	// upsert must pass in pk even autoid == true
 	case4 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestUpsertTask_checkPrimaryFieldData",
@@ -1675,7 +1717,6 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 	case4.schema.Fields[0].IsPrimaryKey = true
 	case4.schema.Fields[0].AutoID = true
 	_, err = checkPrimaryFieldData(case4.schema, case4.result, case4.insertMsg, false)
-	assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, case4.result.Status.ErrorCode)
 	assert.NotEqual(t, nil, err)
 
 	// primary field data is nil, GetPrimaryFieldData fail

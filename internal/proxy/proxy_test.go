@@ -625,6 +625,21 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
+	constructCollectionUpsertRequestWithPK := func() *milvuspb.UpsertRequest {
+		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.UpsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
 	constructCreateIndexRequest := func() *milvuspb.CreateIndexRequest {
 		return &milvuspb.CreateIndexRequest{
 			Base:           nil,
@@ -2113,16 +2128,29 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("upsert when autoID == true", func(t *testing.T) {
+	t.Run("upsert collection not pass in pk when autoID == true", func(t *testing.T) {
 		defer wg.Done()
 		req := constructCollectionUpsertRequest()
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, resp.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, 0, len(resp.SuccIndex))
 		assert.Equal(t, rowNum, len(resp.ErrIndex))
 		assert.Equal(t, int64(0), resp.UpsertCnt)
+	})
+
+	wg.Add(1)
+	t.Run("upsert collection pass in pk when autoID == true", func(t *testing.T) {
+		defer wg.Done()
+		req := constructCollectionUpsertRequestWithPK()
+
+		resp, err := proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
 	})
 
 	wg.Add(1)
@@ -3366,7 +3394,7 @@ func TestProxy(t *testing.T) {
 	}
 	createCollectionReq = constructCreateCollectionRequest()
 
-	constructPartitionReqUpsertRequestValid := func() *milvuspb.UpsertRequest {
+	constructPartitionReqUpsertRequestWithPK := func() *milvuspb.UpsertRequest {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		hashKeys := generateHashKeys(rowNum)
@@ -3396,7 +3424,7 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
-	constructCollectionUpsertRequestValid := func() *milvuspb.UpsertRequest {
+	constructCollectionUpsertRequestWithPK = func() *milvuspb.UpsertRequest {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		hashKeys := generateHashKeys(rowNum)
@@ -3462,7 +3490,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("upsert partition", func(t *testing.T) {
 		defer wg.Done()
-		req := constructPartitionReqUpsertRequestValid()
+		req := constructPartitionReqUpsertRequestWithPK()
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)
@@ -3486,9 +3514,9 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("upsert when autoID == false", func(t *testing.T) {
+	t.Run("upsert pass in pk field data when autoID == false", func(t *testing.T) {
 		defer wg.Done()
-		req := constructCollectionUpsertRequestValid()
+		req := constructCollectionUpsertRequestWithPK()
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)

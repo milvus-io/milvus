@@ -1109,6 +1109,7 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="behavior changed(issue#25397), @Nico")
     def test_partition_upsert_with_auto_id(self):
         """
         target: test upsert data in partition when auto_id=True

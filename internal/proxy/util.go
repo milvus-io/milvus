@@ -1031,7 +1031,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 	return false, nil
 }
 
-func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	neededFieldsNum := 0
 	isPrimaryKeyNum := 0
 
@@ -1052,7 +1052,8 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalid("no default data", "", "pk field schema can not set default value")
 		}
-		if !fieldSchema.AutoID {
+
+		if !fieldSchema.AutoID || !inInsert {
 			neededFieldsNum++
 		}
 		// if has no field pass in, consider use default value
@@ -1096,7 +1097,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := fillFieldsDataBySchema(schema, insertMsg); err != nil {
+	if err := fillFieldsDataBySchema(schema, insertMsg, inInsert); err != nil {
 		return nil, err
 	}
 
@@ -1118,7 +1119,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		} else {
 			// check primary key data not exist
 			if typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) {
-				return nil, fmt.Errorf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+				return nil, fmt.Errorf("can not assign primary field data when auto id enabled %v when insert", primaryFieldSchema.Name)
 			}
 			// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 			primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
@@ -1132,16 +1133,11 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		}
 	} else {
 		// when checkPrimaryFieldData in upsert
-		if primaryFieldSchema.AutoID {
-			// upsert has not supported when autoID == true
-			log.Info("can not upsert when auto id enabled",
-				zap.String("primaryFieldSchemaName", primaryFieldSchema.Name))
-			result.Status.ErrorCode = commonpb.ErrorCode_UpsertAutoIDTrue
-			return nil, fmt.Errorf("upsert can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
-		}
+		// can pass pk field data when upsert, see https://github.com/milvus-io/milvus/issues/25397
+		// upsert must pass in pk even when autoID == true
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Error("get primary field data failed when upsert", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+			log.Error("upsert must pass in pk field, get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
 			return nil, err
 		}
 	}
