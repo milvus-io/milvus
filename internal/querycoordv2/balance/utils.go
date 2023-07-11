@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -38,11 +39,11 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
 		if p.To != -1 {
-			action := task.NewSegmentAction(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID())
+			action := task.NewSegmentActionWithScope(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
 			actions = append(actions, action)
 		}
 		if p.From != -1 {
-			action := task.NewSegmentAction(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID())
+			action := task.NewSegmentActionWithScope(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
 			actions = append(actions, action)
 		}
 		t, err := task.NewSegmentTask(
