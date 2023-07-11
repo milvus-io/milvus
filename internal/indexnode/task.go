@@ -356,18 +356,23 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
+
+	gcIndex := func() {
+		if err := it.index.Delete(); err != nil {
+			log.Ctx(ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+		}
+	}
 	indexFilePath2Size, err := it.index.UpLoad()
 	if err != nil {
 		log.Ctx(ctx).Error("failed to upload index", zap.Error(err))
+		gcIndex()
 		return err
 	}
 	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 
 	// early release index for gc, and we can ensure that Delete is idempotent.
-	if err := it.index.Delete(); err != nil {
-		log.Ctx(ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
-	}
+	gcIndex()
 
 	// use serialized size before encoding
 	it.serializedSize = 0
