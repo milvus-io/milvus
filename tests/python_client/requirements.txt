@@ -12,7 +12,7 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.4.0.dev81
+pymilvus==2.4.0.dev90
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -43,4 +43,4 @@ loguru==0.6.0
 # util
 psutil==5.9.4
 # for standby test
-etcd-sdk-python==0.0.2
+etcd-sdk-python==0.0.3
