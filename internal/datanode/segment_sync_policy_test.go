@@ -20,8 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/atomic"
@@ -97,6 +99,7 @@ func TestSyncMemoryTooHigh(t *testing.T) {
 
 func TestSyncCpLagBehindTooMuch(t *testing.T) {
 	Params.DataNodeCfg.CpLagPeriod = time.Duration(60) * time.Second
+	Params.DataNodeCfg.CpLagSyncLimit = 2
 	nowTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 	laggedTs := tsoutil.AddPhysicalDurationOnTs(nowTs, -2*Params.DataNodeCfg.CpLagPeriod)
 	tests := []struct {
@@ -153,12 +156,50 @@ func TestSyncCpLagBehindTooMuch(t *testing.T) {
 			},
 			[]int64{1, 2},
 		},
+		{"test_cp_sync_limit",
+			[]*Segment{
+				{
+					segmentID: 1,
+					historyInsertBuf: []*BufferData{
+						{
+							startPos: &internalpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -3*time.Second),
+							},
+						},
+					},
+				},
+				{
+					segmentID: 2,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &internalpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -2*time.Second),
+							},
+						},
+					},
+				},
+				{
+					segmentID: 3,
+					historyDeleteBuf: []*DelDataBuf{
+						{
+							startPos: &internalpb.MsgPosition{
+								Timestamp: tsoutil.AddPhysicalDurationOnTs(laggedTs, -1*time.Second),
+							},
+						},
+					},
+				},
+			},
+			[]int64{1, 2},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
+			lo.ForEach(test.segments, func(segment *Segment, _ int) {
+				segment.setType(datapb.SegmentType_Flushed)
+			})
 			policy := syncCPLagTooBehind()
 			ids := policy(test.segments, tsoutil.ComposeTSByTime(time.Now(), 0), nil)
-			assert.ElementsMatch(t, test.idsToSync, ids)
+			assert.Exactly(t, test.idsToSync, ids)
 		})
 	}
 }
