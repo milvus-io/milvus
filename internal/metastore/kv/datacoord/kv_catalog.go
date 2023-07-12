@@ -254,12 +254,12 @@ func (kc *Catalog) LoadFromSegmentPath(colID, partID, segID typeutil.UniqueID) (
 	return segInfo, nil
 }
 
-func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
-	if len(newSegments) == 0 {
+func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
+	if len(segments) == 0 {
 		return nil
 	}
 	kvs := make(map[string]string)
-	for _, segment := range newSegments {
+	for _, segment := range segments {
 		kc.collectMetrics(segment)
 
 		// we don't persist binlog fields, but instead store binlogs as independent kvs
@@ -269,6 +269,14 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
 		if cloned.GetNumOfRows() != rowCount {
 			cloned.NumOfRows = rowCount
+		}
+
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			binlogs, err := kc.handleDroppedSegment(segment)
+			if err != nil {
+				return err
+			}
+			maps.Copy(kvs, binlogs)
 		}
 
 		k, v, err := buildSegmentKv(cloned)
@@ -288,6 +296,26 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 		maps.Copy(kvs, binlogKvs)
 	}
 
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) handleDroppedSegment(segment *datapb.SegmentInfo) (kvs map[string]string, err error) {
+	var has bool
+	has, err = kc.hasBinlogPrefix(segment)
+	if err != nil {
+		return
+	}
+	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
+	if !has {
+		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), true)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (kc *Catalog) SaveByBatch(kvs map[string]string) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
