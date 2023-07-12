@@ -135,6 +135,9 @@ func (mt *MetaTable) reload() error {
 	collectionNum := int64(0)
 	partitionNum := int64(0)
 
+	metrics.RootCoordNumOfCollections.Set(float64(0))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(0))
+
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
 	if err != nil {
@@ -193,8 +196,8 @@ func (mt *MetaTable) reload() error {
 		}
 	}
 
-	metrics.RootCoordNumOfCollections.Set(float64(collectionNum))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(partitionNum))
+	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 
 	log.Info("meta table recovery finished")
 	return nil
@@ -229,7 +232,10 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	for _, alias := range aliases {
 		mt.aliases.insert(util.DefaultDBName, alias.Name, alias.CollectionID)
 	}
-	return err
+
+	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
+	return nil
 }
 
 func (mt *MetaTable) createDefaultDb() error {
