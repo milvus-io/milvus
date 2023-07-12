@@ -18,7 +18,6 @@ OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
-ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
 useasan = false
@@ -34,14 +33,14 @@ milvus: build-cpp print-build-info
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
 		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+		-tags dynamic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 milvus-gpu: build-cpp-gpu print-gpu-build-info
 	@echo "Building Milvus-gpu ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
 		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+		-tags dynamic -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -100,7 +99,7 @@ meta-migration:
 	@source $(PWD)/scripts/setenv.sh && \
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
     		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-    		${AARCH64_FLAG} -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
+    		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
 integration-test:
@@ -108,21 +107,13 @@ integration-test:
 	@source $(PWD)/scripts/setenv.sh && \
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
     		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-    		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
+    		-tags dynamic -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
 BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
-
-ifeq ($(ARCH),arm64)
-	AARCH64_FLAG = -tags dynamic
-endif
-
-ifeq ($(ARCH),aarch64)
-	AARCH64_FLAG = -tags dynamic
-endif
 
 print-build-info:
 	$(shell git config --global --add safe.directory '*')
