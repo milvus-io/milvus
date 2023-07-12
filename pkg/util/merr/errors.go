@@ -124,6 +124,9 @@ var (
 	// task related
 	ErrTaskQueueFull = newMilvusError("task queue full", 1600, false)
 
+	// field related
+	ErrFieldNotFound = newMilvusError("field not found", 1700, false)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)

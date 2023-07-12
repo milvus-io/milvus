@@ -123,6 +123,9 @@ func (s *ErrSuite) TestWrap() {
 
 	// task related
 	s.ErrorIs(WrapErrTaskQueueFull("test_task_queue", "task queue is full"), ErrTaskQueueFull)
+
+	// field related
+	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)
 }
 
 func (s *ErrSuite) TestCombine() {

@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -364,7 +365,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return nil, WrapSegmentReleased(s.segmentID)
+		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	span := trace.SpanFromContext(ctx)
@@ -407,7 +408,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return nil, WrapSegmentReleased(s.segmentID)
+		return nil, merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(
@@ -533,7 +534,7 @@ func (s *LocalSegment) Insert(rowIDs []int64, timestamps []typeutil.Timestamp, r
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	offset, err := s.preInsert(len(rowIDs))
@@ -592,7 +593,7 @@ func (s *LocalSegment) Delete(primaryKeys []storage.PrimaryKey, timestamps []typ
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	var cOffset = C.int64_t(0) // depre
@@ -657,7 +658,7 @@ func (s *LocalSegment) LoadMultiFieldData(rowCount int64, fields []*datapb.Field
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(
@@ -710,7 +711,7 @@ func (s *LocalSegment) LoadFieldData(fieldID int64, rowCount int64, field *datap
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(
@@ -763,7 +764,7 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(
@@ -854,7 +855,7 @@ func (s *LocalSegment) LoadIndex(bytesIndex [][]byte, indexInfo *querypb.FieldIn
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(
@@ -902,7 +903,7 @@ func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldTyp
 	defer s.mut.RUnlock()
 
 	if s.ptr == nil {
-		return WrapSegmentReleased(s.segmentID)
+		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
 	log := log.With(

@@ -110,6 +110,10 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err),
 			)
+			if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
+				log.Warn("try to insert data into released segment, skip it", zap.Error(err))
+				continue
+			}
 			// panic here, insert failure
 			panic(err)
 		}

@@ -167,8 +167,9 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		log.Warn("Query failed, failed to get collection")
-		failRet.Status.Reason = segments.WrapCollectionNotFound(req.Req.CollectionID).Error()
+		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+		log.Warn("Query failed, failed to get collection", zap.Error(err))
+		failRet.Status = merr.Status(err)
 		return failRet, nil
 	}
 
@@ -196,7 +197,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		return nil, segments.ErrCollectionNotFound
+		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
 	}
 
 	// Send task to scheduler and wait until it finished.
