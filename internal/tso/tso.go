@@ -210,7 +210,9 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	// atomic unsafe pointer
 	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
-
+	if time.Since(now).Milliseconds() > UpdateTimestampStep.Milliseconds() {
+		log.Warn("tso update timestamp slow", zap.Duration("elapse", time.Since(now)))
+	}
 	return nil
 }
 

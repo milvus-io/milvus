@@ -176,6 +176,22 @@ var (
 			Name:      "ddl_req_latency_in_queue",
 			Help:      "latency of each DDL operations in queue",
 		}, []string{functionLabelName})
+
+	RootCoordTSOLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "tso_assignment_latency",
+			Help:      "latency of timestamp assignment",
+		})
+
+	RootCoordIDLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "id_assignment_latency",
+			Help:      "latency of id assignment",
+		})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -194,6 +210,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordIDAllocCounter)
 	registry.MustRegister(RootCoordTimestamp)
 	registry.MustRegister(RootCoordTimestampSaved)
+	registry.MustRegister(RootCoordTSOLatency)
+	registry.MustRegister(RootCoordIDLatency)
 
 	// for collection
 	registry.MustRegister(RootCoordNumOfCollections)

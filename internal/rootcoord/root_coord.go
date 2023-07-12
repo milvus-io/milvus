@@ -244,7 +244,6 @@ func (c *Core) tsLoop() {
 			}
 			ts := c.tsoAllocator.GetLastSavedTime()
 			metrics.RootCoordTimestampSaved.Set(float64(ts.Unix()))
-
 		case <-ctx.Done():
 			log.Info("rootcoord's ts loop quit!")
 			return
@@ -1477,6 +1476,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		}, nil
 	}
 
+	now := time.Now()
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),
@@ -1490,6 +1490,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	// return first available timestamp
 	ts = ts - uint64(in.GetCount()) + 1
 	metrics.RootCoordTimestamp.Set(float64(ts))
+	metrics.RootCoordTSOLatency.Observe(float64(time.Since(now).Milliseconds()))
 	return &rootcoordpb.AllocTimestampResponse{
 		Status:    merr.Status(nil),
 		Timestamp: ts,
@@ -1504,6 +1505,7 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 			Status: merr.Status(merr.WrapErrServiceNotReady(code.String())),
 		}, nil
 	}
+	now := time.Now()
 	start, _, err := c.idAllocator.Alloc(in.Count)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate id",
@@ -1517,6 +1519,7 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 	}
 
 	metrics.RootCoordIDAllocCounter.Add(float64(in.Count))
+	metrics.RootCoordIDLatency.Observe(float64(time.Since(now).Milliseconds()))
 	return &rootcoordpb.AllocIDResponse{
 		Status: merr.Status(nil),
 		ID:     start,

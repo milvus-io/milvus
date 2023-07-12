@@ -113,14 +113,14 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		return 0, errors.New("tso count should be positive")
 	}
 
-	maxRetryCount := 10
-
+	maxRetryCount := 50
+	start := time.Now()
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
 		if current == nil || current.physical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			log.Info("sync hasn't completed yet, wait for a while")
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(UpdateTimestampStep)
 			continue
 		}
 
@@ -131,6 +131,9 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 				zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue
+		}
+		if time.Since(start) > 10*UpdateTimestampStep {
+			log.RatedWarn(1, "slow tso generation", zap.Any("time", time.Since(start)))
 		}
 		return tsoutil.ComposeTS(physical, logical), nil
 	}
