@@ -373,6 +373,7 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	// init msgstream failed
 	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
 	suite.msgStream.EXPECT().AsConsumer([]string{suite.pchannel}, mock.Anything, mock.Anything).Return()
+	suite.msgStream.EXPECT().Close().Return()
 	suite.msgStream.EXPECT().Seek(mock.Anything).Return(errors.New("mock error"))
 
 	status, err := suite.node.WatchDmChannels(ctx, req)
