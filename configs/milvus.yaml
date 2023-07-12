@@ -335,7 +335,7 @@ dataCoord:
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
+    missingTolerance: 10800 # file meta missing tolerance duration in seconds, 10800
     dropTolerance: 3600 # file belongs to dropped entity tolerance duration in seconds. 3600
   enableActiveStandby: false
   port: 13333
