@@ -292,6 +292,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1.3, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
 		params.Save("queryCoord.reverseUnBalanceTolerationFactor", "1.5")
 		assert.Equal(t, 1.5, Params.ReverseUnbalanceTolerationFactor.GetAsFloat())
+
+		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
+		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
+		assert.Equal(t, 10000, Params.BalanceCheckInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
