@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"go.uber.org/zap"
 )
 
@@ -164,21 +165,33 @@ func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) e
 
 // SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
 func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+	log := log.With(
+		zap.Int64("nodeID", nodeID),
+		zap.Int64("planID", req.GetPlanID()),
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		log.Warn("failed to get client", zap.Error(err))
 		return err
 	}
 
-	resp, err := cli.SyncSegments(ctx, req)
-	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to sync segments", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", req.GetPlanID()))
+	err = retry.Do(context.Background(), func() error {
+		resp, err := cli.SyncSegments(ctx, req)
+		if err := VerifyResponse(resp, err); err != nil {
+			log.Warn("failed to sync segments", zap.Error(err))
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("failed to sync segments after retry", zap.Error(err))
 		return err
 	}
 
-	log.Info("success to sync segments", zap.Int64("node", nodeID), zap.Any("planID", req.GetPlanID()))
+	log.Info("success to sync segments")
 	return nil
 }
 
