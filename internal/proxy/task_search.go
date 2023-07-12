@@ -442,6 +442,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	if len(toReduceResults) >= 1 {
+		MetricType = toReduceResults[0].GetMetricType()
+	}
+
 	// Decode all search results
 	tr.CtxRecord(ctx, "decodeResultStart")
 	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
