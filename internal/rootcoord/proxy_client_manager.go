@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -89,6 +90,7 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 	}
 
 	p.connect(session)
+	p.updateProxyNumMetric()
 }
 
 // GetProxyCount returns number of proxy clients.
@@ -97,6 +99,11 @@ func (p *proxyClientManager) GetProxyCount() int {
 	defer p.lock.Unlock()
 
 	return len(p.proxyClient)
+}
+
+// mutex.Lock is required before calling this method.
+func (p *proxyClientManager) updateProxyNumMetric() {
+	metrics.RootCoordProxyCounter.WithLabelValues().Set(float64(len(p.proxyClient)))
 }
 
 func (p *proxyClientManager) connect(session *sessionutil.Session) {
@@ -129,6 +136,7 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	}
 
 	delete(p.proxyClient, s.ServerID)
+	p.updateProxyNumMetric()
 	log.Info("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
 
