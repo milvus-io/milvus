@@ -113,6 +113,10 @@ func (pi *ParamItem) GetAsUint32() uint32 {
 	return uint32(getAsInt64(pi.GetValue()))
 }
 
+func (pi *ParamItem) GetAsUint16() uint16 {
+	return uint16(getAsInt64(pi.GetValue()))
+}
+
 func (pi *ParamItem) GetAsInt64() int64 {
 	return getAsInt64(pi.GetValue())
 }
