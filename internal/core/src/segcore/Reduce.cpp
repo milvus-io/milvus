@@ -16,10 +16,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <future>
 
 #include "SegmentInterface.h"
 #include "Utils.h"
 #include "pkVisitor.h"
+#include "common/thread_pool.h"
+#include "segcore/SingletonConfig.h"
 
 namespace milvus::segcore {
 
@@ -229,6 +232,138 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     return dup_cnt;
 }
 
+int64_t
+ReduceHelper::ReduceResultDataForSmallThroughPut(int64_t nq_begin,
+                                                 int64_t nq_end,
+                                                 int64_t slice_index) {
+    int64_t offset = 0;
+    int64_t skip_dup_cnt = 0;
+    for (int64_t qi = nq_begin; qi < nq_end; qi++) {
+        skip_dup_cnt +=
+            ReduceSearchResultForOneNQ(qi, slice_topKs_[slice_index], offset);
+    }
+    return skip_dup_cnt;
+}
+
+void
+ReduceHelper::MergeSortForOneNQThreadSafe(
+    int64_t query_index,
+    int64_t topk,
+    std::vector<ReduceSelectedSet>& selected_topks) {
+    std::vector<SearchResultPair> result_pairs;
+    for (int i = 0; i < num_segments_; i++) {
+        auto search_result = search_results_[i];
+        auto offset_beg = search_result->topk_per_nq_prefix_sum_[query_index];
+        auto offset_end =
+            search_result->topk_per_nq_prefix_sum_[query_index + 1];
+        if (offset_beg == offset_end) {
+            continue;
+        }
+        auto primary_key = search_result->primary_keys_[offset_beg];
+        auto distance = search_result->distances_[offset_beg];
+
+        result_pairs.emplace_back(
+            primary_key, distance, search_result, i, offset_beg, offset_end);
+    }
+
+    // nq has no results for all segments
+    if (result_pairs.size() == 0) {
+        return;
+    }
+
+    std::unordered_set<milvus::PkType> pk_set;
+    int64_t offset = 0;
+    while (offset < topk) {
+        std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
+        auto& pilot = result_pairs[0];
+        auto index = pilot.segment_index_;
+        auto pk = pilot.primary_key_;
+        // no valid search result for this nq, break to next
+        if (pk == INVALID_PK) {
+            break;
+        }
+        // remove duplicates
+        if (pk_set.count(pk) == 0) {
+            selected_topks[query_index].selected.push_back(index);
+            selected_topks[query_index].offsets.push_back(pilot.offset_);
+            pk_set.insert(pk);
+            offset++;
+        } else {
+            // skip entity with same primary key
+            selected_topks[query_index].skip_cnt++;
+        }
+        pilot.advance();
+    }
+}
+
+int64_t
+ReduceHelper::ReduceResultDataForBigThroughPut(int64_t nq_begin,
+                                               int64_t nq_end,
+                                               int64_t slice_index) {
+    std::vector<ReduceSelectedSet> selected_topks;
+    selected_topks.resize(nq_end - nq_begin);
+
+    // 1. Initialize selected set.
+    for (int64_t qi = nq_begin; qi < nq_end; qi++) {
+        selected_topks[qi - nq_begin].query_index = qi;
+        selected_topks[qi - nq_begin].selected.reserve(
+            slice_topKs_[slice_index]);
+        selected_topks[qi - nq_begin].offsets.reserve(
+            slice_topKs_[slice_index]);
+        selected_topks[qi - nq_begin].skip_cnt = 0;
+    }
+
+    auto mergeSingle =
+        [this, slice_index, &selected_topks](int64_t query_index) {
+            MergeSortForOneNQThreadSafe(
+                query_index, slice_topKs_[slice_index], selected_topks);
+        };
+    auto mergeBatch = [&mergeSingle](int64_t begin, int64_t end) {
+        for (int64_t query_index = begin; query_index < end; query_index++) {
+            mergeSingle(query_index);
+        }
+    };
+
+    // 2. Select TopK.
+    std::vector<std::future<void>> futures;
+    auto pool_size = ThreadPool::GetGlobalThreadPool()->size();
+    auto total_nq = nq_end - nq_begin;
+    auto nq_per_batch = (total_nq + pool_size - 1) / pool_size;
+    for (int j = 0; j < pool_size; j++) {
+        auto begin = nq_begin + j * nq_per_batch;
+        auto end = begin + nq_per_batch;
+        if (end > nq_end) {
+            end = nq_end;
+        }
+        if (end <= begin) {
+            break;
+        }
+        auto func = [=, &mergeBatch]() { mergeBatch(begin, end); };
+        futures.emplace_back(ThreadPool::GetGlobalThreadPool()->push(func));
+    }
+    for (auto& future : futures) {
+        future.wait();
+    }
+
+    // 3. ReCalculate & Fill offsets.
+    int64_t result_offset = 0;
+    int64_t skip_dup_cnt = 0;
+    for (int64_t qi = nq_begin; qi < nq_end; qi++) {
+        const auto& selected_topk = selected_topks[qi - nq_begin];
+        auto hit_size = selected_topk.selected.size();
+        for (int i = 0; i < hit_size; i++) {
+            auto segment_index = selected_topk.selected[i];
+            auto seg_offset = selected_topk.offsets[i];
+            search_results_[segment_index]->result_offsets_.push_back(
+                result_offset++);
+            final_search_records_[segment_index][selected_topk.query_index]
+                .push_back(seg_offset);
+        }
+        skip_dup_cnt += selected_topk.skip_cnt;
+    }
+    return skip_dup_cnt;
+}
+
 void
 ReduceHelper::ReduceResultData() {
     for (int i = 0; i < num_segments_; i++) {
@@ -245,15 +380,20 @@ ReduceHelper::ReduceResultData() {
     }
 
     int64_t skip_dup_cnt = 0;
+    auto& cfg = segcore::SingletonConfig::GetInstance();
     for (int64_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         auto nq_begin = slice_nqs_prefix_sum_[slice_index];
         auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
-
-        // reduce search results
-        int64_t offset = 0;
-        for (int64_t qi = nq_begin; qi < nq_end; qi++) {
-            skip_dup_cnt += ReduceSearchResultForOneNQ(
-                qi, slice_topKs_[slice_index], offset);
+        auto topk = slice_topKs_[slice_index];
+        auto total_nq = nq_end - nq_begin;
+        if (cfg.is_enable_parallel_reduce() &&
+            (total_nq >= cfg.get_nq_threshold_to_enable_parallel_reduce() ||
+             topk >= cfg.get_k_threshold_to_enable_parallel_reduce())) {
+            skip_dup_cnt +=
+                ReduceResultDataForBigThroughPut(nq_begin, nq_end, slice_index);
+        } else {
+            skip_dup_cnt += ReduceResultDataForSmallThroughPut(
+                nq_begin, nq_end, slice_index);
         }
     }
     if (skip_dup_cnt > 0) {

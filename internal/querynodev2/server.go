@@ -200,6 +200,15 @@ func (node *QueryNode) InitSegcore() error {
 	nprobe := C.int64_t(paramtable.Get().QueryNodeCfg.GrowingIndexNProbe.GetAsInt64())
 	C.SegcoreSetNprobe(nprobe)
 
+	enableParallelReduce := C.bool(paramtable.Get().QueryNodeCfg.EnableParallelReduce.GetAsBool())
+	C.SegcoreSetEnableParallelReduce(enableParallelReduce)
+
+	nqThresholdToEnableParallelReduce := C.int64_t(paramtable.Get().QueryNodeCfg.NqThresholdToEnableParallelReduce.GetAsInt64())
+	C.SegcoreSetNqThresholdToEnableParallelReduce(nqThresholdToEnableParallelReduce)
+
+	kThresholdToEnableParallelReduce := C.int64_t(paramtable.Get().QueryNodeCfg.KThresholdToEnableParallelReduce.GetAsInt64())
+	C.SegcoreSetKThresholdToEnableParallelReduce(kThresholdToEnableParallelReduce)
+
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
 	C.SegcoreSetSimdType(cSimdType)

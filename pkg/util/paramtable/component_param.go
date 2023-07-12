@@ -1439,11 +1439,14 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereThreadPoolSize    ParamItem `refreshable:"false"`
-	ChunkRows                 ParamItem `refreshable:"false"`
-	EnableGrowingSegmentIndex ParamItem `refreshable:"false"`
-	GrowingIndexNlist         ParamItem `refreshable:"false"`
-	GrowingIndexNProbe        ParamItem `refreshable:"false"`
+	KnowhereThreadPoolSize            ParamItem `refreshable:"false"`
+	ChunkRows                         ParamItem `refreshable:"false"`
+	EnableGrowingSegmentIndex         ParamItem `refreshable:"false"`
+	GrowingIndexNlist                 ParamItem `refreshable:"false"`
+	GrowingIndexNProbe                ParamItem `refreshable:"false"`
+	EnableParallelReduce              ParamItem `refreshable:"false"`
+	NqThresholdToEnableParallelReduce ParamItem `refreshable:"false"`
+	KThresholdToEnableParallelReduce  ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1595,6 +1598,33 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export: true,
 	}
 	p.GrowingIndexNProbe.Init(base.mgr)
+
+	p.EnableParallelReduce = ParamItem{
+		Key:          "queryNode.segcore.enableParallelReduce",
+		Version:      "2.0.0",
+		DefaultValue: "true",
+		Doc:          "Whether to enable cpp-side parallel reduce.",
+		Export:       true,
+	}
+	p.EnableParallelReduce.Init(base.mgr)
+
+	p.NqThresholdToEnableParallelReduce = ParamItem{
+		Key:          "queryNode.segcore.nqThresholdToEnableParallelReduce",
+		Version:      "2.0.0",
+		DefaultValue: "100",
+		Doc:          "When nq is bigger than `nqThresholdToEnableParallelReduce`, segcore will reduce search results parallel.",
+		Export:       true,
+	}
+	p.NqThresholdToEnableParallelReduce.Init(base.mgr)
+
+	p.KThresholdToEnableParallelReduce = ParamItem{
+		Key:          "queryNode.segcore.kThresholdToEnableParallelReduce",
+		Version:      "2.0.0",
+		DefaultValue: "1000",
+		Doc:          "When topk is bigger than `kThresholdToEnableParallelReduce`, segcore will reduce search results parallel.",
+		Export:       true,
+	}
+	p.KThresholdToEnableParallelReduce.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

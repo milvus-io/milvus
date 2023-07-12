@@ -37,6 +37,15 @@ SegcoreSetSimdType(const char*);
 void
 SegcoreSetKnowhereThreadPoolNum(const uint32_t num_threads);
 
+void
+SegcoreSetEnableParallelReduce(bool flag);
+
+void
+SegcoreSetNqThresholdToEnableParallelReduce(int64_t nq);
+
+void
+SegcoreSetKThresholdToEnableParallelReduce(int64_t k);
+
 #ifdef __cplusplus
 }
 #endif

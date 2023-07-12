@@ -13,6 +13,7 @@
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
+#include "segcore/SingletonConfig.h"
 
 namespace milvus::segcore {
 extern "C" void
@@ -57,12 +58,33 @@ SegcoreSetKnowhereThreadPoolNum(const uint32_t num_threads) {
 // return value must be freed by the caller
 extern "C" char*
 SegcoreSetSimdType(const char* value) {
-    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
+    LOG_SEGCORE_INFO_ << "set config simd_type: " << value;
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     memcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;
+}
+
+extern "C" void
+SegcoreSetEnableParallelReduce(bool flag) {
+    LOG_SEGCORE_INFO_ << "set enable parallel reduce: " << flag;
+    milvus::segcore::SingletonConfig::GetInstance().set_enable_parallel_reduce(
+        flag);
+}
+
+extern "C" void
+SegcoreSetNqThresholdToEnableParallelReduce(int64_t nq) {
+    LOG_SEGCORE_INFO_ << "set nq threshold to enable parallel reduce: " << nq;
+    milvus::segcore::SingletonConfig::GetInstance()
+        .set_nq_threshold_to_enable_parallel_reduce(nq);
+}
+
+extern "C" void
+SegcoreSetKThresholdToEnableParallelReduce(int64_t k) {
+    LOG_SEGCORE_INFO_ << "set topk threshold to enable parallel reduce: " << k;
+    milvus::segcore::SingletonConfig::GetInstance()
+        .set_k_threshold_to_enable_parallel_reduce(k);
 }
 
 }  // namespace milvus::segcore

@@ -74,6 +74,7 @@ class SegcoreConfig {
     }
 
  private:
+    // TODO: use thread-safe singleton (SingletonConfig) to replace this.
     bool enable_growing_segment_index_ = false;
     int64_t chunk_rows_ = 32 * 1024;
     int64_t nlist_ = 100;

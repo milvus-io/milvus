@@ -77,6 +77,28 @@ class ReduceHelper {
                                int64_t topk,
                                int64_t& result_offset);
 
+    int64_t
+    ReduceResultDataForSmallThroughPut(int64_t nq_begin,
+                                       int64_t nq_end,
+                                       int64_t slice_index);
+
+    struct ReduceSelectedSet {
+        int64_t query_index;
+        std::vector<int64_t> selected;  // which segments.
+        std::vector<int64_t> offsets;   // offset of selected segments.
+        int64_t skip_cnt;
+    };
+
+    void
+    MergeSortForOneNQThreadSafe(int64_t query_index,
+                                int64_t topk,
+                                std::vector<ReduceSelectedSet>& selected_topks);
+
+    int64_t
+    ReduceResultDataForBigThroughPut(int64_t nq_begin,
+                                     int64_t nq_end,
+                                     int64_t slice_index);
+
     void
     ReduceResultData();
 

@@ -235,6 +235,13 @@ queryNode:
       enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
+    enableParallelReduce: true # Whether to enable cpp-side parallel reduce.
+    # When `enableParallelReduce` is true and nq is bigger than `nqThresholdToEnableParallelReduce`,
+    # segcore will reduce search results parallel.
+    nqThresholdToEnableParallelReduce: 100
+    # When `enableParallelReduce` is true and topk is bigger than `kThresholdToEnableParallelReduce`,
+    # segcore will reduce search results parallel.
+    kThresholdToEnableParallelReduce: 1000
   loadMemoryUsageFactor: 2 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95

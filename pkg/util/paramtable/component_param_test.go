@@ -348,6 +348,18 @@ func TestComponentParam(t *testing.T) {
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(1024), chunkRows)
 
+		params.Save("queryNode.segcore.enableParallelReduce", "true")
+		enableParallelReduce := Params.EnableParallelReduce.GetAsBool()
+		assert.True(t, enableParallelReduce)
+
+		params.Save("queryNode.segcore.nqThresholdToEnableParallelReduce", "100")
+		nqThresholdToEnableParallelReduce := Params.NqThresholdToEnableParallelReduce.GetAsInt64()
+		assert.Equal(t, int64(100), nqThresholdToEnableParallelReduce)
+
+		params.Save("queryNode.segcore.kThresholdToEnableParallelReduce", "1000")
+		kThresholdToEnableParallelReduce := Params.KThresholdToEnableParallelReduce.GetAsInt64()
+		assert.Equal(t, int64(1000), kThresholdToEnableParallelReduce)
+
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())

@@ -9,28 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/SingletonConfig.h"
+#include "test_utils/SingletonConfigRestorer.h"
 #include <gtest/gtest.h>
 
-#include "segcore/segcore_init_c.h"
-#include "test_utils/SingletonConfigRestorer.h"
-
-TEST(Init, Naive) {
-    using namespace milvus;
+TEST(SingletonConfig, GetterAndSetter) {
     using namespace milvus::segcore;
 
     milvus::test::SingletonConfigRestorer restorer;
 
-    SegcoreInit(nullptr);
-    SegcoreSetChunkRows(32768);
-
-    auto simd_type = SegcoreSetSimdType("auto");
-    free(simd_type);
-
     auto& cfg = SingletonConfig::GetInstance();
 
-    SegcoreSetEnableParallelReduce(true);
-    SegcoreSetNqThresholdToEnableParallelReduce(1000);
-    SegcoreSetKThresholdToEnableParallelReduce(10000);
+    cfg.set_enable_parallel_reduce(true);
+    cfg.set_nq_threshold_to_enable_parallel_reduce(1000);
+    cfg.set_k_threshold_to_enable_parallel_reduce(10000);
 
     ASSERT_TRUE(cfg.is_enable_parallel_reduce());
     ASSERT_EQ(cfg.get_nq_threshold_to_enable_parallel_reduce(), 1000);
