@@ -225,7 +225,7 @@ class TestIndexOperation(TestcaseBase):
         method: create two different indexes with default index name
         expected: create successfully
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index(default_field_name, default_index)
         collection_w.create_index(ct.default_int64_field_name, {})
@@ -237,7 +237,7 @@ class TestIndexOperation(TestcaseBase):
         method: create index on scalar field and load
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(ct.default_int64_field_name, {})
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={ct.err_code: 1, ct.err_msg: "there is no vector index on collection, "
@@ -1259,10 +1259,7 @@ class TestIndexInvalid(TestcaseBase):
                 2. drop the index
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
+        collection_w = self.init_collection_general(prefix, True)[0]
         collection_w.drop_index(check_task=CheckTasks.err_res,
                                 check_items={"err_code": 1,
                                              "err_msg": "index cannot be dropped, collection is "
@@ -1853,7 +1850,7 @@ class TestAutoIndex(TestcaseBase):
         method: create index with only one field name
         expected: create successfully
         """
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
         collection_w.create_index(field_name)
         actual_index_params = collection_w.index()[0].params
         assert default_autoindex_params == actual_index_params
@@ -1866,7 +1863,7 @@ class TestAutoIndex(TestcaseBase):
         method: create index with different params
         expected: create successfully
         """
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
         collection_w.create_index(field_name, index_params)
         actual_index_params = collection_w.index()[0].params
         log.info(collection_w.index()[0].params)
@@ -1885,7 +1882,7 @@ class TestAutoIndex(TestcaseBase):
         method: create index with invalid params
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"metric_type": "L2", "nlist": "1024", "M": "100"}
         collection_w.create_index(field_name, index_params,
                                   check_task=CheckTasks.err_res,
@@ -1900,7 +1897,7 @@ class TestAutoIndex(TestcaseBase):
         method: create index on binary vectors
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, is_binary=True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         collection_w.create_index(binary_field_name, {},
                                   check_task=CheckTasks.err_res,
                                   check_items={"err_code": 1,
