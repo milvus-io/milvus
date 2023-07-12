@@ -507,7 +507,7 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         nb = 10
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
-                                                                               is_index=True)
+                                                                               is_index=False)
         middle = len(insert_ids) // 2
         op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
                 "field": default_field_name}
@@ -4897,7 +4897,7 @@ class TestUtilityFlushAll(TestcaseBase):
 
         for i in range(collection_num):
             collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
-                                                                             is_index=True)
+                                                                             is_index=False)
             collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
             collection_names.append(collection_w.name)
 
@@ -5033,7 +5033,7 @@ class TestUtilityFlushAll(TestcaseBase):
 
         for i in range(collection_num):
             collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
-                                                                             is_index=True)
+                                                                             is_index=False)
             collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
             collection_names.append(collection_w.name)
 

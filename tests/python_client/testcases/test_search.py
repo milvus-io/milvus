@@ -322,7 +322,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("skip in FLAT index")
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         # 2. create index and load
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -484,12 +484,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: test search int64 and float with like
         expected: searched failed
         """
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
+        collection_w = self.init_collection_general(prefix, True)[0]
         log.info("test_search_with_expression: searching with expression: %s" % expression)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             default_search_params, default_limit, expression,
                                             check_task=CheckTasks.err_res,
@@ -568,7 +564,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
@@ -671,7 +667,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=False)[0]
         # 2. delete partitions
         log.info("test_search_partition_deleted: deleting a partition")
         par = collection_w.partitions
@@ -702,7 +698,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         # 2. create different index
         if params.get("m"):
             if (default_dim % params["m"]) != 0:
@@ -730,11 +726,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        # 3. search the non exist partition
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search the non exist partition
         partition_name = "search_non_exist"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, [partition_name],
@@ -751,7 +744,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with binary data
-        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=False)[0]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -933,7 +926,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # create collection, insert tmp_nb, flush and load
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=1,
                                                     primary_field=ct.default_string_field_name,
-                                                    is_index=True,
+                                                    is_index=False,
                                                     enable_dynamic_field=True)[0]
 
         # create index
@@ -1066,6 +1059,36 @@ class TestCollectionSearch(TestcaseBase):
                             guarantee_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_search_without_metric_type_multi_querynodes(self):
+        """
+        target: test search without metric type multi querynodes
+        method: 1. create a collection, insert data and load
+                2. search
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, is_index=False, primary_field=default_string_field_name)[0:4]
+        nb = 500
+        data = cf.gen_default_list_data(nb)
+        for _ in range(10):
+            collection_w.insert(data)
+            collection_w.flush()
+
+        collection_w.create_index(default_saarch_field, default_index_params)
+        collection_w.load()
+
+        # 2. search
+        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        search_params = {"metric_type": "", "params": {"nprobe": 10}}
+        collection_w.search(vectors[:dedault_nq], default_search_field,
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": dedault_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit})
 
@@ -1232,7 +1255,7 @@ class TestCollectionSearch(TestcaseBase):
         # 2. rename collection
         new_collection_name = cf.gen_unique_str(prefix + "new")
         self.utility_wrap.rename_collection(collection_w.name, new_collection_name)
-        collection_w = self.init_collection_general(auto_id=auto_id, is_index=True,
+        collection_w = self.init_collection_general(auto_id=auto_id, is_index=False,
                                                     dim=dim, name=new_collection_name,
                                                     enable_dynamic_field=enable_dynamic_field)[0]
         # 3. search
@@ -1454,7 +1477,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. connect, create collection and insert data
         self._connect()
-        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=False)[0]
         dataframe = cf.gen_default_dataframe_data(dim=dim, start=-1500)
         collection_w.insert(dataframe)
 
@@ -1595,7 +1618,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True,
+                                                                                  dim=dim, is_index=False,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
@@ -1631,7 +1654,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True,
+                                                                                  dim=dim, is_index=False,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction, "nlist": 100}  # nlist is of no use
@@ -1666,7 +1689,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True,
+                                                                                  dim=dim, is_index=False,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
@@ -1699,7 +1722,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True,
+                                                                                  dim=dim, is_index=False,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
         # 2. create index and load
@@ -1737,7 +1760,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, is_index=False)[0]
         # 2. create index and load
         collection_w.create_index("float_vector", {})
         collection_w.load()
@@ -1765,7 +1788,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=min_dim, is_index=True)[0:5]
+                                                                                  dim=min_dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             params["m"] = min_dim
@@ -1803,7 +1826,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True,
+                                                                                  dim=dim, is_index=False,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
         # 2. create different index
@@ -1849,7 +1872,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                          partition_num=1,
                                                                                          auto_id=auto_id,
-                                                                                         dim=dim, is_index=False,
+                                                                                         dim=dim,
                                                                                          enable_dynamic_field=
                                                                                          enable_dynamic_field)[0:5]
         # 2. get vectors that inserted into collection
@@ -2000,15 +2023,10 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  is_index=True,
                                                                                   enable_dynamic_field=
                                                                                   enable_dynamic_field)[0:5]
 
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search in one partition
+        # 2. search in one partition
         log.info("test_search_index_one_partition: searching (1000 entities) through one partition")
         limit = 1000
         par = collection_w.partitions
@@ -2038,14 +2056,9 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      dim=dim,
-                                                                      is_index=True)[0:4]
+                                                                      dim=dim)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search through partitions
+        # 2. search through partitions
         log.info("test_search_index_partitions: searching (1000 entities) through partitions")
         par = collection_w.partitions
         log.info("test_search_index_partitions: partitions: %s" % par)
@@ -2074,27 +2087,20 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      is_index=True,
                                                                       enable_dynamic_field=
                                                                       enable_dynamic_field)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create index
-        nlist = 128
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search through partitions
+        # 2. search through partitions
         log.info("test_search_index_partitions_fuzzy: searching through partitions")
         limit = 1000
         limit_check = limit
         par = collection_w.partitions
-        search_params = {"metric_type": "L2", "params": {"nprobe": nlist}}
         if partition_names == ["search(.*)"]:
             insert_ids = insert_ids[par[0].num_entities:]
             if limit > par[1].num_entities:
                 limit_check = par[1].num_entities
         collection_w.search(vectors[:nq], default_search_field,
-                            search_params, limit, default_search_exp,
+                            default_search_params, limit, default_search_exp,
                             partition_names, _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
@@ -2111,7 +2117,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id,
-                                                    dim=dim, is_index=True)[0]
+                                                    dim=dim, is_index=False)[0]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create empty partition
         partition_name = "search_partition_empty"
@@ -2148,7 +2154,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                                   is_binary=True,
                                                                                                   auto_id=auto_id,
                                                                                                   dim=dim,
-                                                                                                  is_index=True,
+                                                                                                  is_index=False,
                                                                                                   is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -2187,7 +2193,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       is_flush=is_flush)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
@@ -2226,7 +2232,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       is_flush=is_flush)[0:4]
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
@@ -2269,7 +2275,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = 8
         collection_w, _, binary_raw_vector, insert_ids, time_stamp \
             = self.init_collection_general(prefix, True, default_nb, is_binary=True, auto_id=auto_id,
-                                           dim=dim, is_index=True, is_flush=is_flush)[0:5]
+                                           dim=dim, is_index=False, is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUBSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
@@ -2305,7 +2311,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = 8
         collection_w, _, binary_raw_vector, insert_ids, time_stamp \
             = self.init_collection_general(prefix, True, default_nb, is_binary=True, auto_id=auto_id,
-                                           dim=dim, is_index=True, is_flush=is_flush)[0:5]
+                                           dim=dim, is_index=False, is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUPERSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
@@ -2336,7 +2342,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize a collection without data
-        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id, is_index=False)[0]
         # 2. insert data
         insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
         # 3. load data
@@ -2419,7 +2425,6 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True,
                                                                              enable_dynamic_field=
                                                                              enable_dynamic_field)[0:4]
 
@@ -2437,12 +2442,7 @@ class TestCollectionSearch(TestcaseBase):
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-        # 3. search with expression
+        # 2. search with expression
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
@@ -2475,16 +2475,11 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              is_all_data_type=True,
                                                                              auto_id=auto_id,
-                                                                             dim=dim, is_index=True,
+                                                                             dim=dim,
                                                                              enable_dynamic_field=
                                                                              enable_dynamic_field)[0:4]
 
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-        # 3. filter result with expression in collection
+        # 2. filter result with expression in collection
         filter_ids = []
         bool_type_cmp = bool_type
         if bool_type == "true":
@@ -2499,7 +2494,7 @@ class TestCollectionSearch(TestcaseBase):
                 if _vectors[0][f"{default_bool_field_name}"][i] == bool_type_cmp:
                     filter_ids.append(_id)
 
-        # 4. search with different expressions
+        # 3. search with different expressions
         expression = f"{default_bool_field_name} == {bool_type}"
         log.info("test_search_with_expression_bool: searching with bool expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
@@ -2533,7 +2528,7 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              auto_id=True,
-                                                                             dim=dim, is_index=True,
+                                                                             dim=dim,
                                                                              enable_dynamic_field=
                                                                              enable_dynamic_field)[0:4]
 
@@ -2549,12 +2544,7 @@ class TestCollectionSearch(TestcaseBase):
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-        # 3. search with different expressions
+        # 2. search with different expressions
         log.info("test_search_with_expression_auto_id: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
@@ -2702,20 +2692,16 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
 
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[default_int64_field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert default_int64_field_name in res[0][0].entity._row_data
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=[default_int64_field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": [default_int64_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_vector_field(self, auto_id, _async):
@@ -2729,20 +2715,16 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert field_name in res[0][0].entity._row_data
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=[field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields(self, nb, nq, dim, auto_id, _async):
@@ -2759,21 +2741,17 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        res = collection_w.search(vectors[:nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=[default_int64_field_name,
-                                                 default_float_field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+        output_fields = [default_int64_field_name, default_float_field_name]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -2790,9 +2768,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. create a collection and insert data
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
-        data = cf.gen_default_dataframe_data()
-        collection_w.insert(data)
+        collection_w, _vectors = self.init_collection_general(prefix, True, is_index=False)[:2]
 
         # 2. create index and load
         default_index = {"index_type": index, "params": params, "metric_type": metrics}
@@ -2801,22 +2777,14 @@ class TestCollectionSearch(TestcaseBase):
 
         # 3. search with output field vector
         search_params = cf.gen_search_param(index, metrics)[0]
-        res = collection_w.search(vectors[:1], default_search_field,
-                                  search_params, default_limit, default_search_exp,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": 1,
-                                               "limit": default_limit})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for _id in range(default_limit):
-            for i in range(default_dim):
-                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
-                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
-                if vectorInsert != vectorRes:
-                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
-                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
-                assert str(vectorInsert) == vectorRes
+        collection_w.search(vectors[:1], default_search_field,
+                            search_params, default_limit, default_search_exp,
+                            output_fields=[field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1,
+                                         "limit": default_limit,
+                                         "original_entities": _vectors,
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #23661")
@@ -2848,11 +2816,7 @@ class TestCollectionSearch(TestcaseBase):
                                   output_fields=[binary_field_name])[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['binary_vector'][0])
         assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
-        # log.info(data['float_vector'][1])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [32, 128, 768])
@@ -2866,30 +2830,22 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. create a collection and insert data
-        collection_w = self.init_collection_general(prefix, is_index=True, dim=dim)[0]
-        data = cf.gen_default_dataframe_data(dim=dim)
-        collection_w.insert(data)
+        collection_w, _vectors = self.init_collection_general(prefix, True, dim=dim)[:2]
 
-        # 2. create index and load
-        index_params = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", index_params)
-        collection_w.load()
-
-        # 3. search with output field vector
+        # 2. search with output field vector
         vectors = cf.gen_vectors(default_nq, dim=dim)
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit, default_search_exp,
-                                  output_fields=[field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "limit": default_limit})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for i in range(default_limit):
-            assert len(res[0][i].entity.float_vector) == len(data[field_name][res[0][i].id])
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, default_search_exp,
+                            output_fields=[field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "original_entities": _vectors,
+                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_output_vector_field_and_scalar_field(self):
+    @pytest.mark.skip(reason="issue #25487")
+    def test_search_output_vector_field_and_scalar_field(self, enable_dynamic_field):
         """
         target: test search with output vector field and scalar field
         method: 1. initialize a collection
@@ -2898,21 +2854,29 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize a collection
-        collection_w = self.init_collection_general(prefix, True)[0]
+        collection_w, _vectors = self.init_collection_general(prefix, True,
+                                                              enable_dynamic_field=enable_dynamic_field)[:2]
 
         # 2. search with output field vector
-        res = collection_w.search(vectors[:1], default_search_field,
-                                  default_search_params, default_limit, default_search_exp,
-                                  output_fields=[default_float_field_name,
-                                                 default_string_field_name,
-                                                 default_search_field],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": 1,
-                                               "limit": default_limit})[0]
-
-        # 3. check the result
-        assert default_float_field_name, default_string_field_name in res[0][0].entity._row_data
-        assert default_search_field in res[0][0].entity._row_data
+        output_fields = [default_float_field_name, default_string_field_name, default_search_field]
+        original_entities = []
+        if enable_dynamic_field:
+            entities = []
+            for vector in _vectors[0]:
+                entities.append({default_float_field_name: vector[default_float_field_name],
+                                 default_string_field_name: vector[default_string_field_name],
+                                 default_search_field: vector[default_search_field]})
+            original_entities.append(pd.DataFrame(entities))
+        else:
+            original_entities = _vectors
+        collection_w.search(vectors[:1], default_search_field,
+                            default_search_params, default_limit, default_search_exp,
+                            output_fields=output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 1,
+                                         "limit": default_limit,
+                                         "original_entities": original_entities,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_output_field_vector_with_partition(self):
@@ -2925,7 +2889,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. create a collection and insert data
-        collection_w = self.init_collection_general(prefix, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
         partition_w = self.init_partition_wrap(collection_w)
         data = cf.gen_default_dataframe_data()
         partition_w.insert(data)
@@ -2935,26 +2899,18 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search with output field vector
-        res = partition_w.search(vectors[:1], default_search_field,
-                                 default_search_params, default_limit, default_search_exp,
-                                 output_fields=[field_name],
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": 1,
-                                              "limit": default_limit})[0]
-
-        # 4. check the result vectors should be equal to the inserted
-        for _id in range(default_limit):
-            for i in range(default_dim):
-                vectorInsert = str(data[field_name][res[0][_id].id][i])[:7]
-                vectorRes = str(res[0][_id].entity.float_vector[i])[:7]
-                if vectorInsert != vectorRes:
-                    getcontext().rounding = getattr(decimal, 'ROUND_HALF_UP')
-                    vectorInsert = Decimal(data[field_name][res[0][_id].id][i]).quantize(Decimal('0.00000'))
-                assert str(vectorInsert) == vectorRes
+        partition_w.search(vectors[:1], default_search_field,
+                           default_search_params, default_limit, default_search_exp,
+                           output_fields=[field_name],
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": 1,
+                                        "limit": default_limit,
+                                        "original_entities": [data],
+                                        "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
-    def test_search_with_output_field_wildcard(self, output_fields, auto_id, _async, enable_dynamic_field):
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_int64_field_name]])
+    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async, enable_dynamic_field):
         """
         target: test search with output fields using wildcard
         method: search with one output_field (wildcard)
@@ -2967,21 +2923,17 @@ class TestCollectionSearch(TestcaseBase):
                                                                       enable_dynamic_field)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, _async=_async,
-                                  output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
-        if _async:
-            res.done()
-            res = res.result()
-        assert len(res[0][0].entity._row_data) != 0
-        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+        output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            output_fields=wildcard_output_fields,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async,
+                                         "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_multi_collections(self, nb, nq, dim, auto_id, _async):
@@ -3131,18 +3083,11 @@ class TestCollectionSearch(TestcaseBase):
         nb = 10000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       nb, dim=dim,
-                                                                      is_index=True,
                                                                       enable_dynamic_field=
                                                                       enable_dynamic_field,
                                                                       with_json=False)[0:4]
 
-
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-        # 3. search with expression
+        # 2. search with expression
         expression = f"0 < {default_int64_field_name} < 5001"
         log.info("test_search_with_expression: searching with expression: %s" % expression)
 
@@ -3166,20 +3111,13 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         nb = 10000
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, dim=dim, is_index=True,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field,
                                                                       with_json=False)[0:4]
 
-
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
-        vectors_id = [random.randint(0,nums)for _ in range(nums)]
+        vectors_id = [random.randint(0, nums)for _ in range(nums)]
         expression = f"{default_int64_field_name} in {vectors_id}"
         search_res, _ = collection_w.search(vectors, default_search_field,
                                             default_search_params, default_limit, expression,
@@ -3528,7 +3466,7 @@ class TestCollectionSearch(TestcaseBase):
         self._connect()
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
                                                                       auto_id=auto_id,
-                                                                      dim=dim, is_index=True,
+                                                                      dim=dim, is_index=False,
                                                                       enable_dynamic_field=
                                                                       enable_dynamic_field)[0:4]
         collection_w.create_partition(partition_name)
@@ -3632,7 +3570,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create partition
         partition_name = "search_partition_empty"
@@ -3676,13 +3614,10 @@ class TestSearchBase(TestcaseBase):
         expected: the length of the result is top_k
         """
         top_k = get_top_k
-        nq = ct.default_nq
-        dim = ct.default_dim
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+                                                                                  is_index=False)[0:5]
         # 2. create partition
         partition_name = ct.default_partition_name
         par = collection_w.partitions
@@ -3697,8 +3632,8 @@ class TestSearchBase(TestcaseBase):
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
-        res, _ = collection_w.search(vectors[:nq], default_search_field,
-                                     ct.default_search_params, top_k,
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                     default_search_params, top_k,
                                      default_search_exp, [partition_name])
         assert len(res[0]) <= top_k
 
@@ -3714,7 +3649,7 @@ class TestSearchBase(TestcaseBase):
         dim = ct.default_dim
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create ip index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "IP"}
@@ -3742,7 +3677,7 @@ class TestSearchBase(TestcaseBase):
 
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create ip index
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
@@ -3769,7 +3704,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, insert_entities, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
                                                                                        is_binary=False,
-                                                                                       dim=dim, is_index=True)[0:5]
+                                                                                       dim=dim, is_index=False)[0:5]
         insert_vectors = insert_entities[0][default_search_field].tolist()
 
         # 2. load collection.
@@ -3803,7 +3738,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create partition
         partition_name = "search_partition_empty"
@@ -3847,7 +3782,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create partition
         par_name = collection_w.partitions[0].name
@@ -3970,7 +3905,7 @@ class TestSearchDSL(TestcaseBase):
                                          "limit": ct.default_top_k})
 
 
-class TestsearchString(TestcaseBase):
+class TestSearchString(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test search about string
@@ -4129,7 +4064,6 @@ class TestsearchString(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True,
                                                                              enable_dynamic_field=
                                                                              enable_dynamic_field)[0:4]
 
@@ -4147,12 +4081,7 @@ class TestsearchString(TestcaseBase):
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
-        # 2. create index
-        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
-        collection_w.create_index("float_vector", index_param)
-        collection_w.load()
-
-        # 3. search with expression
+        # 2. search with expression
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
@@ -4186,7 +4115,7 @@ class TestsearchString(TestcaseBase):
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       primary_field=ct.default_string_field_name)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -4221,7 +4150,7 @@ class TestsearchString(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)[0:4]
+                                                                                      is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -4250,7 +4179,7 @@ class TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_binary=True, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_binary=True, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -4283,10 +4212,10 @@ class TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim, is_index=False)[0:4]
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param, index_name="a")
-        index_param_two ={}
+        index_param_two = {}
         collection_w.create_index("varchar", index_param_two, index_name="b")
         collection_w.load()
         # 2. search
@@ -4304,8 +4233,7 @@ class TestsearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
-                                         "_async": _async}
-                            )
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_all_index_with_compare_expr(self, _async):
@@ -4319,12 +4247,12 @@ class TestsearchString(TestcaseBase):
         # create collection, insert tmp_nb, flush and load
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, insert_data=True,
                                                                             primary_field=ct.default_string_field_name,
-                                                                            is_index=True)[0:4]
+                                                                            is_index=False)[0:4]
 
         # create index
         index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
-        index_params_two ={}
+        index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
         assert collection_w.has_index(index_name=index_name2)
 
@@ -4395,7 +4323,7 @@ class TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, _= \
-            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name, is_index=True)[0:4]
+            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name, is_index=False)[0:4]
 
         nb = 3000
         data = cf.gen_default_list_data(nb)
@@ -4409,7 +4337,6 @@ class TestsearchString(TestcaseBase):
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
-
 
         search_string_exp = "varchar >= \"\""
 
@@ -4430,7 +4357,7 @@ class TestsearchString(TestcaseBase):
                                          "_async": _async})
 
 
-class TestsearchPagination(TestcaseBase):
+class TestSearchPagination(TestcaseBase):
     """ Test case of search pagination """
 
     @pytest.fixture(scope="function", params=[0, 10, 100])
@@ -4674,19 +4601,13 @@ class TestsearchPagination(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      is_index=True)[0:4]
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search through partitions
+                                                                      auto_id=auto_id)[0:4]
+        # 2. search through partitions
         par = collection_w.partitions
         limit = 100
-        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_param, limit, default_search_exp,
+                                         search_params, limit, default_search_exp,
                                          [par[0].name, par[1].name], _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
@@ -4702,8 +4623,6 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        res_distance = res[0].distances[offset:]
-        # assert sorted(search_res[0].distances) == sorted(res_distance)
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4839,7 +4758,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -4878,7 +4797,7 @@ class TestsearchPagination(TestcaseBase):
             assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
 
-class TestsearchPaginationInvalid(TestcaseBase):
+class TestSearchPaginationInvalid(TestcaseBase):
     """ Test case of search pagination """
 
     @pytest.fixture(scope="function", params=[0, 10])
@@ -4933,7 +4852,7 @@ class TestsearchPaginationInvalid(TestcaseBase):
                                                     "[1, 16385], but got %d" % (offset, offset)})
 
 
-class  TestsearchDiskann(TestcaseBase):
+class TestsearchDiskann(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test search about diskann index
@@ -4969,7 +4888,7 @@ class  TestsearchDiskann(TestcaseBase):
         nb = 2000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
                                                                       nb=nb, dim=dim,
-                                                                      is_index=True,
+                                                                      is_index=False,
                                                                       enable_dynamic_field=
                                                                       enable_dynamic_field)[0:4]
         
@@ -5007,7 +4926,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -5039,7 +4958,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -5071,7 +4990,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -5100,7 +5019,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=False, dim=dim, is_index=True,
+            self.init_collection_general(prefix, True, auto_id=False, dim=dim, is_index=False,
                                          primary_field=ct.default_string_field_name,
                                          enable_dynamic_field=
                                          enable_dynamic_field)[0:4]
@@ -5134,7 +5053,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True,
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False,
                                          enable_dynamic_field=
                                          enable_dynamic_field)[0:4]
         # 2. create index
@@ -5177,11 +5096,11 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True,
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False,
                                          enable_dynamic_field=
                                          enable_dynamic_field)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
         if not enable_dynamic_field:
             index_params_one = {}
@@ -5227,7 +5146,7 @@ class  TestsearchDiskann(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, ids = \
             self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name,
-                                         is_index=True,
+                                         is_index=False,
                                          enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. create index
         default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
