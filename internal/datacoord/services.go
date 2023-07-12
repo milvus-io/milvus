@@ -1417,7 +1417,7 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 	}
 
 	for _, ttMsg := range req.GetMsgs() {
-		sub := tsoutil.SubByNow(req.GetBase().GetTimestamp())
+		sub := tsoutil.SubByNow(ttMsg.GetTimestamp())
 		metrics.DataCoordConsumeDataNodeTimeTickLag.
 			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), ttMsg.GetChannelName()).
 			Set(float64(sub))
