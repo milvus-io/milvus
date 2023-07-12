@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // timeTickSender is to merge channel states updated by flow graph node and send to datacoord periodically
@@ -64,8 +65,8 @@ func (m *timeTickSender) start(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("timeTickSender context done")
 			return
-		case t := <-ticker.C:
-			m.sendReport(ctx, uint64(t.Unix()))
+		case <-ticker.C:
+			m.sendReport(ctx)
 		}
 	}
 }
@@ -157,10 +158,11 @@ func (m *timeTickSender) cleanStatesCache(sendedLastTss map[string]uint64) {
 	log.RatedDebug(30, "timeTickSender channelStatesCaches", zap.Int("sizeAfterClean", len(m.channelStatesCaches)))
 }
 
-func (m *timeTickSender) sendReport(ctx context.Context, submitTs Timestamp) error {
+func (m *timeTickSender) sendReport(ctx context.Context) error {
 	toSendMsgs, sendLastTss := m.mergeDatanodeTtMsg()
 	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
+		submitTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		statusResp, err := m.dataCoord.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),

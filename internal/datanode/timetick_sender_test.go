@@ -86,7 +86,7 @@ func TestTimetickManagerNormal(t *testing.T) {
 	}
 	manager.update(channelName2, ts3, segmentStats3)
 
-	err := manager.sendReport(ctx, 100)
+	err := manager.sendReport(ctx)
 	assert.NoError(t, err)
 
 	_, channelExistAfterSubmit := manager.channelStatesCaches[channelName1]
@@ -123,7 +123,7 @@ func TestTimetickManagerNormal(t *testing.T) {
 	}
 	manager.update(channelName3, ts5, segmentStats5)
 
-	err = manager.sendReport(ctx, 100)
+	err = manager.sendReport(ctx)
 	assert.NoError(t, err)
 
 	_, channelExistAfterSubmit2 := manager.channelStatesCaches[channelName1]
@@ -148,7 +148,7 @@ func TestTimetickManagerSendErr(t *testing.T) {
 	}
 	// update first time
 	manager.update(channelName1, ts, segmentStats)
-	err := manager.sendReport(ctx, 100)
+	err := manager.sendReport(ctx)
 	assert.Error(t, err)
 }
 
@@ -167,6 +167,6 @@ func TestTimetickManagerSendNotSuccess(t *testing.T) {
 	}
 	// update first time
 	manager.update(channelName1, ts, segmentStats)
-	err := manager.sendReport(ctx, 100)
+	err := manager.sendReport(ctx)
 	assert.Error(t, err)
 }
