@@ -28,9 +28,9 @@ macro(build_aws_sdk_s3)
         "-DAUTORUN_UNIT_TESTS=OFF"
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 
-    if ( APPLE )
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-        set(AWS_SDK_S3_CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS} "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+    if (APPLE)
+      set(AWS_SDK_S3_CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS} "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
     endif()
 
     ExternalProject_Add(aws_sdk_s3_ep
