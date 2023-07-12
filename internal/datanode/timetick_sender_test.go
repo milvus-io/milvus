@@ -32,7 +32,7 @@ import (
 
 func TestTimetickManagerNormal(t *testing.T) {
 	ctx := context.Background()
-	manager := newTimeTickManager(&DataCoordFactory{}, 0)
+	manager := newTimeTickSender(&DataCoordFactory{}, 0)
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().Unix())
@@ -128,7 +128,7 @@ func TestTimetickManagerNormal(t *testing.T) {
 
 func TestTimetickManagerSendErr(t *testing.T) {
 	ctx := context.Background()
-	manager := newTimeTickManager(&DataCoordFactory{ReportDataNodeTtMsgsError: true}, 0)
+	manager := newTimeTickSender(&DataCoordFactory{ReportDataNodeTtMsgsError: true}, 0)
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().Unix())
@@ -147,7 +147,7 @@ func TestTimetickManagerSendErr(t *testing.T) {
 
 func TestTimetickManagerSendNotSuccess(t *testing.T) {
 	ctx := context.Background()
-	manager := newTimeTickManager(&DataCoordFactory{ReportDataNodeTtMsgsNotSuccess: true}, 0)
+	manager := newTimeTickSender(&DataCoordFactory{ReportDataNodeTtMsgsNotSuccess: true}, 0)
 
 	channelName1 := "channel1"
 	ts := uint64(time.Now().Unix())
@@ -178,7 +178,7 @@ func TestTimetickManagerSendReport(t *testing.T) {
 	}).Return(&commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil)
-	manager := newTimeTickManager(mockDataCoord, 0)
+	manager := newTimeTickSender(mockDataCoord, 0)
 	go manager.start(ctx)
 
 	assert.Eventually(t, func() bool {

@@ -543,7 +543,7 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.start(node.ctx)
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickManager(node.dataCoord, node.session.ServerID)
+			node.timeTickSender = newTimeTickSender(node.dataCoord, node.session.ServerID)
 			go node.timeTickSender.start(node.ctx)
 		}
 

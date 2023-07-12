@@ -277,7 +277,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
 	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
 	assert.Nil(t, err)
 
@@ -439,7 +439,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		syncPeriodically(),
 		syncMemoryTooHigh(),
 	}
-	atimeTickSender := newTimeTickManager(mockDataCoord, 0)
+	atimeTickSender := newTimeTickSender(mockDataCoord, 0)
 	syncService, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, alloc, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0, atimeTickSender)
 	assert.NoError(t, err)
 
