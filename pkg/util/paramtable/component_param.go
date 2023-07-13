@@ -2137,7 +2137,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "10800",
+		DefaultValue: "3600",
 		Doc:          "file meta missing tolerance duration in seconds, 60*60*3",
 		Export:       true,
 	}
@@ -2146,7 +2146,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCDropTolerance = ParamItem{
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "3600",
+		DefaultValue: "10800",
 		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
 		Export:       true,
 	}

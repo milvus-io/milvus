@@ -238,6 +238,17 @@ func (gc *garbageCollector) clearEtcd() {
 
 	for _, segment := range drops {
 		log := log.With(zap.Int64("segmentID", segment.ID))
+		// skip gc the current segment if its parent exist
+		for _, segmentIDCompactFrom := range segment.CompactionFrom {
+			if _, ok := drops[segmentIDCompactFrom]; ok {
+				log.WithRateGroup("GC_FAIL_PARENT_EXIST", 1, 60).
+					RatedInfo(60, "dropped segment parents not clenaed, skip meta gc",
+						zap.Int64("segment", segment.GetID()),
+						zap.Int64("parent segment", segmentIDCompactFrom),
+					)
+				continue
+			}
+		}
 		to, isCompacted := compactTo[segment.GetID()]
 		// for compacted segment, try to clean up the files as long as target segment is there
 		if !isCompacted && !gc.isExpire(segment.GetDroppedAt()) {
