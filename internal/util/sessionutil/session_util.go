@@ -85,6 +85,7 @@ type Session struct {
 	ctx context.Context
 	// When outside context done, Session cancels its goroutines first, then uses
 	// keepAliveCancel to cancel the etcd KeepAlive
+	keepAliveLock   sync.Mutex
 	keepAliveCancel context.CancelFunc
 	keepAliveCtx    context.Context
 
@@ -105,10 +106,8 @@ type Session struct {
 
 	metaRoot string
 
-	registered           atomic.Value
-	disconnected         atomic.Value
-	retryKeepAlive       atomic.Value
-	enableRetryKeepAlive *atomic.Bool
+	registered   atomic.Value
+	disconnected atomic.Value
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -206,10 +205,9 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		Version:  common.Version,
 
 		// options
-		sessionTTL:           paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
-		sessionRetryTimes:    paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
-		reuseNodeID:          true,
-		enableRetryKeepAlive: atomic.NewBool(true),
+		sessionTTL:        paramtable.Get().CommonCfg.SessionTTL.GetAsInt64(),
+		sessionRetryTimes: paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
+		reuseNodeID:       true,
 	}
 
 	// integration test create cluster with different nodeId in one process
@@ -427,7 +425,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		if !txnResp.Succeeded {
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
 		}
-		log.Debug("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
+		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 		s.keepAliveCtx = keepAliveCtx
@@ -464,18 +462,22 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					if !s.enableRetryKeepAlive.Load() {
+
+					// if keep alive is canceled, keepAliveCtx.Err() will return a non-nil error
+					if s.keepAliveCtx.Err() != nil {
 						s.safeCloseLiveCh()
 						return
 					}
-					log.Info("start try to KeepAliveOnce", zap.String("serverName", s.ServerName))
-					s.retryKeepAlive.Store(true)
+
+					log.Info("keepAlive channel close caused by etcd, try to KeepAliveOnce", zap.String("serverName", s.ServerName))
+					s.keepAliveLock.Lock()
+					defer s.keepAliveLock.Unlock()
 					// have to KeepAliveOnce before KeepAlive because KeepAlive won't throw error even when lease OT
 					var keepAliveOnceResp *clientv3.LeaseKeepAliveResponse
 					s.keepAliveCtx.Done()
-					s.keepAliveCtx = context.Background()
-					err := retry.Do(s.keepAliveCtx, func() error {
-						ctx, cancel := context.WithTimeout(s.keepAliveCtx, time.Second*5)
+					s.keepAliveCtx, s.keepAliveCancel = context.WithCancel(context.Background())
+					err := retry.Do(s.ctx, func() error {
+						ctx, cancel := context.WithTimeout(s.keepAliveCtx, time.Second*10)
 						defer cancel()
 						resp, err := s.etcdCli.KeepAliveOnce(ctx, *s.leaseID)
 						keepAliveOnceResp = resp
@@ -490,21 +492,18 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					log.Info("succeed to KeepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("leaseID", int64(*s.leaseID)), zap.Any("resp", keepAliveOnceResp))
 
 					var chNew <-chan *clientv3.LeaseKeepAliveResponse
-					err = retry.Do(s.keepAliveCtx, func() error {
-						ctx, cancel := context.WithTimeout(s.keepAliveCtx, time.Second*5)
-						defer cancel()
-						ch, err := s.etcdCli.KeepAlive(ctx, *s.leaseID)
-						chNew = ch
-						return err
-					}, retry.Attempts(3))
-
+					keepAliveFunc := func() error {
+						var err1 error
+						chNew, err1 = s.etcdCli.KeepAlive(s.keepAliveCtx, *s.leaseID)
+						return err1
+					}
+					err = fnWithTimeout(keepAliveFunc, time.Second*10)
 					if err != nil {
 						log.Warn("fail to retry keepAlive", zap.Error(err))
 						s.safeCloseLiveCh()
 						return
 					}
 					s.processKeepAliveResponse(chNew)
-					s.retryKeepAlive.Store(false)
 					return
 				}
 				if resp == nil {
@@ -515,6 +514,26 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			}
 		}
 	}()
+}
+
+func fnWithTimeout(fn func() error, d time.Duration) error {
+	if d != 0 {
+		resultChan := make(chan bool)
+		var err1 error
+		go func() {
+			err1 = fn()
+			resultChan <- true
+		}()
+
+		select {
+		case <-resultChan:
+			log.Debug("retry func success")
+		case <-time.After(d):
+			return fmt.Errorf("func timed out")
+		}
+		return err1
+	}
+	return fn()
 }
 
 // GetSessions will get all sessions registered in etcd.
@@ -783,8 +802,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				}
 				return
 			case <-ctx.Done():
-				log.Debug("liveness exits due to context done")
-				s.enableRetryKeepAlive.Store(false)
+				log.Warn("liveness exits due to context done")
 				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
@@ -824,10 +842,6 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 					case mvccpb.PUT:
 						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 					case mvccpb.DELETE:
-						if s.isRetryingKeepAlive() {
-							log.Info("session key is deleted during re register, ignore this DELETE event", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-							continue
-						}
 						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
 						if s.keepAliveCancel != nil {
 							s.keepAliveCancel()
@@ -897,18 +911,6 @@ func (s *Session) SetEnableActiveStandBy(enable bool) {
 
 func (s *Session) updateStandby(b bool) {
 	s.isStandby.Store(b)
-}
-
-func (s *Session) SetEnableRetryKeepAlive(enable bool) {
-	s.enableRetryKeepAlive.Store(enable)
-}
-
-func (s *Session) isRetryingKeepAlive() bool {
-	v, ok := s.retryKeepAlive.Load().(bool)
-	if !ok {
-		return false
-	}
-	return v
 }
 
 func (s *Session) safeCloseLiveCh() {
