@@ -62,6 +62,8 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 			zap.Int64("collection ID", dmNodeConfig.collectionID))
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
+			insertStream.Close()
+			log.Error("seek failed", zap.Error(err))
 			return nil, err
 		}
 		log.Info("datanode seek successfully",

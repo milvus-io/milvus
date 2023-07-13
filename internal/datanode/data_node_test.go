@@ -646,18 +646,13 @@ func TestDataNode(t *testing.T) {
 			{"fake-by-dev-rootcoord-dml-backgroundgc-1"},
 			{"fake-by-dev-rootcoord-dml-backgroundgc-2"},
 			{"fake-by-dev-rootcoord-dml-backgroundgc-3"},
-			{""},
-			{""},
 		}
 
-		for i, test := range testDataSyncs {
-			if i <= 2 {
-				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
-				assert.Nil(t, err)
-				vchanNameCh <- test.dmChannelName
-			}
+		for _, test := range testDataSyncs {
+			err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
+			assert.Nil(t, err)
+			vchanNameCh <- test.dmChannelName
 		}
-		cancel()
 	})
 
 	t.Run("Test SyncSegments", func(t *testing.T) {
