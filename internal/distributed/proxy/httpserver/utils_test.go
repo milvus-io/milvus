@@ -240,7 +240,7 @@ func TestPrintCollectionDetails(t *testing.T) {
 			HTTPReturnDescription:     ""},
 		{
 			HTTPReturnFieldName:       FieldBookIntro,
-			HTTPReturnFieldType:       "FloatVector",
+			HTTPReturnFieldType:       "FloatVector(2)",
 			HTTPReturnFieldPrimaryKey: false,
 			HTTPReturnFieldAutoID:     false,
 			HTTPReturnDescription:     ""},
@@ -283,6 +283,25 @@ func TestPrimaryField(t *testing.T) {
 	filter, err = checkGetPrimaryKey(coll, idStr)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, filter, "book_id in [1,2,3]")
+}
+
+func TestInsertWithDynamicFields(t *testing.T) {
+	body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+	req := InsertReq{}
+	coll := generateCollectionSchema(false)
+	err := checkAndSetData(body, &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Schema: coll,
+	}, &req)
+	assert.Equal(t, err, nil)
+	assert.Equal(t, req.Data[0]["id"], int64(0))
+	assert.Equal(t, req.Data[0]["book_id"], int64(1))
+	assert.Equal(t, req.Data[0]["word_count"], int64(2))
+	fieldsData, err := anyToColumns(req.Data, coll)
+	assert.Equal(t, err, nil)
+	assert.Equal(t, fieldsData[len(fieldsData)-1].IsDynamic, true)
+	assert.Equal(t, fieldsData[len(fieldsData)-1].Type, schemapb.DataType_JSON)
+	assert.Equal(t, string(fieldsData[len(fieldsData)-1].GetScalars().GetJsonData().GetData()[0]), "{\"id\":0}")
 }
 
 func TestSerialize(t *testing.T) {
@@ -715,7 +734,7 @@ func newSearchResult(results []map[string]interface{}) []map[string]interface{} 
 func TestAnyToColumn(t *testing.T) {
 	data, err := anyToColumns(newSearchResult(generateSearchResult()), newCollectionSchema(generateCollectionSchema(false)))
 	assert.Equal(t, err, nil)
-	assert.Equal(t, len(data), 12)
+	assert.Equal(t, len(data), 13)
 }
 
 func TestBuildQueryResps(t *testing.T) {

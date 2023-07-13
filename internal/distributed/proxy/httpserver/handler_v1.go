@@ -101,6 +101,8 @@ func (h *Handlers) listCollections(c *gin.Context) {
 		var collections []string
 		if response.CollectionNames != nil {
 			collections = response.CollectionNames
+		} else {
+			collections = []string{}
 		}
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: collections})
 	}
@@ -153,6 +155,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		return
 	}
 	req := milvuspb.CreateCollectionRequest{
+		DbName:           httpReq.DbName,
 		CollectionName:   httpReq.CollectionName,
 		Schema:           schema,
 		ShardsNum:        ShardNumDefault,
@@ -174,6 +177,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 	}
 
 	resp, err = h.proxy.CreateIndex(c, &milvuspb.CreateIndexRequest{
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		FieldName:      httpReq.VectorField,
 		ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
@@ -186,6 +190,7 @@ func (h *Handlers) createCollection(c *gin.Context) {
 		return
 	}
 	resp, err = h.proxy.LoadCollection(c, &milvuspb.LoadCollectionRequest{
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	})
 	if err != nil {
@@ -210,6 +215,7 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		return
 	}
 	stateResp, stateErr := h.proxy.GetLoadState(c, &milvuspb.GetLoadStateRequest{
+		DbName:         dbName,
 		CollectionName: collectionName,
 	})
 	collLoadState := ""
@@ -228,13 +234,16 @@ func (h *Handlers) getCollectionDetails(c *gin.Context) {
 		}
 	}
 	indexResp, indexErr := h.proxy.DescribeIndex(c, &milvuspb.DescribeIndexRequest{
+		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldName:      vectorField,
 	})
 	var indexDesc []gin.H
 	if indexErr != nil {
+		indexDesc = []gin.H{}
 		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexErr.Error()))
 	} else if indexResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		indexDesc = []gin.H{}
 		log.Warn("get indexes description fail", zap.String("collection", collectionName), zap.String("vectorField", vectorField), zap.String("err", indexResp.Status.Reason))
 	} else {
 		indexDesc = printIndexes(indexResp.IndexDescriptions)
@@ -267,10 +276,11 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 		return
 	}
 	if !has {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnMessage: "can't find collection: " + httpReq.CollectionName})
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "can't find collection: " + httpReq.CollectionName})
 		return
 	}
 	req := milvuspb.DropCollectionRequest{
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 	}
 	username, _ := c.Get(ContextUsername)
@@ -291,8 +301,9 @@ func (h *Handlers) dropCollection(c *gin.Context) {
 
 func (h *Handlers) query(c *gin.Context) {
 	httpReq := QueryReq{
-		DbName: DefaultDbName,
-		Limit:  100,
+		DbName:       DefaultDbName,
+		Limit:        100,
+		OutputFields: []string{DefaultOutputFields},
 	}
 	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "check your parameters conform to the json format", HTTPReturnError: err.Error()})
@@ -303,10 +314,18 @@ func (h *Handlers) query(c *gin.Context) {
 		return
 	}
 	req := milvuspb.QueryRequest{
+		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Expr:               httpReq.Filter,
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
+		QueryParams:        []*commonpb.KeyValuePair{},
+	}
+	if httpReq.Offset > 0 {
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
+	}
+	if httpReq.Limit > 0 {
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	username, _ := c.Get(ContextUsername)
 	_, authErr := proxy.PrivilegeInterceptorWithUsername(c, username.(string), &req)
@@ -331,7 +350,8 @@ func (h *Handlers) query(c *gin.Context) {
 
 func (h *Handlers) get(c *gin.Context) {
 	httpReq := GetReq{
-		DbName: DefaultDbName,
+		DbName:       DefaultDbName,
+		OutputFields: []string{DefaultOutputFields},
 	}
 	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "check your parameters conform to the json format", HTTPReturnError: err.Error()})
@@ -352,6 +372,7 @@ func (h *Handlers) get(c *gin.Context) {
 		return
 	}
 	req := milvuspb.QueryRequest{
+		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Expr:               filter,
 		OutputFields:       httpReq.OutputFields,
@@ -402,6 +423,7 @@ func (h *Handlers) delete(c *gin.Context) {
 		return
 	}
 	req := milvuspb.DeleteRequest{
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		Expr:           filter,
 	}
@@ -444,6 +466,7 @@ func (h *Handlers) insert(c *gin.Context) {
 		return
 	}
 	req := milvuspb.InsertRequest{
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
@@ -496,6 +519,7 @@ func (h *Handlers) search(c *gin.Context) {
 		{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 	}
 	req := milvuspb.SearchRequest{
+		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
 		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
