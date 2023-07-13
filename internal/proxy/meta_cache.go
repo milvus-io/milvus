@@ -348,7 +348,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 		collInfo = m.collInfo[database][collectionName]
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("Reload collection from root coordinator ",
-			zap.String("collection name", collectionName),
+			zap.String("collectionName", collectionName),
 			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}

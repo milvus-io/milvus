@@ -125,7 +125,7 @@ func (t *tickler) inc() {
 func (t *tickler) watch() {
 	if t.interval == 0 {
 		log.Info("zero interval, close ticler watch",
-			zap.String("channel name", t.watchInfo.GetVchan().GetChannelName()),
+			zap.String("channelName", t.watchInfo.GetVchan().GetChannelName()),
 		)
 		return
 	}

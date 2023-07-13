@@ -133,7 +133,7 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 		t.pos = pos
 		t.dropped = dropped
 		log.Info("running flush insert task",
-			zap.Int64("segment ID", t.segmentID),
+			zap.Int64("segmentID", t.segmentID),
 			zap.Bool("flushed", flushed),
 			zap.Bool("dropped", dropped),
 			zap.Any("position", pos),

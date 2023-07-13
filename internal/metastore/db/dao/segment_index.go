@@ -19,7 +19,7 @@ func (s *segmentIndexDb) Get(tenantID string, collectionID, buildID typeutil.Uni
 
 	err := s.db.Model(&dbmodel.SegmentIndex{}).Where("tenant_id = ? AND collection_id = ? AND build_id = ?", tenantID, collectionID, buildID).Find(&r).Error
 	if err != nil {
-		log.Error("get indexes by collection_id failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Error(err))
+		log.Error("get indexes by collection_id failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
@@ -104,7 +104,7 @@ func (s *segmentIndexDb) MarkDeletedByCollectionID(tenantID string, collID typeu
 	}).Error
 
 	if err != nil {
-		log.Error("update segment_indexes deleted by collection id failed", zap.String("tenant", tenantID), zap.Int64("collID", collID), zap.Error(err))
+		log.Error("update segment_indexes deleted by collection id failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collID), zap.Error(err))
 		return err
 	}
 

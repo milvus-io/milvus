@@ -18,7 +18,7 @@ func (s *partitionDb) GetByCollectionID(tenantID string, collectionID typeutil.U
 
 	err := s.db.Model(&dbmodel.Partition{}).Where("tenant_id = ? AND collection_id = ? AND ts = ? AND is_deleted = false", tenantID, collectionID, ts).Find(&r).Error
 	if err != nil {
-		log.Error("get partitions by collection_id and ts failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
+		log.Error("get partitions by collection_id and ts failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Uint64("ts", ts), zap.Error(err))
 		return nil, err
 	}
 

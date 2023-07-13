@@ -52,7 +52,7 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			// unFlushed segment may not have binLogs, skip loading
 			segmentInfo := req.GetSegmentInfos()[segmentID]
 			if segmentInfo == nil {
-				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segment ID", segmentID))
+				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segmentID", segmentID))
 				continue
 			}
 			if len(segmentInfo.GetBinlogs()) > 0 {

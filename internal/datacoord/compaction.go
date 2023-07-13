@@ -325,7 +325,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 				continue
 			}
-			log.Info("compaction timeout",
+			log.Warn("compaction timeout",
 				zap.Int64("planID", task.plan.PlanID),
 				zap.Int64("nodeID", task.dataNodeID),
 				zap.Uint64("startTime", task.plan.GetStartTime()),

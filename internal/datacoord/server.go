@@ -493,7 +493,7 @@ func (s *Server) initServiceDiscovery() error {
 
 	inSessions, inRevision, err := s.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
-		log.Error("DataCoord get QueryCoord session failed", zap.Error(err))
+		log.Warn("DataCoord get QueryCoord session failed", zap.Error(err))
 		return err
 	}
 	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
@@ -630,7 +630,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 				}
 
 				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
-					log.Error("failed to handle timetick message", zap.Error(err))
+					log.Warn("failed to handle timetick message", zap.Error(err))
 					continue
 				}
 			}
@@ -700,14 +700,14 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 		segment := s.meta.GetSegment(stat.GetSegmentID())
 		if segment == nil {
 			log.Warn("skip updating row number for not exist segment",
-				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("segmentID", stat.GetSegmentID()),
 				zap.Int64("new value", stat.GetNumRows()))
 			continue
 		}
 
 		if isFlushState(segment.GetState()) {
 			log.Warn("skip updating row number for flushed segment",
-				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("segmentID", stat.GetSegmentID()),
 				zap.Int64("new value", stat.GetNumRows()))
 			continue
 		}
@@ -715,7 +715,7 @@ func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 		// Log if # of rows is updated.
 		if segment.currRows < stat.GetNumRows() {
 			log.Debug("Updating segment number of rows",
-				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("segmentID", stat.GetSegmentID()),
 				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)

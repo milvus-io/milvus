@@ -71,7 +71,7 @@ func (nm *IndexNodeManager) RemoveNode(nodeID UniqueID) {
 }
 
 func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
-	log.Info("IndexCoord", zap.Any("Stopping node with ID", nodeID))
+	log.Debug("IndexCoord", zap.Int64("Stopping node with ID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 	nm.stoppingNodes[nodeID] = struct{}{}
@@ -79,7 +79,7 @@ func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
 
 // AddNode adds the client of IndexNode.
 func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
-	log.Debug("add IndexNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
+	log.Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
 	var (
 		nodeClient types.IndexNode
 		err        error
@@ -153,7 +153,7 @@ func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, type
 }
 
 func (nm *IndexNodeManager) ClientSupportDisk() bool {
-	log.Info("check if client support disk index")
+	log.Debug("check if client support disk index")
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {
 		log.Warn("there is no IndexNode online")
