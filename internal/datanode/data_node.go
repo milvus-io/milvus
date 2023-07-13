@@ -124,6 +124,8 @@ type DataNode struct {
 
 	dispClient msgdispatcher.Client
 	factory    dependency.Factory
+
+	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -144,6 +146,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
 		flowgraphManager: newFlowgraphManager(),
 		clearSignal:      make(chan string, 100),
+
+		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
@@ -422,12 +426,12 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
 		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
+			log.Warn("handle put event: new data sync service failed", zap.String("vChanName", vChanName), zap.Error(err))
 			watchInfo.State = datapb.ChannelWatchState_WatchFailure
-			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
+		} else {
+			log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+			watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 		}
-		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
-		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
-
 	case datapb.ChannelWatchState_ToRelease:
 		// there is no reason why we release fail
 		node.tryToReleaseFlowgraph(vChanName)
@@ -539,7 +543,7 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.start(node.ctx)
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
-			node.timeTickSender = newTimeTickManager(node.dataCoord, node.session.ServerID)
+			node.timeTickSender = newTimeTickSender(node.dataCoord, node.session.ServerID)
 			go node.timeTickSender.start(node.ctx)
 		}
 

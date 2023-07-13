@@ -228,7 +228,7 @@ func (rl *rateLimiter) setRates(collectionRate *proxypb.CollectionRate) error {
 
 func (rl *rateLimiter) getErrorCode(rt internalpb.RateType) commonpb.ErrorCode {
 	switch rt {
-	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
 		if errCode, ok := rl.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
 			return errCode
 		}
@@ -250,6 +250,8 @@ func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, collecti
 	switch rateType {
 	case internalpb.RateType_DMLInsert:
 		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.InsertLabel).Set(rate)
+	case internalpb.RateType_DMLUpsert:
+		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.UpsertLabel).Set(rate)
 	case internalpb.RateType_DMLDelete:
 		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.DeleteLabel).Set(rate)
 	case internalpb.RateType_DQLSearch:
@@ -281,6 +283,12 @@ func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 				r = &quotaConfig.DMLMaxInsertRate
 			} else {
 				r = &quotaConfig.DMLMaxInsertRatePerCollection
+			}
+		case internalpb.RateType_DMLUpsert:
+			if globalLevel {
+				r = &quotaConfig.DMLMaxUpsertRate
+			} else {
+				r = &quotaConfig.DMLMaxUpsertRatePerCollection
 			}
 		case internalpb.RateType_DMLDelete:
 			if globalLevel {

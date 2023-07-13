@@ -610,6 +610,21 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			return util.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 		}
 
+		// when we try to release a segment, add it to pipeline's exclude list first
+		// in case of consumed it's growing segment again
+		pipeline := node.pipelineManager.Get(req.GetShard())
+		if pipeline != nil {
+			droppedInfos := lo.Map(req.GetSegmentIDs(), func(id int64, _ int) *datapb.SegmentInfo {
+				return &datapb.SegmentInfo{
+					ID: id,
+					DmlPosition: &msgpb.MsgPosition{
+						Timestamp: typeutil.MaxTimestamp,
+					},
+				}
+			})
+			pipeline.ExcludedSegments(droppedInfos...)
+		}
+
 		req.NeedTransfer = false
 		err := delegator.ReleaseSegments(ctx, req, false)
 		if err != nil {
@@ -725,9 +740,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
 	if collection == nil {
-		log.Warn("failed to search segments", zap.Error(segments.ErrCollectionNotFound))
-		err := segments.WrapCollectionNotFound(req.GetReq().GetCollectionID())
-		failRet.Status.Reason = err.Error()
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to search segments", zap.Error(err))
+		failRet.Status = merr.Status(err)
 		return failRet, err
 	}
 
@@ -867,7 +882,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
@@ -1021,7 +1036,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	if !req.FromShardLeader {
@@ -1180,6 +1195,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Channel:            s.Shard(),
 			Version:            s.Version(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
+			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
+				return info.IndexInfo.FieldID, info.IndexInfo
+			}),
 		})
 	}
 
@@ -1213,6 +1231,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			if segment == nil {
 				log.Warn("leader view growing not found", zap.String("channel", key), zap.Int64("segmentID", entry.SegmentID))
 				growingSegments[entry.SegmentID] = &msgpb.MsgPosition{}
+				continue
 			}
 			growingSegments[entry.SegmentID] = segment.StartPosition()
 		}

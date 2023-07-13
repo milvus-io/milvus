@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
@@ -45,42 +44,21 @@ type IOReader struct {
 }
 
 type JSONParser struct {
-	ctx                context.Context // for canceling parse process
-	bufRowCount        int             // max rows in a buffer
-	name2FieldID       map[string]storage.FieldID
+	ctx                context.Context     // for canceling parse process
+	collectionInfo     *CollectionInfo     // collection details including schema
+	bufRowCount        int                 // max rows in a buffer
 	updateProgressFunc func(percent int64) // update working progress percent value
-	dynamicFieldID     storage.FieldID     // dynamic field id, set to -1 if no dynamic field
 }
 
 // NewJSONParser helper function to create a JSONParser
-func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema, updateProgressFunc func(percent int64)) *JSONParser {
-	name2FieldID := make(map[string]storage.FieldID)
-	dynamicFieldID := int64(-1)
-	for i := 0; i < len(collectionSchema.Fields); i++ {
-		schema := collectionSchema.Fields[i]
-		// RowIDField and TimeStampField is internal field, no need to parse
-		if schema.GetFieldID() == common.RowIDField || schema.GetFieldID() == common.TimeStampField {
-			continue
-		}
-		// if primary key field is auto-gernerated, no need to parse
-		if schema.GetAutoID() {
-			continue
-		}
-
-		name2FieldID[schema.GetName()] = schema.GetFieldID()
-		if schema.GetIsDynamic() && collectionSchema.GetEnableDynamicField() {
-			dynamicFieldID = schema.GetFieldID()
-		}
-	}
-
+func NewJSONParser(ctx context.Context, collectionInfo *CollectionInfo, updateProgressFunc func(percent int64)) *JSONParser {
 	parser := &JSONParser{
 		ctx:                ctx,
+		collectionInfo:     collectionInfo,
 		bufRowCount:        1024,
-		name2FieldID:       name2FieldID,
 		updateProgressFunc: updateProgressFunc,
-		dynamicFieldID:     dynamicFieldID,
 	}
-	adjustBufSize(parser, collectionSchema)
+	adjustBufSize(parser, collectionInfo.Schema)
 
 	return parser
 }
@@ -112,43 +90,50 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 }
 
 func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row map[storage.FieldID]interface{}) error {
-	if p.dynamicFieldID < 0 {
+	if p.collectionInfo.DynamicField == nil {
 		return nil
 	}
+
+	dynamicFieldID := p.collectionInfo.DynamicField.GetFieldID()
 	// combine the dynamic field value
 	// valid input:
-	// case 1: {"id": 1, "vector": [], "x": 8, "$meta": "{\"y\": 8}"}
-	// case 2: {"id": 1, "vector": [], "x": 8, "$meta": {}}
+	// case 1: {"id": 1, "vector": [], "x": 8, "$meta": "{\"y\": 8}"} ==>> {"id": 1, "vector": [], "$meta": "{\"y\": 8, \"x\": 8}"}
+	// case 2: {"id": 1, "vector": [], "x": 8, "$meta": {}} ==>> {"id": 1, "vector": [], "$meta": {\"x\": 8}}
 	// case 3: {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
 	// case 4: {"id": 1, "vector": [], "$meta": {"x": 8}}
 	// case 5: {"id": 1, "vector": [], "$meta": {}}
-	// case 6: {"id": 1, "vector": [], "x": 8}
+	// case 6: {"id": 1, "vector": [], "x": 8} ==>> {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
 	// case 7: {"id": 1, "vector": []}
-	obj, ok := row[p.dynamicFieldID]
+	obj, ok := row[dynamicFieldID]
 	if ok {
 		if len(dynamicValues) > 0 {
 			if value, is := obj.(string); is {
 				// case 1
 				mp := make(map[string]interface{})
-				json.Unmarshal([]byte(value), &mp)
+				err := json.Unmarshal([]byte(value), &mp)
+				if err != nil {
+					// invalid input
+					return errors.New("illegal value for dynamic field, not a JSON format string")
+				}
+
 				maps.Copy(dynamicValues, mp)
 			} else if mp, is := obj.(map[string]interface{}); is {
 				// case 2
 				maps.Copy(dynamicValues, mp)
 			} else {
 				// invalid input
-				return errors.New("illegal value for dynamic field")
+				return errors.New("illegal value for dynamic field, not a JSON object")
 			}
-			row[p.dynamicFieldID] = dynamicValues
+			row[dynamicFieldID] = dynamicValues
 		}
 		// else case 3/4/5
 	} else {
 		if len(dynamicValues) > 0 {
 			// case 6
-			row[p.dynamicFieldID] = dynamicValues
+			row[dynamicFieldID] = dynamicValues
 		} else {
 			// case 7
-			row[p.dynamicFieldID] = "{}"
+			row[dynamicFieldID] = "{}"
 		}
 	}
 
@@ -158,36 +143,50 @@ func (p *JSONParser) combineDynamicRow(dynamicValues map[string]interface{}, row
 func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}, error) {
 	stringMap, ok := raw.(map[string]interface{})
 	if !ok {
-		log.Error("JSON parser: invalid JSON format, each row should be a key-value map")
+		log.Warn("JSON parser: invalid JSON format, each row should be a key-value map")
 		return nil, errors.New("invalid JSON format, each row should be a key-value map")
 	}
 
 	dynamicValues := make(map[string]interface{})
 	row := make(map[storage.FieldID]interface{})
+	// some fields redundant?
 	for k, v := range stringMap {
-		fieldID, ok := p.name2FieldID[k]
+		fieldID, ok := p.collectionInfo.Name2FieldID[k]
+		if (fieldID == p.collectionInfo.PrimaryKey.GetFieldID()) && p.collectionInfo.PrimaryKey.GetAutoID() {
+			// primary key is auto-id, no need to provide
+			log.Warn("JSON parser: the primary key is auto-generated, no need to provide", zap.String("fieldName", k))
+			return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", k)
+		}
+
 		if ok {
 			row[fieldID] = v
-		} else if p.dynamicFieldID >= 0 {
+		} else if p.collectionInfo.DynamicField != nil {
 			// has dynamic field. put redundant pair to dynamicValues
 			dynamicValues[k] = v
 		} else {
 			// no dynamic field. if user provided redundant field, return error
-			log.Error("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
+			log.Warn("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
 			return nil, fmt.Errorf("the field '%s' is not defined in collection schema", k)
 		}
 	}
 
 	// some fields not provided?
-	if len(row) != len(p.name2FieldID) {
-		for k, v := range p.name2FieldID {
-			if v == p.dynamicFieldID {
-				// dyanmic field, allow user ignore this field
+	if len(row) != len(p.collectionInfo.Name2FieldID) {
+		for k, v := range p.collectionInfo.Name2FieldID {
+			if (p.collectionInfo.DynamicField != nil) && (v == p.collectionInfo.DynamicField.GetFieldID()) {
+				// ignore dyanmic field, user don't have to provide values for dynamic field
 				continue
 			}
+
+			if v == p.collectionInfo.PrimaryKey.GetFieldID() && p.collectionInfo.PrimaryKey.GetAutoID() {
+				// ignore auto-generaed primary key
+				continue
+			}
+
 			_, ok := row[v]
 			if !ok {
-				log.Error("JSON parser: a field value is missed", zap.String("fieldName", k))
+				// not auto-id primary key, no dynamic field,  must provide value
+				log.Warn("JSON parser: a field value is missed", zap.String("fieldName", k))
 				return nil, fmt.Errorf("value of field '%s' is missed", k)
 			}
 		}
@@ -195,12 +194,17 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 
 	// combine the redundant pairs into dunamic field(if has)
 	err := p.combineDynamicRow(dynamicValues, row)
+	if err != nil {
+		log.Warn("JSON parser: failed to combine dynamic values", zap.Error(err))
+		return nil, err
+	}
+
 	return row, err
 }
 
 func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 	if handler == nil || reader == nil {
-		log.Error("JSON parse handler is nil")
+		log.Warn("JSON parse handler is nil")
 		return errors.New("JSON parse handler is nil")
 	}
 
@@ -225,11 +229,11 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
-		log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))
+		log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
 		return fmt.Errorf("failed to decode the JSON file, error: %w", err)
 	}
 	if t != json.Delim('{') {
-		log.Error("JSON parser: invalid JSON format, the content should be started with'{'")
+		log.Warn("JSON parser: invalid JSON format, the content should be started with'{'")
 		return errors.New("invalid JSON format, the content should be started with'{'")
 	}
 
@@ -239,26 +243,26 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		// read the key
 		t, err := dec.Token()
 		if err != nil {
-			log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))
+			log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
 			return fmt.Errorf("failed to decode the JSON file, error: %w", err)
 		}
 		key := t.(string)
 		keyLower := strings.ToLower(key)
 		// the root key should be RowRootNode
 		if keyLower != RowRootNode {
-			log.Error("JSON parser: invalid JSON format, the root key is not found", zap.String("RowRootNode", RowRootNode), zap.String("key", key))
+			log.Warn("JSON parser: invalid JSON format, the root key is not found", zap.String("RowRootNode", RowRootNode), zap.String("key", key))
 			return fmt.Errorf("invalid JSON format, the root key should be '%s', but get '%s'", RowRootNode, key)
 		}
 
 		// started by '['
 		t, err = dec.Token()
 		if err != nil {
-			log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))
+			log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
 			return fmt.Errorf("failed to decode the JSON file, error: %w", err)
 		}
 
 		if t != json.Delim('[') {
-			log.Error("JSON parser: invalid JSON format, rows list should begin with '['")
+			log.Warn("JSON parser: invalid JSON format, rows list should begin with '['")
 			return errors.New("invalid JSON format, rows list should begin with '['")
 		}
 
@@ -267,7 +271,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
-				log.Error("JSON parser: failed to parse row value", zap.Error(err))
+				log.Warn("JSON parser: failed to parse row value", zap.Error(err))
 				return fmt.Errorf("failed to parse row value, error: %w", err)
 			}
 
@@ -282,7 +286,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 			if len(buf) >= p.bufRowCount {
 				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
-					log.Error("JSON parser: failed to convert row value to entity", zap.Error(err))
+					log.Warn("JSON parser: failed to convert row value to entity", zap.Error(err))
 					return fmt.Errorf("failed to convert row value to entity, error: %w", err)
 				}
 
@@ -295,7 +299,7 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		if len(buf) > 0 {
 			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
-				log.Error("JSON parser: failed to convert row value to entity", zap.Error(err))
+				log.Warn("JSON parser: failed to convert row value to entity", zap.Error(err))
 				return fmt.Errorf("failed to convert row value to entity, error: %w", err)
 			}
 		}
@@ -303,18 +307,18 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		// end by ']'
 		t, err = dec.Token()
 		if err != nil {
-			log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))
+			log.Warn("JSON parser: failed to decode the JSON file", zap.Error(err))
 			return fmt.Errorf("failed to decode the JSON file, error: %w", err)
 		}
 
 		if t != json.Delim(']') {
-			log.Error("JSON parser: invalid JSON format, rows list should end with a ']'")
+			log.Warn("JSON parser: invalid JSON format, rows list should end with a ']'")
 			return errors.New("invalid JSON format, rows list should end with a ']'")
 		}
 
 		// outside context might be canceled(service stop, or future enhancement for canceling import task)
 		if isCanceled(p.ctx) {
-			log.Error("JSON parser: import task was canceled")
+			log.Warn("JSON parser: import task was canceled")
 			return errors.New("import task was canceled")
 		}
 
@@ -323,9 +327,10 @@ func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
 		break
 	}
 
+	// empty file is allowed, don't return error
 	if isEmpty {
-		log.Error("JSON parser: row count is 0")
-		return errors.New("row count is 0")
+		log.Info("JSON parser: row count is 0")
+		return nil
 	}
 
 	updateProgress()

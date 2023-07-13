@@ -49,7 +49,7 @@ type segmentStatesSequence struct {
 	data map[uint64][]*commonpb.SegmentStats // ts -> segmentStats
 }
 
-func newTimeTickManager(dataCoord types.DataCoord, nodeID int64) *timeTickSender {
+func newTimeTickSender(dataCoord types.DataCoord, nodeID int64) *timeTickSender {
 	return &timeTickSender{
 		nodeID:              nodeID,
 		dataCoord:           dataCoord,

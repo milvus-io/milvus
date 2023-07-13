@@ -176,6 +176,7 @@ func (node *Proxy) initRateCollector() error {
 		return err
 	}
 	rateCol.Register(internalpb.RateType_DMLInsert.String())
+	rateCol.Register(internalpb.RateType_DMLUpsert.String())
 	rateCol.Register(internalpb.RateType_DMLDelete.String())
 	// TODO: add bulkLoad rate
 	rateCol.Register(internalpb.RateType_DQLSearch.String())

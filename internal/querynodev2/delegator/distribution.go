@@ -210,24 +210,25 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
+
 	for _, segmentID := range growingInTarget {
 		entry, ok := d.growingSegments[segmentID]
 		if !ok {
-			log.Error("readable growing segment lost, make it unserviceable",
+			log.Warn("readable growing segment lost, consume from dml seems too slow",
 				zap.Int64("segmentID", segmentID))
-			d.serviceable.Store(false)
 			continue
 		}
 		entry.TargetVersion = newVersion
 		d.growingSegments[segmentID] = entry
 	}
 
+	available := true
 	for _, segmentID := range sealedInTarget {
 		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
 			log.Error("readable sealed segment lost, make it unserviceable",
 				zap.Int64("segmentID", segmentID))
-			d.serviceable.Store(false)
+			available = false
 			continue
 		}
 		entry.TargetVersion = newVersion
@@ -237,6 +238,8 @@ func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int
 	oldValue := d.targetVersion.Load()
 	d.targetVersion.Store(newVersion)
 	d.genSnapshot()
+	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
+	d.serviceable.Store(available)
 	log.Info("Update readable segment version",
 		zap.Int64("oldVersion", oldValue),
 		zap.Int64("newVersion", newVersion),
@@ -250,11 +253,9 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	changed := false
 	for _, sealed := range sealedSegments {
 		if d.offlines.Contain(sealed.SegmentID) {
 			d.offlines.Remove(sealed.SegmentID)
-			changed = true
 		}
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
@@ -262,7 +263,6 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		}
 		if entry.NodeID == sealed.NodeID || sealed.NodeID == wildcardNodeID {
 			delete(d.sealedSegments, sealed.SegmentID)
-			changed = true
 		}
 	}
 
@@ -273,14 +273,10 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		}
 
 		delete(d.growingSegments, growing.SegmentID)
-		changed = true
 	}
 
-	if !changed {
-		// no change made, return closed signal channel
-		return getClosedCh()
-	}
-
+	// wait previous read even not distribution changed
+	// in case of segment balance caused segment lost track
 	return d.genSnapshot()
 }
 

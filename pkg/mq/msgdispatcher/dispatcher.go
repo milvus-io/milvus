@@ -99,6 +99,7 @@ func NewDispatcher(factory msgstream.Factory,
 		stream.AsConsumer([]string{pchannel}, subName, mqwrapper.SubscriptionPositionUnknown)
 		err = stream.Seek([]*Pos{position})
 		if err != nil {
+			stream.Close()
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
 		}

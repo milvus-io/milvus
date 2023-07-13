@@ -632,8 +632,7 @@ class TestQueryParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
-                                                        ["*", default_int_field_name],
-                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
+                                                        ["*", default_int_field_name]])
     def test_query_output_field_wildcard(self, wildcard_output_fields):
         """
         target: test query with output fields using wildcard

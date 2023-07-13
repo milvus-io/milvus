@@ -55,6 +55,9 @@ func getRequestInfo(req interface{}) (int64, internalpb.RateType, int, error) {
 	case *milvuspb.InsertRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DMLInsert, proto.Size(r), nil
+	case *milvuspb.UpsertRequest:
+		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+		return collectionID, internalpb.RateType_DMLUpsert, proto.Size(r), nil
 	case *milvuspb.DeleteRequest:
 		collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 		return collectionID, internalpb.RateType_DMLDelete, proto.Size(r), nil
@@ -140,7 +143,7 @@ func wrapQuotaError(rt internalpb.RateType, errCode commonpb.ErrorCode, fullMeth
 	// deny to write/read
 	var op string
 	switch rt {
-	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
 		op = "write"
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
 		op = "read"

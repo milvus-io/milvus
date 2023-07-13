@@ -506,6 +506,7 @@ message SegmentVersionInfo {
   string channel = 4;
   int64 version = 5;
   uint64 last_delta_timestamp = 6;
+  map<int64, FieldIndexInfo> index_info = 7;
 }
 
 message ChannelVersionInfo {

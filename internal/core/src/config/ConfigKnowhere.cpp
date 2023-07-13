@@ -64,6 +64,7 @@ KnowhereSetSimdType(const char* value) {
 void
 KnowhereInitThreadPool(const uint32_t num_threads) {
     knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
+    knowhere::KnowhereConfig::SetAioContextPool(num_threads, 32);
 }
 
 }  // namespace milvus::config

@@ -495,6 +495,15 @@ func WrapErrTaskQueueFull(msg ...string) error {
 	return err
 }
 
+// field related
+func WrapErrFieldNotFound[T any](field T, msg ...string) error {
+	err := errors.Wrapf(ErrFieldNotFound, "field=%v", field)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 func wrapWithField(err error, name string, value any) error {
 	return errors.Wrapf(err, "%s=%v", name, value)
 }

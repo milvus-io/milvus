@@ -284,6 +284,7 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, collections
 			q.quotaStates[collection] = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
 		}
 		q.currentRates[collection][internalpb.RateType_DMLInsert] = 0
+		q.currentRates[collection][internalpb.RateType_DMLUpsert] = 0
 		q.currentRates[collection][internalpb.RateType_DMLDelete] = 0
 		q.currentRates[collection][internalpb.RateType_DMLBulkLoad] = 0
 		q.quotaStates[collection][milvuspb.QuotaState_DenyToWrite] = errorCode
@@ -468,12 +469,16 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		if q.currentRates[collection][internalpb.RateType_DMLInsert] != Inf {
 			q.currentRates[collection][internalpb.RateType_DMLInsert] *= Limit(factor)
 		}
+		if q.currentRates[collection][internalpb.RateType_DMLUpsert] != Inf {
+			q.currentRates[collection][internalpb.RateType_DMLUpsert] *= Limit(factor)
+		}
 		if q.currentRates[collection][internalpb.RateType_DMLDelete] != Inf {
 			q.currentRates[collection][internalpb.RateType_DMLDelete] *= Limit(factor)
 		}
 
 		collectionProps := q.getCollectionLimitConfig(collection)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMinKey), internalpb.RateType_DMLInsert, collection)
+		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionUpsertRateMinKey), internalpb.RateType_DMLUpsert, collection)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMinKey), internalpb.RateType_DMLDelete, collection)
 		log.RatedDebug(10, "QuotaCenter cool write rates off done",
 			zap.Int64("collectionID", collection),
@@ -694,6 +699,7 @@ func (q *QuotaCenter) resetAllCurrentRates() {
 	q.currentRates = map[int64]map[internalpb.RateType]ratelimitutil.Limit{}
 	for _, collection := range q.writableCollections {
 		q.resetCurrentRate(internalpb.RateType_DMLInsert, collection)
+		q.resetCurrentRate(internalpb.RateType_DMLUpsert, collection)
 		q.resetCurrentRate(internalpb.RateType_DMLDelete, collection)
 		q.resetCurrentRate(internalpb.RateType_DMLBulkLoad, collection)
 	}
@@ -718,6 +724,8 @@ func (q *QuotaCenter) resetCurrentRate(rt internalpb.RateType, collection int64)
 	switch rt {
 	case internalpb.RateType_DMLInsert:
 		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMaxKey))
+	case internalpb.RateType_DMLUpsert:
+		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionUpsertRateMaxKey))
 	case internalpb.RateType_DMLDelete:
 		q.currentRates[collection][rt] = Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMaxKey))
 	case internalpb.RateType_DMLBulkLoad:

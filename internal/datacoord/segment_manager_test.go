@@ -23,10 +23,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -608,7 +611,6 @@ func TestTryToSealSegment(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
 		memoryKV := NewMetaMemoryKV()
-		fkv := &saveFailKV{MetaKv: memoryKV}
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
@@ -622,7 +624,11 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)
@@ -634,7 +640,6 @@ func TestTryToSealSegment(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
 		memoryKV := NewMetaMemoryKV()
-		fkv := &saveFailKV{MetaKv: memoryKV}
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.NoError(t, err)
@@ -648,7 +653,11 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
+		metakv := mockkv.NewMetaKv(t)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.NoError(t, err)

@@ -225,7 +225,7 @@ queryNode:
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
-    cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency 
+    cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency
     knowhereThreadPoolNumRatio: 4
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
@@ -235,7 +235,7 @@ queryNode:
       enableIndex: true
       nlist: 128 # growing segment index nlist
       nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
-  loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
+  loadMemoryUsageFactor: 2 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
@@ -243,7 +243,7 @@ queryNode:
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
   grouping:
     enabled: true
-    maxNQ: 50000
+    maxNQ: 1000
     topKMergeRatio: 20
   scheduler:
     receiveChanSize: 10240
@@ -335,7 +335,7 @@ dataCoord:
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
+    missingTolerance: 10800 # file meta missing tolerance duration in seconds, 10800
     dropTolerance: 3600 # file belongs to dropped entity tolerance duration in seconds. 3600
   enableActiveStandby: false
   port: 13333
@@ -503,6 +503,10 @@ quotaAndLimits:
     # The maximum rate will not be greater than max.
     enabled: false
     insertRate:
+      collection:
+        max: -1 # MB/s, default no limit
+      max: -1 # MB/s, default no limit
+    upsertRate:
       collection:
         max: -1 # MB/s, default no limit
       max: -1 # MB/s, default no limit

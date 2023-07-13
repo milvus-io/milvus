@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -73,7 +72,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	//Get collection from collection manager
 	collection := fNode.manager.Collection.Get(fNode.collectionID)
 	if collection == nil {
-		err := segments.WrapCollectionNotFound(fNode.collectionID)
+		err := merr.WrapErrCollectionNotFound(fNode.collectionID)
 		log.Error(err.Error())
 		panic(err)
 	}

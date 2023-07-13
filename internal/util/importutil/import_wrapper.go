@@ -22,16 +22,14 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -70,14 +68,16 @@ const (
 // ReportImportAttempts is the maximum # of attempts to retry when import fails.
 var ReportImportAttempts uint = 10
 
-type ImportFlushFunc func(fields map[storage.FieldID]storage.FieldData, shardID int) error
-type AssignSegmentFunc func(shardID int) (int64, string, error)
-type CreateBinlogsFunc func(fields map[storage.FieldID]storage.FieldData, segmentID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error)
-type SaveSegmentFunc func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64) error
+type ImportFlushFunc func(fields BlockData, shardID int, partID int64) error
+type AssignSegmentFunc func(shardID int, partID int64) (int64, string, error)
+type CreateBinlogsFunc func(fields BlockData, segmentID int64, partID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error)
+type SaveSegmentFunc func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64, partID int64) error
+type ReportFunc func(res *rootcoordpb.ImportResult) error
 
 type WorkingSegment struct {
 	segmentID    int64                 // segment ID
-	shardID      int                   // shard id
+	shardID      int                   // shard ID
+	partitionID  int64                 // partition ID
 	targetChName string                // target dml channel
 	rowCount     int64                 // accumulate row count
 	memSize      int                   // total memory size of all binlogs
@@ -86,64 +86,48 @@ type WorkingSegment struct {
 }
 
 type ImportWrapper struct {
-	ctx              context.Context            // for canceling parse process
-	cancel           context.CancelFunc         // for canceling parse process
-	collectionSchema *schemapb.CollectionSchema // collection schema
-	shardNum         int32                      // sharding number of the collection
-	segmentSize      int64                      // maximum size of a segment(unit:byte) defined by dataCoord.segment.maxSize (milvus.yml)
-	rowIDAllocator   *allocator.IDAllocator     // autoid allocator
-	chunkManager     storage.ChunkManager
+	ctx            context.Context        // for canceling parse process
+	cancel         context.CancelFunc     // for canceling parse process
+	collectionInfo *CollectionInfo        // collection details including schema
+	segmentSize    int64                  // maximum size of a segment(unit:byte) defined by dataCoord.segment.maxSize (milvus.yml)
+	rowIDAllocator *allocator.IDAllocator // autoid allocator
+	chunkManager   storage.ChunkManager
 
 	assignSegmentFunc AssignSegmentFunc // function to prepare a new segment
 	createBinlogsFunc CreateBinlogsFunc // function to create binlog for a segment
 	saveSegmentFunc   SaveSegmentFunc   // function to persist a segment
 
-	importResult         *rootcoordpb.ImportResult                 // import result
-	reportFunc           func(res *rootcoordpb.ImportResult) error // report import state to rootcoord
-	reportImportAttempts uint                                      // attempts count if report function get error
+	importResult         *rootcoordpb.ImportResult // import result
+	reportFunc           ReportFunc                // report import state to rootcoord
+	reportImportAttempts uint                      // attempts count if report function get error
 
-	workingSegments map[int]*WorkingSegment // a map shard id to working segments
-	progressPercent int64                   // working progress percent
+	workingSegments map[int]map[int64]*WorkingSegment // two-level map shard id and partition id to working segments
+	progressPercent int64                             // working progress percent
 }
 
-func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.CollectionSchema, shardNum int32, segmentSize int64,
+func NewImportWrapper(ctx context.Context, collectionInfo *CollectionInfo, segmentSize int64,
 	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, importResult *rootcoordpb.ImportResult,
 	reportFunc func(res *rootcoordpb.ImportResult) error) *ImportWrapper {
-	if collectionSchema == nil {
-		log.Error("import wrapper: collection schema is nil")
+	if collectionInfo == nil || collectionInfo.Schema == nil {
+		log.Warn("import wrapper: collection schema is nil")
 		return nil
 	}
-
-	// ignore the RowID field and Timestamp field
-	realSchema := &schemapb.CollectionSchema{
-		Name:               collectionSchema.GetName(),
-		Description:        collectionSchema.GetDescription(),
-		AutoID:             collectionSchema.GetAutoID(),
-		Fields:             make([]*schemapb.FieldSchema, 0),
-		EnableDynamicField: collectionSchema.GetEnableDynamicField(),
-	}
-	for i := 0; i < len(collectionSchema.Fields); i++ {
-		schema := collectionSchema.Fields[i]
-		if schema.GetName() == common.RowIDFieldName || schema.GetName() == common.TimeStampFieldName {
-			continue
-		}
-		realSchema.Fields = append(realSchema.Fields, schema)
-	}
+	log.Info("import wrapper: collection info", zap.Int32("ShardNum", collectionInfo.ShardNum),
+		zap.Int("PartitionsNum", len(collectionInfo.PartitionIDs)), zap.Any("Fields", collectionInfo.Name2FieldID))
 
 	ctx, cancel := context.WithCancel(ctx)
 
 	wrapper := &ImportWrapper{
 		ctx:                  ctx,
 		cancel:               cancel,
-		collectionSchema:     realSchema,
-		shardNum:             shardNum,
+		collectionInfo:       collectionInfo,
 		segmentSize:          segmentSize,
 		rowIDAllocator:       idAlloc,
 		chunkManager:         cm,
 		importResult:         importResult,
 		reportFunc:           reportFunc,
 		reportImportAttempts: ReportImportAttempts,
-		workingSegments:      make(map[int]*WorkingSegment),
+		workingSegments:      make(map[int]map[int64]*WorkingSegment),
 	}
 
 	return wrapper
@@ -151,17 +135,17 @@ func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.Collection
 
 func (p *ImportWrapper) SetCallbackFunctions(assignSegmentFunc AssignSegmentFunc, createBinlogsFunc CreateBinlogsFunc, saveSegmentFunc SaveSegmentFunc) error {
 	if assignSegmentFunc == nil {
-		log.Error("import wrapper: callback function AssignSegmentFunc is nil")
+		log.Warn("import wrapper: callback function AssignSegmentFunc is nil")
 		return fmt.Errorf("callback function AssignSegmentFunc is nil")
 	}
 
 	if createBinlogsFunc == nil {
-		log.Error("import wrapper: callback function CreateBinlogsFunc is nil")
+		log.Warn("import wrapper: callback function CreateBinlogsFunc is nil")
 		return fmt.Errorf("callback function CreateBinlogsFunc is nil")
 	}
 
 	if saveSegmentFunc == nil {
-		log.Error("import wrapper: callback function SaveSegmentFunc is nil")
+		log.Warn("import wrapper: callback function SaveSegmentFunc is nil")
 		return fmt.Errorf("callback function SaveSegmentFunc is nil")
 	}
 
@@ -192,7 +176,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 
 		// only allow json file or numpy file
 		if fileType != JSONFileExt && fileType != NumpyFileExt {
-			log.Error("import wrapper: unsupported file type", zap.String("filePath", filePath))
+			log.Warn("import wrapper: unsupported file type", zap.String("filePath", filePath))
 			return false, fmt.Errorf("unsupported file type: '%s'", filePath)
 		}
 
@@ -205,12 +189,12 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// row-based only support json type, column-based only support numpy type
 		if rowBased {
 			if fileType != JSONFileExt {
-				log.Error("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
+				log.Warn("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
 				return rowBased, fmt.Errorf("unsupported file type for row-based mode: '%s'", filePath)
 			}
 		} else {
 			if fileType != NumpyFileExt {
-				log.Error("import wrapper: unsupported file type for column-based mode", zap.String("filePath", filePath))
+				log.Warn("import wrapper: unsupported file type for column-based mode", zap.String("filePath", filePath))
 				return rowBased, fmt.Errorf("unsupported file type for column-based mode: '%s'", filePath)
 			}
 		}
@@ -218,7 +202,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// check dupliate file
 		_, ok := fileNames[name]
 		if ok {
-			log.Error("import wrapper: duplicate file name", zap.String("filePath", filePath))
+			log.Warn("import wrapper: duplicate file name", zap.String("filePath", filePath))
 			return rowBased, fmt.Errorf("duplicate file: '%s'", filePath)
 		}
 		fileNames[name] = struct{}{}
@@ -226,20 +210,21 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// check file size, single file size cannot exceed MaxFileSize
 		size, err := p.chunkManager.Size(p.ctx, filePath)
 		if err != nil {
-			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
+			log.Warn("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
 			return rowBased, fmt.Errorf("failed to get file size of '%s', error:%w", filePath, err)
 		}
 
 		// empty file
 		if size == 0 {
-			log.Error("import wrapper: file size is zero", zap.String("filePath", filePath))
+			log.Warn("import wrapper: file size is zero", zap.String("filePath", filePath))
 			return rowBased, fmt.Errorf("the file '%s' size is zero", filePath)
 		}
 
 		if size > params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64() {
-			log.Error("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
-				zap.Int64("fileSize", size), zap.Int64("MaxFileSize", params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64()))
-			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %d bytes", filePath, params.Params.CommonCfg.ImportMaxFileSize.GetAsInt64())
+			log.Warn("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
+				zap.Int64("fileSize", size), zap.String("MaxFileSize", params.Params.CommonCfg.ImportMaxFileSize.GetValue()))
+			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %s bytes",
+				filePath, params.Params.CommonCfg.ImportMaxFileSize.GetValue())
 		}
 		totalSize += size
 	}
@@ -278,7 +263,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			if fileType == JSONFileExt {
 				err = p.parseRowBasedJSON(filePath, options.OnlyValidate)
 				if err != nil {
-					log.Error("import wrapper: failed to parse row-based json file", zap.Error(err), zap.String("filePath", filePath))
+					log.Warn("import wrapper: failed to parse row-based json file", zap.Error(err), zap.String("filePath", filePath))
 					return err
 				}
 			} // no need to check else, since the fileValidation() already do this
@@ -290,11 +275,11 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 		// parse and consume column-based files(currently support numpy)
 		// for column-based files, the NumpyParser will generate autoid for primary key, and split rows into segments
 		// according to shard number, so the flushFunc will be called in the NumpyParser
-		flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		flushFunc := func(fields BlockData, shardID int, partitionID int64) error {
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
-			return p.flushFunc(fields, shardID)
+			return p.flushFunc(fields, shardID, partitionID)
 		}
-		parser, err := NewNumpyParser(p.ctx, p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize,
+		parser, err := NewNumpyParser(p.ctx, p.collectionInfo, p.rowIDAllocator, SingleBlockSize,
 			p.chunkManager, flushFunc, p.updateProgressPercent)
 		if err != nil {
 			return err
@@ -392,12 +377,12 @@ func (p *ImportWrapper) isBinlogImport(filePaths []string) bool {
 func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, tsEndPoint uint64) error {
 	tr := timerecord.NewTimeRecorder("Import task")
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partitionID int64) error {
 		printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
-		return p.flushFunc(fields, shardID)
+		return p.flushFunc(fields, shardID, partitionID)
 	}
-	parser, err := NewBinlogParser(p.ctx, p.collectionSchema, p.shardNum, SingleBlockSize, p.chunkManager, flushFunc,
-		p.updateProgressPercent, tsStartPoint, tsEndPoint)
+	parser, err := NewBinlogParser(p.ctx, p.collectionInfo, SingleBlockSize,
+		p.chunkManager, flushFunc, p.updateProgressPercent, tsStartPoint, tsEndPoint)
 	if err != nil {
 		return err
 	}
@@ -429,23 +414,23 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 
 	// parse file
 	reader := bufio.NewReader(file)
-	parser := NewJSONParser(p.ctx, p.collectionSchema, p.updateProgressPercent)
+	parser := NewJSONParser(p.ctx, p.collectionInfo, p.updateProgressPercent)
 
 	// if only validate, we input a empty flushFunc so that the consumer do nothing but only validation.
 	var flushFunc ImportFlushFunc
 	if onlyValidate {
-		flushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		flushFunc = func(fields BlockData, shardID int, partitionID int64) error {
 			return nil
 		}
 	} else {
-		flushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		flushFunc = func(fields BlockData, shardID int, partitionID int64) error {
 			var filePaths = []string{filePath}
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlogs", filePaths)
-			return p.flushFunc(fields, shardID)
+			return p.flushFunc(fields, shardID, partitionID)
 		}
 	}
 
-	consumer, err := NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize, flushFunc)
+	consumer, err := NewJSONRowConsumer(p.ctx, p.collectionInfo, p.rowIDAllocator, SingleBlockSize, flushFunc)
 	if err != nil {
 		return err
 	}
@@ -463,7 +448,12 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 }
 
 // flushFunc is the callback function for parsers generate segment and save binlog files
-func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+func (p *ImportWrapper) flushFunc(fields BlockData, shardID int, partitionID int64) error {
+	logFields := []zap.Field{
+		zap.Int("shardID", shardID),
+		zap.Int64("partitionID", partitionID),
+	}
+
 	// if fields data is empty, do nothing
 	var rowNum int
 	memSize := 0
@@ -473,52 +463,59 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 		break
 	}
 	if rowNum <= 0 {
-		log.Warn("import wrapper: fields data is empty", zap.Int("shardID", shardID))
+		log.Warn("import wrapper: fields data is empty", logFields...)
 		return nil
 	}
 
 	// if there is no segment for this shard, create a new one
 	// if the segment exists and its size almost exceed segmentSize, close it and create a new one
 	var segment *WorkingSegment
-	segment, ok := p.workingSegments[shardID]
-	if ok {
-		// the segment already exists, check its size, if the size exceeds(or almost) segmentSize, close the segment
-		if int64(segment.memSize)+int64(memSize) >= p.segmentSize {
-			err := p.closeWorkingSegment(segment)
-			if err != nil {
-				return err
+	if shard, ok := p.workingSegments[shardID]; ok {
+		if segment, exists := shard[partitionID]; exists {
+			// the segment already exists, check its size, if the size exceeds(or almost) segmentSize, close the segment
+			if int64(segment.memSize)+int64(memSize) >= p.segmentSize {
+				err := p.closeWorkingSegment(segment)
+				if err != nil {
+					logFields = append(logFields, zap.Error(err))
+					log.Warn("import wrapper: failed to close working segment", logFields...)
+					return err
+				}
+				segment = nil
+				p.workingSegments[shardID][partitionID] = nil
 			}
-			segment = nil
-			p.workingSegments[shardID] = nil
 		}
-
+	} else {
+		p.workingSegments[shardID] = make(map[int64]*WorkingSegment)
 	}
 
 	if segment == nil {
 		// create a new segment
-		segID, channelName, err := p.assignSegmentFunc(shardID)
+		segID, channelName, err := p.assignSegmentFunc(shardID, partitionID)
 		if err != nil {
-			log.Error("import wrapper: failed to assign a new segment", zap.Error(err), zap.Int("shardID", shardID))
+			logFields = append(logFields, zap.Error(err))
+			log.Warn("import wrapper: failed to assign a new segment", logFields...)
 			return fmt.Errorf("failed to assign a new segment for shard id %d, error: %w", shardID, err)
 		}
 
 		segment = &WorkingSegment{
 			segmentID:    segID,
 			shardID:      shardID,
+			partitionID:  partitionID,
 			targetChName: channelName,
 			rowCount:     int64(0),
 			memSize:      0,
 			fieldsInsert: make([]*datapb.FieldBinlog, 0),
 			fieldsStats:  make([]*datapb.FieldBinlog, 0),
 		}
-		p.workingSegments[shardID] = segment
+		p.workingSegments[shardID][partitionID] = segment
 	}
 
 	// save binlogs
-	fieldsInsert, fieldsStats, err := p.createBinlogsFunc(fields, segment.segmentID)
+	fieldsInsert, fieldsStats, err := p.createBinlogsFunc(fields, segment.segmentID, partitionID)
 	if err != nil {
-		log.Error("import wrapper: failed to save binlogs", zap.Error(err), zap.Int("shardID", shardID),
-			zap.Int64("segmentID", segment.segmentID), zap.String("targetChannel", segment.targetChName))
+		logFields = append(logFields, zap.Error(err), zap.Int64("segmentID", segment.segmentID),
+			zap.String("targetChannel", segment.targetChName))
+		log.Warn("import wrapper: failed to save binlogs", logFields...)
 		return fmt.Errorf("failed to save binlogs, shard id %d, segment id %d, channel '%s', error: %w",
 			shardID, segment.segmentID, segment.targetChName, err)
 	}
@@ -536,7 +533,8 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 		return p.reportFunc(p.importResult)
 	}, retry.Attempts(p.reportImportAttempts))
 	if reportErr != nil {
-		log.Warn("import wrapper: fail to report working progress percent value to RootCoord", zap.Error(reportErr))
+		logFields = append(logFields, zap.Error(err))
+		log.Warn("import wrapper: fail to report working progress percent value to RootCoord", logFields...)
 	}
 
 	return nil
@@ -544,21 +542,21 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 
 // closeWorkingSegment marks a segment to be sealed
 func (p *ImportWrapper) closeWorkingSegment(segment *WorkingSegment) error {
-	log.Info("import wrapper: adding segment to the correct DataNode flow graph and saving binlog paths",
+	logFields := []zap.Field{
 		zap.Int("shardID", segment.shardID),
 		zap.Int64("segmentID", segment.segmentID),
 		zap.String("targetChannel", segment.targetChName),
 		zap.Int64("rowCount", segment.rowCount),
 		zap.Int("insertLogCount", len(segment.fieldsInsert)),
-		zap.Int("statsLogCount", len(segment.fieldsStats)))
+		zap.Int("statsLogCount", len(segment.fieldsStats)),
+	}
+	log.Info("import wrapper: adding segment to the correct DataNode flow graph and saving binlog paths", logFields...)
 
-	err := p.saveSegmentFunc(segment.fieldsInsert, segment.fieldsStats, segment.segmentID, segment.targetChName, segment.rowCount)
+	err := p.saveSegmentFunc(segment.fieldsInsert, segment.fieldsStats, segment.segmentID, segment.targetChName,
+		segment.rowCount, segment.partitionID)
 	if err != nil {
-		log.Error("import wrapper: failed to seal segment",
-			zap.Error(err),
-			zap.Int("shardID", segment.shardID),
-			zap.Int64("segmentID", segment.segmentID),
-			zap.String("targetChannel", segment.targetChName))
+		logFields = append(logFields, zap.Error(err))
+		log.Warn("import wrapper: failed to seal segment", logFields...)
 		return fmt.Errorf("failed to seal segment, shard id %d, segment id %d, channel '%s', error: %w",
 			segment.shardID, segment.segmentID, segment.targetChName, err)
 	}
@@ -568,13 +566,15 @@ func (p *ImportWrapper) closeWorkingSegment(segment *WorkingSegment) error {
 
 // closeAllWorkingSegments mark all segments to be sealed at the end of import operation
 func (p *ImportWrapper) closeAllWorkingSegments() error {
-	for _, segment := range p.workingSegments {
-		err := p.closeWorkingSegment(segment)
-		if err != nil {
-			return err
+	for _, shard := range p.workingSegments {
+		for _, segment := range shard {
+			err := p.closeWorkingSegment(segment)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	p.workingSegments = make(map[int]*WorkingSegment)
+	p.workingSegments = make(map[int]map[int64]*WorkingSegment)
 
 	return nil
 }

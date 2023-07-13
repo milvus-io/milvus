@@ -1599,7 +1599,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",
 		Version:      "2.0.0",
-		DefaultValue: "3",
+		DefaultValue: "2",
 		PanicIfEmpty: true,
 		Doc:          "The multiply factor of calculating the memory usage while loading segments",
 		Export:       true,
@@ -1694,7 +1694,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "50000",
+		DefaultValue: "1000",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
@@ -2008,7 +2008,7 @@ the number of binlog file reaches to max value.`,
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable data segment compaction",
 		Export:       true,
 	}
@@ -2133,11 +2133,12 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GCInterval.Init(base.mgr)
 
+	// Do you set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "86400",
-		Doc:          "file meta missing tolerance duration in seconds, 60*24",
+		DefaultValue: "10800",
+		Doc:          "file meta missing tolerance duration in seconds, 60*60*3",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)
@@ -2220,6 +2221,7 @@ type dataNodeConfig struct {
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
 	CpLagPeriod            ParamItem `refreshable:"true"`
+	CpLagSyncLimit         ParamItem `refreshable:"true"`
 
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
@@ -2344,10 +2346,19 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.segment.cpLagPeriod",
 		Version:      "2.2.0",
 		DefaultValue: "600",
-		Doc:          "The period to sync segments if buffer is not empty.",
+		Doc:          "The period to sync segments for cp lag period policy",
 		Export:       true,
 	}
 	p.CpLagPeriod.Init(base.mgr)
+
+	p.CpLagSyncLimit = ParamItem{
+		Key:          "datanode.segment.cpLagSyncLimit",
+		Version:      "2.2.0",
+		DefaultValue: "10",
+		Doc:          "The limit to sync segments for cp lag period policy",
+		Export:       true,
+	}
+	p.CpLagSyncLimit.Init(base.mgr)
 
 	p.WatchEventTicklerInterval = ParamItem{
 		Key:          "datanode.segment.watchEventTicklerInterval",

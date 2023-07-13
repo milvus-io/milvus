@@ -117,7 +117,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	}
 
 	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
 
@@ -389,7 +389,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		delBufHeap: &PriorityQueue{},
 	}
 	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
 
@@ -637,7 +637,7 @@ func TestInsertBufferNodeRollBF(t *testing.T) {
 	}
 
 	dataCoord := &DataCoordFactory{}
-	atimeTickSender := newTimeTickManager(dataCoord, 0)
+	atimeTickSender := newTimeTickSender(dataCoord, 0)
 	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 	require.NoError(t, err)
 
@@ -1015,7 +1015,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		}
 
 		dataCoord := &DataCoordFactory{}
-		atimeTickSender := newTimeTickManager(dataCoord, 0)
+		atimeTickSender := newTimeTickSender(dataCoord, 0)
 		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, delBufManager, flushChan, resendTTChan, fm, newCache(), c, atimeTickSender)
 		require.NoError(t, err)
 

@@ -353,3 +353,22 @@ func (kv *MemoryKV) RemoveWithPrefix(key string) error {
 	}
 	return nil
 }
+
+func (kv *MemoryKV) Has(key string) (bool, error) {
+	kv.Lock()
+	defer kv.Unlock()
+	return kv.tree.Has(memoryKVItem{key: key}), nil
+}
+
+func (kv *MemoryKV) HasPrefix(prefix string) (bool, error) {
+	kv.Lock()
+	defer kv.Unlock()
+
+	var has bool
+	kv.tree.AscendGreaterOrEqual(memoryKVItem{key: prefix}, func(i btree.Item) bool {
+		has = strings.HasPrefix(i.(memoryKVItem).key, prefix)
+		return false
+	})
+
+	return has, nil
+}

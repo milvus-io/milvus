@@ -105,6 +105,8 @@ const (
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"
 	CollectionInsertRateMinKey   = "collection.insertRate.min.mb"
+	CollectionUpsertRateMaxKey   = "collection.upsertRate.max.mb"
+	CollectionUpsertRateMinKey   = "collection.upsertRate.min.mb"
 	CollectionDeleteRateMaxKey   = "collection.deleteRate.max.mb"
 	CollectionDeleteRateMinKey   = "collection.deleteRate.min.mb"
 	CollectionBulkLoadRateMaxKey = "collection.bulkLoadRate.max.mb"

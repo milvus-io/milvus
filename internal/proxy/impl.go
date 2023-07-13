@@ -2596,8 +2596,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	insertReceiveSize := proto.Size(it.upsertMsg.InsertMsg)
 	deleteReceiveSize := proto.Size(it.upsertMsg.DeleteMsg)
 
-	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(deleteReceiveSize))
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(insertReceiveSize))
+	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(insertReceiveSize+deleteReceiveSize))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()

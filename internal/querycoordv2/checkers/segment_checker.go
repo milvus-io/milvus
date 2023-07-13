@@ -77,7 +77,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	// find already released segments which are not contained in target
 	segments := c.dist.SegmentDistManager.GetAll()
 	released := utils.FilterReleased(segments, collectionIDs)
-	tasks = append(tasks, c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_All)...)
+	tasks = append(tasks, c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_Historical)...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	return tasks
 }
@@ -92,14 +92,14 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	redundancies = c.filterSegmentInUse(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_All)
+	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	ret = append(ret, tasks...)
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedHistoricalSegments(c.dist, c.meta, replica.GetID())
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
-	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_All)
+	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	ret = append(ret, tasks...)
 
