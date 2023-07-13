@@ -18,9 +18,10 @@ const (
 	EnableAutoID  = true
 	DisableAutoID = false
 
-	HTTPCollectionName = "collectionName"
-	HTTPDbName         = "dbName"
-	DefaultDbName      = "default"
+	HTTPCollectionName  = "collectionName"
+	HTTPDbName          = "dbName"
+	DefaultDbName       = "default"
+	DefaultOutputFields = "*"
 
 	HTTPReturnCode    = "code"
 	HTTPReturnMessage = "message"
@@ -51,5 +52,6 @@ const (
 	Params            = "params"
 	ParamRoundDecimal = "round_decimal"
 	ParamOffset       = "offset"
+	ParamLimit        = "limit"
 	BoundedTimestamp  = 2
 )

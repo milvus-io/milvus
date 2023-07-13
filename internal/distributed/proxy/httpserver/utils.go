@@ -124,13 +124,19 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
-		res = append(res, gin.H{
+		fieldDetail := gin.H{
 			HTTPReturnFieldName:       field.Name,
-			HTTPReturnFieldType:       field.DataType.String(),
 			HTTPReturnFieldPrimaryKey: field.IsPrimaryKey,
 			HTTPReturnFieldAutoID:     field.AutoID,
 			HTTPReturnDescription:     field.Description,
-		})
+		}
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			dim, _ := getDim(field)
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+		} else {
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		}
+		res = append(res, fieldDetail)
 	}
 	return res
 }
@@ -438,7 +444,6 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 		return nil, errors.New("cannot find dimension")
 	}
 
-	dynamicFieldName := ""
 	dynamicCol := make([][]byte, 0, rowsLen)
 
 	for _, row := range rows {
@@ -450,11 +455,6 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 		}
 
 		for idx, field := range sch.Fields {
-			// skip dynamic field if visible
-			if isDynamic && field.IsDynamic {
-				dynamicFieldName = field.Name
-				continue
-			}
 			// skip auto id pk field
 			if field.IsPrimaryKey && field.AutoID {
 				// remove pk field from candidates set, avoid adding it into dynamic column
@@ -498,7 +498,7 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			delete(set, field.Name)
 		}
 
-		if isDynamic && dynamicFieldName != "" {
+		if isDynamic {
 			m := make(map[string]interface{})
 			for name, candi := range set {
 				m[name] = candi.v.Interface()
@@ -650,10 +650,10 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 		}
 		columns = append(columns, colData)
 	}
-	if isDynamic && dynamicFieldName != "" {
+	if isDynamic {
 		columns = append(columns, &schemapb.FieldData{
-			Type:      fieldData[dynamicFieldName].Type,
-			FieldName: dynamicFieldName,
+			Type:      schemapb.DataType_JSON,
+			FieldName: "",
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_JsonData{
@@ -663,7 +663,6 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 					},
 				},
 			},
-			FieldId:   fieldData[dynamicFieldName].FieldId,
 			IsDynamic: true,
 		})
 	}
@@ -721,7 +720,6 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 }
 
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, scores []float32) ([]map[string]interface{}, error) {
-	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
 	if len(fieldDataList) == 0 {
 		return []map[string]interface{}{}, nil
 	}
@@ -761,6 +759,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].Type, fieldDataList[0].FieldName)
 		}
 	}
+	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
 	for i := int64(0); i < rowsNum; i++ {
 		row := map[string]interface{}{}
 		for j := 0; j < columnNum; j++ {
