@@ -126,6 +126,8 @@ type DataNode struct {
 	closer io.Closer
 
 	factory dependency.Factory
+
+	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -145,6 +147,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 
 		flowgraphManager: newFlowgraphManager(),
 		clearSignal:      make(chan string, 100),
+
+		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
@@ -979,14 +983,18 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	log.Info("DataNode receive import request",
+	logFields := []zap.Field{
 		zap.Int64("task ID", req.GetImportTask().GetTaskId()),
 		zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
 		zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
+		zap.String("database name", req.GetImportTask().GetDatabaseName()),
 		zap.Strings("channel names", req.GetImportTask().GetChannelNames()),
-		zap.Int64s("working dataNodes", req.WorkingNodes))
+		zap.Int64s("working dataNodes", req.WorkingNodes),
+		zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()),
+	}
+	log.Info("DataNode receive import request", logFields...)
 	defer func() {
-		log.Info("DataNode finish import request", zap.Int64("task ID", req.GetImportTask().GetTaskId()))
+		log.Info("DataNode finish import request", logFields...)
 	}()
 
 	importResult := &rootcoordpb.ImportResult{
@@ -1005,25 +1013,28 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	// Spawn a new context to ignore cancellation from parental context.
 	newCtx, cancel := context.WithTimeout(context.TODO(), ImportCallTimeout)
 	defer cancel()
-	// func to report import state to RootCoord.
-	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		status, err := node.rootCoord.ReportImport(ctx, res)
-		if err != nil {
-			log.Error("fail to report import state to RootCoord", zap.Error(err))
-			return err
-		}
-		if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(status.GetReason())
-		}
-		return nil
+
+	// function to report import state to RootCoord.
+	// retry 10 times, if the rootcoord is down, the report function will cost 20+ seconds
+	reportFunc := reportImportFunc(node)
+	returnFailFunc := func(msg string, inputErr error) (*commonpb.Status, error) {
+		logFields = append(logFields, zap.Error(inputErr))
+		log.Warn(msg, logFields...)
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: inputErr.Error()})
+
+		reportFunc(importResult)
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    inputErr.Error(),
+		}, nil
 	}
 
 	if !node.isHealthy() {
-		log.Warn("DataNode import failed",
-			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
-			zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
-			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
+		err := errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())
+		logFields = append(logFields, zap.Error(err))
+		log.Warn("DataNode import failed, node is not healthy", logFields...)
 
 		resp := &commonpb.Status{}
 		setNotServingStatus(resp, node.GetStateCode())
@@ -1043,19 +1054,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	})
 
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
-		msg := "DataNode alloc ts failed"
-		log.Warn(msg)
-		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: msg})
-		if reportErr := reportFunc(importResult); reportErr != nil {
-			log.Warn("fail to report import state to RootCoord", zap.Error(reportErr))
-		}
-		if err != nil {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msg,
-			}, nil
-		}
+		return returnFailFunc("DataNode alloc ts failed", err)
 	}
 
 	ts := rep.GetTimestamp()
@@ -1064,41 +1063,28 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	metaService := newMetaService(node.rootCoord, req.GetImportTask().GetCollectionId())
 	colInfo, err := metaService.getCollectionInfo(newCtx, req.GetImportTask().GetCollectionId(), 0)
 	if err != nil {
-		log.Warn("failed to get collection info for collection ID",
-			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
-			zap.Error(err))
-		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: err.Error()})
-		reportErr := reportFunc(importResult)
-		if reportErr != nil {
-			log.Warn("fail to report import state to RootCoord", zap.Error(err))
-		}
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return returnFailFunc("failed to get collection info for collection ID", err)
 	}
 
-	returnFailFunc := func(inputErr error) (*commonpb.Status, error) {
-		log.Warn("import wrapper failed to parse import request",
-			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-			zap.Error(inputErr))
-		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: inputErr.Error()})
-		reportErr := reportFunc(importResult)
-		if reportErr != nil {
-			log.Warn("fail to report import state to RootCoord", zap.Error(inputErr))
-		}
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    inputErr.Error(),
-		}, nil
+	// the colInfo doesn't have a collect database name(it is empty). use the database name passed from rootcoord.
+	partitions, err := node.getPartitions(ctx, req.GetImportTask().GetDatabaseName(), colInfo.GetCollectionName())
+	if err != nil {
+		return returnFailFunc("failed to get partition id list", err)
+	}
+
+	partitionIDs, err := importutil.DeduceTargetPartitions(partitions, colInfo.GetSchema(), req.GetImportTask().GetPartitionId())
+	if err != nil {
+		return returnFailFunc("failed to decude target partitions", err)
+	}
+
+	collectionInfo, err := importutil.NewCollectionInfo(colInfo.GetSchema(), colInfo.GetShardsNum(), partitionIDs)
+	if err != nil {
+		return returnFailFunc("invalid collection info to import", err)
 	}
 
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator,
+	importWrapper := importutil.NewImportWrapper(newCtx, collectionInfo, segmentSize, node.rowIDAllocator,
 		node.chunkManager, importResult, reportFunc)
 	importWrapper.SetCallbackFunctions(assignSegmentFunc(node, req),
 		createBinLogsFunc(node, req, colInfo.GetSchema(), ts),
@@ -1107,13 +1093,14 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	tsStart, tsEnd, err := importutil.ParseTSFromOptions(req.GetImportTask().GetInfos())
 	isBackup := importutil.IsBackup(req.GetImportTask().GetInfos())
 	if err != nil {
-		return returnFailFunc(err)
+		return returnFailFunc("failed to parse timestamp from import options", err)
 	}
-	log.Info("import time range", zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
+	logFields = append(logFields, zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
+	log.Info("import time range", logFields...)
 	err = importWrapper.Import(req.GetImportTask().GetFiles(),
 		importutil.ImportOptions{OnlyValidate: false, TsStartPoint: tsStart, TsEndPoint: tsEnd, IsBackup: isBackup})
 	if err != nil {
-		return returnFailFunc(err)
+		return returnFailFunc("failed to import files", err)
 	}
 
 	resp := &commonpb.Status{
@@ -1122,14 +1109,57 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	return resp, nil
 }
 
+func (node *DataNode) getPartitions(ctx context.Context, dbName string, collectionName string) (map[string]int64, error) {
+	req := &milvuspb.ShowPartitionsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+		),
+		DbName:         dbName,
+		CollectionName: collectionName,
+	}
+
+	logFields := []zap.Field{
+		zap.String("dbName", dbName),
+		zap.String("collection name", collectionName),
+	}
+	resp, err := node.rootCoord.ShowPartitions(ctx, req)
+	if err != nil {
+		logFields = append(logFields, zap.Error(err))
+		log.Warn("failed to get partitions of collection", logFields...)
+		return nil, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("failed to get partitions of collection", logFields...)
+		return nil, errors.New(resp.Status.Reason)
+	}
+
+	partitionNames := resp.GetPartitionNames()
+	partitionIDs := resp.GetPartitionIDs()
+	if len(partitionNames) != len(partitionIDs) {
+		logFields = append(logFields, zap.Int("number of names", len(partitionNames)), zap.Int("number of ids", len(partitionIDs)))
+		log.Warn("partition names and ids are unequal", logFields...)
+		return nil, fmt.Errorf("partition names and ids are unequal, number of names: %d, number of ids: %d",
+			len(partitionNames), len(partitionIDs))
+	}
+
+	partitions := make(map[string]int64)
+	for i := 0; i < len(partitionNames); i++ {
+		partitions[partitionNames[i]] = partitionIDs[i]
+	}
+
+	return partitions, nil
+}
+
 // AddImportSegment adds the import segment to the current DataNode.
 func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	log.Info("adding segment to DataNode flow graph",
+	logFields := []zap.Field{
 		zap.Int64("segment ID", req.GetSegmentId()),
 		zap.Int64("collection ID", req.GetCollectionId()),
 		zap.Int64("partition ID", req.GetPartitionId()),
 		zap.String("channel name", req.GetChannelName()),
-		zap.Int64("# of rows", req.GetRowNum()))
+		zap.Int64("# of rows", req.GetRowNum()),
+	}
+	log.Info("adding segment to DataNode flow graph", logFields...)
 	// Fetch the flow graph on the given v-channel.
 	var ds *dataSyncService
 	// Retry in case the channel hasn't been watched yet.
@@ -1142,9 +1172,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		return nil
 	}, retry.Attempts(getFlowGraphServiceAttempts))
 	if err != nil {
-		log.Error("channel not found in current DataNode",
-			zap.String("channel name", req.GetChannelName()),
-			zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
+		logFields = append(logFields, zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
+		log.Error("channel not found in current DataNode", logFields...)
 		return &datapb.AddImportSegmentResponse{
 			Status: &commonpb.Status{
 				// TODO: Add specific error code.
@@ -1172,8 +1201,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	}
 	// Add the new segment to the channel.
 	if !ds.channel.hasSegment(req.GetSegmentId(), true) {
-		log.Info("adding a new segment to channel",
-			zap.Int64("segment ID", req.GetSegmentId()))
+		log.Info("adding a new segment to channel", logFields...)
 		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
 		// By 'extra information' we mean segment info while adding a `SegmentType_Flushed` typed segment.
 		if err := ds.channel.addSegment(
@@ -1197,8 +1225,8 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				recoverTs: req.GetBase().GetTimestamp(),
 				importing: true,
 			}); err != nil {
-			log.Error("failed to add segment to flow graph",
-				zap.Error(err))
+			logFields = append(logFields, zap.Error(err))
+			log.Error("failed to add segment to flow graph", logFields...)
 			return &datapb.AddImportSegmentResponse{
 				Status: &commonpb.Status{
 					// TODO: Add specific error code.
@@ -1218,30 +1246,29 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 }
 
 func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil.AssignSegmentFunc {
-	return func(shardID int) (int64, string, error) {
+	return func(shardID int, partID int64) (int64, string, error) {
 		chNames := req.GetImportTask().GetChannelNames()
 		importTaskID := req.GetImportTask().GetTaskId()
+		logFields := []zap.Field{
+			zap.Int64("task ID", importTaskID),
+			zap.Int("shard ID", shardID),
+			zap.Int64("partition ID", partID),
+			zap.Int("# of channels", len(chNames)),
+			zap.Strings("channel names", chNames),
+		}
 		if shardID >= len(chNames) {
-			log.Error("import task returns invalid shard ID",
-				zap.Int64("task ID", importTaskID),
-				zap.Int("shard ID", shardID),
-				zap.Int("# of channels", len(chNames)),
-				zap.Strings("channel names", chNames),
-			)
+			log.Error("import task returns invalid shard ID", logFields...)
 			return 0, "", fmt.Errorf("syncSegmentID Failed: invalid shard ID %d", shardID)
 		}
 
-		tr := timerecord.NewTimeRecorder("import callback function")
+		tr := timerecord.NewTimeRecorder("assign segment function")
 		defer tr.Elapse("finished")
 
 		colID := req.GetImportTask().GetCollectionId()
-		partID := req.GetImportTask().GetPartitionId()
 		segmentIDReq := composeAssignSegmentIDRequest(1, shardID, chNames, colID, partID)
 		targetChName := segmentIDReq.GetSegmentIDRequests()[0].GetChannelName()
-		log.Info("target channel for the import task",
-			zap.Int64("task ID", importTaskID),
-			zap.Int("shard ID", shardID),
-			zap.String("target channel name", targetChName))
+		logFields = append(logFields, zap.String("target channel name", targetChName))
+		log.Info("assign segment for the import task", logFields...)
 		resp, err := node.dataCoord.AssignSegmentID(context.Background(), segmentIDReq)
 		if err != nil {
 			return 0, "", fmt.Errorf("syncSegmentID Failed:%w", err)
@@ -1254,43 +1281,32 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		}
 
 		segmentID := resp.SegIDAssignments[0].SegID
-		log.Info("new segment assigned",
-			zap.Int64("task ID", importTaskID),
-			zap.Int64("segmentID", segmentID),
-			zap.Int("shard ID", shardID),
-			zap.String("target channel name", targetChName))
+		logFields = append(logFields, zap.Int64("segment ID", segmentID))
+		log.Info("new segment assigned", logFields...)
 
 		// call report to notify the rootcoord update the segment id list for this task
 		// ignore the returned error, since even report failed the segments still can be cleaned
-		retry.Do(context.Background(), func() error {
-			importResult := &rootcoordpb.ImportResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				TaskId:     req.GetImportTask().TaskId,
-				DatanodeId: Params.DataNodeCfg.GetNodeID(),
-				State:      commonpb.ImportState_ImportStarted,
-				Segments:   []int64{segmentID},
-				AutoIds:    make([]int64, 0),
-				RowCount:   0,
-			}
-			status, err := node.rootCoord.ReportImport(context.Background(), importResult)
-			if err != nil {
-				log.Error("fail to report import state to RootCoord", zap.Error(err))
-				return err
-			}
-			if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
-				return errors.New(status.GetReason())
-			}
-			return nil
-		})
+		// retry 10 times, if the rootcoord is down, the report function will cost 20+ seconds
+		importResult := &rootcoordpb.ImportResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			TaskId:     req.GetImportTask().TaskId,
+			DatanodeId: Params.DataNodeCfg.GetNodeID(),
+			State:      commonpb.ImportState_ImportStarted,
+			Segments:   []int64{segmentID},
+			AutoIds:    make([]int64, 0),
+			RowCount:   0,
+		}
+		reportFunc := reportImportFunc(node)
+		reportFunc(importResult)
 
 		return segmentID, targetChName, nil
 	}
 }
 
 func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *schemapb.CollectionSchema, ts Timestamp) importutil.CreateBinlogsFunc {
-	return func(fields map[storage.FieldID]storage.FieldData, segmentID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+	return func(fields importutil.BlockData, segmentID int64, partID int64) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 		var rowNum int
 		for _, field := range fields {
 			rowNum = field.RowNum()
@@ -1299,34 +1315,29 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 
 		chNames := req.GetImportTask().GetChannelNames()
 		importTaskID := req.GetImportTask().GetTaskId()
+		logFields := []zap.Field{
+			zap.Int64("task ID", importTaskID),
+			zap.Int64("partition ID", partID),
+			zap.Int64("segment ID", segmentID),
+			zap.Int("# of channels", len(chNames)),
+			zap.Strings("channel names", chNames),
+		}
+
 		if rowNum <= 0 {
-			log.Info("fields data is empty, no need to generate binlog",
-				zap.Int64("task ID", importTaskID),
-				zap.Int("# of channels", len(chNames)),
-				zap.Strings("channel names", chNames),
-			)
+			log.Info("fields data is empty, no need to generate binlog", logFields...)
 			return nil, nil, nil
 		}
 
 		colID := req.GetImportTask().GetCollectionId()
-		partID := req.GetImportTask().GetPartitionId()
-
 		fieldInsert, fieldStats, err := createBinLogs(rowNum, schema, ts, fields, node, segmentID, colID, partID)
 		if err != nil {
-			log.Error("failed to create binlogs",
-				zap.Int64("task ID", importTaskID),
-				zap.Int("# of channels", len(chNames)),
-				zap.Strings("channel names", chNames),
-				zap.Any("err", err),
-			)
+			logFields = append(logFields, zap.Any("err", err))
+			log.Error("failed to create binlogs", logFields...)
 			return nil, nil, err
 		}
 
-		log.Info("new binlog created",
-			zap.Int64("task ID", importTaskID),
-			zap.Int64("segmentID", segmentID),
-			zap.Int("insert log count", len(fieldInsert)),
-			zap.Int("stats log count", len(fieldStats)))
+		logFields = append(logFields, zap.Int("insert log count", len(fieldInsert)), zap.Int("stats log count", len(fieldStats)))
+		log.Info("new binlog created", logFields...)
 
 		return fieldInsert, fieldStats, err
 	}
@@ -1334,13 +1345,17 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 
 func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, ts Timestamp) importutil.SaveSegmentFunc {
 	importTaskID := req.GetImportTask().GetTaskId()
-	return func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64) error {
-		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths",
+	return func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64,
+		targetChName string, rowCount int64, partID int64) error {
+		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
-			zap.Int64("segmentID", segmentID),
-			zap.String("targetChName", targetChName),
-			zap.Int64("rowCount", rowCount),
-			zap.Uint64("ts", ts))
+			zap.Int64("partition ID", partID),
+			zap.Int64("segment ID", segmentID),
+			zap.String("target channel name", targetChName),
+			zap.Int64("row count", rowCount),
+			zap.Uint64("ts", ts),
+		}
+		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths", logFields...)
 
 		err := retry.Do(context.Background(), func() error {
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
@@ -1352,7 +1367,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 				SegmentId:    segmentID,
 				ChannelName:  targetChName,
 				CollectionId: req.GetImportTask().GetCollectionId(),
-				PartitionId:  req.GetImportTask().GetPartitionId(),
+				PartitionId:  partID,
 				RowNum:       rowCount,
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 					Base: commonpbutil.NewMsgBase(
@@ -1393,9 +1408,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 			log.Warn("failed to save import segment", zap.Error(err))
 			return err
 		}
-		log.Info("segment imported and persisted",
-			zap.Int64("task ID", importTaskID),
-			zap.Int64("segmentID", segmentID))
+		log.Info("segment imported and persisted", logFields...)
 		res.Segments = append(res.Segments, segmentID)
 		res.RowCount += rowCount
 		return nil
@@ -1408,8 +1421,11 @@ func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
 	// all the fields row count are same, checked by ImportWrapper
 	// ask DataCoord to alloc a new segment
 	log.Info("import task flush segment",
+		zap.Int("rowCount", rowNum),
 		zap.Any("channel names", chNames),
-		zap.Int("shard ID", shardID))
+		zap.Int64("collectionID", collID),
+		zap.Int64("partitionID", partID),
+		zap.Int("shardID", shardID))
 	segReqs := []*datapb.SegmentIDRequest{
 		{
 			ChannelName:  chNames[shardID],
@@ -1536,6 +1552,24 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 	}
 	return fieldInsert, fieldStats, nil
+}
+
+func reportImportFunc(node *DataNode) importutil.ReportFunc {
+	return func(importResult *rootcoordpb.ImportResult) error {
+		err := retry.Do(context.Background(), func() error {
+			status, err := node.rootCoord.ReportImport(context.Background(), importResult)
+			if err != nil {
+				log.Error("fail to report import state to RootCoord", zap.Error(err))
+				return err
+			}
+			if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
+				return errors.New(status.GetReason())
+			}
+			return nil
+		}, retry.Attempts(node.reportImportRetryTimes))
+
+		return err
+	}
 }
 
 func logDupFlush(cID, segID int64) {

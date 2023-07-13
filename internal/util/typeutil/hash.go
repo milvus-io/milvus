@@ -18,7 +18,10 @@ package typeutil
 
 import (
 	"errors"
+	"fmt"
 	"hash/crc32"
+	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/spaolacci/murmur3"
@@ -162,4 +165,29 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 	}
 
 	return result, nil
+}
+
+// this method returns a static sequence for partitions for partiton key mode
+func RearrangePartitionsForPartitionKey(partitions map[string]int64) ([]string, []int64, error) {
+	// Make sure the order of the partition names got every time is the same
+	partitionNames := make([]string, len(partitions))
+	partitionIDs := make([]int64, len(partitions))
+	for partitionName, partitionID := range partitions {
+		splits := strings.Split(partitionName, "_")
+		if len(splits) < 2 {
+			return nil, nil, fmt.Errorf("bad default partion name in partition key mode: %s", partitionName)
+		}
+		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+		if err != nil {
+			return nil, nil, err
+		}
+		if (index >= int64(len(partitions))) || (index < 0) {
+			return nil, nil, fmt.Errorf("illegal partition index in partition key mode: %s", partitionName)
+		}
+
+		partitionNames[index] = partitionName
+		partitionIDs[index] = partitionID
+	}
+
+	return partitionNames, partitionIDs, nil
 }

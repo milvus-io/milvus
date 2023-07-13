@@ -94,3 +94,69 @@ func TestHashPK2Channels(t *testing.T) {
 	assert.Equal(t, 5, len(ret))
 	assert.Equal(t, ret[1], ret[2])
 }
+
+func TestRearrangePartitionsForPartitionKey(t *testing.T) {
+	// invalid partition name
+	partitions := map[string]int64{
+		"invalid": 1,
+	}
+
+	partitionNames, partitionIDs, err := RearrangePartitionsForPartitionKey(partitions)
+	assert.Error(t, err)
+	assert.Nil(t, partitionNames)
+	assert.Nil(t, partitionIDs)
+
+	// invalid partition index
+	partitions = map[string]int64{
+		"invalid_a": 1,
+	}
+
+	partitionNames, partitionIDs, err = RearrangePartitionsForPartitionKey(partitions)
+	assert.Error(t, err)
+	assert.Nil(t, partitionNames)
+	assert.Nil(t, partitionIDs)
+
+	partitions = map[string]int64{
+		"invalid_1": 1,
+	}
+
+	partitionNames, partitionIDs, err = RearrangePartitionsForPartitionKey(partitions)
+	assert.Error(t, err)
+	assert.Nil(t, partitionNames)
+	assert.Nil(t, partitionIDs)
+
+	// success cases
+	validateFunc := func(partitions map[string]int64) {
+		partitionNames, partitionIDs, err = RearrangePartitionsForPartitionKey(partitions)
+		assert.NoError(t, err)
+		assert.Equal(t, len(partitions), len(partitionNames))
+		assert.Equal(t, len(partitions), len(partitionIDs))
+
+		for i := 0; i < len(partitions); i++ {
+			assert.Contains(t, partitions, partitionNames[i])
+			assert.Equal(t, partitions[partitionNames[i]], partitionIDs[i])
+
+			if i > 0 {
+				assert.Greater(t, partitionIDs[i], partitionIDs[i-1])
+			}
+		}
+	}
+
+	validateFunc(map[string]int64{
+		"p_0": 1,
+		"p_1": 2,
+		"p_2": 3,
+	})
+
+	validateFunc(map[string]int64{
+		"p_2": 3,
+		"p_1": 2,
+		"p_0": 1,
+	})
+
+	validateFunc(map[string]int64{
+		"p_1": 2,
+		"p_2": 3,
+		"p_0": 1,
+	})
+}

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,11 +50,13 @@ func createNumpyParser(t *testing.T) *NumpyParser {
 
 	cm := createLocalChunkManager(t)
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
 
-	parser, err := NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc, nil)
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+	parser, err := NewNumpyParser(ctx, collectionInfo, idAllocator, 100, cm, flushFunc, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 	return parser
@@ -69,33 +72,118 @@ func findSchema(schema *schemapb.CollectionSchema, dt schemapb.DataType) *schema
 	return nil
 }
 
+func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
+	ctx := context.Background()
+	files := make([]string, 0)
+
+	filePath := path.Join(cm.RootPath(), "FieldBool.npy")
+	content, err := CreateNumpyData([]bool{true, false, true, true, true})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldInt8.npy")
+	content, err = CreateNumpyData([]int8{10, 11, 12, 13, 14})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldInt16.npy")
+	content, err = CreateNumpyData([]int16{100, 101, 102, 103, 104})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldInt32.npy")
+	content, err = CreateNumpyData([]int32{1000, 1001, 1002, 1003, 1004})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldInt64.npy")
+	content, err = CreateNumpyData([]int64{10000, 10001, 10002, 10003, 10004})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldFloat.npy")
+	content, err = CreateNumpyData([]float32{3.14, 3.15, 3.16, 3.17, 3.18})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldDouble.npy")
+	content, err = CreateNumpyData([]float64{5.1, 5.2, 5.3, 5.4, 5.5})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldString.npy")
+	content, err = CreateNumpyData([]string{"a", "bb", "ccc", "dd", "e"})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldJSON.npy")
+	content, err = CreateNumpyData([]string{"{\"x\": 10, \"y\": 5}", "{\"z\": 5}", "{}", "{}", "{\"x\": 3}"})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldBinaryVector.npy")
+	content, err = CreateNumpyData([][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	filePath = path.Join(cm.RootPath(), "FieldFloatVector.npy")
+	content, err = CreateNumpyData([][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}})
+	assert.NoError(t, err)
+	err = cm.Write(ctx, filePath, content)
+	assert.NoError(t, err)
+	files = append(files, filePath)
+
+	return files
+}
+
 func Test_NewNumpyParser(t *testing.T) {
 	ctx := context.Background()
 
-	parser, err := NewNumpyParser(ctx, nil, nil, 2, 100, nil, nil, nil)
+	parser, err := NewNumpyParser(ctx, nil, nil, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
-	schema := sampleSchema()
-	parser, err = NewNumpyParser(ctx, schema, nil, 2, 100, nil, nil, nil)
+	collectionInfo, err := NewCollectionInfo(sampleSchema(), 2, []int64{1})
+	assert.NoError(t, err)
+	parser, err = NewNumpyParser(ctx, collectionInfo, nil, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	idAllocator := newIDAllocator(ctx, t, nil)
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, nil, nil, nil)
+	parser, err = NewNumpyParser(ctx, collectionInfo, idAllocator, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	cm := createLocalChunkManager(t)
 
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, nil, nil)
+	parser, err = NewNumpyParser(ctx, collectionInfo, idAllocator, 100, cm, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
 		return nil
 	}
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc, nil)
+	parser, err = NewNumpyParser(ctx, collectionInfo, idAllocator, 100, cm, flushFunc, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 }
@@ -129,7 +217,7 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 	assert.NoError(t, err)
 
 	// has dynamic field
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema := &schemapb.CollectionSchema{
 		Name:               "schema",
 		Description:        "schema",
 		AutoID:             true,
@@ -150,6 +238,8 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 			},
 		},
 	}
+	parser.collectionInfo.resetSchema(schema)
+
 	fileNames = []string{"FieldInt64.npy"}
 	err = parser.validateFileNames(fileNames)
 	assert.NoError(t, err)
@@ -161,7 +251,7 @@ func Test_NumpyParserValidateFileNames(t *testing.T) {
 
 func Test_NumpyParserValidateHeader(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	parser := createNumpyParser(t)
@@ -173,14 +263,14 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 	t.Run("not a valid numpy array", func(t *testing.T) {
 		filePath := TempFilesPath + "invalid.npy"
 		err = CreateNumpyFile(filePath, "aaa")
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		columnReader := &NumpyColumnReader{
 			fieldName: "invalid",
@@ -194,14 +284,14 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 		filePath := TempFilesPath + fieldSchema.GetName() + ".npy"
 
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		dim, _ := getFieldDimension(fieldSchema)
 		columnReader := &NumpyColumnReader{
@@ -288,7 +378,7 @@ func Test_NumpyParserValidateHeader(t *testing.T) {
 
 func Test_NumpyParserCreateReaders(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -347,7 +437,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 		files := createSampleNumpyFiles(t, cm)
 		filePath := TempFilesPath + "FieldBool.npy"
 		err = CreateNumpyFile(filePath, []bool{true})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders(files)
 		assert.Error(t, err)
@@ -358,7 +448,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 	t.Run("velidate header failed", func(t *testing.T) {
 		filePath := TempFilesPath + "FieldBool.npy"
 		err = CreateNumpyFile(filePath, []int32{1, 2, 3, 4, 5})
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		files := []string{filePath}
 		readers, err := parser.createReaders(files)
 		assert.Error(t, err)
@@ -369,7 +459,7 @@ func Test_NumpyParserCreateReaders(t *testing.T) {
 
 func Test_NumpyParserReadData(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -409,7 +499,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readEmptyFunc := func(filedName string, data interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -429,7 +519,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readBatchFunc := func(filedName string, data interface{}, dataLen int, getValue func(k int) interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -457,7 +547,7 @@ func Test_NumpyParserReadData(t *testing.T) {
 	readErrorFunc := func(filedName string, data interface{}) {
 		filePath := TempFilesPath + filedName + ".npy"
 		err = CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		readers, err := parser.createReaders([]string{filePath})
 		assert.NoError(t, err)
@@ -572,7 +662,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 	assert.Equal(t, len(sampleSchema().Fields), len(appendFuncs))
 
 	// schema has unsupported data type
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema := &schemapb.CollectionSchema{
 		Name: "schema",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -590,6 +680,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 			},
 		},
 	}
+	parser.collectionInfo.resetSchema(schema)
 	appendFuncs, err = parser.prepareAppendFunctions()
 	assert.Error(t, err)
 	assert.Nil(t, appendFuncs)
@@ -597,7 +688,7 @@ func Test_NumpyParserPrepareAppendFunctions(t *testing.T) {
 
 func Test_NumpyParserCheckRowCount(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -609,28 +700,25 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 	defer closeReaders(readers)
 
 	// succeed
-	segmentData := make(map[storage.FieldID]storage.FieldData)
+	segmentData := make(BlockData)
 	for _, reader := range readers {
 		fieldData, err := parser.readData(reader, 100)
 		assert.NoError(t, err)
 		segmentData[reader.fieldID] = fieldData
 	}
 
-	rowCount, primaryKey, err := parser.checkRowCount(segmentData)
+	rowCount, err := parser.checkRowCount(segmentData)
 	assert.NoError(t, err)
 	assert.Equal(t, 5, rowCount)
-	assert.NotNil(t, primaryKey)
-	assert.Equal(t, "FieldInt64", primaryKey.GetName())
 
 	// field data missed
 	delete(segmentData, 102)
-	rowCount, primaryKey, err = parser.checkRowCount(segmentData)
+	rowCount, err = parser.checkRowCount(segmentData)
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
-	assert.Nil(t, primaryKey)
 
-	// primarykey missed
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	// row count mismatch
+	schema := &schemapb.CollectionSchema{
 		Name: "schema",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -640,38 +728,30 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 				AutoID:       false,
 				DataType:     schemapb.DataType_Int32,
 			},
+			{
+				FieldID:      106,
+				Name:         "FieldInt64",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_Int64,
+			},
 		},
 	}
 
 	segmentData[105] = &storage.Int32FieldData{
 		Data: []int32{1, 2, 3, 4},
 	}
-
-	rowCount, primaryKey, err = parser.checkRowCount(segmentData)
-	assert.Error(t, err)
-	assert.Zero(t, rowCount)
-	assert.Nil(t, primaryKey)
-
-	// row count mismatch
-	parser.collectionSchema.Fields = append(parser.collectionSchema.Fields, &schemapb.FieldSchema{
-		FieldID:      106,
-		Name:         "FieldInt64",
-		IsPrimaryKey: true,
-		AutoID:       false,
-		DataType:     schemapb.DataType_Int64,
-	})
-
 	segmentData[106] = &storage.Int64FieldData{
 		Data: []int64{1, 2, 4},
 	}
 
-	rowCount, primaryKey, err = parser.checkRowCount(segmentData)
+	parser.collectionInfo.resetSchema(schema)
+	rowCount, err = parser.checkRowCount(segmentData)
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
-	assert.Nil(t, primaryKey)
 
 	// has dynamic field
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema = &schemapb.CollectionSchema{
 		Name:               "schema",
 		Description:        "schema",
 		AutoID:             true,
@@ -696,45 +776,50 @@ func Test_NumpyParserCheckRowCount(t *testing.T) {
 		Data: []int64{1, 2, 4},
 	}
 
-	rowCount, primaryKey, err = parser.checkRowCount(segmentData)
+	parser.collectionInfo.resetSchema(schema)
+	rowCount, err = parser.checkRowCount(segmentData)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, rowCount)
-	assert.NotNil(t, primaryKey)
 }
 
 func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
 	parser := createNumpyParser(t)
 
-	segmentData := make(map[storage.FieldID]storage.FieldData)
 	t.Run("segemnt data is empty", func(t *testing.T) {
-		err = parser.splitFieldsData(segmentData, nil)
+		err = parser.splitFieldsData(make(BlockData), nil)
 		assert.Error(t, err)
 	})
 
-	files := createSampleNumpyFiles(t, cm)
-	readers, err := parser.createReaders(files)
-	assert.NoError(t, err)
-	defer closeReaders(readers)
-
-	for _, reader := range readers {
-		fieldData, err := parser.readData(reader, 100)
+	genFieldsDataFunc := func() BlockData {
+		segmentData := make(BlockData)
+		files := createSampleNumpyFiles(t, cm)
+		readers, err := parser.createReaders(files)
 		assert.NoError(t, err)
-		segmentData[reader.fieldID] = fieldData
+		defer closeReaders(readers)
+
+		for _, reader := range readers {
+			fieldData, err := parser.readData(reader, 100)
+			assert.NoError(t, err)
+			segmentData[reader.fieldID] = fieldData
+		}
+		return segmentData
 	}
 
-	shards := make([]map[storage.FieldID]storage.FieldData, 0, parser.shardNum)
 	t.Run("shards number mismatch", func(t *testing.T) {
+		fieldsData := createFieldsData(sampleSchema(), 0)
+		shards := createShardsData(sampleSchema(), fieldsData, 1, []int64{1})
+		segmentData := genFieldsDataFunc()
 		err = parser.splitFieldsData(segmentData, shards)
 		assert.Error(t, err)
 	})
 
 	t.Run("checkRowCount returns error", func(t *testing.T) {
-		parser.collectionSchema = &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name: "schema",
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -744,45 +829,64 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 					AutoID:       false,
 					DataType:     schemapb.DataType_Int32,
 				},
+				{
+					FieldID:      106,
+					Name:         "FieldInt64",
+					IsPrimaryKey: true,
+					AutoID:       false,
+					DataType:     schemapb.DataType_Int64,
+				},
 			},
 		}
-		for i := 0; i < int(parser.shardNum); i++ {
-			shards = append(shards, initSegmentData(parser.collectionSchema))
+
+		segmentData := make(BlockData)
+		segmentData[105] = &storage.Int32FieldData{
+			Data: []int32{1, 2, 3, 4},
 		}
+		segmentData[106] = &storage.Int64FieldData{
+			Data: []int64{1, 2, 4},
+		}
+		parser.collectionInfo.resetSchema(schema)
+		parser.collectionInfo.ShardNum = 2
+		fieldsData := createFieldsData(schema, 0)
+		shards := createShardsData(schema, fieldsData, 2, []int64{1})
 		err = parser.splitFieldsData(segmentData, shards)
 		assert.Error(t, err)
-		parser.collectionSchema = sampleSchema()
 	})
 
 	t.Run("failed to alloc id", func(t *testing.T) {
 		ctx := context.Background()
 		parser.rowIDAllocator = newIDAllocator(ctx, t, errors.New("dummy error"))
+		parser.collectionInfo.resetSchema(sampleSchema())
+		fieldsData := createFieldsData(sampleSchema(), 0)
+		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{1})
+		segmentData := genFieldsDataFunc()
 		err = parser.splitFieldsData(segmentData, shards)
 		assert.Error(t, err)
 		parser.rowIDAllocator = newIDAllocator(ctx, t, nil)
 	})
 
 	t.Run("primary key auto-generated", func(t *testing.T) {
-		schema := findSchema(parser.collectionSchema, schemapb.DataType_Int64)
+		parser.collectionInfo.resetSchema(sampleSchema())
+		schema := findSchema(parser.collectionInfo.Schema, schemapb.DataType_Int64)
 		schema.AutoID = true
 
-		shards = make([]map[storage.FieldID]storage.FieldData, 0, parser.shardNum)
-		for i := 0; i < int(parser.shardNum); i++ {
-			segmentData := initSegmentData(parser.collectionSchema)
-			shards = append(shards, segmentData)
-		}
+		partitionID := int64(1)
+		fieldsData := createFieldsData(sampleSchema(), 0)
+		shards := createShardsData(sampleSchema(), fieldsData, 2, []int64{partitionID})
+		segmentData := genFieldsDataFunc()
 		err = parser.splitFieldsData(segmentData, shards)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, parser.autoIDRange)
 
 		totalNum := 0
-		for i := 0; i < int(parser.shardNum); i++ {
-			totalNum += shards[i][106].RowNum()
+		for i := 0; i < int(parser.collectionInfo.ShardNum); i++ {
+			totalNum += shards[i][partitionID][106].RowNum()
 		}
 		assert.Equal(t, segmentData[106].RowNum(), totalNum)
 
 		// target field data is nil
-		shards[0][105] = nil
+		shards[0][partitionID][105] = nil
 		err = parser.splitFieldsData(segmentData, shards)
 		assert.Error(t, err)
 
@@ -790,7 +894,7 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 	})
 
 	t.Run("has dynamic field", func(t *testing.T) {
-		parser.collectionSchema = &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name:               "schema",
 			Description:        "schema",
 			AutoID:             true,
@@ -811,12 +915,10 @@ func Test_NumpyParserSplitFieldsData(t *testing.T) {
 				},
 			},
 		}
-		shards = make([]map[storage.FieldID]storage.FieldData, 0, parser.shardNum)
-		for i := 0; i < int(parser.shardNum); i++ {
-			segmentData := initSegmentData(parser.collectionSchema)
-			shards = append(shards, segmentData)
-		}
-		segmentData = make(map[storage.FieldID]storage.FieldData)
+		parser.collectionInfo.resetSchema(schema)
+		fieldsData := createFieldsData(schema, 0)
+		shards := createShardsData(schema, fieldsData, 2, []int64{1})
+		segmentData := make(BlockData)
 		segmentData[101] = &storage.Int64FieldData{
 			Data: []int64{1, 2, 4},
 		}
@@ -834,7 +936,7 @@ func Test_NumpyParserCalcRowCountPerBlock(t *testing.T) {
 	assert.Greater(t, rowCount, int64(0))
 
 	// failed to estimate row size
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema := &schemapb.CollectionSchema{
 		Name: "schema",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -853,14 +955,16 @@ func Test_NumpyParserCalcRowCountPerBlock(t *testing.T) {
 			},
 		},
 	}
+	parser.collectionInfo.Schema = schema
 	rowCount, err = parser.calcRowCountPerBlock()
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
 
 	// no field
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema = &schemapb.CollectionSchema{
 		Name: "schema",
 	}
+	parser.collectionInfo.Schema = schema
 	rowCount, err = parser.calcRowCountPerBlock()
 	assert.Error(t, err)
 	assert.Zero(t, rowCount)
@@ -868,7 +972,7 @@ func Test_NumpyParserCalcRowCountPerBlock(t *testing.T) {
 
 func Test_NumpyParserConsume(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -893,7 +997,7 @@ func Test_NumpyParserConsume(t *testing.T) {
 	assert.Error(t, err)
 
 	// invalid schema
-	parser.collectionSchema = &schemapb.CollectionSchema{
+	schema := &schemapb.CollectionSchema{
 		Name: "schema",
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -911,6 +1015,7 @@ func Test_NumpyParserConsume(t *testing.T) {
 			},
 		},
 	}
+	parser.collectionInfo.resetSchema(schema)
 	err = parser.consume(readers)
 	assert.Error(t, err)
 	closeReaders(readers)
@@ -918,7 +1023,7 @@ func Test_NumpyParserConsume(t *testing.T) {
 
 func Test_NumpyParserParse(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	parser := createNumpyParser(t)
@@ -931,20 +1036,21 @@ func Test_NumpyParserParse(t *testing.T) {
 	})
 
 	t.Run("file doesnt exist", func(t *testing.T) {
-		parser.collectionSchema = perfSchema(4)
+		parser.collectionInfo.resetSchema(perfSchema(4))
 		files := []string{"ID.npy", "Vector.npy"}
 		err = parser.Parse(files)
 		assert.Error(t, err)
-		parser.collectionSchema = sampleSchema()
 	})
+
+	parser.collectionInfo.resetSchema(sampleSchema())
 
 	t.Run("succeed", func(t *testing.T) {
 		cm := createLocalChunkManager(t)
 		files := createSampleNumpyFiles(t, cm)
 
 		totalRowCount := 0
-		parser.callFlushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
-			assert.LessOrEqual(t, int32(shardID), parser.shardNum)
+		parser.callFlushFunc = func(fields BlockData, shardID int, partID int64) error {
+			assert.LessOrEqual(t, int32(shardID), parser.collectionInfo.ShardNum)
 			rowCount := 0
 			for _, fieldData := range fields {
 				if rowCount == 0 {
@@ -965,7 +1071,7 @@ func Test_NumpyParserParse(t *testing.T) {
 func Test_NumpyParserParse_perf(t *testing.T) {
 	ctx := context.Background()
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	cm := createLocalChunkManager(t)
@@ -1008,7 +1114,7 @@ func Test_NumpyParserParse_perf(t *testing.T) {
 
 	shardNum := int32(3)
 	totalRowCount := 0
-	callFlushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+	callFlushFunc := func(fields BlockData, shardID int, partID int64) error {
 		assert.LessOrEqual(t, int32(shardID), shardNum)
 		rowCount := 0
 		for _, fieldData := range fields {
@@ -1026,14 +1132,89 @@ func Test_NumpyParserParse_perf(t *testing.T) {
 	updateProgress := func(percent int64) {
 		assert.Greater(t, percent, int64(0))
 	}
-	parser, err := NewNumpyParser(ctx, perfSchema(dim), idAllocator, shardNum, 16*1024*1024, cm, callFlushFunc, updateProgress)
+
+	collectionInfo, err := NewCollectionInfo(perfSchema(dim), shardNum, []int64{1})
+	assert.NoError(t, err)
+
+	parser, err := NewNumpyParser(ctx, collectionInfo, idAllocator, 16*1024*1024, cm, callFlushFunc, updateProgress)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
-	parser.collectionSchema = perfSchema(dim)
 
 	err = parser.Parse([]string{idFilePath, vecFilePath})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, rowCount, totalRowCount)
 
 	tr.Record("parse large numpy files")
+}
+
+func Test_NumpyParserHashToPartition(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "FieldInt64",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "FieldVarchar",
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  103,
+				Name:     "FieldFloat",
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+
+	idAllocator := newIDAllocator(ctx, t, nil)
+	cm := createLocalChunkManager(t)
+	flushFunc := func(fields BlockData, shardID int, partID int64) error {
+		return nil
+	}
+
+	collectionInfo, err := NewCollectionInfo(schema, 2, []int64{1})
+	assert.NoError(t, err)
+	parser, err := NewNumpyParser(ctx, collectionInfo, idAllocator, 100, cm, flushFunc, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, parser)
+
+	fieldsData := createFieldsData(schema, 5)
+	blockData := createBlockData(schema, fieldsData)
+
+	// no partition key, partition ID list greater than 1, return error
+	parser.collectionInfo.PartitionIDs = []int64{1, 2}
+	partID, err := parser.hashToPartition(blockData, 1)
+	assert.Error(t, err)
+	assert.Zero(t, partID)
+
+	// no partition key, return the only one partition ID
+	partitionID := int64(5)
+	parser.collectionInfo.PartitionIDs = []int64{partitionID}
+	partID, err = parser.hashToPartition(blockData, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, partitionID, partID)
+
+	// has partition key
+	schema.Fields[1].IsPartitionKey = true
+	err = parser.collectionInfo.resetSchema(schema)
+	assert.NoError(t, err)
+	partitionIDs := []int64{3, 4, 5, 6}
+	partID, err = parser.hashToPartition(blockData, 1)
+	assert.NoError(t, err)
+	assert.Contains(t, partitionIDs, partID)
+
+	// has partition key, but value is invalid
+	blockData[102] = &storage.FloatFieldData{
+		Data: []float32{1, 2, 3, 4, 5},
+	}
+	partID, err = parser.hashToPartition(blockData, 1)
+	assert.Error(t, err)
+	assert.Zero(t, partID)
 }
