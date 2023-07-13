@@ -244,10 +244,20 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
 	)
-	_, err := w.node.loader.LoadSegment(w.ctx, req, segmentTypeGrowing)
+	loaded, err := w.node.loader.LoadSegment(w.ctx, req, segmentTypeGrowing)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Int64("collection", collectionID), zap.Error(err))
 		return nil, err
+	}
+	for _, segmentID := range loaded {
+		segment, err := w.node.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
+		if err != nil {
+			log.Warn("could not get segment", zap.Int64("segmentID", segmentID))
+			continue
+		}
+		if err = segment.FlushDelete(); err != nil {
+			return nil, err
+		}
 	}
 	log.Info("successfully load growing segments done in WatchDmChannels",
 		zap.Int64("collectionID", collectionID),
