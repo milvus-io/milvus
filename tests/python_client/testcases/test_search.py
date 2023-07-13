@@ -5680,7 +5680,7 @@ class TestSearchDiskann(TestcaseBase):
                                          "_async": _async}
                             )
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_diskann_and_more_index(self, dim, auto_id, _async, enable_dynamic_field):
         """
         target: test delete after creating index
