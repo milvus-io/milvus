@@ -51,10 +51,10 @@ func (p *streamPipeline) work() {
 	for {
 		select {
 		case <-p.closeCh:
-			log.Debug("stream pipeline input closed")
+			log.Debug("stream pipeline input closed", zap.String("vchannel", p.vChannel))
 			return
 		case msg := <-p.input:
-			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
+			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)), zap.String("vchannel", p.vChannel))
 			p.nodes[0].inputChannel <- msg
 		}
 	}

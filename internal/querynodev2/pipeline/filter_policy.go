@@ -18,8 +18,6 @@ package pipeline
 
 import (
 	"fmt"
-
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // MsgFilter will return error if Msg was invalid
@@ -39,14 +37,14 @@ func InsertNotAligned(n *filterNode, c *Collection, msg *InsertMsg) error {
 
 func InsertEmpty(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
+		return fmt.Errorf("the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
+		return fmt.Errorf("collection %d not target collection: %d", msg.GetCollectionID(), c.ID())
 	}
 
 	// all growing will be be in-memory to support dynamic partition load/release
@@ -59,8 +57,7 @@ func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
 		return nil
 	}
 	if msg.EndTimestamp <= segInfo.GetDmlPosition().GetTimestamp() {
-		m := fmt.Sprintf("Segment excluded, id: %d", msg.GetSegmentID())
-		return merr.WrapErrSegmentLack(msg.GetSegmentID(), m)
+		return fmt.Errorf("segment %d was excluded", msg.GetSegmentID())
 	}
 	return nil
 }
@@ -75,14 +72,14 @@ func DeleteNotAligned(n *filterNode, c *Collection, msg *DeleteMsg) error {
 
 func DeleteEmpty(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
+		return fmt.Errorf("the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
+		return fmt.Errorf("collection %d not target collection: %d", msg.GetCollectionID(), c.ID())
 	}
 
 	// all growing will be be in-memory to support dynamic partition load/release

@@ -94,7 +94,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 				zap.String("message type", msg.Type().String()),
 				zap.String("channel", fNode.channel),
 				zap.Int64("collectionID", fNode.collectionID),
-				zap.Error(err),
+				zap.String("reason", err.Error()),
 			)
 		} else {
 			out.append(msg)
