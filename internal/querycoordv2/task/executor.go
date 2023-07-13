@@ -291,7 +291,14 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo)
+	//Get collection index info
+	indexInfo, err := ex.broker.DescribeIndex(ctx, task.CollectionID())
+	if err != nil {
+		log.Warn("fail to get index meta of collection")
+		return err
+	}
+
+	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, indexInfo)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")

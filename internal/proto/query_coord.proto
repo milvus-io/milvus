@@ -288,6 +288,7 @@ message LoadSegmentsRequest {
   int64 version = 10;
   bool need_transfer = 11;
   LoadScope load_scope = 12;
+  repeated index.IndexInfo index_info_list = 13;
 }
 
 message ReleaseSegmentsRequest {

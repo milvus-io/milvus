@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -180,6 +182,35 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return ret, nil
 }
 
+func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
+	for _, info := range indexInfos {
+		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	maxIndexRecordPerSegment := int64(0)
+	if err != nil || sizePerRecord == 0 {
+		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+	} else {
+		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
+	}
+
+	return &segcorepb.CollectionIndexMeta{
+		IndexMetas:       fieldIndexMetas,
+		MaxIndexRowCount: maxIndexRecordPerSegment,
+	}
+}
+
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	channel := req.GetInfos()[0]
@@ -229,31 +260,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return util.SuccessStatus(), nil
 	}
 
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
-	for _, info := range req.GetIndexInfoList() {
-		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-			CollectionID:    info.GetCollectionID(),
-			FieldID:         info.GetFieldID(),
-			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
-			IsAutoIndex:     info.GetIsAutoIndex(),
-			UserIndexParams: info.GetUserIndexParams(),
-		})
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
-	maxIndexRecordPerSegment := int64(0)
-	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
-	} else {
-		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
-		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
-	}
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
-		IndexMetas:       fieldIndexMetas,
-		MaxIndexRowCount: maxIndexRecordPerSegment,
-	}, req.GetLoadMeta())
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	collection := node.manager.Collection.Get(req.GetCollectionID())
 	collection.SetMetricType(req.GetLoadMeta().GetMetricType())
 	delegator, err := delegator.NewShardDelegator(req.GetCollectionID(), req.GetReplicaID(), channel.GetChannelName(), req.GetVersion(),
@@ -461,7 +469,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.loadDeltaLogs(ctx, req), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	// Actual load segment
