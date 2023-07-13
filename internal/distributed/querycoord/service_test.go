@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
@@ -349,8 +350,8 @@ func TestServer_Run2(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func getQueryCoord() *types.MockQueryCoord {
-	mqc := &types.MockQueryCoord{}
+func getQueryCoord() *mocks.MockQueryCoord {
+	mqc := &mocks.MockQueryCoord{}
 	mqc.EXPECT().Init().Return(nil)
 	mqc.EXPECT().SetEtcdClient(mock.Anything)
 	mqc.EXPECT().SetAddress(mock.Anything)

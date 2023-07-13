@@ -27,9 +27,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -38,12 +38,12 @@ import (
 type RemoteWorkerSuite struct {
 	suite.Suite
 
-	mockClient *types.MockQueryNode
+	mockClient *mocks.MockQueryNode
 	worker     *remoteWorker
 }
 
 func (s *RemoteWorkerSuite) SetupTest() {
-	s.mockClient = &types.MockQueryNode{}
+	s.mockClient = &mocks.MockQueryNode{}
 	s.worker = &remoteWorker{client: s.mockClient}
 }
 
@@ -404,7 +404,7 @@ func TestRemoteWorker(t *testing.T) {
 }
 
 func TestNewRemoteWorker(t *testing.T) {
-	client := &types.MockQueryNode{}
+	client := &mocks.MockQueryNode{}
 
 	w := NewRemoteWorker(client)
 

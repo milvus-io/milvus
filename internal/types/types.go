@@ -102,6 +102,8 @@ type DataNode interface {
 }
 
 // DataNodeComponent is used by grpc server of DataNode
+//
+//go:generate mockery --name=DataNodeComponent --structname=MockDataNode --output=../mocks  --filename=mock_datanode.go --with-expecter
 type DataNodeComponent interface {
 	DataNode
 
@@ -381,6 +383,8 @@ type DataCoord interface {
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
+//
+//go:generate mockery --name=DataCoordComponent --structname=MockDataCoord --output=../mocks  --filename=mock_datacoord.go --with-expecter
 type DataCoordComponent interface {
 	DataCoord
 
@@ -885,6 +889,8 @@ type Proxy interface {
 }
 
 // ProxyComponent defines the interface of proxy component.
+//
+//go:generate mockery --name=ProxyComponent --structname=MockProxy --output=../mocks  --filename=mock_proxy.go --with-expecter
 type ProxyComponent interface {
 	Proxy
 
@@ -1452,6 +1458,8 @@ type QueryNode interface {
 }
 
 // QueryNodeComponent is used by grpc server of QueryNode
+//
+//go:generate mockery --name=QueryNodeComponent --structname=MockQueryNode --output=../mocks  --filename=mock_querynode.go --with-expecter
 type QueryNodeComponent interface {
 	QueryNode
 
@@ -1499,6 +1507,8 @@ type QueryCoord interface {
 }
 
 // QueryCoordComponent is used by grpc server of QueryCoord
+//
+//go:generate mockery --name=QueryCoordComponent --structname=MockQueryCoord --output=../mocks  --filename=mock_querycoord.go --with-expecter
 type QueryCoordComponent interface {
 	QueryCoord
 

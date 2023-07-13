@@ -26,8 +26,8 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 func TestTimetickManagerNormal(t *testing.T) {
@@ -166,7 +166,7 @@ func TestTimetickManagerSendNotSuccess(t *testing.T) {
 func TestTimetickManagerSendReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mockDataCoord := types.NewMockDataCoord(t)
+	mockDataCoord := mocks.NewMockDataCoord(t)
 	tsInMill := time.Now().UnixMilli()
 
 	validTs := atomic.NewBool(false)

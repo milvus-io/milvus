@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -76,7 +75,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("proxy health check is ok", func(t *testing.T) {
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),
@@ -105,7 +104,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 		dataCoordMock := NewDataCoordMock()
 		dataCoordMock.checkHealthFunc = checkHealthFunc1
 
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 		node := &Proxy{
 			session: &sessionutil.Session{ServerID: 1},
@@ -124,7 +123,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check quota state", func(t *testing.T) {
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),
@@ -219,7 +218,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	node.multiRateLimiter = NewMultiRateLimiter()
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 
-	qc := types.NewMockQueryCoord(t)
+	qc := mocks.NewMockQueryCoord(t)
 	node.SetQueryCoordClient(qc)
 
 	tsoAllocatorIns := newMockTsoAllocator()
@@ -311,7 +310,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	node.multiRateLimiter = NewMultiRateLimiter()
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 
-	qc := types.NewMockQueryCoord(t)
+	qc := mocks.NewMockQueryCoord(t)
 	node.SetQueryCoordClient(qc)
 	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
@@ -381,7 +380,7 @@ func TestProxy_FlushAll(t *testing.T) {
 	err = node.sched.Start()
 	assert.NoError(t, err)
 	defer node.sched.Close()
-	node.dataCoord = mocks.NewDataCoord(t)
+	node.dataCoord = mocks.NewMockDataCoord(t)
 	node.rootCoord = mocks.NewRootCoord(t)
 
 	// set expectations
@@ -399,7 +398,7 @@ func TestProxy_FlushAll(t *testing.T) {
 
 	globalMetaCache = cache
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	node.dataCoord.(*mocks.DataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
+	node.dataCoord.(*mocks.MockDataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
 		Return(&datapb.FlushResponse{Status: successStatus}, nil).Maybe()
 	node.rootCoord.(*mocks.RootCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
 		Return(&milvuspb.ShowCollectionsResponse{Status: successStatus, CollectionNames: []string{"col-0"}}, nil).Maybe()
@@ -437,8 +436,8 @@ func TestProxy_FlushAll(t *testing.T) {
 	})
 
 	t.Run("FlushAll failed, DataCoord flush failed", func(t *testing.T) {
-		node.dataCoord.(*mocks.DataCoord).ExpectedCalls = nil
-		node.dataCoord.(*mocks.DataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
+		node.dataCoord.(*mocks.MockDataCoord).ExpectedCalls = nil
+		node.dataCoord.(*mocks.MockDataCoord).EXPECT().Flush(mock.Anything, mock.Anything).
 			Return(&datapb.FlushResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -491,12 +490,12 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.dataCoord = mocks.NewDataCoord(t)
+	node.dataCoord = mocks.NewMockDataCoord(t)
 	node.rootCoord = mocks.NewRootCoord(t)
 
 	// set expectations
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	node.dataCoord.(*mocks.DataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
+	node.dataCoord.(*mocks.MockDataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
 		Return(&milvuspb.GetFlushAllStateResponse{Status: successStatus}, nil).Maybe()
 
 	t.Run("GetFlushAllState success", func(t *testing.T) {
@@ -514,8 +513,8 @@ func TestProxy_GetFlushAllState(t *testing.T) {
 	})
 
 	t.Run("DataCoord GetFlushAllState failed", func(t *testing.T) {
-		node.dataCoord.(*mocks.DataCoord).ExpectedCalls = nil
-		node.dataCoord.(*mocks.DataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
+		node.dataCoord.(*mocks.MockDataCoord).ExpectedCalls = nil
+		node.dataCoord.(*mocks.MockDataCoord).EXPECT().GetFlushAllState(mock.Anything, mock.Anything).
 			Return(&milvuspb.GetFlushAllStateResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -538,7 +537,7 @@ func TestProxy_GetReplicas(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	mockQC := types.NewMockQueryCoord(t)
+	mockQC := mocks.NewMockQueryCoord(t)
 	mockRC := mocks.NewRootCoord(t)
 	node.queryCoord = mockQC
 	node.rootCoord = mockRC

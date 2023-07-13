@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -32,7 +32,7 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 	// normal metadata
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// mock metacache
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &types.MockQueryCoord{}
+	queryCoord := &mocks.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.NoError(t, err)

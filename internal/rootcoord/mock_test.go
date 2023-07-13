@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -445,7 +446,7 @@ func withQueryCoord(qc types.QueryCoord) Opt {
 }
 
 func withUnhealthyQueryCoord() Opt {
-	qc := &types.MockQueryCoord{}
+	qc := &mocks.MockQueryCoord{}
 	qc.EXPECT().GetComponentStates(mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
@@ -456,7 +457,7 @@ func withUnhealthyQueryCoord() Opt {
 }
 
 func withInvalidQueryCoord() Opt {
-	qc := &types.MockQueryCoord{}
+	qc := &mocks.MockQueryCoord{}
 	qc.EXPECT().GetComponentStates(mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
@@ -475,7 +476,7 @@ func withInvalidQueryCoord() Opt {
 }
 
 func withFailedQueryCoord() Opt {
-	qc := &types.MockQueryCoord{}
+	qc := &mocks.MockQueryCoord{}
 	qc.EXPECT().GetComponentStates(mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
@@ -496,7 +497,7 @@ func withFailedQueryCoord() Opt {
 }
 
 func withValidQueryCoord() Opt {
-	qc := &types.MockQueryCoord{}
+	qc := &mocks.MockQueryCoord{}
 	qc.EXPECT().GetComponentStates(mock.Anything).Return(
 		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},

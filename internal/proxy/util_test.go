@@ -33,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -900,7 +900,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -924,7 +924,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -948,7 +948,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -979,7 +979,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1007,7 +1007,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1035,7 +1035,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &types.MockQueryCoord{}
+		qc := &mocks.MockQueryCoord{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1833,7 +1833,7 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 }
 
 func Test_GetPartitionProgressFailed(t *testing.T) {
-	qc := types.NewMockQueryCoord(t)
+	qc := mocks.NewMockQueryCoord(t)
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

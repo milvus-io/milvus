@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
@@ -84,7 +85,7 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockQN := types.NewMockQueryNode(t)
+	mockQN := mocks.NewMockQueryNode(t)
 	mockQN.EXPECT().Start().Return(nil).Maybe()
 	mockQN.EXPECT().Stop().Return(nil).Maybe()
 	mockQN.EXPECT().Register().Return(nil).Maybe()
@@ -260,7 +261,7 @@ func Test_Run(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockQN := types.NewMockQueryNode(t)
+	mockQN := mocks.NewMockQueryNode(t)
 	mockQN.EXPECT().Start().Return(errors.New("Failed")).Maybe()
 	mockQN.EXPECT().Stop().Return(errors.New("Failed")).Maybe()
 	mockQN.EXPECT().Register().Return(errors.New("Failed")).Maybe()

@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -48,7 +48,7 @@ func TestQueryTask_all(t *testing.T) {
 		ctx = context.TODO()
 
 		rc = NewRootCoordMock()
-		qc = types.NewMockQueryCoord(t)
+		qc = mocks.NewMockQueryCoord(t)
 		qn = getQueryNode()
 
 		shardsNum      = common.DefaultShardsNum

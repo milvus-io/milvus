@@ -296,7 +296,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	mockRootCoord := coordMocks.NewRootCoord(suite.T())
-	mockDataCoord := coordMocks.NewDataCoord(suite.T())
+	mockDataCoord := coordMocks.NewMockDataCoord(suite.T())
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Status(nil),
@@ -415,7 +415,7 @@ func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQu
 	querynode.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil).Maybe()
 }
 
-func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.DataCoord) {
+func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.MockDataCoord) {
 	var (
 		vChannels    []*datapb.VchannelInfo
 		segmentInfos []*datapb.SegmentInfo
@@ -532,7 +532,7 @@ func (suite *ServerSuite) hackServer() {
 
 func (suite *ServerSuite) hackBroker(server *Server) {
 	mockRootCoord := coordMocks.NewRootCoord(suite.T())
-	mockDataCoord := coordMocks.NewDataCoord(suite.T())
+	mockDataCoord := coordMocks.NewMockDataCoord(suite.T())
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
