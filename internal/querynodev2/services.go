@@ -375,7 +375,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		delegator.Close()
 
 		node.pipelineManager.Remove(req.GetChannelName())
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()))
+		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.tSafeManager.Remove(req.GetChannelName())
 	}
 
