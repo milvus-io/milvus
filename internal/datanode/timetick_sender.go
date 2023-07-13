@@ -137,7 +137,7 @@ func (m *timeTickSender) cleanStatesCache(sendedLastTss map[string]uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sizeBeforeClean := len(m.channelStatesCaches)
-	log.With(zap.Any("sendedLastTss", sendedLastTss), zap.Int("sizeBeforeClean", sizeBeforeClean))
+	log := log.With(zap.Any("sendedLastTss", sendedLastTss), zap.Int("sizeBeforeClean", sizeBeforeClean))
 	for channelName, sendedLastTs := range sendedLastTss {
 		channelCache, ok := m.channelStatesCaches[channelName]
 		if ok {
@@ -152,12 +152,12 @@ func (m *timeTickSender) cleanStatesCache(sendedLastTss map[string]uint64) {
 			delete(m.channelStatesCaches, channelName)
 		}
 	}
-	log.Debug("timeTickSender channelStatesCaches", zap.Int("sizeAfterClean", len(m.channelStatesCaches)))
+	log.RatedDebug(30, "timeTickSender channelStatesCaches", zap.Int("sizeAfterClean", len(m.channelStatesCaches)))
 }
 
 func (m *timeTickSender) sendReport(ctx context.Context) error {
 	toSendMsgs, sendLastTss := m.mergeDatanodeTtMsg()
-	log.Debug("timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
+	log.RatedDebug(30, "timeTickSender send datanode timetick message", zap.Any("toSendMsgs", toSendMsgs), zap.Any("sendLastTss", sendLastTss))
 	err := retry.Do(ctx, func() error {
 		submitTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		statusResp, err := m.dataCoord.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{
