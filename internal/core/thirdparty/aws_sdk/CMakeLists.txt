@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 # -------------------------------------------------------------------------------
 
-set(AWS_SDK_VERSION "1.9.234")
+set(AWS_SDK_VERSION "1.8.186")
 
 macro(build_aws_sdk_s3)
     message(STATUS "Building AWS-SDK-${AWS_SDK_VERSION} from source")
@@ -30,7 +30,15 @@ macro(build_aws_sdk_s3)
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
     if (APPLE)
-      set(AWS_SDK_S3_CMAKE_ARGS ${AWS_SDK_S3_CMAKE_ARGS} "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -Wno-error=strict-prototypes")
+        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+            set(CPU_ARCH "x86_64")
+        elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+            set(CPU_ARCH "arm64")
+        else()
+            message(WARNING "Unknown CPU architecture")
+        endif()
+        list(APPEND AWS_SDK_S3_CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}" "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}"  "-DCMAKE_OSX_ARCHITECTURES=${CPU_ARCH}")
     endif()
 
     ExternalProject_Add(aws_sdk_s3_ep
