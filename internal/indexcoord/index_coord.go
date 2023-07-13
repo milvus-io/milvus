@@ -887,7 +887,8 @@ func (i *IndexCoord) getIndexedStats(ctx context.Context, collID, indexID Unique
 
 // DescribeIndex describe the index info of the collection.
 func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
-	log.Info("IndexCoord DescribeIndex", zap.Int64("collectionID", req.CollectionID), zap.String("indexName", req.GetIndexName()))
+	log.Info("IndexCoord DescribeIndex", zap.Int64("collectionID", req.CollectionID),
+		zap.String("indexName", req.GetIndexName()), zap.Uint64("timestamp", req.GetTimestamp()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
 		ret := &indexpb.DescribeIndexResponse{Status: &commonpb.Status{}}
@@ -928,6 +929,9 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 			UserIndexParams: index.UserIndexParams,
 			IndexID:         index.IndexID,
 		}
+		if req.GetTimestamp() != 0 {
+			createTime = req.GetTimestamp()
+		}
 
 		totalRows, indexedRows, pendingIndexRows, segmentsToCheck, err := i.getIndexedStats(ctx, index.CollectionID, indexID, createTime)
 		if err != nil {
@@ -966,7 +970,8 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 
 // GetIndexStatistics get the statistics of the index. DescribeIndex doesn't contain statistics.
 func (i *IndexCoord) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
-	log.Info("IndexCoord GetIndexStatistics", zap.Int64("collectionID", req.CollectionID), zap.String("indexName", req.GetIndexName()))
+	log.Info("IndexCoord GetIndexStatistics", zap.Int64("collectionID", req.CollectionID),
+		zap.String("indexName", req.GetIndexName()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
 		ret := &indexpb.GetIndexStatisticsResponse{Status: &commonpb.Status{}}

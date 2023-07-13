@@ -32,6 +32,53 @@ func (_m *Proxy) EXPECT() *Proxy_Expecter {
 	return &Proxy_Expecter{mock: &_m.Mock}
 }
 
+// AllocTimestamp provides a mock function with given fields: ctx, req
+func (_m *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.AllocTimestampResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AllocTimestampRequest) *milvuspb.AllocTimestampResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.AllocTimestampResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AllocTimestampRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Proxy_AllocTimestamp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocTimestamp'
+type Proxy_AllocTimestamp_Call struct {
+	*mock.Call
+}
+
+// AllocTimestamp is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.AllocTimestampRequest
+func (_e *Proxy_Expecter) AllocTimestamp(ctx interface{}, req interface{}) *Proxy_AllocTimestamp_Call {
+	return &Proxy_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, req)}
+}
+
+func (_c *Proxy_AllocTimestamp_Call) Run(run func(ctx context.Context, req *milvuspb.AllocTimestampRequest)) *Proxy_AllocTimestamp_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AllocTimestampRequest))
+	})
+	return _c
+}
+
+func (_c *Proxy_AllocTimestamp_Call) Return(_a0 *milvuspb.AllocTimestampResponse, _a1 error) *Proxy_AllocTimestamp_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // AlterAlias provides a mock function with given fields: ctx, request
 func (_m *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, request)

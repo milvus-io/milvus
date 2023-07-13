@@ -371,6 +371,7 @@ enum MsgType : int {
   DataNodeTt = 1208,
   Connect = 1209,
   ListClientInfos = 1210,
+  AllocTimestamp = 1211,
   CreateCredential = 1500,
   GetCredential = 1501,
   DeleteCredential = 1502,
