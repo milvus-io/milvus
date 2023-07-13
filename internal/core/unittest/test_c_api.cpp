@@ -4519,6 +4519,7 @@ TEST(CApiTest, AssembeChunkTest) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
+    chunk.clear();
     for (int i = 0; i < 934; ++i) {
         chunk.push_back(i % 2 == 0);
     }
@@ -4526,6 +4527,8 @@ TEST(CApiTest, AssembeChunkTest) {
     for (size_t i = 0; i < 934; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
+
+    chunk.clear();
     for (int i = 0; i < 62; ++i) {
         chunk.push_back(i % 2 == 0);
     }
@@ -4533,6 +4536,8 @@ TEST(CApiTest, AssembeChunkTest) {
     for (size_t i = 0; i < 62; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
+
+    chunk.clear();
     for (int i = 0; i < 105; ++i) {
         chunk.push_back(i % 2 == 0);
     }
@@ -4620,4 +4625,29 @@ TEST(CApiTest, SearchIdTest) {
     for (auto nt : test_nt) {
         test(nt);
     }
+}
+
+TEST(CApiTest, AssembeChunkPerfTest) {
+    FixedVector<bool> chunk;
+    for (size_t i = 0; i < 100000000; ++i) {
+        chunk.push_back(i % 2 == 0);
+    }
+    BitsetType result;
+    // while (true) {
+    std::cout << "start test" << std::endl;
+    auto start = std::chrono::steady_clock::now();
+    milvus::query::AppendOneChunk(result, chunk);
+    std::cout << "cost: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << "us" << std::endl;
+    int index = 0;
+    for (size_t i = 0; i < 1000; i++) {
+        ASSERT_EQ(result[index++], chunk[i]) << i;
+    }
+    // }
+    // std::string s;
+    // boost::to_string(result, s);
+    // std::cout << s << std::endl;
 }

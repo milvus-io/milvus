@@ -24,7 +24,10 @@ useasan = false
 ifeq (${USE_ASAN}, true)
 useasan = true
 endif
-opensimd = OFF
+use_dynamic_simd = OFF
+ifdef USE_DYNAMIC_SIMD
+	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
+endif
 
 export GIT_BRANCH=master
 
@@ -149,19 +152,19 @@ generated-proto: download-milvus-proto build-3rdparty
 
 build-cpp: generated-proto
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
 
 build-cpp-gpu: generated-proto
 	@echo "Building Milvus cpp gpu library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
 
 build-cpp-with-unittest: generated-proto
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
 
 build-cpp-with-coverage: generated-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${useasan} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -i ${opensimd})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${useasan} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index} -y ${use_dynamic_simd})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)

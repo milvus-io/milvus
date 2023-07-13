@@ -1375,6 +1375,8 @@ TEST(Expr, TestExprs) {
     auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1407,8 +1409,8 @@ TEST(Expr, TestExprs) {
         BinaryArithOpEvalRangeExpr = 6,
     };
 
-    auto build_expr =
-        [&](enum ExprType test_type) -> std::shared_ptr<query::Expr> {
+    auto build_expr = [&](enum ExprType test_type,
+                          int n) -> std::shared_ptr<query::Expr> {
         switch (test_type) {
             case UnaryRangeExpr:
                 return std::make_shared<query::UnaryRangeExprImpl<int8_t>>(
@@ -1418,11 +1420,22 @@ TEST(Expr, TestExprs) {
                     proto::plan::GenericValue::ValCase::kInt64Val);
                 break;
             case TermExprImpl: {
-                std::vector<int64_t> retrieve_ints = {1, 4, 6};
-                return std::make_shared<query::TermExprImpl<int64_t>>(
-                    ColumnInfo(int64_fid, DataType::INT64),
+                std::vector<std::string> retrieve_ints;
+                for (int i = 0; i < n; ++i) {
+                    retrieve_ints.push_back("xxxxxx" + std::to_string(i % 10));
+                }
+                return std::make_shared<query::TermExprImpl<std::string>>(
+                    ColumnInfo(str1_fid, DataType::VARCHAR),
                     retrieve_ints,
-                    proto::plan::GenericValue::ValCase::kInt64Val);
+                    proto::plan::GenericValue::ValCase::kStringVal);
+                // std::vector<double> retrieve_ints;
+                // for (int i = 0; i < n; ++i) {
+                //     retrieve_ints.push_back(i);
+                // }
+                // return std::make_shared<query::TermExprImpl<double>>(
+                //     ColumnInfo(double_fid, DataType::DOUBLE),
+                //     retrieve_ints,
+                //     proto::plan::GenericValue::ValCase::kFloatVal);
                 break;
             }
             case CompareExpr: {
@@ -1499,15 +1512,25 @@ TEST(Expr, TestExprs) {
                 break;
         }
     };
-    auto expr = build_expr(UnaryRangeExpr);
-    std::cout << "start test" << std::endl;
-    auto start = std::chrono::steady_clock::now();
-    auto final = visitor.call_child(*expr);
-    std::cout << "cost: "
-              << std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - start)
-                     .count()
-              << "us" << std::endl;
+    auto test_case = [&](int n) {
+        auto expr = build_expr(TermExprImpl, n);
+        std::cout << "start test" << std::endl;
+        auto start = std::chrono::steady_clock::now();
+        auto final = visitor.call_child(*expr);
+        std::cout << n << "cost: "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << "us" << std::endl;
+    };
+    test_case(3);
+    test_case(10);
+    test_case(20);
+    test_case(30);
+    test_case(50);
+    test_case(100);
+    test_case(200);
+    // test_case(500);
 }
 
 TEST(Expr, TestCompareWithScalarIndexMaris) {

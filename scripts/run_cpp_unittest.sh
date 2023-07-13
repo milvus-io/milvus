@@ -48,6 +48,14 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       echo ${UNITTEST_DIR}/all_tests "run failed"
       exit 1
   fi
+  if [ -f "${UNITTEST_DIR}/dynamic_simd_test" ]; then
+      echo "Running dynamic simd test"
+      ${UNITTEST_DIR}/dynamic_simd_test
+      if [ $? -ne 0 ]; then 
+        echo ${UNITTEST_DIR}/dynamic_simd_test "run failed"
+        exit 1
+      fi
+  fi
 done
 
 # run cwrapper unittest
