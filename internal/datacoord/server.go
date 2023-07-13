@@ -325,7 +325,10 @@ func (s *Server) initDataCoord() error {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
 	}
-	s.initSegmentManager()
+
+	if err = s.initSegmentManager(); err != nil {
+		return err
+	}
 
 	s.initGarbageCollection(storageCli)
 
@@ -479,10 +482,15 @@ func (s *Server) initServiceDiscovery() error {
 	return err
 }
 
-func (s *Server) initSegmentManager() {
+func (s *Server) initSegmentManager() error {
 	if s.segmentManager == nil {
-		s.segmentManager = newSegmentManager(s.meta, s.allocator, s.rootCoordClient)
+		manager, err := newSegmentManager(s.meta, s.allocator)
+		if err != nil {
+			return err
+		}
+		s.segmentManager = manager
 	}
+	return nil
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
