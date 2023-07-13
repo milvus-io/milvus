@@ -31,7 +31,7 @@ jobs:
   ubuntu:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +78,7 @@ jobs:
     name: Code Checker CentOS 7
     # Run in centos docker
     runs-on: ubuntu-20.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v2

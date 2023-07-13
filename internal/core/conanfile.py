@@ -51,9 +51,11 @@ class MilvusConan(ConanFile):
         "folly/2023.05.22.02@milvus/dev",
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
+        "librdkafka/1.9.1",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
+        "librdkafka:shared": True,
         "rocksdb:shared": True,
         "rocksdb:with_zstd": True,
         "arrow:parquet": True,
