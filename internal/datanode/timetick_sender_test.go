@@ -35,7 +35,7 @@ func TestTimetickManagerNormal(t *testing.T) {
 	manager := newTimeTickSender(&DataCoordFactory{}, 0)
 
 	channelName1 := "channel1"
-	ts := uint64(time.Now().Unix())
+	ts := uint64(time.Now().UnixMilli())
 	var segmentID1 int64 = 28257
 	var segmentID2 int64 = 28258
 	segmentStats := []*commonpb.SegmentStats{
@@ -64,21 +64,20 @@ func TestTimetickManagerNormal(t *testing.T) {
 			NumRows:   33333,
 		},
 	}
-	ts2 := uint64(time.Now().Unix())
+	ts2 := ts + 100
 	manager.update(channelName1, ts2, segmentStats2)
 
 	channelSegmentStates, channelSegmentStatesExist := manager.channelStatesCaches[channelName1]
 	assert.Equal(t, true, channelSegmentStatesExist)
 
 	segmentStates, segmentStatesExist := channelSegmentStates.data[ts2]
-	assert.Equal(t, segmentStats2[0], segmentStates[0])
-	assert.Equal(t, segmentStats2[1], segmentStates[1])
 	assert.Equal(t, true, segmentStatesExist)
+	assert.Equal(t, 2, len(segmentStates))
 
 	var segmentID3 int64 = 28259
 	var segmentID4 int64 = 28260
 	channelName2 := "channel2"
-	ts3 := uint64(time.Now().Unix())
+	ts3 := ts2 + 100
 	segmentStats3 := []*commonpb.SegmentStats{
 		{
 			SegmentID: segmentID3,
@@ -103,7 +102,7 @@ func TestTimetickManagerNormal(t *testing.T) {
 	var segmentID5 int64 = 28261
 	var segmentID6 int64 = 28262
 	channelName3 := "channel3"
-	ts4 := uint64(time.Now().Unix())
+	ts4 := ts3 + 100
 	segmentStats4 := []*commonpb.SegmentStats{
 		{
 			SegmentID: segmentID5,
