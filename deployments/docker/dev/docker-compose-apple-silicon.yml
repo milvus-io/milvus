@@ -59,6 +59,43 @@ services:
       - "16686:16686" # frontent
       - "14268:14268" # jaeger.thirft
 
+  pd:
+    image: pingcap/pd:v7.2.0
+    ports:
+      - "2389:2389"
+      - "2390:2390"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/localtime:/localtime
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/data
+    command:
+      - --name=dev-pd-1
+      - --data-dir=/data/dev-pd-1
+      - --client-urls=http://0.0.0.0:2389
+      - --advertise-client-urls=http://127.0.0.1:2389
+      - --peer-urls=http://0.0.0.0:2390
+      - --advertise-peer-urls=http://127.0.0.1:2390
+      - --initial-cluster=dev-pd-1=http://127.0.0.1:2390
+    networks:
+      - default
+
+  tikv:
+    image: pingcap/tikv:v7.2.0
+    ports:
+      - "20160:20160"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/localtime:/localtime
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/data
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=127.0.0.1:20160
+      - --data-dir=/data/dev-tikv-1
+      - --pd=dev-pd-1:2389
+     #- --pd=http://127.0.0.1:2389
+    depends_on:
+      - "pd"
+    networks:
+      - default
+
 networks:
   default:
     name: milvus_dev
