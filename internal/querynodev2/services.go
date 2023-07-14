@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -251,7 +250,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
 	}
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}, req.GetLoadMeta())
@@ -377,6 +376,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.tSafeManager.Remove(req.GetChannelName())
+
+		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 
 	log.Info("unsubscribed channel")
@@ -402,57 +403,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	collection := node.manager.Collection.Get(req.GetCollectionID())
 	if collection != nil {
 		collection.AddPartition(req.GetPartitionIDs()...)
-		return merr.Status(nil), nil
 	}
-
-	if req.GetSchema() == nil {
-		return merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID(), "failed to load partitions")), nil
-	}
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
-	for _, info := range req.GetIndexInfoList() {
-		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-			CollectionID:    info.GetCollectionID(),
-			FieldID:         info.GetFieldID(),
-			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
-			IsAutoIndex:     info.GetIsAutoIndex(),
-			UserIndexParams: info.GetUserIndexParams(),
-		})
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
-	maxIndexRecordPerSegment := int64(0)
-	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
-	} else {
-		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
-		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
-	}
-	vecField, err := typeutil.GetVectorFieldSchema(req.GetSchema())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	indexInfo, ok := lo.Find(req.GetIndexInfoList(), func(info *indexpb.IndexInfo) bool {
-		return info.GetFieldID() == vecField.GetFieldID()
-	})
-	if !ok || indexInfo == nil {
-		err = fmt.Errorf("cannot find index info for %s field", vecField.GetName())
-		return merr.Status(err), nil
-	}
-	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.GetIndexParams())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), &segcorepb.CollectionIndexMeta{
-		IndexMetas:       fieldIndexMetas,
-		MaxIndexRowCount: maxIndexRecordPerSegment,
-	}, &querypb.LoadMetaInfo{
-		CollectionID: req.GetCollectionID(),
-		PartitionIDs: req.GetPartitionIDs(),
-		LoadType:     querypb.LoadType_LoadCollection, // TODO: dyh, remove loadType in querynode
-		MetricType:   metricType,
-	})
 
 	log.Info("load partitions done")
 	return merr.Status(nil), nil
@@ -510,7 +461,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.loadDeltaLogs(ctx, req), nil
 	}
 
-	node.manager.Collection.Put(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
+	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(), nil, req.GetLoadMeta())
+	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	// Actual load segment
 	log.Info("start to load segments...")
@@ -527,8 +479,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		}, nil
 	}
 
+	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
+
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
+
 	return util.SuccessStatus(), nil
 }
 
@@ -636,9 +591,12 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	}
 
 	log.Info("start to release segments")
+	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		node.manager.Segment.Remove(id, req.GetScope())
+		_, count := node.manager.Segment.Remove(id, req.GetScope())
+		sealedCount += count
 	}
+	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
 
 	return util.SuccessStatus(), nil
 }

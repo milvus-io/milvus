@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 var _ cluster.Worker = &LocalWorker{}
@@ -43,13 +45,20 @@ func NewLocalWorker(node *QueryNode) *LocalWorker {
 func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := log.Ctx(ctx)
 	log.Info("start to load segments...")
-	_, err := w.node.loader.Load(ctx,
+	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
 		req.GetInfos()...,
 	)
-	log.Info("load segments done")
+	if err != nil {
+		return err
+	}
+
+	w.node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
+
+	log.Info("load segments done...",
+		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 	return err
 }
 

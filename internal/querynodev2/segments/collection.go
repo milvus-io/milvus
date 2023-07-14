@@ -41,7 +41,12 @@ import (
 
 type CollectionManager interface {
 	Get(collectionID int64) *Collection
-	Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	Ref(collectionID int64, count uint32) bool
+	// unref the collection,
+	// returns true if the collection ref count goes 0, or the collection not exists,
+	// return false otherwise
+	Unref(collectionID int64, count uint32) bool
 }
 
 type collectionManager struct {
@@ -62,18 +67,49 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) Put(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
-	if _, ok := m.collections[collectionID]; ok {
+	if collection, ok := m.collections[collectionID]; ok {
+		collection.Ref(1)
 		return
 	}
 
 	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
 	collection.metricType.Store(loadMeta.GetMetricType())
 	collection.AddPartition(loadMeta.GetPartitionIDs()...)
+	collection.Ref(1)
 	m.collections[collectionID] = collection
+}
+
+func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	if collection, ok := m.collections[collectionID]; ok {
+		collection.Ref(count)
+		return true
+	}
+
+	return false
+}
+
+func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	if collection, ok := m.collections[collectionID]; ok {
+		if collection.Unref(count) == 0 {
+			log.Info("release collection due to ref count to 0", zap.Int64("collectionID", collectionID))
+			delete(m.collections, collectionID)
+			DeleteCollection(collection)
+			return true
+		}
+		return false
+	}
+
+	return true
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
@@ -85,6 +121,8 @@ type Collection struct {
 	loadType      querypb.LoadType
 	metricType    atomic.String
 	schema        *schemapb.CollectionSchema
+
+	refCount *atomic.Uint32
 }
 
 // ID returns collection id
@@ -133,6 +171,24 @@ func (c *Collection) GetMetricType() string {
 	return c.metricType.Load()
 }
 
+func (c *Collection) Ref(count uint32) uint32 {
+	refCount := c.refCount.Add(count)
+	log.Debug("collection ref increment",
+		zap.Int64("collectionID", c.ID()),
+		zap.Uint32("refCount", refCount),
+	)
+	return refCount
+}
+
+func (c *Collection) Unref(count uint32) uint32 {
+	refCount := c.refCount.Sub(count)
+	log.Debug("collection ref decrement",
+		zap.Int64("collectionID", c.ID()),
+		zap.Uint32("refCount", refCount),
+	)
+	return refCount
+}
+
 // newCollection returns a new Collection
 func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadType querypb.LoadType) *Collection {
 	/*
@@ -157,6 +213,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		schema:        schema,
 		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadType,
+		refCount:      atomic.NewUint32(0),
 	}
 }
 
@@ -165,6 +222,7 @@ func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		loadType:   loadType,
+		refCount:   atomic.NewUint32(0),
 	}
 }
 

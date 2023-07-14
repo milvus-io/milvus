@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -48,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ServiceSuite struct {
@@ -536,7 +533,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		PartitionIDs: suite.partitionIDs,
 	}
 	suite.node.manager.Collection = segments.NewCollectionManager()
-	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, loadMeta)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgID:    rand.Int63(),
@@ -739,7 +736,8 @@ func (suite *ServiceSuite) TestReleaseCollection_Failed() {
 
 func (suite *ServiceSuite) TestReleasePartitions_Normal() {
 	ctx := context.Background()
-	suite.TestLoadPartition()
+
+	suite.TestWatchDmChannelsInt64()
 	req := &querypb.ReleasePartitionsRequest{
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
@@ -1018,7 +1016,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		PartitionIDs: suite.partitionIDs,
 		MetricType:   "L2",
 	}
-	suite.node.manager.Collection.Put(suite.collectionID, schema, nil, LoadMeta)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, LoadMeta)
 	req.GetReq().MetricType = "IP"
 	resp, err = suite.node.Search(ctx, req)
 	suite.NoError(err)
@@ -1538,55 +1536,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 	suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	// collection not exist and schema is nil
-	suite.node.manager.Collection = segments.NewCollectionManager()
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-	// no vec field in schema
-	req.Schema = &schemapb.CollectionSchema{}
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-	// no indexInfo
-	req.Schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64)
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-	// no metric type
-	vecField, err := typeutil.GetVectorFieldSchema(req.GetSchema())
-	suite.NoError(err)
-	req.IndexInfoList = []*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collectionID,
-			FieldID:      vecField.GetFieldID(),
-			IndexParams:  []*commonpb.KeyValuePair{},
-		},
-	}
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
-	// collection not exist and schema is not nil
-	req.IndexInfoList = []*indexpb.IndexInfo{
-		{
-			CollectionID: suite.collectionID,
-			FieldID:      vecField.GetFieldID(),
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: "L2",
-				},
-			},
-		},
-	}
-	status, err = suite.node.LoadPartitions(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 
 	// collection existed
 	status, err = suite.node.LoadPartitions(ctx, req)
