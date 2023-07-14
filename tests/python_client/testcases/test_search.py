@@ -775,6 +775,26 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "PartitonName: %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nq", [16385])
+    def test_search_with_invalid_nq(self, nq):
+        """
+        target: test search with invalid nq
+        method: search with invalid nq
+        expected: raise exception and report the error
+        """
+        # initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # search
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "nq (number of search vector per search "
+                                                    "request) should be in range [1, 16384]"})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 15407")
     def test_search_param_invalid_binary(self):
         """
@@ -1406,6 +1426,26 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             ids = hits.ids
             assert sorted(list(set(ids))) == sorted(ids)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("search_params", [{}, {"metric_type": "COSINE"}])
+    def test_search_with_default_search_params(self, _async, search_params):
+        """
+        target: test search with default search params
+        method: search with default search params
+        expected: search successfully
+        """
+        # initialize with data
+        collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True)[0:4]
+        # search
+        collection_w.search(vectors[:nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_accurate_search_with_multi_segments(self, dim):
@@ -3885,8 +3925,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
-    @pytest.mark.skip(reason="create vector index type on scalar field, issue#25170 @Nico")
-    def test_search_collection_naming_rules(self, nq, dim, name, index_name, _async):
+    def test_search_collection_naming_rules(self, name, index_name, _async):
         """
         target: test search collection naming rules
         method: 1. Connect milvus
@@ -3897,30 +3936,28 @@ class TestCollectionSearch(TestcaseBase):
                 6. Search collection
         expected: searched successfully
         """
-        nb = 5000
         field_name1 = "_1nt"
         field_name2 = "f10at_"
         collection_name = cf.gen_unique_str(name)
         self._connect()
         fields = [cf.gen_int64_field(), cf.gen_int64_field(field_name1),
-                  cf.gen_float_vec_field(field_name2, dim=dim)]
-        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name)
+                  cf.gen_float_vec_field(field_name2, dim=default_dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=default_int64_field_name)
         collection_w = self.init_collection_wrap(name=collection_name, schema=schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={"name": collection_name, "schema": schema})
-        collection_w.create_index(field_name1, default_index_params, index_name=index_name)
-        int_values = pd.Series(data=[i for i in range(0, nb)])
-        float_vec_values = cf.gen_vectors(nb, dim)
-        dataframe = pd.DataFrame({ct.default_int64_field_name: int_values,
+        collection_w.create_index(field_name1, index_name=index_name)
+        int_values = pd.Series(data=[i for i in range(0, default_nb)])
+        float_vec_values = cf.gen_vectors(default_nb, default_dim)
+        dataframe = pd.DataFrame({default_int64_field_name: int_values,
                                   field_name1: int_values, field_name2: float_vec_values})
         collection_w.insert(dataframe)
         collection_w.create_index(field_name2, index_params=ct.default_flat_index)
         collection_w.load()
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        collection_w.search(vectors[:nq], field_name2, default_search_params,
+        collection_w.search(vectors[:default_nq], field_name2, default_search_params,
                             default_limit, _async=_async,
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
+                            check_items={"nq": default_nq,
                                          "limit": default_limit,
                                          "_async": _async})
 
