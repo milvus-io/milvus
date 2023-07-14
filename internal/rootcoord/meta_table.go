@@ -864,8 +864,15 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 		return fmt.Errorf("database %s not found", dbName)
 	}
 
-	if _, ok := mt.names.get(dbName, alias); ok {
-		return fmt.Errorf("cannot create alias, collection already exists with same name: %s", alias)
+	if collID, ok := mt.names.get(dbName, alias); ok {
+		coll, ok := mt.collID2Meta[collID]
+		if !ok {
+			return fmt.Errorf("meta error, name mapped non-exist collection id")
+		}
+		// allow alias with dropping&dropped
+		if coll.State != pb.CollectionState_CollectionDropping && coll.State != pb.CollectionState_CollectionDropped {
+			return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+		}
 	}
 
 	collectionID, ok := mt.names.get(dbName, collectionName)
@@ -961,8 +968,12 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string
 		return fmt.Errorf("database not found: %s", dbName)
 	}
 
-	if _, ok := mt.names.get(dbName, alias); ok {
-		return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+	if collID, ok := mt.names.get(dbName, alias); ok {
+		coll := mt.collID2Meta[collID]
+		// allow alias with dropping&dropped
+		if coll.State != pb.CollectionState_CollectionDropping && coll.State != pb.CollectionState_CollectionDropped {
+			return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+		}
 	}
 
 	collectionID, ok := mt.names.get(dbName, collectionName)
