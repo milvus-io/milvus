@@ -43,7 +43,13 @@ func NewLocalWorker(node *QueryNode) *LocalWorker {
 }
 
 func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 {
+			return info.GetSegmentID()
+		})),
+		zap.String("loadScope", req.GetLoadScope().String()),
+	)
 	log.Info("start to load segments...")
 	loaded, err := w.node.loader.Load(ctx,
 		req.GetCollectionID(),
@@ -63,7 +69,11 @@ func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegment
 }
 
 func (w *LocalWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) error {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.String("scope", req.GetScope().String()),
+	)
 	log.Info("start to release segments")
 	for _, id := range req.GetSegmentIDs() {
 		w.node.manager.Segment.Remove(id, req.GetScope())
@@ -72,7 +82,10 @@ func (w *LocalWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseS
 }
 
 func (w *LocalWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) error {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("segmentID", req.GetSegmentId()),
+	)
 	log.Info("start to process segment delete")
 	status, err := w.node.Delete(ctx, req)
 	if err != nil {
