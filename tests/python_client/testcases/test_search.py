@@ -1084,7 +1084,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.insert(data)
             collection_w.flush()
 
-        collection_w.create_index(default_saarch_field, default_index_params)
+        collection_w.create_index(default_search_field, default_index_params)
         collection_w.load()
 
         # 2. search
@@ -3619,6 +3619,7 @@ class TestSearchBase(TestcaseBase):
         expected: the length of the result is top_k
         """
         top_k = get_top_k
+        dim = 128
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,

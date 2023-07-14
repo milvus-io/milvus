@@ -155,6 +155,7 @@ pipeline {
                                                     --set indexNode.disk.enabled=true \
                                                     --set queryNode.disk.enabled=true \
                                                     --set standalone.disk.enabled=true \
+                                                    --set log.level=debug \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
                                                     -f values/ci/nightly.yaml "
