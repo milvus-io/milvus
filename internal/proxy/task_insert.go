@@ -218,8 +218,10 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
 
 	collectionName := it.insertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
+	log := log.Ctx(ctx)
 	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
 		return err
 	}
 	it.insertMsg.CollectionID = collID
@@ -233,16 +235,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Ctx(ctx).Warn("get vChannels failed",
-			zap.Int64("collectionID", collID),
-			zap.Error(err))
+		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
 
-	log.Ctx(ctx).Debug("send insert request to virtual channels",
-		zap.String("collectionName", it.insertMsg.GetCollectionName()),
+	log.Debug("send insert request to virtual channels",
 		zap.String("partition", it.insertMsg.GetPartitionName()),
 		zap.Int64("collectionID", collID),
 		zap.Strings("virtual_channels", channelNames),
@@ -258,9 +257,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
 	}
 	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed",
-			zap.Int64("collectionID", collID),
-			zap.Error(err))
+		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
@@ -268,11 +265,10 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	assignSegmentIDDur := tr.RecordSpan()
 
 	log.Debug("assign segmentID for insert data success",
-		zap.Int64("collectionID", collID),
-		zap.String("collectionName", it.insertMsg.CollectionName),
 		zap.Duration("assign segmentID duration", assignSegmentIDDur))
 	err = stream.Produce(msgPack)
 	if err != nil {
+		log.Warn("fail to produce insert msg", zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err

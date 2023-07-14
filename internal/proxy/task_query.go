@@ -402,6 +402,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		exec:       t.queryShard,
 	})
 	if err != nil {
+		log.Warn("fail to execute query", zap.Error(err))
 		return merr.WrapErrShardDelegatorQueryFailed(err.Error())
 	}
 
@@ -442,6 +443,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	t.result, err = reducer.Reduce(toReduceResults)
 	if err != nil {
+		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
 	}
 	t.result.OutputFields = t.userOutputFields
