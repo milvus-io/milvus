@@ -210,6 +210,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
+	log := log.Ctx(ctx)
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
@@ -224,6 +225,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
+		log.Warn("is partition key mode failed", zap.Error(err))
 		return err
 	}
 	if partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
@@ -232,9 +234,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.request.OutputFields, t.userOutputFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
+		log.Warn("translate output fields failed", zap.Error(err))
 		return err
 	}
-	log.Ctx(ctx).Debug("translate output fields",
+	log.Debug("translate output fields",
 		zap.Strings("output fields", t.request.GetOutputFields()))
 
 	// fetch search_growing from search param
@@ -254,6 +257,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// Manually update nq if not set.
 	nq, err := getNq(t.request)
 	if err != nil {
+		log.Warn("failed to get nq", zap.Error(err))
 		return err
 	}
 	// Check if nq is valid:
@@ -265,6 +269,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 	if err != nil {
+		log.Warn("fail to get output field ids", zap.Error(err))
 		return err
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
@@ -290,23 +295,25 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
-			log.Ctx(ctx).Warn("failed to create query plan", zap.Error(err),
+			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 				zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 			return fmt.Errorf("failed to create query plan: %v", err)
 		}
-		log.Ctx(ctx).Debug("create query plan",
+		log.Debug("create query plan",
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 
 		if partitionKeyMode {
 			expr, err := ParseExprFromPlan(plan)
 			if err != nil {
+				log.Warn("failed to parse expr", zap.Error(err))
 				return err
 			}
 			partitionKeys := ParsePartitionKeys(expr)
 			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), collectionName, partitionKeys)
 			if err != nil {
+				log.Warn("failed to assign partition keys", zap.Error(err))
 				return err
 			}
 
@@ -321,6 +328,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		estimateSize, err := t.estimateResultSize(nq, t.SearchRequest.Topk)
 		if err != nil {
+			log.Warn("failed to estimate result size", zap.Error(err))
 			return err
 		}
 		if estimateSize >= requeryThreshold {
@@ -333,7 +341,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 
-		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute",
+		log.Debug("Proxy::searchTask::PreExecute",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.String("plan", plan.String())) // may be very large if large term passed.
 	}
@@ -341,6 +349,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// translate partition name to partition ids. Use regex-pattern to match partition name.
 	t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, partitionNames)
 	if err != nil {
+		log.Warn("failed to get partition ids", zap.Error(err))
 		return err
 	}
 
@@ -354,7 +363,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName)
 	if err2 != nil {
-		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
+		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
 			zap.Any("collectionName", collectionName), zap.Error(err2))
 		return err2
 	}
@@ -388,7 +397,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.Username = username
 	}
 
-	log.Ctx(ctx).Debug("search PreExecute done.",
+	log.Debug("search PreExecute done.",
 		zap.Uint64("travel_ts", travelTimestamp), zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
@@ -414,6 +423,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		exec:       t.searchShard,
 	})
 	if err != nil {
+		log.Warn("search execute failed", zap.Error(err))
 		return merr.WrapErrShardDelegatorSearchFailed(err.Error())
 	}
 
@@ -431,6 +441,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
+	log := log.Ctx(ctx)
 
 	var (
 		Nq         = t.SearchRequest.GetNq()
@@ -439,6 +450,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	)
 	toReduceResults, err := t.collectSearchResults(ctx)
 	if err != nil {
+		log.Warn("failed to collect search results", zap.Error(err))
 		return err
 	}
 
@@ -450,31 +462,34 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	tr.CtxRecord(ctx, "decodeResultStart")
 	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
+		log.Warn("failed to decode search results", zap.Error(err))
 		return err
 	}
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	if len(validSearchResults) <= 0 {
-		log.Ctx(ctx).Warn("search result is empty")
+		log.Warn("search result is empty")
 
 		t.fillInEmptyResult(Nq)
 		return nil
 	}
 
 	// Reduce all search results
-	log.Ctx(ctx).Debug("proxy search post execute reduce",
+	log.Debug("proxy search post execute reduce",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
 		zap.Int("number of valid search results", len(validSearchResults)))
 	tr.CtxRecord(ctx, "reduceResultStart")
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(t.schema)
 	if err != nil {
+		log.Warn("failed to get primary field schema", zap.Error(err))
 		return err
 	}
 
 	t.result, err = reduceSearchResultData(ctx, validSearchResults, Nq, Topk, MetricType, primaryFieldSchema.DataType, t.offset)
 	if err != nil {
+		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
 
@@ -486,12 +501,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	if t.requery {
 		err = t.Requery()
 		if err != nil {
+			log.Warn("failed to requery", zap.Error(err))
 			return err
 		}
 	}
 	t.result.Results.OutputFields = t.userOutputFields
 
-	log.Ctx(ctx).Debug("Search post execute done",
+	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil

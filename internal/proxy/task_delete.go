@@ -163,14 +163,15 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		Timestamp: dt.BeginTs(),
 	}
 
+	log := log.Ctx(ctx)
 	collName := dt.deleteMsg.CollectionName
 	if err := validateCollectionName(collName); err != nil {
-		log.Info("Invalid collection name", zap.String("collectionName", collName), zap.Error(err))
+		log.Warn("Invalid collection name", zap.Error(err))
 		return err
 	}
 	collID, err := globalMetaCache.GetCollectionID(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
-		log.Info("Failed to get collection id", zap.String("collectionName", collName), zap.Error(err))
+		log.Warn("Failed to get collection id", zap.Error(err))
 		return err
 	}
 	dt.deleteMsg.CollectionID = collID
@@ -178,6 +179,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, dt.deleteMsg.GetDbName(), dt.deleteMsg.CollectionName)
 	if err != nil {
+		log.Warn("Failed to get partition key mode", zap.Error(err))
 		return err
 	}
 	if partitionKeyMode && len(dt.deleteMsg.PartitionName) != 0 {
@@ -188,12 +190,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if len(dt.deleteMsg.PartitionName) > 0 {
 		partName := dt.deleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
+			log.Info("Invalid partition name", zap.Error(err))
 			return err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, dt.deleteMsg.GetDbName(), collName, partName)
 		if err != nil {
-			log.Info("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
+			log.Info("Failed to get partition id", zap.Error(err))
 			return err
 		}
 		dt.deleteMsg.PartitionID = partID
@@ -203,7 +205,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.deleteMsg.GetDbName(), collName)
 	if err != nil {
-		log.Info("Failed to get collection schema", zap.String("collectionName", collName), zap.Error(err))
+		log.Info("Failed to get collection schema", zap.Error(err))
 		return err
 	}
 	dt.schema = schema
@@ -228,18 +230,22 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		dt.deleteMsg.Timestamps[index] = dt.BeginTs()
 	}
 
+	log.Debug("pre delete done", zap.Int64("collection_id", dt.collectionID))
+
 	return nil
 }
 
 func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
 	defer sp.End()
+	log := log.Ctx(ctx)
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
 
 	collID := dt.deleteMsg.CollectionID
 	stream, err := dt.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
+		log.Warn("fail to get or create dml stream", zap.Error(err))
 		return err
 	}
 

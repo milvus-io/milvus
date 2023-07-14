@@ -292,7 +292,7 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return generic.Zero[T](), err
 	}
 	if IsCrossClusterRoutingErr(err) {
-		log.Warn("CrossClusterRoutingErr, start to reset connection",
+		log.Ctx(ctx).Warn("CrossClusterRoutingErr, start to reset connection",
 			zap.String("role", c.GetRole()),
 			zap.Error(err),
 		)
@@ -303,7 +303,7 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		log.Ctx(ctx).Warn("ClientBase:isNotGrpcErr", zap.Error(err))
 		return generic.Zero[T](), err
 	}
-	log.Info("ClientBase grpc error, start to reset connection",
+	log.Ctx(ctx).Info("ClientBase grpc error, start to reset connection",
 		zap.String("role", c.GetRole()),
 		zap.Error(err),
 	)
