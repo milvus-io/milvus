@@ -344,7 +344,7 @@ func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 			getInsertMsg(111, 70000),
 			false},
 		// for pChannel reuse on same collection
-		{"test insert msg with different channel name",
+		{"test insert msg with different channelName",
 			[]UniqueID{100},
 			nil,
 			nil,

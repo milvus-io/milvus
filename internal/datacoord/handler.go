@@ -259,7 +259,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionIDs 
 	}
 	if minPos != nil {
 		log.Info("getEarliestSegmentDMLPos done",
-			zap.Int64("segment ID", minPosSegID),
+			zap.Int64("segmentID", minPosSegID),
 			zap.Uint64("posTs", minPosTs),
 			zap.Time("posTime", tsoutil.PhysicalTime(minPosTs)))
 	}

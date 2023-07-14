@@ -415,9 +415,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 	log.Info("receive import job",
 		zap.String("database name", req.GetDbName()),
-		zap.String("collection name", req.GetCollectionName()),
-		zap.Int64("collection ID", cID),
-		zap.Int64("partition ID", pID))
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64("collectionID", cID),
+		zap.Int64("partitionID", pID))
 	err := func() error {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
@@ -698,8 +698,8 @@ func (m *importManager) setCollectionPartitionName(dbName string, colID, partID 
 			return nil
 		}
 		log.Error("failed to setCollectionPartitionName",
-			zap.Int64("collection ID", colID),
-			zap.Int64("partition ID", partID),
+			zap.Int64("collectionID", colID),
+			zap.Int64("partitionID", partID),
 			zap.Error(err))
 	}
 	return errors.New("failed to setCollectionPartitionName for import task")

@@ -378,7 +378,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
+	log.Ctx(ctx).Info("proxy create index", zap.Int64("collectionID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
 		zap.String("indexName", cit.req.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
 		zap.Any("indexParams", cit.req.GetExtraParams()),
 		zap.Any("newExtraParams", cit.newExtraParams),

@@ -273,12 +273,12 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
 	if !ok {
-		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
+		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
 	}
 
 	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
-		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channel name", req.GetChannel()))
+		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
 		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
 	}
 
@@ -410,8 +410,8 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	logFields := []zap.Field{
 		zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-		zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
-		zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
+		zap.Int64("collectionID", req.GetImportTask().GetCollectionId()),
+		zap.Int64("partitionID", req.GetImportTask().GetPartitionId()),
 		zap.String("database name", req.GetImportTask().GetDatabaseName()),
 		zap.Strings("channel names", req.GetImportTask().GetChannelNames()),
 		zap.Int64s("working dataNodes", req.WorkingNodes),
@@ -542,7 +542,7 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 
 	logFields := []zap.Field{
 		zap.String("dbName", dbName),
-		zap.String("collection name", collectionName),
+		zap.String("collectionName", collectionName),
 	}
 	resp, err := node.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
@@ -575,10 +575,10 @@ func (node *DataNode) getPartitions(ctx context.Context, dbName string, collecti
 // AddImportSegment adds the import segment to the current DataNode.
 func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
 	logFields := []zap.Field{
-		zap.Int64("segment ID", req.GetSegmentId()),
-		zap.Int64("collection ID", req.GetCollectionId()),
-		zap.Int64("partition ID", req.GetPartitionId()),
-		zap.String("channel name", req.GetChannelName()),
+		zap.Int64("segmentID", req.GetSegmentId()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("partitionID", req.GetPartitionId()),
+		zap.String("channelName", req.GetChannelName()),
 		zap.Int64("# of rows", req.GetRowNum()),
 	}
 	log.Info("adding segment to DataNode flow graph", logFields...)
@@ -674,7 +674,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
 			zap.Int("shard ID", shardID),
-			zap.Int64("partition ID", partID),
+			zap.Int64("partitionID", partID),
 			zap.Int("# of channels", len(chNames)),
 			zap.Strings("channel names", chNames),
 		}
@@ -703,7 +703,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		}
 
 		segmentID := resp.SegIDAssignments[0].SegID
-		logFields = append(logFields, zap.Int64("segment ID", segmentID))
+		logFields = append(logFields, zap.Int64("segmentID", segmentID))
 		log.Info("new segment assigned", logFields...)
 
 		// call report to notify the rootcoord update the segment id list for this task
@@ -739,8 +739,8 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 		importTaskID := req.GetImportTask().GetTaskId()
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
-			zap.Int64("partition ID", partID),
-			zap.Int64("segment ID", segmentID),
+			zap.Int64("partitionID", partID),
+			zap.Int64("segmentID", segmentID),
 			zap.Int("# of channels", len(chNames)),
 			zap.Strings("channel names", chNames),
 		}
@@ -771,8 +771,8 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 		targetChName string, rowCount int64, partID int64) error {
 		logFields := []zap.Field{
 			zap.Int64("task ID", importTaskID),
-			zap.Int64("partition ID", partID),
-			zap.Int64("segment ID", segmentID),
+			zap.Int64("partitionID", partID),
+			zap.Int64("segmentID", segmentID),
 			zap.String("target channel name", targetChName),
 			zap.Int64("row count", rowCount),
 			zap.Uint64("ts", ts),
@@ -999,6 +999,6 @@ func reportImportFunc(node *DataNode) importutil.ReportFunc {
 
 func logDupFlush(cID, segID int64) {
 	log.Info("segment is already being flushed, ignoring flush request",
-		zap.Int64("collection ID", cID),
-		zap.Int64("segment ID", segID))
+		zap.Int64("collectionID", cID),
+		zap.Int64("segmentID", segID))
 }

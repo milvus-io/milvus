@@ -117,7 +117,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
 		log.Info("ddNode in dropMode",
 			zap.String("vChannelName", ddn.vChannelName),
-			zap.Int64("collection ID", ddn.collectionID))
+			zap.Int64("collectionID", ddn.collectionID))
 		return []Msg{}
 	}
 
@@ -182,7 +182,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
 				log.Info("filter insert messages",
-					zap.Int64("filter segment ID", imsg.GetSegmentID()),
+					zap.Int64("filter segmentID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
 					zap.String("segment's vChannel", imsg.GetShardName()),
 					zap.String("current vChannel", ddn.vChannelName))

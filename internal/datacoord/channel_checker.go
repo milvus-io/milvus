@@ -95,7 +95,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		log.Info("zero timeoutTs, skip starting timer",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
-			zap.String("channel name", channelName),
+			zap.String("channelName", channelName),
 		)
 		return
 	}
@@ -110,7 +110,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		log.Info("timer started",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
-			zap.String("channel name", channelName),
+			zap.String("channelName", channelName),
 			zap.Duration("check interval", timeout))
 		defer ticker.Stop()
 
@@ -121,7 +121,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 			log.Warn("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
-				zap.String("channel name", channelName),
+				zap.String("channelName", channelName),
 				zap.Duration("timeout interval", timeout),
 				zap.Int32("runningTimerCount", c.runningTimerCount.Load()))
 			ackType := getAckType(watchState)
@@ -131,7 +131,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 			log.Info("stop timer before timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
-				zap.String("channel name", channelName),
+				zap.String("channelName", channelName),
 				zap.Duration("timeout interval", timeout),
 				zap.Int32("runningTimerCount", c.runningTimerCount.Load()))
 			return

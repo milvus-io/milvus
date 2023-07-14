@@ -18,7 +18,7 @@ func (s *indexDb) Get(tenantID string, collectionID typeutil.UniqueID) ([]*dbmod
 
 	err := s.db.Model(&dbmodel.Index{}).Where("tenant_id = ? AND collection_id = ?", tenantID, collectionID).Find(&r).Error
 	if err != nil {
-		log.Error("get indexes by collection_id failed", zap.String("tenant", tenantID), zap.Int64("collID", collectionID), zap.Error(err))
+		log.Error("get indexes by collection_id failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
@@ -59,7 +59,7 @@ func (s *indexDb) Update(in *dbmodel.Index) error {
 	}).Error
 
 	if err != nil {
-		log.Error("update indexes failed", zap.String("tenant", in.TenantID), zap.Int64("collID", in.CollectionID), zap.Int64("indexID", in.IndexID), zap.Error(err))
+		log.Error("update indexes failed", zap.String("tenant", in.TenantID), zap.Int64("collectionID", in.CollectionID), zap.Int64("indexID", in.IndexID), zap.Error(err))
 		return err
 	}
 
@@ -72,7 +72,7 @@ func (s *indexDb) MarkDeletedByCollectionID(tenantID string, collID typeutil.Uni
 	}).Error
 
 	if err != nil {
-		log.Error("update indexes is_deleted=true failed", zap.String("tenant", tenantID), zap.Int64("collID", collID), zap.Error(err))
+		log.Error("update indexes is_deleted=true failed", zap.String("tenant", tenantID), zap.Int64("collectionID", collID), zap.Error(err))
 		return err
 	}
 

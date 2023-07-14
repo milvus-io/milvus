@@ -142,7 +142,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskR
 		q.tailCh = t.finishSignal
 		q.tailMut.Unlock()
 		log.Info("new flush task runner created and initialized",
-			zap.Int64("segment ID", q.segmentID),
+			zap.Int64("segmentID", q.segmentID),
 			zap.String("pos message ID", string(pos.GetMsgID())),
 		)
 	}
@@ -290,7 +290,7 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 
 func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
 	log.Info("handling insert task",
-		zap.Int64("segment ID", segmentID),
+		zap.Int64("segmentID", segmentID),
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),
 		zap.Any("position", pos),
@@ -316,7 +316,7 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 }
 
 func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *msgpb.MsgPosition) {
-	log.Info("handling delete task", zap.Int64("segment ID", segmentID))
+	log.Info("handling delete task", zap.Int64("segmentID", segmentID))
 	// in dropping mode
 	if m.dropping.Load() {
 		// preventing separate delete, check position exists in queue first
@@ -922,9 +922,9 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			// Stop retry and still proceed to the end, ignoring this error.
 			if !pack.flushed && rsp.GetErrorCode() == commonpb.ErrorCode_SegmentNotFound {
 				log.Warn("stale segment not found, could be compacted",
-					zap.Int64("segment ID", pack.segmentID))
+					zap.Int64("segmentID", pack.segmentID))
 				log.Warn("failed to SaveBinlogPaths",
-					zap.Int64("segment ID", pack.segmentID),
+					zap.Int64("segmentID", pack.segmentID),
 					zap.Error(errors.New(rsp.GetReason())))
 				return nil
 			}
@@ -945,7 +945,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		}, opts...)
 		if err != nil {
 			log.Warn("failed to SaveBinlogPaths",
-				zap.Int64("segment ID", pack.segmentID),
+				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
 			// TODO change to graceful stop
 			panic(err)

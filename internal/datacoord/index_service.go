@@ -51,7 +51,7 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) error {
-	log.Info("create index for segment", zap.Int64("segID", segment.ID), zap.Int64("indexID", indexID))
+	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
 	buildID, err := s.allocator.allocID(context.Background())
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 	for _, index := range indexes {
 		if _, ok := segment.segmentIndexes[index.IndexID]; !ok {
 			if err := s.createIndexForSegment(segment, index.IndexID); err != nil {
-				log.Warn("create index for segment fail", zap.Int64("segID", segment.ID),
+				log.Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))
 				return err
 			}
@@ -102,30 +102,30 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			segments := s.meta.GetHasUnindexTaskSegments()
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segID", segment.ID))
+					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
 					continue
 				}
 			}
-		case collID := <-s.notifyIndexChan:
-			log.Info("receive create index notify", zap.Int64("collID", collID))
+		case collectionID := <-s.notifyIndexChan:
+			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
 			segments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
-				return isFlush(info) && collID == info.CollectionID
+				return isFlush(info) && collectionID == info.CollectionID
 			})
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segID", segment.ID))
+					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
 					continue
 				}
 			}
 		case segID := <-s.buildIndexCh:
-			log.Info("receive new flushed segment", zap.Int64("segID", segID))
+			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
 			segment := s.meta.GetSegment(segID)
 			if segment == nil {
-				log.Warn("segment is not exist, no need to build index", zap.Int64("segID", segID))
+				log.Warn("segment is not exist, no need to build index", zap.Int64("segmentID", segID))
 				continue
 			}
 			if err := s.createIndexesForSegment(segment); err != nil {
-				log.Warn("create index for segment fail, wait for retry", zap.Int64("segID", segment.ID))
+				log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
 				continue
 			}
 		}
@@ -137,8 +137,10 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
 // indexBuilder will find this task and assign it to IndexNode for execution.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive CreateIndex request", zap.Int64("CollectionID", req.GetCollectionID()),
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive CreateIndex request",
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Any("TypeParams", req.GetTypeParams()),
 		zap.Any("IndexParams", req.GetIndexParams()))
@@ -195,7 +197,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	err = s.meta.CreateIndex(index)
 	if err != nil {
-		log.Error("CreateIndex fail", zap.Int64("collectionID", req.GetCollectionID()),
+		log.Error("CreateIndex fail",
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
 		errResp.Reason = err.Error()
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
@@ -207,7 +209,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	default:
 	}
 
-	log.Info("CreateIndex successfully", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Info("CreateIndex successfully",
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Int64("IndexID", indexID))
 	errResp.ErrorCode = commonpb.ErrorCode_Success
@@ -218,8 +220,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 // GetIndexState gets the index state of the index name in the request from Proxy.
 // Deprecated
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive GetIndexState request", zap.Int64("collectionID", req.CollectionID),
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive GetIndexState request",
 		zap.String("indexName", req.IndexName))
 
 	errResp := &commonpb.Status{
@@ -239,7 +243,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	if len(indexes) == 0 {
 		errResp.ErrorCode = commonpb.ErrorCode_IndexNotExist
 		errResp.Reason = fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Error("GetIndexState fail", zap.Int64("collectionID", req.CollectionID),
+		log.Error("GetIndexState fail",
 			zap.String("indexName", req.IndexName), zap.String("fail reason", errResp.Reason))
 		return &indexpb.GetIndexStateResponse{
 			Status: errResp,
@@ -272,14 +276,16 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	ret.State = indexInfo.State
 	ret.FailReason = indexInfo.IndexStateFailReason
 
-	log.Info("GetIndexState success", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Info("GetIndexState success",
 		zap.String("IndexName", req.GetIndexName()), zap.String("state", ret.GetState().String()))
 	return ret, nil
 }
 
 func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive GetSegmentIndexState", zap.Int64("CollectionID", req.GetCollectionID()),
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive GetSegmentIndexState",
 		zap.String("IndexName", req.GetIndexName()), zap.Int64s("fieldID", req.GetSegmentIDs()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -303,8 +309,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	indexID2CreateTs := s.meta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
 	if len(indexID2CreateTs) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.GetIndexName())
-		log.Error("GetSegmentIndexState fail", zap.Int64("collectionID", req.GetCollectionID()),
-			zap.String("indexName", req.GetIndexName()), zap.String("fail reason", errMsg))
+		log.Warn("GetSegmentIndexState fail", zap.String("indexName", req.GetIndexName()), zap.String("fail reason", errMsg))
 		return &indexpb.GetSegmentIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
@@ -320,8 +325,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 			FailReason: state.failReason,
 		})
 	}
-	log.Info("GetSegmentIndexState successfully", zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log.Info("GetSegmentIndexState successfully", zap.String("indexName", req.GetIndexName()))
 	return ret, nil
 }
 
@@ -446,7 +450,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		indexInfo.State = commonpb.IndexState_Finished
 	}
 
-	log.Info("completeIndexInfo success", zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
+	log.Info("completeIndexInfo success", zap.Int64("collectionID", index.CollectionID), zap.Int64("indexID", index.IndexID),
 		zap.Int64("totalRows", indexInfo.TotalRows), zap.Int64("indexRows", indexInfo.IndexedRows),
 		zap.Int64("pendingIndexRows", indexInfo.PendingIndexRows),
 		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason))
@@ -455,9 +459,10 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 // GetIndexBuildProgress get the index building progress by num rows.
 // Deprecated
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive GetIndexBuildProgress request", zap.Int64("collID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive GetIndexBuildProgress request", zap.String("indexName", req.GetIndexName()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -474,8 +479,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Error("GetIndexBuildProgress fail", zap.Int64("collectionID", req.CollectionID),
-			zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		log.Warn("GetIndexBuildProgress fail", zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
 		return &indexpb.GetIndexBuildProgressResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
@@ -503,8 +507,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
 	}), false)
-	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log.Info("GetIndexBuildProgress success", zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -517,9 +520,10 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 
 // DescribeIndex describe the index info of the collection.
 func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive DescribeIndex request", zap.Int64("collID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive DescribeIndex request", zap.String("indexName", req.GetIndexName()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -536,8 +540,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Error("DescribeIndex fail", zap.Int64("collectionID", req.CollectionID),
-			zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		log.Warn("DescribeIndex fail", zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
 		return &indexpb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
@@ -569,8 +572,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		s.completeIndexInfo(indexInfo, index, segments, false)
 		indexInfos = append(indexInfos, indexInfo)
 	}
-	log.Info("DescribeIndex success", zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log.Info("DescribeIndex success", zap.String("indexName", req.GetIndexName()))
 	return &indexpb.DescribeIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -581,10 +583,10 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 
 // GetIndexStatistics get the statistics of the index. DescribeIndex doesn't contain statistics.
 func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexStatisticsRequest) (*indexpb.GetIndexStatisticsResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive GetIndexStatistics request",
-		zap.Int64("collID", req.GetCollectionID()),
-		zap.String("indexName", req.GetIndexName()))
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive GetIndexStatistics request", zap.String("indexName", req.GetIndexName()))
 	if s.isClosed() {
 		log.Warn(msgDataCoordIsUnhealthy(s.serverID()))
 		return &indexpb.GetIndexStatisticsResponse{
@@ -595,8 +597,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Error("GetIndexStatistics fail",
-			zap.Int64("collectionID", req.CollectionID),
+		log.Warn("GetIndexStatistics fail",
 			zap.String("indexName", req.IndexName),
 			zap.String("fail reason", errMsg))
 		return &indexpb.GetIndexStatisticsResponse{
@@ -630,8 +631,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 		s.completeIndexInfo(indexInfo, index, segments, true)
 		indexInfos = append(indexInfos, indexInfo)
 	}
-	log.Info("GetIndexStatisticsResponse success",
-		zap.Int64("collectionID", req.GetCollectionID()),
+	log.Debug("GetIndexStatisticsResponse success",
 		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexStatisticsResponse{
 		Status: &commonpb.Status{
@@ -645,8 +645,10 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 // divided into many segments, and each segment corresponds to an IndexBuildID. DataCoord uses IndexBuildID to record
 // index tasks.
 func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive DropIndex request", zap.Int64("collectionID", req.GetCollectionID()),
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive DropIndex request",
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()), zap.String("indexName", req.GetIndexName()),
 		zap.Bool("drop all indexes", req.GetDropAll()))
 	errResp := &commonpb.Status{
@@ -684,25 +686,24 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		// drop collection index
 		err := s.meta.MarkIndexAsDeleted(req.CollectionID, indexIDs)
 		if err != nil {
-			log.Error("DropIndex fail", zap.Int64("collectionID", req.CollectionID),
-				zap.String("indexName", req.IndexName), zap.Error(err))
+			log.Warn("DropIndex fail", zap.String("indexName", req.IndexName), zap.Error(err))
 			ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			ret.Reason = err.Error()
 			return ret, nil
 		}
 	}
 
-	log.Info("DropIndex success", zap.Int64("collID", req.CollectionID),
-		zap.Int64s("partitionIDs", req.PartitionIDs), zap.String("indexName", req.IndexName),
+	log.Debug("DropIndex success", zap.Int64s("partitionIDs", req.PartitionIDs), zap.String("indexName", req.IndexName),
 		zap.Int64s("indexIDs", indexIDs))
 	return ret, nil
 }
 
 // GetIndexInfos gets the index file paths for segment from DataCoord.
 func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive GetIndexInfos request", zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.String("indexName", req.GetIndexName()))
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+	log.Info("receive GetIndexInfos request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.String("indexName", req.GetIndexName()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -756,8 +757,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		}
 	}
 
-	log.Info("GetIndexInfos successfully", zap.Int64("collectionID", req.CollectionID),
-		zap.String("indexName", req.GetIndexName()))
+	log.Debug("GetIndexInfos successfully", zap.String("indexName", req.GetIndexName()))
 
 	return ret, nil
 }

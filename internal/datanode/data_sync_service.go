@@ -214,7 +214,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 			log.Warn("Collection ID or ChannelName not match",
 				zap.Int64("Wanted ID", dsService.collectionID),
 				zap.Int64("Actual ID", us.CollectionID),
-				zap.String("Wanted Channel Name", vchanInfo.ChannelName),
+				zap.String("Wanted channel Name", vchanInfo.ChannelName),
 				zap.String("Actual Channel Name", us.GetInsertChannel()),
 			)
 			continue

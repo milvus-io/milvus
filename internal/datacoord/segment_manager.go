@@ -436,7 +436,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	for _, id := range segCandidates {
 		info := s.meta.GetHealthySegment(id)
 		if info == nil {
-			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
+			log.Warn("failed to get seg info from meta", zap.Int64("segmentID", id))
 			continue
 		}
 		if info.CollectionID != collectionID {

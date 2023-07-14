@@ -176,14 +176,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("check partition key mode failed", zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("check partition key mode failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 	if partitionKeyMode {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.insertMsg)
 		if err != nil {
-			log.Warn("get partition keys from insert request failed", zap.String("collection name", collectionName), zap.Error(err))
+			log.Warn("get partition keys from insert request failed", zap.String("collectionName", collectionName), zap.Error(err))
 			return err
 		}
 	} else {

@@ -3750,7 +3750,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		log.Warn("failed to get collection id",
-			zap.String("collection name", req.GetCollectionName()),
+			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
@@ -3973,7 +3973,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	log := log.Ctx(ctx)
 
 	log.Info("received import request",
-		zap.String("collection name", req.GetCollectionName()),
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Strings("files", req.GetFiles()))
 	resp := &milvuspb.ImportResponse{

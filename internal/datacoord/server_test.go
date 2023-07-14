@@ -465,7 +465,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	t.Run("with invalid segment id", func(t *testing.T) {
+	t.Run("with invalid segmentID", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -600,7 +600,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
-	t.Run("with wrong segment id", func(t *testing.T) {
+	t.Run("with wrong segmentID", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
@@ -3837,7 +3837,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	})
 
-	t.Run("test add segment w/ bad channel name", func(t *testing.T) {
+	t.Run("test add segment w/ bad channelName", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 

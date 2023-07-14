@@ -861,7 +861,7 @@ func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, lo
 		for _, fieldBinlog := range logs {
 			for _, binlog := range fieldBinlog.Binlogs {
 				if segmentID != getSegmentID(binlog.LogPath) {
-					log.Panic("the segment path doesn't match the segment id", zap.Int64("segment_id", segmentID), zap.String("path", binlog.LogPath))
+					log.Panic("the segment path doesn't match the segmentID", zap.Int64("segmentID", segmentID), zap.String("path", binlog.LogPath))
 				}
 			}
 		}

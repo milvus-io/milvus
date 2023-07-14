@@ -549,8 +549,8 @@ func (ibNode *insertBufferNode) addSegmentAndUpdateRowNum(insertMsgs []*msgstrea
 				})
 			if err != nil {
 				log.Warn("add segment wrong",
-					zap.Int64("segID", currentSegID),
-					zap.Int64("collID", collID),
+					zap.Int64("segmentID", currentSegID),
+					zap.Int64("collectionID", collID),
 					zap.Int64("partID", partitionID),
 					zap.String("chanName", msg.GetShardName()),
 					zap.Error(err))

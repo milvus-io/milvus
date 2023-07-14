@@ -40,7 +40,7 @@ import (
 // flowgraph ddNode.
 func newDmInputNode(dispatcherClient msgdispatcher.Client, seekPos *msgpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
 	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.Int64("collection ID", dmNodeConfig.collectionID),
+		zap.Int64("collectionID", dmNodeConfig.collectionID),
 		zap.String("vchannel", dmNodeConfig.vChannelName))
 	var err error
 	var input <-chan *msgstream.MsgPack

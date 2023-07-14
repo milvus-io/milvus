@@ -264,7 +264,7 @@ func (d *dmlChannels) getChannelNum() int {
 func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
 	v, ok := d.pool.Load(chanName)
 	if !ok {
-		log.Error("invalid channel name", zap.String("chanName", chanName))
+		log.Error("invalid channelName", zap.String("chanName", chanName))
 		return nil, errors.Newf("invalid channel name: %s", chanName)
 	}
 	return v.(*dmlMsgStream), nil
@@ -366,12 +366,12 @@ func genChannelNames(prefix string, num int64) []string {
 func parseChannelNameIndex(channelName string) int {
 	index := strings.LastIndex(channelName, "_")
 	if index < 0 {
-		log.Error("invalid channel name", zap.String("chanName", channelName))
+		log.Error("invalid channelName", zap.String("chanName", channelName))
 		panic("invalid channel name: " + channelName)
 	}
 	index, err := strconv.Atoi(channelName[index+1:])
 	if err != nil {
-		log.Error("invalid channel name", zap.String("chanName", channelName), zap.Error(err))
+		log.Error("invalid channelName", zap.String("chanName", channelName), zap.Error(err))
 		panic("invalid channel name: " + channelName)
 	}
 	return index

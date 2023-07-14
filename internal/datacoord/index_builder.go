@@ -229,7 +229,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
-				zap.Int64("segID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
+				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
 				State:          commonpb.IndexState_Finished,
@@ -307,7 +307,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return false
 		}
 		log.Ctx(ib.ctx).Info("index task assigned successfully", zap.Int64("buildID", buildID),
-			zap.Int64("segID", meta.SegmentID), zap.Int64("nodeID", nodeID))
+			zap.Int64("segmentID", meta.SegmentID), zap.Int64("nodeID", nodeID))
 		// update index meta state to InProgress
 		if err := ib.meta.BuildIndex(buildID); err != nil {
 			// need to release lock then reassign, so set task state to retry

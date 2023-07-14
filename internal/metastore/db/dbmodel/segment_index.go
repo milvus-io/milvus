@@ -69,7 +69,7 @@ type ISegmentIndexDb interface {
 //		if ir.IndexFileKeys != "" {
 //			err := json.Unmarshal([]byte(ir.IndexFileKeys), &IndexFileKeys)
 //			if err != nil {
-//				log.Error("unmarshal index file paths of segment index failed", zap.Int64("collID", ir.CollectionID),
+//				log.Error("unmarshal index file paths of segment index failed", zap.Int64("collectionID", ir.CollectionID),
 //					zap.Int64("indexID", ir.IndexID), zap.Int64("segmentID", ir.SegmentID),
 //					zap.Int64("buildID", ir.BuildID), zap.Error(err))
 //				return nil, err

@@ -217,20 +217,20 @@ func (m *meta) AddSegmentIndex(segIndex *model.SegmentIndex) error {
 	defer m.Unlock()
 
 	buildID := segIndex.BuildID
-	log.Info("meta update: adding segment index", zap.Int64("collID", segIndex.CollectionID),
-		zap.Int64("segID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
+	log.Info("meta update: adding segment index", zap.Int64("collectionID", segIndex.CollectionID),
+		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID))
 
 	segIndex.IndexState = commonpb.IndexState_Unissued
 	if err := m.catalog.CreateSegmentIndex(m.ctx, segIndex); err != nil {
 		log.Warn("meta update: adding segment index failed",
-			zap.Int64("segment ID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
+			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 			zap.Int64("buildID", segIndex.BuildID), zap.Error(err))
 		return err
 	}
 	m.updateSegmentIndex(segIndex)
-	log.Info("meta update: adding segment index success", zap.Int64("collID", segIndex.CollectionID),
-		zap.Int64("segID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
+	log.Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
+		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID))
 	m.updateIndexTasksMetrics()
 	return nil
@@ -347,7 +347,7 @@ func (m *meta) GetIndexesForCollection(collID UniqueID, indexName string) []*mod
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
 func (m *meta) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) error {
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collID", collID),
+	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
 
 	m.Lock()
@@ -379,7 +379,7 @@ func (m *meta) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) error {
 		m.indexes[index.CollectionID][index.IndexID] = index
 	}
 
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collID", collID), zap.Int64s("indexIDs", indexIDs))
+	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collectionID", collID), zap.Int64s("indexIDs", indexIDs))
 	return nil
 }
 
@@ -569,7 +569,7 @@ func (m *meta) BuildIndex(buildID UniqueID) error {
 		return err
 	}
 	log.Info("meta update: segment index in progress success", zap.Int64("buildID", segIdx.BuildID),
-		zap.Int64("segID", segIdx.SegmentID))
+		zap.Int64("segmentID", segIdx.SegmentID))
 
 	m.updateIndexTasksMetrics()
 	return nil
@@ -619,10 +619,10 @@ func (m *meta) GetDeletedIndexes() []*model.Index {
 func (m *meta) RemoveIndex(collID, indexID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
-	log.Info("IndexCoord meta table remove index", zap.Int64("collID", collID), zap.Int64("indexID", indexID))
+	log.Info("IndexCoord meta table remove index", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
 	err := m.catalog.DropIndex(m.ctx, collID, indexID)
 	if err != nil {
-		log.Info("IndexCoord meta table remove index fail", zap.Int64("collID", collID),
+		log.Info("IndexCoord meta table remove index fail", zap.Int64("collectionID", collID),
 			zap.Int64("indexID", indexID), zap.Error(err))
 		return err
 	}
@@ -635,7 +635,7 @@ func (m *meta) RemoveIndex(collID, indexID UniqueID) error {
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FinishedIndexTaskLabel})
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FailedIndexTaskLabel})
 	}
-	log.Info("IndexCoord meta table remove index success", zap.Int64("collID", collID), zap.Int64("indexID", indexID))
+	log.Info("IndexCoord meta table remove index success", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
 	return nil
 }
 
