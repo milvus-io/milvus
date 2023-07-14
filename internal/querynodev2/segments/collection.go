@@ -232,8 +232,13 @@ func DeleteCollection(collection *Collection) {
 		void
 		deleteCollection(CCollection collection);
 	*/
+	collection.mu.Lock()
+	defer collection.mu.Unlock()
+
 	cPtr := collection.collectionPtr
-	C.DeleteCollection(cPtr)
+	if cPtr != nil {
+		C.DeleteCollection(cPtr)
+	}
 
 	collection.collectionPtr = nil
 }
