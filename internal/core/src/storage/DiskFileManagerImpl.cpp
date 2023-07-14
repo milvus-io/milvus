@@ -48,7 +48,7 @@ DiskFileManagerImpl::~DiskFileManagerImpl() {
 
 bool
 DiskFileManagerImpl::LoadFile(const std::string& file) noexcept {
-    return true;
+    PanicInfo("MemFileManagerImpl::LoadFile not implemented");
 }
 
 std::string
@@ -119,10 +119,9 @@ DiskFileManagerImpl::AddBatchIndexFiles(
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto& pool = ThreadPool::GetInstance();
 
-    auto LoadIndexFromDisk = [&](
-        const std::string& file,
-        const int64_t offset,
-        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+    auto LoadIndexFromDisk = [&](const std::string& file,
+            const int64_t offset,
+            const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
         local_chunk_manager->Read(file, offset, buf.get(), data_size);
         return buf;

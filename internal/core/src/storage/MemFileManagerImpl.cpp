@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include "storage/MemFileManagerImpl.h"
+#include <exception>
 
+#include "exceptions/EasyAssert.h"
 #include "storage/Util.h"
 #include "common/Common.h"
 
@@ -79,7 +81,7 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
 
 bool
 MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
-    return true;
+    PanicInfo("MemFileManagerImpl::LoadFile not implemented");
 }
 
 std::map<std::string, storage::FieldDataPtr>
