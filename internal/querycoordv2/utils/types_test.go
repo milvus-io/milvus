@@ -55,7 +55,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 				proto.Clone(segmentInfo).(*datapb.SegmentInfo),
 			},
 		}
-		req := PackSegmentLoadInfo(resp, nil)
+		req := PackSegmentLoadInfo(resp, nil, 0)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t2, req.GetDeltaPosition().Timestamp)
@@ -67,7 +67,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		resp := &datapb.GetSegmentInfoResponse{
 			Infos: []*datapb.SegmentInfo{segInfo},
 		}
-		req := PackSegmentLoadInfo(resp, nil)
+		req := PackSegmentLoadInfo(resp, nil, 0)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t1, req.GetDeltaPosition().Timestamp)
@@ -79,7 +79,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		resp := &datapb.GetSegmentInfoResponse{
 			Infos: []*datapb.SegmentInfo{segInfo},
 		}
-		req := PackSegmentLoadInfo(resp, nil)
+		req := PackSegmentLoadInfo(resp, nil, 0)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, t0, req.GetDeltaPosition().Timestamp)

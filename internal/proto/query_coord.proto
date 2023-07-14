@@ -253,6 +253,7 @@ message SegmentLoadInfo {
   string insert_channel = 13;
   msg.MsgPosition start_position = 14;
   msg.MsgPosition delta_position = 15;
+  int64 readableVersion = 16;
 }
 
 message FieldIndexInfo {

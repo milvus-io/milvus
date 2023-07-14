@@ -361,7 +361,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			PartitionID:   info.GetPartitionID(),
 			NodeID:        req.GetDstNodeID(),
 			Version:       req.GetVersion(),
-			TargetVersion: sd.distribution.getTargetVersion(),
+			TargetVersion: info.GetReadableVersion(),
 		}
 	})
 	sd.distribution.AddDistributions(entries...)
