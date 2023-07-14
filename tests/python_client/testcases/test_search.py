@@ -5,8 +5,6 @@ import numpy
 import threading
 import pytest
 import pandas as pd
-import decimal
-from decimal import Decimal, getcontext
 from time import sleep
 import heapq
 
