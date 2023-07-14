@@ -35,6 +35,8 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/error.h"
 #include "query/PlanProto.h"
+#include "simd/hook.h"
+
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR
@@ -186,7 +188,10 @@ AppendOneChunk(BitsetType& result, const FixedVector<bool>& chunk_res) {
     // Append a value once instead of BITSET_BLOCK_BIT_SIZE times.
     auto AppendBlock = [&result](const bool* ptr, int n) {
         for (int i = 0; i < n; ++i) {
-            BitSetBlockType val = 0;
+#if defined(USE_DYNAMIC_SIMD)
+            auto val = milvus::simd::get_bitset_block(ptr);
+#else
+            BitsetBlockType val = 0;
             // This can use CPU SIMD optimzation
             uint8_t vals[BITSET_BLOCK_SIZE] = {0};
             for (size_t j = 0; j < 8; ++j) {
@@ -195,8 +200,9 @@ AppendOneChunk(BitsetType& result, const FixedVector<bool>& chunk_res) {
                 }
             }
             for (size_t j = 0; j < BITSET_BLOCK_SIZE; ++j) {
-                val |= BitSetBlockType(vals[j]) << (8 * j);
+                val |= BitsetBlockType(vals[j]) << (8 * j);
             }
+#endif
             result.append(val);
             ptr += BITSET_BLOCK_SIZE * 8;
         }
@@ -1782,11 +1788,31 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
     auto index_func = [&terms, n](Index* index) {
         return index->In(n, terms.data());
     };
-    auto elem_func = [&terms, &term_set](MayConstRef<T> x) {
-        //// terms has already been sorted.
-        // return std::binary_search(terms.begin(), terms.end(), x);
+
+#if defined(USE_DYNAMIC_SIMD)
+    std::function<bool(MayConstRef<T> x)> elem_func;
+    if (n <= milvus::simd::TERM_EXPR_IN_SIZE_THREAD) {
+        elem_func = [&terms, &term_set, n](MayConstRef<T> x) {
+            if constexpr (std::is_integral<T>::value ||
+                          std::is_floating_point<T>::value) {
+                return milvus::simd::find_term_func<T>(terms.data(), n, x);
+            } else {
+                // For string type, simd performance not better than set mode
+                static_assert(std::is_same<T, std::string>::value ||
+                              std::is_same<T, std::string_view>::value);
+                return term_set.find(x) != term_set.end();
+            }
+        };
+    } else {
+        elem_func = [&term_set, n](MayConstRef<T> x) {
+            return term_set.find(x) != term_set.end();
+        };
+    }
+#else
+    auto elem_func = [&term_set](MayConstRef<T> x) {
         return term_set.find(x) != term_set.end();
     };
+#endif
 
     return ExecRangeVisitorImpl<T>(
         expr.column_.field_id, index_func, elem_func);

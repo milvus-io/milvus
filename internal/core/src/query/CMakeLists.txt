@@ -30,4 +30,8 @@ set(MILVUS_QUERY_SRCS
         PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
-target_link_libraries(milvus_query milvus_index)
+if(USE_DYNAMIC_SIMD)
+        target_link_libraries(milvus_query milvus_index milvus_simd)
+else() 
+        target_link_libraries(milvus_query milvus_index)
+endif()

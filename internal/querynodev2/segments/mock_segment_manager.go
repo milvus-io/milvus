@@ -378,8 +378,27 @@ func (_c *MockSegmentManager_Put_Call) RunAndReturn(run func(commonpb.SegmentSta
 }
 
 // Remove provides a mock function with given fields: segmentID, scope
-func (_m *MockSegmentManager) Remove(segmentID int64, scope querypb.DataScope) {
-	_m.Called(segmentID, scope)
+func (_m *MockSegmentManager) Remove(segmentID int64, scope querypb.DataScope) (int, int) {
+	ret := _m.Called(segmentID, scope)
+
+	var r0 int
+	var r1 int
+	if rf, ok := ret.Get(0).(func(int64, querypb.DataScope) (int, int)); ok {
+		return rf(segmentID, scope)
+	}
+	if rf, ok := ret.Get(0).(func(int64, querypb.DataScope) int); ok {
+		r0 = rf(segmentID, scope)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, querypb.DataScope) int); ok {
+		r1 = rf(segmentID, scope)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	return r0, r1
 }
 
 // MockSegmentManager_Remove_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Remove'
@@ -401,25 +420,44 @@ func (_c *MockSegmentManager_Remove_Call) Run(run func(segmentID int64, scope qu
 	return _c
 }
 
-func (_c *MockSegmentManager_Remove_Call) Return() *MockSegmentManager_Remove_Call {
-	_c.Call.Return()
+func (_c *MockSegmentManager_Remove_Call) Return(_a0 int, _a1 int) *MockSegmentManager_Remove_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSegmentManager_Remove_Call) RunAndReturn(run func(int64, querypb.DataScope)) *MockSegmentManager_Remove_Call {
+func (_c *MockSegmentManager_Remove_Call) RunAndReturn(run func(int64, querypb.DataScope) (int, int)) *MockSegmentManager_Remove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // RemoveBy provides a mock function with given fields: filters
-func (_m *MockSegmentManager) RemoveBy(filters ...SegmentFilter) {
+func (_m *MockSegmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	_va := make([]interface{}, len(filters))
 	for _i := range filters {
 		_va[_i] = filters[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, _va...)
-	_m.Called(_ca...)
+	ret := _m.Called(_ca...)
+
+	var r0 int
+	var r1 int
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) (int, int)); ok {
+		return rf(filters...)
+	}
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) int); ok {
+		r0 = rf(filters...)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(...SegmentFilter) int); ok {
+		r1 = rf(filters...)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	return r0, r1
 }
 
 // MockSegmentManager_RemoveBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveBy'
@@ -447,12 +485,12 @@ func (_c *MockSegmentManager_RemoveBy_Call) Run(run func(filters ...SegmentFilte
 	return _c
 }
 
-func (_c *MockSegmentManager_RemoveBy_Call) Return() *MockSegmentManager_RemoveBy_Call {
-	_c.Call.Return()
+func (_c *MockSegmentManager_RemoveBy_Call) Return(_a0 int, _a1 int) *MockSegmentManager_RemoveBy_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(...SegmentFilter)) *MockSegmentManager_RemoveBy_Call {
+func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(...SegmentFilter) (int, int)) *MockSegmentManager_RemoveBy_Call {
 	_c.Call.Return(run)
 	return _c
 }

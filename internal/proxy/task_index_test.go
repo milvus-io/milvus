@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -218,8 +218,8 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	})
 }
 
-func getMockQueryCoord() *types.MockQueryCoord {
-	qc := &types.MockQueryCoord{}
+func getMockQueryCoord() *mocks.MockQueryCoord {
+	qc := &mocks.MockQueryCoord{}
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{

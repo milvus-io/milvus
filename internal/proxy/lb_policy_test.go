@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -41,8 +42,8 @@ import (
 type LBPolicySuite struct {
 	suite.Suite
 	rc types.RootCoord
-	qc *types.MockQueryCoord
-	qn *types.MockQueryNode
+	qc *mocks.MockQueryCoord
+	qn *mocks.MockQueryNode
 
 	mgr        *MockShardClientManager
 	lbBalancer *MockLBBalancer
@@ -50,7 +51,7 @@ type LBPolicySuite struct {
 
 	nodes    []int64
 	channels []string
-	qnList   []*types.MockQueryNode
+	qnList   []*mocks.MockQueryNode
 
 	collection string
 }
@@ -63,7 +64,7 @@ func (s *LBPolicySuite) SetupTest() {
 	s.nodes = []int64{1, 2, 3, 4, 5}
 	s.channels = []string{"channel1", "channel2"}
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := types.NewMockQueryCoord(s.T())
+	qc := mocks.NewMockQueryCoord(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -92,7 +93,7 @@ func (s *LBPolicySuite) SetupTest() {
 	s.rc = NewRootCoordMock()
 	s.rc.Start()
 
-	s.qn = types.NewMockQueryNode(s.T())
+	s.qn = mocks.NewMockQueryNode(s.T())
 	s.qn.EXPECT().GetAddress().Return("localhost").Maybe()
 	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 

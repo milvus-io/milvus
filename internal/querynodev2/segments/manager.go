@@ -94,8 +94,8 @@ type SegmentManager interface {
 	// Remove removes the given segment,
 	// and decreases the ref count of the corresponding collection,
 	// will not decrease the ref count if the given segment not exists
-	Remove(segmentID UniqueID, scope querypb.DataScope)
-	RemoveBy(filters ...SegmentFilter)
+	Remove(segmentID UniqueID, scope querypb.DataScope) (int, int)
+	RemoveBy(filters ...SegmentFilter) (int, int)
 	Clear()
 }
 
@@ -240,40 +240,56 @@ func (mgr *segmentManager) Empty() bool {
 	return len(mgr.growingSegments)+len(mgr.sealedSegments) == 0
 }
 
-func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) {
+// returns true if the segment exists,
+// false otherwise
+func (mgr *segmentManager) Remove(segmentID UniqueID, scope querypb.DataScope) (int, int) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
+	var removeGrowing, removeSealed int
 	switch scope {
 	case querypb.DataScope_Streaming:
-		remove(segmentID, mgr.growingSegments)
+		if remove(segmentID, mgr.growingSegments) {
+			removeGrowing = 1
+		}
 
 	case querypb.DataScope_Historical:
-		remove(segmentID, mgr.sealedSegments)
+		if remove(segmentID, mgr.sealedSegments) {
+			removeSealed = 1
+		}
 
 	case querypb.DataScope_All:
-		remove(segmentID, mgr.growingSegments)
-		remove(segmentID, mgr.sealedSegments)
+		if remove(segmentID, mgr.growingSegments) {
+			removeGrowing = 1
+		}
+		if remove(segmentID, mgr.sealedSegments) {
+			removeSealed = 1
+		}
 	}
+
 	mgr.updateMetric()
+	return removeGrowing, removeSealed
 }
 
-func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) {
+func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
+	var removeGrowing, removeSealed int
 	for id, segment := range mgr.growingSegments {
-		if filter(segment, filters...) {
-			remove(id, mgr.growingSegments)
+		if filter(segment, filters...) && remove(id, mgr.growingSegments) {
+			removeGrowing++
 		}
 	}
 
 	for id, segment := range mgr.sealedSegments {
-		if filter(segment, filters...) {
-			remove(id, mgr.sealedSegments)
+		if filter(segment, filters...) && remove(id, mgr.sealedSegments) {
+			removeSealed++
 		}
 	}
+
 	mgr.updateMetric()
+	return removeGrowing, removeSealed
 }
 
 func (mgr *segmentManager) Clear() {
@@ -305,10 +321,12 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segmentID int64, container map[int64]Segment) {
+// returns true if the segment exists,
+// false otherwise
+func remove(segmentID int64, container map[int64]Segment) bool {
 	segment, ok := container[segmentID]
 	if !ok {
-		return
+		return false
 	}
 	delete(container, segmentID)
 
@@ -331,4 +349,5 @@ func remove(segmentID int64, container map[int64]Segment) {
 			fmt.Sprint(len(segment.Indexes())),
 		).Sub(float64(rowNum))
 	}
+	return true
 }

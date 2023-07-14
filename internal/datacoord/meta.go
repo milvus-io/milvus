@@ -1091,10 +1091,11 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
-	modInfos := make([]*datapb.SegmentInfo, len(segmentsCompactFrom))
-	for i := range segmentsCompactFrom {
-		modInfos[i] = segmentsCompactFrom[i].SegmentInfo
+	modInfos := make([]*datapb.SegmentInfo, 0, len(segmentsCompactFrom))
+	for _, segment := range segmentsCompactFrom {
+		modInfos = append(modInfos, segment.SegmentInfo)
 	}
+
 	newSegment := segmentCompactTo.SegmentInfo
 
 	modSegIDs := lo.Map(modInfos, func(segment *datapb.SegmentInfo, _ int) int64 { return segment.GetID() })
@@ -1110,7 +1111,12 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 		zap.Int("delta logs", len(newSegment.GetDeltalogs())),
 		zap.Int64("compact to segment", newSegment.GetID()))
 
-	err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modInfos, newSegment)
+	err := m.catalog.AlterSegments(m.ctx, append(modInfos, newSegment), metastore.BinlogsIncrement{
+		Segment:    newSegment,
+		Insertlogs: newSegment.GetBinlogs(),
+		Deltalogs:  newSegment.GetDeltalogs(),
+		Statslogs:  newSegment.GetStatslogs(),
+	})
 	if err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return err

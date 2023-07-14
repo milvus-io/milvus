@@ -78,7 +78,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{}, nil)
 
 		ctx := context.Background()
@@ -89,7 +89,7 @@ func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("get error", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		fakeErr := errors.New("fake error")
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(nil, fakeErr)
 
@@ -101,7 +101,7 @@ func TestCoordinatorBroker_GetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("return non-success code", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		dc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

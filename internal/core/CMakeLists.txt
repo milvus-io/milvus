@@ -29,6 +29,10 @@ if ( MILVUS_GPU_VERSION )
     add_definitions(-DMILVUS_GPU_VERSION)
 endif ()
 
+if ( USE_DYNAMIC_SIMD ) 
+    add_definitions(-DUSE_DYNAMIC_SIMD)
+endif()
+
 project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )

@@ -926,7 +926,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				log.Warn("failed to SaveBinlogPaths",
 					zap.Int64("segment ID", pack.segmentID),
 					zap.Error(errors.New(rsp.GetReason())))
-				return fmt.Errorf("segment %d not found", pack.segmentID)
+				return nil
 			}
 			// meta error, datanode handles a virtual channel does not belong here
 			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed {
