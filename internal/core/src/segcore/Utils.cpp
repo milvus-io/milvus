@@ -592,15 +592,4 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
 
     channel->close();
 }
-
-std::vector<storage::FieldDataPtr>
-CollectFieldDataChannel(storage::FieldDataChannelPtr& channel) {
-    std::vector<storage::FieldDataPtr> result;
-    storage::FieldDataPtr field_data;
-    while (channel->pop(field_data)) {
-        result.push_back(field_data);
-    }
-    return result;
-}
-
 }  // namespace milvus::segcore

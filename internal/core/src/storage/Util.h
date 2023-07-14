@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "storage/FieldData.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
@@ -130,5 +131,11 @@ FieldDataPtr
 CreateFieldData(const DataType& type,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);
+
+std::vector<storage::FieldDataPtr>
+CollectFieldDataChannel(storage::FieldDataChannelPtr& channel);
+
+storage::FieldDataPtr
+MergeFieldData(std::vector<storage::FieldDataPtr>& data_array);
 
 }  // namespace milvus::storage

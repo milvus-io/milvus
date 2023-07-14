@@ -15,7 +15,10 @@
 // limitations under the License.
 
 #include "storage/MemFileManagerImpl.h"
+#include <memory>
+#include <unordered_map>
 
+#include "storage/FieldData.h"
 #include "storage/Util.h"
 #include "common/Common.h"
 
@@ -87,14 +90,14 @@ MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files) {
     std::map<std::string, storage::FieldDataPtr> file_to_index_data;
     auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
 
     auto LoadBatchIndexFiles = [&]() {
         auto index_datas = GetObjectData(rcm_.get(), batch_files);
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
-                batch_files[idx].substr(batch_files[idx].find_last_of("/") + 1);
+                batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
             file_to_index_data[file_name] = index_datas[idx];
         }
     };
@@ -114,6 +117,44 @@ MemFileManagerImpl::LoadIndexToMemory(
     AssertInfo(file_to_index_data.size() == remote_files.size(),
                "inconsistent file num and index data num!");
     return file_to_index_data;
+}
+
+void
+MemFileManagerImpl::LoadFileStream(
+    const std::vector<std::string>& remote_files,
+    std::map<std::string, storage::FieldDataChannelPtr>& channels) {
+    auto parallel_degree =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (auto& [_, channel] : channels) {
+        channel->set_capacity(parallel_degree * 2);
+    }
+
+    std::vector<std::string> batch_files;
+    auto LoadBatchIndexFiles = [&]() {
+        auto index_datas = GetObjectData(rcm_.get(), batch_files);
+        for (auto i = 0; i < index_datas.size(); i++) {
+            auto file_name =
+                batch_files[i].substr(batch_files[i].find_last_of('/') + 1);
+            auto& channel = channels[file_name];
+            channel->push(index_datas[i]);
+        }
+    };
+
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            LoadBatchIndexFiles();
+            batch_files.clear();
+        }
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        LoadBatchIndexFiles();
+    }
+
+    for (auto& [_, channel] : channels) {
+        channel->close();
+    }
 }
 
 std::vector<FieldDataPtr>

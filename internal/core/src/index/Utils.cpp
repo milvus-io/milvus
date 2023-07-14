@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 #include <functional>
 #include <iostream>
@@ -26,6 +28,7 @@
 #include "exceptions/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "common/Slice.h"
+#include "storage/FieldData.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -216,6 +219,57 @@ AssembleIndexDatas(std::map<std::string, storage::FieldDataPtr>& index_datas) {
                 "index len is inconsistent after disassemble and assemble");
             index_datas[prefix] = new_field_data;
         }
+    }
+}
+
+void
+AssembleIndexDatas(
+    std::map<std::string, storage::FieldDataChannelPtr>& index_datas,
+    std::unordered_map<std::string, storage::FieldDataPtr>& result) {
+    if (auto meta_iter = index_datas.find(INDEX_FILE_SLICE_META);
+        meta_iter != index_datas.end()) {
+        auto raw_metadata_array =
+            storage::CollectFieldDataChannel(meta_iter->second);
+        auto raw_metadata = storage::MergeFieldData(raw_metadata_array);
+        result[INDEX_FILE_SLICE_META] = raw_metadata;
+        index_datas.erase(INDEX_FILE_SLICE_META);
+        Config metadata = Config::parse(
+            std::string(static_cast<const char*>(raw_metadata->Data()),
+                        raw_metadata->Size()));
+
+        for (auto& item : metadata[META]) {
+            std::string prefix = item[NAME];
+            int slice_num = item[SLICE_NUM];
+            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+
+            auto new_field_data =
+                storage::CreateFieldData(DataType::INT8, 1, total_len);
+
+            for (auto i = 0; i < slice_num; ++i) {
+                std::string file_name = GenSlicedFileName(prefix, i);
+                auto it = index_datas.find(file_name);
+                AssertInfo(it != index_datas.end(), "lost index slice data");
+                auto& channel = it->second;
+                auto data_array = storage::CollectFieldDataChannel(channel);
+                auto data = storage::MergeFieldData(data_array);
+                auto len = data->Size();
+                new_field_data->FillFieldData(data->Data(), len);
+                index_datas.erase(file_name);
+            }
+            AssertInfo(
+                new_field_data->IsFull(),
+                "index len is inconsistent after disassemble and assemble");
+            result[prefix] = new_field_data;
+        }
+    }
+    for (auto& [key, channel] : index_datas) {
+        if (key == INDEX_FILE_SLICE_META) {
+            continue;
+        }
+
+        auto data_array = storage::CollectFieldDataChannel(channel);
+        auto data = storage::MergeFieldData(data_array);
+        result[key] = data;
     }
 }
 

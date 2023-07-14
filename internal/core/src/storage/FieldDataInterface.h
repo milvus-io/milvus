@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -58,8 +59,14 @@ class FieldDataBase {
     virtual int64_t
     Size(ssize_t index) const = 0;
 
+    virtual size_t
+    Length() const = 0;
+
     virtual bool
     IsFull() const = 0;
+
+    virtual void
+    Reserve(size_t cap) = 0;
 
  public:
     virtual int64_t
@@ -96,8 +103,7 @@ class FieldDataImpl : public FieldDataBase {
                            int64_t buffered_num_rows = 0)
         : FieldDataBase(data_type),
           dim_(is_scalar ? 1 : dim),
-          num_rows_(buffered_num_rows),
-          tell_(0) {
+          num_rows_(buffered_num_rows) {
         field_data_.resize(num_rows_ * dim_);
     }
 
@@ -121,30 +127,44 @@ class FieldDataImpl : public FieldDataBase {
     RawValue(ssize_t offset) const override {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
-        AssertInfo(offset < get_tell(),
+        AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return &field_data_[offset];
     }
 
     int64_t
     Size() const override {
-        return sizeof(Type) * get_tell() * dim_;
+        return sizeof(Type) * length() * dim_;
     }
 
     int64_t
     Size(ssize_t offset) const override {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
-        AssertInfo(offset < get_tell(),
+        AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return sizeof(Type) * dim_;
+    }
+
+    size_t
+    Length() const override {
+        return length_;
     }
 
     bool
     IsFull() const override {
         auto buffered_num_rows = get_num_rows();
-        auto filled_num_rows = get_tell();
+        auto filled_num_rows = length();
         return buffered_num_rows == filled_num_rows;
+    }
+
+    void
+    Reserve(size_t cap) override {
+        std::lock_guard lck(num_rows_mutex_);
+        if (cap > num_rows_) {
+            num_rows_ = cap;
+            field_data_.resize(num_rows_ * dim_);
+        }
     }
 
  public:
@@ -163,10 +183,10 @@ class FieldDataImpl : public FieldDataBase {
         }
     }
 
-    int64_t
-    get_tell() const {
+    size_t
+    length() const {
         std::shared_lock lck(tell_mutex_);
-        return tell_;
+        return length_;
     }
 
     int64_t
@@ -178,7 +198,7 @@ class FieldDataImpl : public FieldDataBase {
     Chunk field_data_;
     int64_t num_rows_;
     mutable std::shared_mutex num_rows_mutex_;
-    int64_t tell_;
+    size_t length_{};
     mutable std::shared_mutex tell_mutex_;
 
  private:
@@ -194,7 +214,7 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     int64_t
     Size() const {
         int64_t data_size = 0;
-        for (size_t offset = 0; offset < get_tell(); ++offset) {
+        for (size_t offset = 0; offset < length(); ++offset) {
             data_size += field_data_[offset].size();
         }
 
@@ -205,7 +225,7 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     Size(ssize_t offset) const {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
-        AssertInfo(offset < get_tell(),
+        AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return field_data_[offset].size();
     }
@@ -220,7 +240,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     int64_t
     Size() const {
         int64_t data_size = 0;
-        for (size_t offset = 0; offset < get_tell(); ++offset) {
+        for (size_t offset = 0; offset < length(); ++offset) {
             data_size += field_data_[offset].data().size();
         }
 
@@ -231,7 +251,7 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     Size(ssize_t offset) const {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
-        AssertInfo(offset < get_tell(),
+        AssertInfo(offset < length(),
                    "subscript position don't has valid value");
         return field_data_[offset].data().size();
     }

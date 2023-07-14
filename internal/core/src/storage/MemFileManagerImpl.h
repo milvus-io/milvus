@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -53,6 +54,11 @@ class MemFileManagerImpl : public FileManagerImpl {
 
     std::map<std::string, storage::FieldDataPtr>
     LoadIndexToMemory(const std::vector<std::string>& remote_files);
+
+    void
+    LoadFileStream(
+        const std::vector<std::string>& remote_files,
+        std::map<std::string, storage::FieldDataChannelPtr>& channels);
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(std::vector<std::string> remote_files);
