@@ -271,7 +271,15 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn("failed to get index of segment", zap.Error(err))
 		return err
 	}
-	loadInfo := utils.PackSegmentLoadInfo(resp, indexes)
+
+	readableVersion := int64(0)
+	switch GetTaskType(task) {
+	case TaskTypeGrow:
+		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.NextTarget)
+	case TaskTypeMove:
+		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.CurrentTarget)
+	}
+	loadInfo := utils.PackSegmentLoadInfo(resp, indexes, readableVersion)
 
 	// Get shard leader for the given replica and segment
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())

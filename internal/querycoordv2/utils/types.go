@@ -84,7 +84,7 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
-func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
+func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb.FieldIndexInfo, readableVersion int64) *querypb.SegmentLoadInfo {
 	var (
 		deltaPosition *msgpb.MsgPosition
 		positionSrc   string
@@ -116,17 +116,18 @@ func PackSegmentLoadInfo(resp *datapb.GetSegmentInfoResponse, indexes []*querypb
 			zap.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:     segment.ID,
-		PartitionID:   segment.PartitionID,
-		CollectionID:  segment.CollectionID,
-		BinlogPaths:   segment.Binlogs,
-		NumOfRows:     segment.NumOfRows,
-		Statslogs:     segment.Statslogs,
-		Deltalogs:     segment.Deltalogs,
-		InsertChannel: segment.InsertChannel,
-		IndexInfos:    indexes,
-		StartPosition: segment.GetStartPosition(),
-		DeltaPosition: deltaPosition,
+		SegmentID:       segment.ID,
+		PartitionID:     segment.PartitionID,
+		CollectionID:    segment.CollectionID,
+		BinlogPaths:     segment.Binlogs,
+		NumOfRows:       segment.NumOfRows,
+		Statslogs:       segment.Statslogs,
+		Deltalogs:       segment.Deltalogs,
+		InsertChannel:   segment.InsertChannel,
+		IndexInfos:      indexes,
+		StartPosition:   segment.GetStartPosition(),
+		DeltaPosition:   deltaPosition,
+		ReadableVersion: readableVersion,
 	}
 	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo
