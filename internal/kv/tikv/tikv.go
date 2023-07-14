@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -67,6 +68,68 @@ func (kv *tiKV) Close() {
 // GetPath returns the path of the key.
 func (kv *tiKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
+}
+
+// Has returns if a key exists.
+func (kv *tiKV) Has(key string) (bool, error) {
+	start := time.Now()
+	key = path.Join(kv.rootPath, key)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	val, err := kv.getTiKVMeta(ctx, key)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "Failed to get value for key") {
+			return false, nil
+		} else {
+			return false, errors.Wrap(err, fmt.Sprintf("Failed to read key %s", key))
+		}
+	}
+	if len(val) == 0 {
+		return false, nil
+	}
+	CheckElapseAndWarn(start, "Slow tikv operation Has()", zap.String("key", key))
+	return true, nil
+}
+
+// HasPrefix returns if a key prefix exists.
+func (kv *tiKV) HasPrefix(prefix string) (bool, error) {
+	start := time.Now()
+	prefix = path.Join(kv.rootPath, prefix)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	txn, err := kv.txn.Begin()
+	if err != nil {
+		return false, err
+	}
+
+	// Defer a rollback only if the transaction hasn't been committed
+	defer func() {
+		if err != nil {
+			txn.Rollback()
+		}
+	}()
+
+	// Retrieve key-value pairs with the specified prefix
+	startKey := []byte(prefix)
+	endKey := tikv.PrefixNextKey([]byte(prefix))
+	iter, err := txn.Iter(startKey, endKey)
+	if err != nil {
+		return false, err
+	}
+	defer iter.Close()
+
+	r := false
+	// Iterater only needs to check the first key-value pair
+	if iter.Valid() {
+		r = true
+	}
+	err = kv.executeTxn(txn, ctx)
+	if err != nil {
+		log.Warn("TiKv HasPrefix error", zap.String("prefix", prefix), zap.Error(err))
+	}
+	CheckElapseAndWarn(start, "Slow load with HasPrefix", zap.String("prefix", prefix))
+	return r, nil
 }
 
 // Load returns value of the key.
