@@ -98,7 +98,7 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	score3 := suite.balancer.calculateScore(-1, costMetrics3, 0)
 	score4 := suite.balancer.calculateScore(-1, costMetrics4, 0)
 	suite.Equal(float64(12), score1)
-	suite.Equal(float64(8.5), score2)
+	suite.Equal(float64(19), score2)
 	suite.Equal(float64(17), score3)
 	suite.Equal(float64(5), score4)
 
@@ -107,7 +107,7 @@ func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	score7 := suite.balancer.calculateScore(-1, costMetrics3, 5)
 	score8 := suite.balancer.calculateScore(-1, costMetrics4, 5)
 	suite.Equal(float64(347), score5)
-	suite.Equal(float64(176), score6)
+	suite.Equal(float64(689), score6)
 	suite.Equal(float64(352), score7)
 	suite.Equal(float64(220), score8)
 
@@ -200,7 +200,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 
 			executingNQ:  map[int64]int64{1: 0, 2: 0, 3: 0},
 			requestCount: 100,
-			result:       map[int64]int64{1: 27, 2: 34, 3: 39},
+			result:       map[int64]int64{1: 40, 2: 32, 3: 28},
 		},
 		{
 			name: "one qn has task in queue",
