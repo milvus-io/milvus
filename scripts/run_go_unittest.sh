@@ -63,98 +63,98 @@ done
 
 function test_proxy()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast
 }
 
 function test_querynode()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast
 }
 
 
 function test_kv()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/kv/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/kv/..." -failfast
 }
 
 function test_mq()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
 }
 
 function test_storage()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/storage" -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/storage" -failfast
 }
 
 function test_allocator()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/allocator/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/allocator/..." -failfast
 }
 
 function test_tso()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/tso/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/tso/..." -failfast
 }
 
 function test_config()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/config/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/config/..." -failfast
 }
 
 function test_util()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/autoindex/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/autoindex/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
 }
 
 function test_datanode
 {
 
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datanode/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datanode/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datanode/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datanode/..." -failfast
 
 }
 
 function test_indexnode()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexnode/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexnode/..." -failfast
 }
 
 function test_rootcoord()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/rootcoord/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/rootcoord" -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/rootcoord/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/rootcoord" -failfast
 }
 
 function test_datacoord()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datacoord/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datacoord/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfast
 }
 
 function test_querycoord()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord/..." -failfast
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast
 }
 
 function test_indexcoord()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexcoord/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexcoord/..." -failfast
 }
 
 function test_metastore()
 {
-CGO_CFLAGS="-DDUMP_LEAKS" go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/metastore/..." -failfast
+GOTRACEBACK=system go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/metastore/..." -failfast
 }
 
 function test_all()
