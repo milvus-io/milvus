@@ -16,6 +16,8 @@ import (
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 
+	txnkv "github.com/tikv/client-go/v2/txnkv"
+
 	types "github.com/milvus-io/milvus/internal/types"
 )
 
@@ -1280,6 +1282,39 @@ func (_c *MockQueryCoord_SetRootCoord_Call) Return(_a0 error) *MockQueryCoord_Se
 }
 
 func (_c *MockQueryCoord_SetRootCoord_Call) RunAndReturn(run func(types.RootCoord) error) *MockQueryCoord_SetRootCoord_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetTiKVClient provides a mock function with given fields: client
+func (_m *MockQueryCoord) SetTiKVClient(client *txnkv.Client) {
+	_m.Called(client)
+}
+
+// MockQueryCoord_SetTiKVClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetTiKVClient'
+type MockQueryCoord_SetTiKVClient_Call struct {
+	*mock.Call
+}
+
+// SetTiKVClient is a helper method to define mock.On call
+//   - client *txnkv.Client
+func (_e *MockQueryCoord_Expecter) SetTiKVClient(client interface{}) *MockQueryCoord_SetTiKVClient_Call {
+	return &MockQueryCoord_SetTiKVClient_Call{Call: _e.mock.On("SetTiKVClient", client)}
+}
+
+func (_c *MockQueryCoord_SetTiKVClient_Call) Run(run func(client *txnkv.Client)) *MockQueryCoord_SetTiKVClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*txnkv.Client))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_SetTiKVClient_Call) Return() *MockQueryCoord_SetTiKVClient_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockQueryCoord_SetTiKVClient_Call) RunAndReturn(run func(*txnkv.Client)) *MockQueryCoord_SetTiKVClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
