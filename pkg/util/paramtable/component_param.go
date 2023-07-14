@@ -2042,7 +2042,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
-		DefaultValue: "0.25",
+		DefaultValue: "0.23",
 		Export:       true,
 	}
 	p.SegmentSealProportion.Init(base.mgr)
@@ -2077,7 +2077,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxIdleTime = ParamItem{
 		Key:          "dataCoord.segment.maxIdleTime",
 		Version:      "2.0.0",
-		DefaultValue: "3600",
+		DefaultValue: "600",
 		Doc: `If a segment didn't accept dml records in ` + "maxIdleTime" + ` and the size of segment is greater than
 ` + "minSizeFromIdleToSealed" + `, Milvus will automatically seal it.
 The max idle time of segment in seconds, 10*60.`,
