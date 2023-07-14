@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -460,7 +460,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 				signal <- struct{}{}
 			})
 
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),
@@ -485,7 +485,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		signal := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
 
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).
 			Return(merr.Status(nil), fmt.Errorf("mock err")).
 			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest) {
@@ -519,7 +519,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 				signal <- struct{}{}
 			})
 
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),

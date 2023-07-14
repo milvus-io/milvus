@@ -25,8 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -45,7 +45,7 @@ func (suite *LookAsideBalancerSuite) SetupTest() {
 	suite.balancer = NewLookAsideBalancer(suite.clientMgr)
 	suite.balancer.Start(context.Background())
 
-	qn := types.NewMockQueryNode(suite.T())
+	qn := mocks.NewMockQueryNode(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(1)).Return(qn, nil).Maybe()
 	qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, errors.New("fake error")).Maybe()
 }
@@ -289,7 +289,7 @@ func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
 }
 
 func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
-	qn2 := types.NewMockQueryNode(suite.T())
+	qn2 := mocks.NewMockQueryNode(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(qn2, nil)
 	qn2.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -314,7 +314,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	// mock qn down for a while and then recover
-	qn3 := types.NewMockQueryNode(suite.T())
+	qn3 := mocks.NewMockQueryNode(suite.T())
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(3)).Return(qn3, nil)
 	qn3.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{

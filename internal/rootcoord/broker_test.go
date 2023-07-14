@@ -342,7 +342,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 func TestServerBroker_GcConfirm(t *testing.T) {
 	t.Run("invalid datacoord", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		dc.On("GcConfirm",
 			mock.Anything, // context.Context
 			mock.Anything, // *datapb.GcConfirmRequest
@@ -353,7 +353,7 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 	})
 
 	t.Run("non success", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		dc.On("GcConfirm",
 			mock.Anything, // context.Context
 			mock.Anything, // *datapb.GcConfirmRequest
@@ -366,7 +366,7 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		dc := mocks.NewDataCoord(t)
+		dc := mocks.NewMockDataCoord(t)
 		dc.On("GcConfirm",
 			mock.Anything, // context.Context
 			mock.Anything, // *datapb.GcConfirmRequest

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -72,7 +73,7 @@ func TestQuotaCenter(t *testing.T) {
 	pcm := newProxyClientManager(core.proxyCreator)
 
 	t.Run("test QuotaCenter", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -82,7 +83,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test syncMetrics", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: succStatus()}, nil)
@@ -112,7 +113,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test forceDeny", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -142,7 +143,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateRates", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -158,7 +159,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -206,7 +207,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test TimeTickDelayFactor factors", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -279,7 +280,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -338,7 +339,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -378,7 +379,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test MemoryFactor factors", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -433,7 +434,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test GrowingSegmentsSize factors", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -487,7 +488,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test checkDiskQuota", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -530,8 +531,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
-		p1 := types.NewMockProxy(t)
+		qc := mocks.NewMockQueryCoord(t)
+		p1 := mocks.NewMockProxy(t)
 		p1.EXPECT().SetRates(mock.Anything, mock.Anything).Return(nil, nil)
 		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
 			TestProxyID: p1,
@@ -551,7 +552,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test recordMetrics", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)
@@ -563,7 +564,7 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test guaranteeMinRate", func(t *testing.T) {
-		qc := types.NewMockQueryCoord(t)
+		qc := mocks.NewMockQueryCoord(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator, meta)

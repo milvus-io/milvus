@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -39,7 +40,7 @@ type StatisticTaskSuite struct {
 	suite.Suite
 	rc types.RootCoord
 	qc types.QueryCoord
-	qn *types.MockQueryNode
+	qn *mocks.MockQueryNode
 
 	lb LBPolicy
 
@@ -52,7 +53,7 @@ func (s *StatisticTaskSuite) SetupSuite() {
 
 func (s *StatisticTaskSuite) SetupTest() {
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := types.NewMockQueryCoord(s.T())
+	qc := mocks.NewMockQueryCoord(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -75,7 +76,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 	s.qc = qc
 	s.rc = NewRootCoordMock()
 	s.rc.Start()
-	s.qn = types.NewMockQueryNode(s.T())
+	s.qn = mocks.NewMockQueryNode(s.T())
 
 	s.qn.EXPECT().GetComponentStates(mock.Anything).Return(nil, nil).Maybe()
 	mgr := NewMockShardClientManager(s.T())
