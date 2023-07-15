@@ -27,6 +27,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/client-go/v2/testutils"
+	tilib "github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"golang.org/x/exp/maps"
 
@@ -38,7 +40,22 @@ import (
 var Params paramtable.ComponentParam
 var tkv *txnkv.Client
 
-func setupTiKV() {
+// creates a locak TiKV Store for testing purpose.
+func setupLocalTiKV() {
+	client, cluster, pdClient, err := testutils.NewMockTiKV("", nil)
+	if err != nil {
+		panic(err)
+	}
+	testutils.BootstrapWithSingleStore(cluster)
+	store, err := tilib.NewTestTiKVStore(client, pdClient, nil, nil, 0)
+	if err != nil {
+		panic(err)
+	}
+	tkv = &txnkv.Client{store}
+}
+
+// Connects to a remote TiKV service for testing purpose. By default, it assumes the TiKV is from localhost.
+func setupRemoteTiKV() {
 	pdsn := "127.0.0.1:2379"
 	var err error
 	tkv, err = txnkv.NewClient([]string{pdsn})
@@ -47,9 +64,17 @@ func setupTiKV() {
 	}
 }
 
+func setupTiKV(use_remote bool) {
+	if use_remote {
+		setupRemoteTiKV()
+	} else {
+		setupLocalTiKV()
+	}
+}
+
 func TestMain(m *testing.M) {
 	Params.Init()
-	setupTiKV()
+	setupTiKV(false)
 	code := m.Run()
 	os.Exit(code)
 }
