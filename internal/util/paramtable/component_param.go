@@ -1655,11 +1655,11 @@ func (p *dataCoordConfig) initGCInterval() {
 }
 
 func (p *dataCoordConfig) initGCMissingTolerance() {
-	p.GCMissingTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 24*60*60)) * time.Second
+	p.GCMissingTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 60*60)) * time.Second
 }
 
 func (p *dataCoordConfig) initGCDropTolerance() {
-	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 3600)) * time.Second
+	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 3*60*60)) * time.Second
 }
 
 func (p *dataCoordConfig) SetEnableAutoCompaction(enable bool) {

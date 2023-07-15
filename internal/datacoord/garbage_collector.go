@@ -146,6 +146,7 @@ func (gc *garbageCollector) scan() {
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
+		startTs := time.Now()
 		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
 			log.Error("failed to list files with prefix",
@@ -153,6 +154,7 @@ func (gc *garbageCollector) scan() {
 				zap.String("error", err.Error()),
 			)
 		}
+		log.Info("gc scan finish list object", zap.String("prefix", prefix), zap.Duration("time spent", time.Since(startTs)), zap.Int("keys", len(infoKeys)))
 		for i, infoKey := range infoKeys {
 			total++
 			_, has := filesMap[infoKey]
@@ -243,7 +245,20 @@ func (gc *garbageCollector) clearEtcd() {
 
 	for _, segment := range drops {
 		log := log.With(zap.Int64("segmentID", segment.ID))
-		if !gc.isExpire(segment.GetDroppedAt()) {
+		for _, segmentIDCompactFrom := range segment.CompactionFrom {
+			if _, ok := drops[segmentIDCompactFrom]; ok {
+				log.WithRateGroup("GC_FAIL_PARENT_EXIST", 1, 60).
+					RatedInfo(60, "dropped segment parents not clenaed, skip meta gc",
+						zap.Int64("segment", segment.GetID()),
+						zap.Int64("parent segment", segmentIDCompactFrom),
+					)
+				continue
+			}
+		}
+		to, isCompacted := compactTo[segment.GetID()]
+		// for compacted segment, try to clean up the files as long as target segment is there
+		// for dropped segment, always wait until drop tolerance
+		if !isCompacted && !gc.isExpire(segment.GetDroppedAt()) {
 			continue
 		}
 		segInsertChannel := segment.GetInsertChannel()
@@ -261,7 +276,7 @@ func (gc *garbageCollector) clearEtcd() {
 		}
 		// For compact A, B -> C, don't GC A or B if C is not indexed,
 		// guarantee replacing A, B with C won't downgrade performance
-		if to, ok := compactTo[segment.GetID()]; ok && !indexedSet.Contain(to.GetID()) {
+		if isCompacted && !indexedSet.Contain(to.GetID()) {
 			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
 				RatedWarn(60, "skipping GC when compact target segment is not indexed",
 					zap.Int64("segmentID", to.GetID()))
@@ -270,7 +285,10 @@ func (gc *garbageCollector) clearEtcd() {
 		logs := getLogs(segment)
 		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
 		if gc.removeLogs(logs) {
-			_ = gc.meta.DropSegment(segment.GetID())
+			err := gc.meta.DropSegment(segment.GetID())
+			if err != nil {
+				log.Warn("failed to drop segment", zap.Int64("segment id", segment.GetID()), zap.Error(err))
+			}
 		}
 		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
 			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
@@ -278,8 +296,7 @@ func (gc *garbageCollector) clearEtcd() {
 				zap.String("vChannel", segInsertChannel))
 
 			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
-				log.Warn("failed to drop channel check point during segment garbage collection",
-					zap.Error(err))
+				log.Warn("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
 				// Fail-open as there's nothing to do.
 			}
 		}

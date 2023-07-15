@@ -334,8 +334,8 @@ dataCoord:
 
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
-    dropTolerance: 3600 # file belongs to dropped entity tolerance duration in seconds
+    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 1 hour
+    dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds, 3 hour
 
 
 dataNode:
