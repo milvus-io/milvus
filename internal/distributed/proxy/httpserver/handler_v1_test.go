@@ -181,7 +181,7 @@ func TestVectorListCollection(t *testing.T) {
 		name:         "show collections fail",
 		mp:           mp1,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + reason + "\",\"message\":\"show collections fail\"}",
+		expectedBody: "{\"code\":17,\"error\":\"" + reason + "\",\"message\":\"show collections fail\"}",
 	})
 
 	mp := mocks.NewProxy(t)
@@ -772,6 +772,7 @@ func TestSearch(t *testing.T) {
 		Results: &schemapb.SearchResultData{
 			FieldsData: generateFieldData(),
 			Scores:     []float32{0.01, 0.04, 0.09},
+			TopK:       3,
 		},
 	}, nil).Once()
 	testCases = append(testCases, testCase{

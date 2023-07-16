@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -96,7 +97,7 @@ func (h *Handlers) listCollections(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show collections fail", HTTPReturnError: err.Error()})
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show collections fail", HTTPReturnError: response.Status.Reason})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: response.Status.ErrorCode, HTTPReturnMessage: "show collections fail", HTTPReturnError: response.Status.Reason})
 	} else {
 		var collections []string
 		if response.CollectionNames != nil {
@@ -339,7 +340,7 @@ func (h *Handlers) query(c *gin.Context) {
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: response.Status.ErrorCode, HTTPReturnMessage: response.Status.Reason})
 	} else {
-		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil)
+		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show result by row wrong", "originData": response.FieldsData, HTTPReturnError: err.Error()})
 		} else {
@@ -366,7 +367,7 @@ func (h *Handlers) get(c *gin.Context) {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), "id"))
+	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "make sure the collection's primary field", HTTPReturnError: err.Error()})
 		return
@@ -390,7 +391,7 @@ func (h *Handlers) get(c *gin.Context) {
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: response.Status.ErrorCode, HTTPReturnMessage: response.Status.Reason})
 	} else {
-		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil)
+		outputData, err := buildQueryResp(int64(0), response.OutputFields, response.FieldsData, nil, nil)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show result by row wrong", "originData": response.FieldsData, HTTPReturnError: err.Error()})
 		} else {
@@ -417,7 +418,7 @@ func (h *Handlers) delete(c *gin.Context) {
 		return
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), "id"))
+	filter, err := checkGetPrimaryKey(coll.Schema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "make sure the collection's primary field", HTTPReturnError: err.Error()})
 		return
@@ -513,8 +514,13 @@ func (h *Handlers) search(c *gin.Context) {
 		return
 	}
 
+	params := map[string]interface{}{ //auto generated mapping
+		"level": int(commonpb.ConsistencyLevel_Bounded),
+	}
+	bs, _ := json.Marshal(params)
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
+		{Key: Params, Value: string(bs)},
 		{Key: ParamRoundDecimal, Value: "-1"},
 		{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 	}
@@ -541,11 +547,15 @@ func (h *Handlers) search(c *gin.Context) {
 	} else if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: response.Status.ErrorCode, HTTPReturnMessage: "search fail", HTTPReturnError: response.Status.Reason})
 	} else {
-		outputData, err := buildQueryResp(response.Results.TopK, response.Results.OutputFields, response.Results.FieldsData, response.Results.Scores)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show result by row wrong", HTTPReturnError: err.Error()})
+		if response.Results.TopK == int64(0) {
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
 		} else {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			outputData, err := buildQueryResp(response.Results.TopK, response.Results.OutputFields, response.Results.FieldsData, response.Results.Ids, response.Results.Scores)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusBadRequest, HTTPReturnMessage: "show result by row wrong", HTTPReturnError: err.Error()})
+			} else {
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			}
 		}
 	}
 }
