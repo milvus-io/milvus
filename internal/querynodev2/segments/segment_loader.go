@@ -817,6 +817,7 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 
 	usedMem := hardware.GetUsedMemoryCount() + loader.committedMemSize
 	totalMem := hardware.GetMemoryCount()
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
 
 	if usedMem == 0 || totalMem == 0 {
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
@@ -888,7 +889,9 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 		zap.Int("concurrency", concurrency),
 		zap.Uint64("memUsage", toMB(memLoadingUsage)),
 		zap.Uint64("memUsageAfterLoad", toMB(usedMemAfterLoad)),
-		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
+		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)),
+		zap.Uint64("currentUsedMem", toMB(usedMem)),
+		zap.Uint64("currentUsedDisk", toMB(uint64(localUsedSize))))
 
 	if memLoadingUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
@@ -899,10 +902,10 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
-	if usedLocalSizeAfterLoad > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
+	if usedLocalSizeAfterLoad > uint64(float64(diskCap)*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, disk space is not enough, usedDiskAfterLoad = %v MB, totalDisk = %v MB, thresholdFactor = %f",
 			toMB(usedLocalSizeAfterLoad),
-			toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())),
+			toMB(uint64(diskCap)),
 			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 	}
 
