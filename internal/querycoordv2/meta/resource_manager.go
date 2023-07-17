@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -34,7 +35,6 @@ var (
 	ErrNodeAlreadyAssign            = errors.New("node already assign to other resource group")
 	ErrRGIsFull                     = errors.New("resource group is full")
 	ErrRGIsEmpty                    = errors.New("resource group is empty")
-	ErrRGNotExist                   = errors.New("resource group doesn't exist")
 	ErrRGAlreadyExist               = errors.New("resource group already exist")
 	ErrRGAssignNodeFailed           = errors.New("failed to assign node to resource group")
 	ErrRGUnAssignNodeFailed         = errors.New("failed to unassign node from resource group")
@@ -45,7 +45,6 @@ var (
 	ErrRGNameIsEmpty                = errors.New("resource group name couldn't be empty")
 	ErrDeleteDefaultRG              = errors.New("delete default rg is not permitted")
 	ErrDeleteNonEmptyRG             = errors.New("delete non-empty rg is not permitted")
-	ErrNodeNotExist                 = errors.New("node does not exist")
 	ErrNodeStopped                  = errors.New("node has been stopped")
 	ErrRGLimit                      = errors.New("resource group num reach limit 1024")
 	ErrNodeNotEnough                = errors.New("nodes not enough")
@@ -202,15 +201,15 @@ func (rm *ResourceManager) AssignNode(rgName string, node int64) error {
 
 func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 	if rm.groups[rgName] == nil {
-		return ErrRGNotExist
+		return merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	if rm.nodeMgr.Get(node) == nil {
-		return ErrNodeNotExist
+		return merr.WrapErrNodeNotFound(node)
 	}
 
 	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
-		return ErrNodeStopped
+		return merr.WrapErrNodeNotAvailable(node)
 	}
 
 	rm.checkRGNodeStatus(rgName)
@@ -271,7 +270,7 @@ func (rm *ResourceManager) UnassignNode(rgName string, node int64) error {
 
 func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 	if rm.groups[rgName] == nil {
-		return ErrRGNotExist
+		return merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	if !rm.groups[rgName].containsNode(node) {
@@ -324,7 +323,7 @@ func (rm *ResourceManager) GetNodes(rgName string) ([]int64, error) {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 	if rm.groups[rgName] == nil {
-		return nil, ErrRGNotExist
+		return nil, merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	rm.checkRGNodeStatus(rgName)
@@ -397,7 +396,7 @@ func (rm *ResourceManager) GetResourceGroup(rgName string) (*ResourceGroup, erro
 	defer rm.rwmutex.RUnlock()
 
 	if rm.groups[rgName] == nil {
-		return nil, ErrRGNotExist
+		return nil, merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	rm.checkRGNodeStatus(rgName)
@@ -433,7 +432,7 @@ func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
 	defer rm.rwmutex.Unlock()
 
 	if rm.nodeMgr.Get(node) == nil {
-		return "", ErrNodeNotExist
+		return "", merr.WrapErrNodeNotFound(node)
 	}
 
 	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
@@ -515,8 +514,11 @@ func (rm *ResourceManager) TransferNode(from string, to string, numNode int) ([]
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	if rm.groups[from] == nil || rm.groups[to] == nil {
-		return nil, ErrRGNotExist
+	if rm.groups[from] == nil {
+		return nil, merr.WrapErrResourceGroupNotFound(from)
+	}
+	if rm.groups[to] == nil {
+		return nil, merr.WrapErrResourceGroupNotFound(to)
 	}
 
 	rm.checkRGNodeStatus(from)
@@ -614,7 +616,7 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) ([]int64, err
 	defer rm.rwmutex.Unlock()
 
 	if rm.groups[rgName] == nil {
-		return nil, ErrRGNotExist
+		return nil, merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	ret := make([]int64, 0)

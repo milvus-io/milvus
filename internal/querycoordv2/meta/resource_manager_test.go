@@ -28,6 +28,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -91,11 +92,11 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 
 	// test add non-exist node to rg
 	err = suite.manager.AssignNode("rg1", 2)
-	suite.ErrorIs(err, ErrNodeNotExist)
+	suite.ErrorIs(err, merr.ErrNodeNotFound)
 
 	// test add node to non-exist rg
 	err = suite.manager.AssignNode("rg2", 1)
-	suite.ErrorIs(err, ErrRGNotExist)
+	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
 
 	// test remove node from rg
 	err = suite.manager.UnassignNode("rg1", 1)
@@ -107,7 +108,7 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 
 	// test remove node from non-exist rg
 	err = suite.manager.UnassignNode("rg2", 1)
-	suite.ErrorIs(err, ErrRGNotExist)
+	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
 
 	// add node which already assign to rg  to another rg
 	err = suite.manager.AddResourceGroup("rg2")
@@ -123,7 +124,7 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 
 	// transfer meet non exist rg
 	_, err = suite.manager.TransferNode("rgggg", "rg2", 1)
-	suite.ErrorIs(err, ErrRGNotExist)
+	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
 
 	_, err = suite.manager.TransferNode("rg1", "rg2", 5)
 	suite.ErrorIs(err, ErrNodeNotEnough)

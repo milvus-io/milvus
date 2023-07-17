@@ -17,7 +17,6 @@
 package utils
 
 import (
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,25 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
-
-// WrapStatus wraps status with given error code, message and errors
-func WrapStatus(code commonpb.ErrorCode, msg string, errs ...error) *commonpb.Status {
-	status := &commonpb.Status{
-		ErrorCode: code,
-		Reason:    msg,
-	}
-
-	for _, err := range errs {
-		status.Reason = fmt.Sprintf("%s, err=%v", status.Reason, err)
-	}
-
-	return status
-}
-
-// WrapError wraps error with given message
-func WrapError(msg string, err error) error {
-	return fmt.Errorf("%s[%w]", msg, err)
-}
 
 func SegmentBinlogs2SegmentInfo(collectionID int64, partitionID int64, segmentBinlogs *datapb.SegmentBinlogs) *datapb.SegmentInfo {
 	return &datapb.SegmentInfo{

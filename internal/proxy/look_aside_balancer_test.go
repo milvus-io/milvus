@@ -304,7 +304,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
 	}, 2*time.Second, 100*time.Millisecond)
 	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
-	suite.ErrorIs(err, merr.ErrNoAvailableNode)
+	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 
 	suite.Eventually(func() bool {

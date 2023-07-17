@@ -269,7 +269,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
+        err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 

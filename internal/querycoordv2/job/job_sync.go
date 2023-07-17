@@ -22,10 +22,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -54,16 +54,6 @@ func NewSyncNewCreatedPartitionJob(
 }
 
 func (job *SyncNewCreatedPartitionJob) PreExecute() error {
-	// check if collection not load or loadType is loadPartition
-	collection := job.meta.GetCollection(job.req.GetCollectionID())
-	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
-		return ErrPartitionNotInTarget
-	}
-
-	// check if partition already existed
-	if partition := job.meta.GetPartition(job.req.GetPartitionID()); partition != nil {
-		return ErrPartitionNotInTarget
-	}
 	return nil
 }
 
@@ -73,6 +63,17 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 	)
+
+	// check if collection not load or loadType is loadPartition
+	collection := job.meta.GetCollection(job.req.GetCollectionID())
+	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
+		return nil
+	}
+
+	// check if partition already existed
+	if partition := job.meta.GetPartition(job.req.GetPartitionID()); partition != nil {
+		return nil
+	}
 
 	err := loadPartitions(job.ctx, job.meta, job.cluster, job.broker, false, req.GetCollectionID(), req.GetPartitionID())
 	if err != nil {
@@ -92,7 +93,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		return errors.Wrap(err, msg)
 	}
 
 	return nil

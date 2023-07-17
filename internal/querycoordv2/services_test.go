@@ -435,7 +435,7 @@ func (suite *ServiceSuite) TestResourceGroupFailed() {
 	}
 	resp, err := server.DescribeResourceGroup(ctx, describeRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrResourceGroupNotFound)
 
 	// server unhealthy
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -520,7 +520,6 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	suite.Contains(resp.Reason, "can't transfer node")
 
 	// test transfer node meet non-exist source rg
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
@@ -528,7 +527,6 @@ func (suite *ServiceSuite) TestTransferNode() {
 		TargetResourceGroup: meta.DefaultResourceGroupName,
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, meta.ErrRGNotExist.Error())
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
 	// test transfer node meet non-exist target rg
@@ -537,7 +535,6 @@ func (suite *ServiceSuite) TestTransferNode() {
 		TargetResourceGroup: "rgggg",
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, meta.ErrRGNotExist.Error())
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
 	err = server.meta.ResourceManager.AddResourceGroup("rg3")
@@ -611,7 +608,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, "only found [0] replicas in source resource group")
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rgg",
@@ -620,7 +617,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+	suite.ErrorIs(merr.Error(resp), merr.ErrResourceGroupNotFound)
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
@@ -629,7 +626,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+	suite.ErrorIs(merr.Error(resp), merr.ErrResourceGroupNotFound)
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
@@ -638,7 +635,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          0,
 	})
 	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
 	suite.server.meta.Put(meta.NewReplica(&querypb.Replica{
 		CollectionID:  1,
@@ -693,7 +690,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          1,
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, "transfer replica will cause replica loaded in both default rg and other rg")
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
 	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(1))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
@@ -731,8 +728,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		}
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
+		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 	}
 
 	req := &querypb.LoadCollectionRequest{
@@ -756,7 +752,6 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 
 	// Test load with wrong rg num
@@ -769,7 +764,6 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, ErrLoadUseWrongRG.Error())
 	}
 }
 
@@ -866,7 +860,6 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 }
 
@@ -916,7 +909,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 
 	// Test release all partitions
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+		Return(merr.Status(nil), nil)
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
@@ -1199,8 +1192,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		}
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		suite.Contains(resp.Reason, "source nodes can only contain 1 node")
+		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 	}
 
 	// Test load balance with not fully loaded
@@ -1219,8 +1211,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		}
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		suite.Contains(resp.Reason, "can't balance segments of not fully loaded collection")
+		suite.ErrorIs(merr.Error(resp), merr.ErrCollectionNotFullyLoaded)
 	}
 
 	// Test load balance with source node and dest node not in the same replica
@@ -1243,8 +1234,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		}
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
-		suite.Contains(resp.Reason, "destination nodes have to be in the same replica of source node")
+		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 	}
 
 	// Test balance task failed
@@ -1424,8 +1414,7 @@ func (suite *ServiceSuite) TestGetReplicasFailed() {
 	}
 	resp, err := server.GetReplicas(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_MetaFailed, resp.GetStatus().GetErrorCode())
-	suite.EqualValues(resp.GetStatus().GetReason(), "failed to get replica info, err=replica=100001: no available node in replica")
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrReplicaNotAvailable)
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
@@ -1731,7 +1720,7 @@ func (suite *ServiceSuite) expectLoadPartitions() {
 	suite.broker.EXPECT().DescribeIndex(mock.Anything, mock.Anything).
 		Return(nil, nil)
 	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+		Return(merr.Status(nil), nil)
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

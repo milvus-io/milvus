@@ -213,7 +213,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 			},
 		},
 	}, nil)
-	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test subscribe channel task
 	tasks := []Task{}
@@ -308,7 +308,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	targetNode := int64(1)
 
 	// Expect
-	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test unsubscribe channel task
 	tasks := []Task{}
@@ -386,7 +386,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -529,7 +529,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	}
 
 	// Expect
-	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test load segment task
 	view := &meta.LeaderView{
@@ -590,7 +590,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 	targetNode := int64(3)
 
 	// Expect
-	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	tasks := []Task{}
 	for _, segment := range suite.releaseSegments {
@@ -667,10 +667,8 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().LoadSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
-	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
-
-	// Test move segment task
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, leader, mock.Anything).Return(merr.Status(nil), nil)
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(merr.Status(nil), nil)
 	vchannel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
@@ -767,7 +765,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -846,7 +844,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(nil), nil)
 
 	// Test load segment task
 	suite.meta.ReplicaManager.Put(createReplica(suite.collection, targetNode))

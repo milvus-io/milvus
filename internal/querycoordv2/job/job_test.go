@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -36,8 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
@@ -131,10 +130,10 @@ func (suite *JobSuite) SetupSuite() {
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().
 		LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+		Return(merr.Status(nil), nil)
 	suite.cluster.EXPECT().
 		ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+		Return(merr.Status(nil), nil)
 }
 
 func (suite *JobSuite) SetupTest() {
@@ -248,7 +247,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.NoError(err)
 	}
 
 	// Test load existed collection with different replica number
@@ -273,7 +272,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
 	}
 
 	// Test load partition while collection exists
@@ -300,7 +299,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.NoError(err)
 	}
 
 	suite.meta.ResourceManager.AddResourceGroup("rg1")
@@ -438,7 +437,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
 	}
 }
 
@@ -499,7 +498,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.NoError(err)
 	}
 
 	// Test load partition with different replica number
@@ -526,7 +525,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
 	}
 
 	// Test load partition with more partition
@@ -579,7 +578,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrCollectionLoaded)
+		suite.NoError(err)
 	}
 
 	suite.meta.ResourceManager.AddResourceGroup("rg1")
@@ -690,7 +689,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 	job = newLoadPartJob(p0, p1, p2)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrCollectionLoaded)
+	suite.NoError(err)
 	suite.assertPartitionLoaded(collection)
 
 	// loaded: p0, p1
@@ -837,7 +836,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrLoadParameterMismatched)
+		suite.ErrorIs(err, merr.ErrParameterInvalid)
 	}
 }
 
@@ -1336,7 +1335,7 @@ func (suite *JobSuite) TestCallReleasePartitionFailed() {
 		return call.Method != "ReleasePartitions"
 	})
 	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+		Return(merr.Status(nil), nil)
 }
 
 func (suite *JobSuite) TestSyncNewCreatedPartition() {
@@ -1376,7 +1375,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrPartitionNotInTarget)
+	suite.NoError(err)
 
 	// test collection loaded, but its loadType is loadPartition
 	req = &querypb.SyncNewCreatedPartitionRequest{
@@ -1392,7 +1391,7 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	suite.ErrorIs(err, ErrPartitionNotInTarget)
+	suite.NoError(err)
 }
 
 func (suite *JobSuite) loadAll() {
