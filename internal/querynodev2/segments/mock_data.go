@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -58,12 +59,6 @@ const (
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 	IndexHNSW            = "HNSW"
-
-	L2       = "L2"
-	IP       = "IP"
-	hamming  = "HAMMING"
-	Jaccard  = "JACCARD"
-	tanimoto = "TANIMOTO"
 
 	nlist               = 100
 	m                   = 4
@@ -79,7 +74,7 @@ const (
 	timestampFieldID  = 1
 	metricTypeKey     = common.MetricTypeKey
 	defaultDim        = 128
-	defaultMetricType = "L2"
+	defaultMetricType = metric.L2
 
 	dimKey = common.DimKey
 
@@ -113,7 +108,7 @@ var simpleFloatVecField = vecFieldParam{
 var simpleBinVecField = vecFieldParam{
 	id:         101,
 	dim:        defaultDim,
-	metricType: Jaccard,
+	metricType: metric.JACCARD,
 	vecType:    schemapb.DataType_BinaryVector,
 	fieldName:  "binVectorField",
 }

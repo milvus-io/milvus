@@ -162,7 +162,6 @@ INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
                         ::testing::Values(knowhere::metric::L2,
                                           knowhere::metric::IP,
                                           knowhere::metric::JACCARD,
-                                          knowhere::metric::TANIMOTO,
                                           knowhere::metric::HAMMING));
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {

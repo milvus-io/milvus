@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -439,11 +440,11 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) error {
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
-	case "L2", "IP":
+	case metric.L2, metric.IP, metric.COSINE:
 		if dataType == schemapb.DataType_FloatVector {
 			return nil
 		}
-	case "JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUBPERSTURCTURE":
+	case metric.JACCARD, metric.HAMMING:
 		if dataType == schemapb.DataType_BinaryVector {
 			return nil
 		}

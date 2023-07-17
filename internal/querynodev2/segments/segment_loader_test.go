@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -234,7 +235,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			vecFields[0],
 			msgLength,
 			IndexFaissIVFFlat,
-			L2,
+			metric.L2,
 			suite.chunkManager,
 		)
 		suite.NoError(err)
@@ -401,7 +402,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 		vecFields[0],
 		msgLength,
 		IndexFaissIVFFlat,
-		L2,
+		metric.L2,
 		suite.chunkManager,
 	)
 	suite.NoError(err)
