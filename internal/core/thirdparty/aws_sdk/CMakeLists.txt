@@ -18,7 +18,10 @@ macro(build_aws_sdk_s3)
 
     set(AWS_SDK_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-    set(AWS_SDK_BUILD_COMMAND make)
+
+    set(AWS_SDK_BUILD_COMMAND make ${MAKE_BUILD_ARGS})
+    message(STATUS "build command: ${AWS_SDK_BUILD_COMMAND}")
+
     set(AWS_SDK_INSTALL_COMMAND make install)
 
     set(AWS_SDK_S3_CMAKE_ARGS

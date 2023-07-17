@@ -30,7 +30,13 @@ else()
   set(EP_LOG_OPTIONS)
 endif()
 
-set(MAKE_BUILD_ARGS "-j6")
+include(ProcessorCount)
+
+processorcount(CPU_CORES)
+
+message(STATUS "CPU Cores: ${CPU_CORES}")
+
+set(MAKE_BUILD_ARGS "-j${CPU_CORES}")
 
 include(FetchContent)
 set(FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download)
