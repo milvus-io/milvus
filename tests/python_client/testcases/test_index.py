@@ -1939,7 +1939,6 @@ class TestAutoIndex(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
-        collection_w.create_index(binary_field_name, {},
-                                  check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 1,
-                                               "err_msg": "float vector is only supported"})
+        collection_w.create_index(binary_field_name, {})
+        actual_index_params = collection_w.index()[0].params
+        assert default_autoindex_params == actual_index_params

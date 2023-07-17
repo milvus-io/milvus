@@ -196,6 +196,7 @@ pipeline {
                                                 def clusterEnabled = "false"
                                                 def mqMode='pulsar'
                                                 int e2e_timeout_seconds = 5 * 60 * 60
+                                                int parallel_num = 6
                                                 def tag="L0 L1 L2"
                                                 if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                     clusterEnabled = "true"
@@ -209,6 +210,7 @@ pipeline {
                                                     e2e_timeout_seconds = 6 * 60 * 60
                                                 } else if("${MILVUS_SERVER_TYPE}" == "standalone-authentication") {
                                                     tag="RBAC"
+                                                    parallel_num = 1
                                                     e2e_timeout_seconds = 1 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
@@ -218,7 +220,7 @@ pipeline {
                                                     MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                     TEST_TIMEOUT="${e2e_timeout_seconds}" \
                                                     MQ_MODE="${mqMode}" \
-                                                    ./ci_e2e.sh  "-n 6 --tags ${tag}"
+                                                    ./ci_e2e.sh  "-n ${parallel_num} --tags ${tag}"
                                                     """
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"

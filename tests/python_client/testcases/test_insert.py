@@ -417,6 +417,10 @@ class TestInsertOperation(TestcaseBase):
     def auto_id(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=[ct.default_int64_field_name, ct.default_string_field_name])
+    def pk_field(self, request):
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_without_connection(self):
         """
@@ -655,34 +659,34 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_auto_id_true(self):
+    def test_insert_auto_id_true(self, pk_field):
         """
         target: test insert ids fields values when auto_id=True
         method: 1.create collection with auto_id=True 2.insert without ids
         expected: verify primary_keys and num_entities
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(auto_id=True)
+        schema = cf.gen_default_collection_schema(primary_field=pk_field, auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data()
-        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        df.drop(pk_field, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_twice_auto_id_true(self):
+    def test_insert_twice_auto_id_true(self, pk_field):
         """
         target: test insert ids fields twice when auto_id=True
         method: 1.create collection with auto_id=True 2.insert twice
         expected: verify primary_keys unique
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(auto_id=True)
+        schema = cf.gen_default_collection_schema(primary_field=pk_field, auto_id=True)
         nb = 10
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data(nb)
-        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        df.drop(pk_field, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         primary_keys = mutation_res.primary_keys
         assert cf._check_primary_keys(primary_keys, nb)
@@ -692,30 +696,34 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == nb * 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_auto_id_true_list_data(self):
+    def test_insert_auto_id_true_list_data(self, pk_field):
         """
         target: test insert ids fields values when auto_id=True
         method: 1.create collection with auto_id=True 2.insert list data with ids field values
         expected: assert num entities
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(auto_id=True)
+        schema = cf.gen_default_collection_schema(primary_field=pk_field, auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data()
-        mutation_res, _ = collection_w.insert(data=data[1:])
+        if pk_field == ct.default_int64_field_name:
+            mutation_res, _ = collection_w.insert(data=data[1:])
+        else:
+            del data[2]
+            mutation_res, _ = collection_w.insert(data=data)
         assert mutation_res.insert_count == ct.default_nb
         assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_auto_id_true_with_dataframe_values(self):
+    def test_insert_auto_id_true_with_dataframe_values(self, pk_field):
         """
         target: test insert with auto_id=True
         method: create collection with auto_id=True
         expected: 1.verify num entities 2.verify ids
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(auto_id=True)
+        schema = cf.gen_default_collection_schema(primary_field=pk_field, auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data(nb=100)
         error = {ct.err_code: 1, ct.err_msg: "Please don't provide data for auto_id primary field: int64"}
@@ -723,14 +731,14 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.is_empty
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_auto_id_true_with_list_values(self):
+    def test_insert_auto_id_true_with_list_values(self, pk_field):
         """
         target: test insert with auto_id=True
         method: create collection with auto_id=True
         expected: 1.verify num entities 2.verify ids
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(auto_id=True)
+        schema = cf.gen_default_collection_schema(primary_field=pk_field, auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data(nb=100)
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
@@ -1167,7 +1175,22 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Data type is not support."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_invalid_with_pk_varchar_auto_id_true(self):
+        """
+        target: test insert invalid with pk varchar and auto id true
+        method: set pk varchar max length < 18, insert data
+        expected: raise exception
+        """
+        string_field = cf.gen_string_field(is_primary=True, max_length=6)
+        embedding_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema([string_field, embedding_field], auto_id=True)
+        collection_w = self.init_collection_wrap(schema=schema)
+        data = [[[random.random() for _ in range(ct.default_dim)] for _ in range(2)]]
+        error = {ct.err_code: 1, ct.err_msg: "the length (18) of 0th string exceeds max length (6)"}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_over_resource_limit(self):
         """
         target: test insert over RPC limitation 64MB (67108864)

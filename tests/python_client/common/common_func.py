@@ -1100,7 +1100,7 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 
 
 def get_wildcard_output_field_names(collection_w, output_fields):
-    all_fields = collection_w.schema.fields
+    all_fields = [field.name for field in collection_w.schema.fields]
     if "*" in output_fields:
         output_fields.remove("*")
         output_fields.extend(all_fields)
