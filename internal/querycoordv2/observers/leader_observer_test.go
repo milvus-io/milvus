@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -566,6 +568,110 @@ func (suite *LeaderObserverTestSuite) TestSyncTargetVersion() {
 	suite.Equal(querypb.SyncType_UpdateVersion, action.Type)
 	suite.Len(action.GrowingInTarget, 2)
 	suite.Len(action.SealedInTarget, 1)
+}
+
+func (suite *LeaderObserverTestSuite) TestSyncDeltaLogs() {
+	observer := suite.observer
+	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+
+	info := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+		DmlPosition: &msgpb.MsgPosition{
+			ChannelName: "test-insert-channel",
+			Timestamp:   100,
+		},
+	}
+	newInfo := proto.Clone(info).(*datapb.SegmentInfo)
+	newInfo.DmlPosition.Timestamp = 101
+
+	segments := []*datapb.SegmentInfo{
+		newInfo,
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	resp := &datapb.GetSegmentInfoResponse{
+		Infos: []*datapb.SegmentInfo{newInfo},
+	}
+	schema := utils.CreateTestSchema()
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(1)).Return(
+		resp, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, segments, nil)
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, int64(1)).Return(schema, nil)
+	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
+
+	segment := utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel")
+	segment.SegmentInfo = info
+	observer.dist.SegmentDistManager.Update(1, segment)
+	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
+	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
+	observer.dist.LeaderViewManager.Update(2, view)
+	loadInfo := utils.PackSegmentLoadInfo(resp, nil, view.TargetVersion)
+
+	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+		return &querypb.SyncDistributionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SyncDistribution,
+			},
+			CollectionID: 1,
+			ReplicaID:    1,
+			Channel:      "test-insert-channel",
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        querypb.SyncType_Amend,
+					PartitionID: 1,
+					SegmentID:   1,
+					NodeID:      1,
+					Version:     1,
+					Info:        loadInfo,
+				},
+				{
+					Type:        querypb.SyncType_Set,
+					PartitionID: 1,
+					SegmentID:   1,
+					NodeID:      1,
+					Version:     1,
+					Info:        loadInfo,
+				},
+			},
+			Schema: schema,
+			LoadMeta: &querypb.LoadMetaInfo{
+				CollectionID: 1,
+				PartitionIDs: []int64{},
+			},
+			Version: version,
+		}
+	}
+	called := atomic.NewBool(false)
+	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2),
+		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
+		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
+			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
+				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
+			called.Store(true)
+		}).
+		Return(&commonpb.Status{}, nil)
+
+	observer.Start(context.TODO())
+
+	suite.Eventually(
+		func() bool {
+			return called.Load()
+		},
+		10*time.Second,
+		500*time.Millisecond,
+	)
 }
 
 func TestLeaderObserverSuite(t *testing.T) {

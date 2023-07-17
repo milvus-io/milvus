@@ -179,8 +179,25 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			readableVersion = o.target.GetCollectionTargetVersion(s.CollectionID, meta.NextTarget)
 		}
 
+		ctx := context.Background()
+		if existInCurrentTarget && currentTarget.GetDmlPosition().GetTimestamp() > s.LastDeltaTimestamp {
+			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
+			if err != nil || len(resp.GetInfos()) == 0 {
+				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+				continue
+			}
+			loadInfo := utils.PackSegmentLoadInfo(resp, nil, readableVersion)
+			ret = append(ret, &querypb.SyncAction{
+				Type:        querypb.SyncType_Amend,
+				PartitionID: s.GetPartitionID(),
+				SegmentID:   s.GetID(),
+				NodeID:      s.Node,
+				Version:     s.Version,
+				Info:        loadInfo,
+			})
+		}
+
 		if !ok || version.GetVersion() < s.Version { // Leader misses this segment
-			ctx := context.Background()
 			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
 			if err != nil || len(resp.GetInfos()) == 0 {
 				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
@@ -197,6 +214,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 				Info:        loadInfo,
 			})
 		}
+
 	}
 	return ret
 }
@@ -215,7 +233,8 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 			continue
 		}
 		log.Debug("leader observer append a segment to remove:", zap.Int64("collectionID", leaderView.CollectionID),
-			zap.String("Channel", leaderView.Channel), zap.Int64("leaderViewID", leaderView.ID),
+			zap.String("channel", leaderView.Channel),
+			zap.Int64("leaderViewID", leaderView.ID),
 			zap.Int64("segmentID", sid), zap.Bool("distMap_exist", ok),
 			zap.Bool("existInCurrentTarget", existInCurrentTarget),
 			zap.Bool("existInNextTarget", existInNextTarget))
