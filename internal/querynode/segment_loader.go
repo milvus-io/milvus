@@ -886,7 +886,9 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)),
 		zap.Uint64("currentUsedMem", toMB(usedMem)),
 		zap.Uint64("currentAvailableFreeMemory", toMB(currentAvailableMemCount)),
-		zap.Uint64("currentTotalMemory", toMB(totalMem)))
+		zap.Uint64("currentTotalMemory", toMB(totalMem)),
+		zap.Uint64("currentUsedDisk", toMB(uint64(localUsedSize))),
+		zap.Uint64("currentTotalDisk", toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit))))
 
 	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
 		return fmt.Errorf("%w, load segment failed, OOM if load, collectionID = %d, MaxSegmentMemUsage = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, currentAvailableMemCount = %v MB, currentTotalMem = %v MB, thresholdFactor = %f",
