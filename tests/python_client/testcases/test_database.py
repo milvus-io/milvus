@@ -10,7 +10,7 @@ from utils.util_log import test_log as log
 prefix = "db"
 
 
-@pytest.mark.tags(CaseLabel.L3)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseParams(TestcaseBase):
     """ Test case of database """
 
@@ -220,7 +220,7 @@ class TestDatabaseParams(TestcaseBase):
                                           check_items={ct.err_code: 1, ct.err_msg: "database not exist"})
 
 
-@pytest.mark.tags(CaseLabel.L3)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseOperation(TestcaseBase):
 
     def teardown_method(self, method):
@@ -531,7 +531,7 @@ class TestDatabaseOperation(TestcaseBase):
         assert collection_w.name in colls
 
 
-@pytest.mark.tags(CaseLabel.L3)
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestDatabaseOtherApi(TestcaseBase):
     """ test other interface that has db_name params"""
 

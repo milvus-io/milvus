@@ -3802,9 +3802,9 @@ class TestCollectionString(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
         fields = [int_field, string_field, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: "The auto_id can only be specified on field with DataType.INT64"}
-        self.collection_schema_wrap.init_collection_schema(fields=fields,
-                                                           check_task=CheckTasks.err_res, check_items=error)
+        schema = self.collection_schema_wrap.init_collection_schema(fields=fields)[0]
+        self.init_collection_wrap(schema=schema, check_task=CheckTasks.check_collection_property,
+                                  check_items={"schema": schema, "primary": ct.default_string_field_name})
         
 class TestCollectionJSON(TestcaseBase):
     """

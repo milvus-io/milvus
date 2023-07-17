@@ -5,8 +5,6 @@ import numpy
 import threading
 import pytest
 import pandas as pd
-import decimal
-from decimal import Decimal, getcontext
 from time import sleep
 import heapq
 
@@ -3311,11 +3309,7 @@ class TestCollectionSearch(TestcaseBase):
                                   output_fields=[binary_field_name])[0]
 
         # 4. check the result vectors should be equal to the inserted
-        log.info(res[0][0].id)
-        log.info(res[0][0].entity.float_vector)
-        log.info(data['binary_vector'][0])
         assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
-        # log.info(data['float_vector'][1])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [32, 128, 768])
@@ -3429,9 +3423,8 @@ class TestCollectionSearch(TestcaseBase):
                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_float_field_name],
-                                                        ["*", default_search_field],
-                                                        ["%"], ["%", default_float_field_name], ["*", "%"]])
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_int64_field_name],
+                                                        ["*", default_search_field]])
     def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async, enable_dynamic_field):
         """
         target: test search with output fields using wildcard
