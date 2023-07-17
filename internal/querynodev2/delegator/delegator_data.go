@@ -375,13 +375,13 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	deltaPositions []*msgpb.MsgPosition,
 	targetNodeID int64, worker cluster.Worker) error {
 	log := sd.getLogger(ctx)
-	sd.deleteMut.Lock()
-	defer sd.deleteMut.Unlock()
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
 
+	sd.deleteMut.Lock()
+	defer sd.deleteMut.Unlock()
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for i, info := range infos {
