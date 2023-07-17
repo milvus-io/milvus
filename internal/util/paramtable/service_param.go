@@ -485,6 +485,7 @@ type MinioConfig struct {
 	UseIAM          bool
 	CloudProvider   string
 	IAMEndpoint     string
+	LogLevel        string
 }
 
 func (p *MinioConfig) init(base *BaseTable) {
@@ -499,6 +500,7 @@ func (p *MinioConfig) init(base *BaseTable) {
 	p.initUseIAM()
 	p.initCloudProvider()
 	p.initIAMEndpoint()
+	p.initLogLevel()
 }
 
 func (p *MinioConfig) initAddress() {
@@ -586,4 +588,8 @@ func (p *MinioConfig) initCloudProvider() {
 
 func (p *MinioConfig) initIAMEndpoint() {
 	p.IAMEndpoint = p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
+}
+
+func (p *MinioConfig) initLogLevel() {
+	p.LogLevel = p.Base.LoadWithDefault("minio.logLevel", DefaultMinioLogLevel)
 }

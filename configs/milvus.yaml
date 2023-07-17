@@ -93,6 +93,9 @@ minio:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: ""
+  # Log level for aws sdk log. 
+  # Supported level:  off, fatal, error, warn, info, debug, trace
+  logLevel: error
 
 # Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file
