@@ -99,7 +99,6 @@ pipeline {
                                         if ("${MILVUS_SERVER_TYPE}".contains('distributed')) {
                                             clusterEnabled = "true"
                                         }
-                                        sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
 
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             if ("${imageTag}"==''){
