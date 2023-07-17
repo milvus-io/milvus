@@ -127,6 +127,9 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 	segmentPlans, channelPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
 	for _, rid := range replicaIDs {
 		replica := b.meta.ReplicaManager.Get(rid)
+		if replica == nil {
+			continue
+		}
 		sPlans, cPlans := b.Balance.BalanceReplica(replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
