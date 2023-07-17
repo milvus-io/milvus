@@ -85,12 +85,12 @@ func (b *LookAsideBalancer) Close() {
 }
 
 func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
-	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 60, 1)
+	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 1, 60)
 	targetNode := int64(-1)
 	targetScore := float64(math.MaxFloat64)
 	for _, node := range availableNodes {
 		if b.unreachableQueryNodes.Contain(node) {
-			log.RatedWarn(30, "query node  is unreachable, skip it",
+			log.RatedWarn(5, "query node  is unreachable, skip it",
 				zap.Int64("nodeID", node))
 			continue
 		}
@@ -171,7 +171,7 @@ func (b *LookAsideBalancer) isNodeCostMetricsTooOld(node int64) bool {
 }
 
 func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
-	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 60, 1)
+	log := log.Ctx(ctx).WithRateGroup("proxy.LookAsideBalancer", 1, 60)
 	defer b.wg.Done()
 
 	ticker := time.NewTicker(checkQueryNodeHealthInterval)
@@ -195,7 +195,7 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						defer cancel()
 
 						checkHealthFailed := func(err error) bool {
-							log.RatedWarn(30, "query node check health failed, add it to unreachable nodes list",
+							log.RatedWarn(5, "query node check health failed, add it to unreachable nodes list",
 								zap.Int64("nodeID", node),
 								zap.Error(err))
 							b.unreachableQueryNodes.Insert(node)
