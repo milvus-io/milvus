@@ -375,6 +375,11 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -656,6 +661,11 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil)
 	for _, segment := range suite.moveSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -754,6 +764,11 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
 		},
 	}, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
@@ -831,6 +846,11 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		Name: "TestSegmentTaskStale",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}, nil)
+	suite.broker.EXPECT().DescribeIndex(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
 		},
 	}, nil)
 	for _, segment := range suite.loadSegments {

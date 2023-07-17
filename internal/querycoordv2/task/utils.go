@@ -89,6 +89,7 @@ func packLoadSegmentRequest(
 	schema *schemapb.CollectionSchema,
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
+	indexInfo []*indexpb.IndexInfo,
 ) *querypb.LoadSegmentsRequest {
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -104,6 +105,7 @@ func packLoadSegmentRequest(
 		DstNodeID:      action.Node(),
 		Version:        time.Now().UnixNano(),
 		NeedTransfer:   true,
+		IndexInfoList:  indexInfo,
 	}
 }
 
