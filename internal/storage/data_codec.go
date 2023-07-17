@@ -406,8 +406,17 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	rowNum := int64(timeFieldData.RowNum())
 
 	ts := timeFieldData.(*Int64FieldData).Data
-	startTs := ts[0]
-	endTs := ts[len(ts)-1]
+	var startTs, endTs Timestamp
+	startTs, endTs = math.MaxUint64, 0
+	for _, t := range ts {
+		if uint64(t) > endTs {
+			endTs = uint64(t)
+		}
+
+		if uint64(t) < startTs {
+			startTs = uint64(t)
+		}
+	}
 
 	// sort insert data by rowID
 	dataSorter := &DataSorter{
@@ -440,7 +449,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			return nil, err
 		}
 
-		eventWriter.SetEventTimestamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
+		eventWriter.SetEventTimestamp(startTs, endTs)
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
@@ -550,7 +559,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, err
 		}
-		writer.SetEventTimeStamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
+		writer.SetEventTimeStamp(startTs, endTs)
 
 		err = writer.Finish()
 		if err != nil {
