@@ -63,9 +63,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -639,7 +639,7 @@ func TestProxy(t *testing.T) {
 				},
 				{
 					Key:   common.MetricTypeKey,
-					Value: distance.L2,
+					Value: metric.L2,
 				},
 				{
 					Key:   common.IndexTypeKey,
@@ -1543,7 +1543,7 @@ func TestProxy(t *testing.T) {
 			Params: []*commonpb.KeyValuePair{
 				{
 					Key:   common.MetricTypeKey,
-					Value: distance.L2,
+					Value: metric.L2,
 				},
 			},
 		})

@@ -1,32 +1,11 @@
 package indexparamcheck
 
-import "github.com/milvus-io/milvus/pkg/common"
+import (
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metric"
+)
 
 const (
-	// L2 represents Euclidean distance
-	L2 = "L2"
-
-	// IP represents inner product distance
-	IP = "IP"
-
-	// COSINE represents cosine distance
-	COSINE = "COSINE"
-
-	// HAMMING represents hamming distance
-	HAMMING = "HAMMING"
-
-	// JACCARD represents jaccard distance
-	JACCARD = "JACCARD"
-
-	// TANIMOTO represents tanimoto distance
-	TANIMOTO = "TANIMOTO"
-
-	// SUBSTRUCTURE represents substructure distance
-	SUBSTRUCTURE = "SUBSTRUCTURE"
-
-	// SUPERSTRUCTURE represents superstructure distance
-	SUPERSTRUCTURE = "SUPERSTRUCTURE"
-
 	MinNBits     = 1
 	MaxNBits     = 16
 	DefaultNBits = 8
@@ -65,16 +44,17 @@ const (
 )
 
 // METRICS is a set of all metrics types supported for float vector.
-var METRICS = []string{L2, IP, COSINE} // const
+var METRICS = []string{metric.L2, metric.IP, metric.COSINE} // const
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
-var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
-var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
-var HnswMetrics = []string{L2, IP, COSINE, HAMMING, JACCARD}                               // const
-var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
-var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
+var BinIDMapMetrics = []string{metric.HAMMING, metric.JACCARD, metric.TANIMOTO, metric.SUBSTRUCTURE,
+												metric.SUPERSTRUCTURE} // const
+var BinIvfMetrics = []string{metric.HAMMING, metric.JACCARD, metric.TANIMOTO}                   // const
+var HnswMetrics = []string{metric.L2, metric.IP, metric.COSINE, metric.HAMMING, metric.JACCARD} // const
+var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}             // const
+var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1}      // const
 
 const (
-	FloatVectorDefaultMetricType  = IP
-	BinaryVectorDefaultMetricType = JACCARD
+	FloatVectorDefaultMetricType  = metric.IP
+	BinaryVectorDefaultMetricType = metric.JACCARD
 )

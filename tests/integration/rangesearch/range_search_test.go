@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -109,7 +109,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.IP),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
@@ -137,12 +137,12 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	radius := 10
 	filter := 20
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.IP)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
 
 	// only pass in radius when range search
 	params["radius"] = radius
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
@@ -155,7 +155,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
@@ -169,7 +169,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	params["radius"] = filter
 	params["range_filter"] = radius
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
@@ -257,7 +257,7 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
@@ -285,11 +285,11 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	radius := 20
 	filter := 10
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.L2)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	// only pass in radius when range search
 	params["radius"] = radius
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
@@ -302,7 +302,7 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	// pass in radius and range_filter when range search
 	params["range_filter"] = filter
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 
@@ -316,7 +316,7 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	params["radius"] = filter
 	params["range_filter"] = radius
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ = c.Proxy.Search(ctx, searchReq)
 

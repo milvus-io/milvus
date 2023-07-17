@@ -676,7 +676,7 @@ class TestUtilityBase(TestcaseBase):
     def metric(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["HAMMING", "TANIMOTO"])
+    @pytest.fixture(scope="function", params=["HAMMING", "JACCARD"])
     def metric_binary(self, request):
         yield request.param
 

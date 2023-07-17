@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -16,21 +17,21 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	validParamsWithoutNbits := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	validParamsWithoutDim := map[string]string{
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	invalidParamsDim := copyParams(validParams)
@@ -43,7 +44,7 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		NBITS:  strconv.Itoa(8),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	invalidParamsIVF := copyParams(validParams)
@@ -60,21 +61,21 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	p2 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: IP,
+		Metric: metric.IP,
 	}
 	p3 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: COSINE,
+		Metric: metric.COSINE,
 	}
 
 	p4 := map[string]string{
@@ -82,35 +83,35 @@ func Test_raftIVFPQChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: HAMMING,
+		Metric: metric.HAMMING,
 	}
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 	p6 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: TANIMOTO,
+		Metric: metric.TANIMOTO,
 	}
 	p7 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: SUBSTRUCTURE,
+		Metric: metric.SUBSTRUCTURE,
 	}
 	p8 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: SUPERSTRUCTURE,
+		Metric: metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {

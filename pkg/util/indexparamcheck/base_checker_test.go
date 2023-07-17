@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -12,10 +13,10 @@ import (
 func Test_baseChecker_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	paramsWithoutDim := map[string]string{
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	cases := []struct {
 		params   map[string]string

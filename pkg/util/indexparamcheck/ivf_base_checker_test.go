@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,49 +14,49 @@ func Test_ivfBaseChecker_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	p2 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: IP,
+		Metric: metric.IP,
 	}
 	p3 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: COSINE,
+		Metric: metric.COSINE,
 	}
 
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: HAMMING,
+		Metric: metric.HAMMING,
 	}
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 	p6 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: TANIMOTO,
+		Metric: metric.TANIMOTO,
 	}
 	p7 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: SUBSTRUCTURE,
+		Metric: metric.SUBSTRUCTURE,
 	}
 	p8 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(1024),
-		Metric: SUPERSTRUCTURE,
+		Metric: metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {

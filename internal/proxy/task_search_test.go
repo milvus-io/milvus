@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -121,7 +121,7 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 		},
 		{
 			Key:   common.MetricTypeKey,
-			Value: distance.L2,
+			Value: metric.L2,
 		},
 		{
 			Key:   SearchParamsKey,
@@ -1441,7 +1441,7 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, distance.L2, schemapb.DataType_Int64, test.offset)
+				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
 				assert.NoError(t, err)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.limit, test.limit}, reduced.GetResults().GetTopks())
@@ -1481,7 +1481,7 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 
 		for _, test := range lessThanLimitTests {
 			t.Run(test.description, func(t *testing.T) {
-				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, distance.L2, schemapb.DataType_Int64, test.offset)
+				reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, test.offset)
 				assert.NoError(t, err)
 				assert.Equal(t, test.outData, reduced.GetResults().GetIds().GetIntId().GetData())
 				assert.Equal(t, []int64{test.outLimit, test.outLimit}, reduced.GetResults().GetTopks())
@@ -1505,7 +1505,7 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, distance.L2, schemapb.DataType_Int64, 0)
+		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_Int64, 0)
 
 		assert.NoError(t, err)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetIntId().GetData())
@@ -1532,7 +1532,7 @@ func TestTaskSearch_reduceSearchResultData(t *testing.T) {
 			results = append(results, r)
 		}
 
-		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, distance.L2, schemapb.DataType_VarChar, 0)
+		reduced, err := reduceSearchResultData(context.TODO(), results, nq, topk, metric.L2, schemapb.DataType_VarChar, 0)
 
 		assert.NoError(t, err)
 		assert.Equal(t, resultData, reduced.GetResults().GetIds().GetStrId().GetData())
@@ -1717,7 +1717,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		noSearchParams := getBaseSearchParams()
 		noSearchParams = append(noSearchParams, &commonpb.KeyValuePair{
 			Key:   common.MetricTypeKey,
-			Value: distance.L2,
+			Value: metric.L2,
 		})
 
 		offsetParam := getValidSearchParams()
@@ -1775,7 +1775,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		spNoSearchParams := append(spNoMetricType, &commonpb.KeyValuePair{
 			Key:   common.MetricTypeKey,
-			Value: distance.L2,
+			Value: metric.L2,
 		})
 
 		// no roundDecimal is valid

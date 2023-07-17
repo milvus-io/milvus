@@ -13,6 +13,8 @@ package indexparamcheck
 
 import (
 	"strconv"
+
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 // TODO: add more test cases which `IndexChecker.CheckTrain` return false,
@@ -22,7 +24,7 @@ func invalidIVFParamsMin() map[string]string {
 	invalidIVFParams := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(MinNList - 1),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	return invalidIVFParams
 }
@@ -31,7 +33,7 @@ func invalidIVFParamsMax() map[string]string {
 	invalidIVFParams := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(MaxNList + 1),
-		Metric: L2,
+		Metric: metric.L2,
 	}
 	return invalidIVFParams
 }

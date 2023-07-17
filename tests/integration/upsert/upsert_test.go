@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -109,7 +109,7 @@ func (s *UpsertSuite) TestUpsert() {
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, distance.IP),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
@@ -138,7 +138,7 @@ func (s *UpsertSuite) TestUpsert() {
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, distance.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 
