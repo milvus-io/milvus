@@ -32,7 +32,7 @@ import (
 type UniqueID = typeutil.UniqueID
 
 const (
-	DefaultEasyloggingYaml      = "easylogging.yaml"
+	DefaultGlogConf             = "glog.conf"
 	DefaultMinioHost            = "localhost"
 	DefaultMinioPort            = "9000"
 	DefaultMinioAccessKey       = "minioadmin"
@@ -47,6 +47,7 @@ const (
 	DefaultLogFormat                         = "text"
 	DefaultLogLevelForBase                   = "debug"
 	DefaultRootPath                          = ""
+	DefaultMinioLogLevel                     = "error"
 	DefaultKnowhereThreadPoolNumRatioInBuild = 1
 )
 

@@ -65,4 +65,11 @@ SegcoreSetSimdType(const char* value) {
     return ret;
 }
 
+extern "C" void
+SegcoreCloseGlog() {
+    if (google::IsGoogleLoggingInitialized()) {
+        google::ShutdownGoogleLogging();
+    }
+}
+
 }  // namespace milvus::segcore

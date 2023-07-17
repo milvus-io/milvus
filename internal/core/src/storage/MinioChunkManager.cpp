@@ -18,6 +18,7 @@
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
+#include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -89,7 +90,14 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 }
 
 void
-MinioChunkManager::InitSDKAPI(RemoteStorageType type, bool useIAM) {
+AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
+    LOG_SEGCORE_INFO_ << "[AWS LOG] " << statement;
+}
+
+void
+MinioChunkManager::InitSDKAPI(RemoteStorageType type,
+                              bool useIAM,
+                              const std::string& log_level_str) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
@@ -112,8 +120,30 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type, bool useIAM) {
                     GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };
         }
-        sdk_options_.loggingOptions.logLevel =
-            Aws::Utils::Logging::LogLevel::Info;
+        LOG_SEGCORE_INFO_ << "init aws with log level:" << log_level_str;
+        auto get_aws_log_level = [](const std::string& level_str) {
+            Aws::Utils::Logging::LogLevel level =
+                Aws::Utils::Logging::LogLevel::Off;
+            if (level_str == "fatal") {
+                level = Aws::Utils::Logging::LogLevel::Fatal;
+            } else if (level_str == "error") {
+                level = Aws::Utils::Logging::LogLevel::Error;
+            } else if (level_str == "warn") {
+                level = Aws::Utils::Logging::LogLevel::Warn;
+            } else if (level_str == "info") {
+                level = Aws::Utils::Logging::LogLevel::Info;
+            } else if (level_str == "debug") {
+                level = Aws::Utils::Logging::LogLevel::Debug;
+            } else if (level_str == "trace") {
+                level = Aws::Utils::Logging::LogLevel::Trace;
+            }
+            return level;
+        };
+        auto log_level = get_aws_log_level(log_level_str);
+        sdk_options_.loggingOptions.logLevel = log_level;
+        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
+            return std::make_shared<AwsLogger>(log_level);
+        };
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -222,7 +252,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         storageType = RemoteStorageType::S3;
     }
 
-    InitSDKAPI(storageType, storage_config.useIAM);
+    InitSDKAPI(storageType, storage_config.useIAM, storage_config.log_level);
 
     // The ClientConfiguration default constructor will take a long time.
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440

@@ -37,6 +37,9 @@ SegcoreSetSimdType(const char*);
 void
 SegcoreSetKnowhereThreadPoolNum(const uint32_t num_threads);
 
+void
+SegcoreCloseGlog();
+
 #ifdef __cplusplus
 }
 #endif

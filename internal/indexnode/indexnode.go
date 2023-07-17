@@ -144,9 +144,9 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) initSegcore() {
-	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
-	C.IndexBuilderInit(cEasyloggingYaml)
-	C.free(unsafe.Pointer(cEasyloggingYaml))
+	cGlogConf := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultGlogConf))
+	C.IndexBuilderInit(cGlogConf)
+	C.free(unsafe.Pointer(cGlogConf))
 
 	// override index builder SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType.GetValue())
@@ -168,6 +168,10 @@ func (i *IndexNode) initSegcore() {
 
 	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
+}
+
+func (i *IndexNode) CloseSegcore() {
+	initcore.CleanGlogManager()
 }
 
 func (i *IndexNode) initSession() error {
@@ -254,6 +258,7 @@ func (i *IndexNode) Stop() error {
 			i.session.Stop()
 		}
 
+		i.CloseSegcore()
 		log.Info("Index node stopped.")
 	})
 	return nil
