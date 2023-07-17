@@ -225,6 +225,8 @@ func (d *Dispatcher) work() {
 				}
 				if err != nil {
 					t.pos = pack.StartPositions[0]
+					// replace the pChannel with vChannel
+					t.pos.ChannelName = t.vchannel
 					d.lagTargets.LoadOrStore(t.vchannel, t)
 					d.nonBlockingNotify()
 					delete(d.targets, vchannel)
