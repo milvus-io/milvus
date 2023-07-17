@@ -1421,7 +1421,7 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 	log := log.Ctx(ctx)
 	if s.isClosed() {
 		log.Warn("failed to report dataNode ttMsgs on closed server")
-		return merr.Status(merr.WrapErrServiceUnavailable(msgDataCoordIsUnhealthy(s.session.ServerID))), nil
+		return merr.Status(merr.WrapErrServiceUnavailable("Datacoord not ready")), nil
 	}
 
 	for _, ttMsg := range req.GetMsgs() {
