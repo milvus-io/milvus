@@ -34,9 +34,7 @@ import (
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
 // TODO we should split compaction into different priorities, small compaction helps to merge segment, large compaction helps to handle delta and expiration of large segments
 const (
-	maxParallelCompactionTaskNum = 100
-	rpcCompactionTimeout         = 10 * time.Second
-	tsTimeout                    = uint64(1)
+	tsTimeout = uint64(1)
 )
 
 type compactionPlanContext interface {
@@ -374,7 +372,7 @@ func (c *compactionPlanHandler) isFull() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.executingTaskNum >= maxParallelCompactionTaskNum
+	return c.executingTaskNum >= Params.DataCoordCfg.CompactionMaxParallelTasks
 }
 
 func (c *compactionPlanHandler) getExecutingCompactions() []*compactionTask {

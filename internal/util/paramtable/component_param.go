@@ -1454,6 +1454,8 @@ type dataCoordConfig struct {
 	EnableCompaction     bool
 	EnableAutoCompaction atomic.Value
 
+	CompactionRPCTimeout              int64
+	CompactionMaxParallelTasks        int
 	MinSegmentToMerge                 int
 	MaxSegmentToMerge                 int
 	SegmentSmallProportion            float64
@@ -1496,6 +1498,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
 
+	p.initCompactionRPCTimeout()
+	p.initCompactionMaxParalellTask()
 	p.initCompactionMinSegment()
 	p.initCompactionMaxSegment()
 	p.initSegmentProportion()
@@ -1579,6 +1583,14 @@ func (p *dataCoordConfig) initChannelWatchPrefix() {
 
 func (p *dataCoordConfig) initEnableCompaction() {
 	p.EnableCompaction = p.Base.ParseBool("dataCoord.enableCompaction", false)
+}
+
+func (p *dataCoordConfig) initCompactionRPCTimeout() {
+	p.CompactionRPCTimeout = p.Base.ParseInt64WithDefault("dataCoord.compaction.rpcTimeout", 10)
+}
+
+func (p *dataCoordConfig) initCompactionMaxParalellTask() {
+	p.CompactionMaxParallelTasks = p.Base.ParseIntWithDefault("dataCoord.compaction.maxParallelTaskNum", 100)
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
