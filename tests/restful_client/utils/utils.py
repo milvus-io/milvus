@@ -1,13 +1,28 @@
 import random
 import time
+import random
+import string
 from faker import Faker
 import numpy as np
 from sklearn import preprocessing
 import requests
 from loguru import logger
+import datetime
+
 fake = Faker()
+
+
+def random_string(length=8):
+    letters = string.ascii_letters
+    return ''.join(random.choice(letters) for _ in range(length))
+
+
+def gen_collection_name(prefix="test_collection", length=8):
+    name = f'{prefix}_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f") + random_string(length=length)
+    return name
+
 def admin_password():
-    return "Zilliz@123"
+    return "Milvus"
 
 
 def invalid_cluster_name():
@@ -31,12 +46,7 @@ def wait_cluster_be_ready(cluster_id, client, timeout=120):
     return -1
 
 
-def force_delete_cluster(cluster_id):
-    url = f"https://cloud-test.cloud-uat3.zilliz.com/cloud/v1/test/deleteInstance?instanceId={cluster_id}"
-    rsp = requests.get(url).json()
-    logger.info(rsp)
-    assert rsp["Code"] == 0
-    assert rsp["Message"] == "success"
+
 
 
 def gen_data_by_type(field):
