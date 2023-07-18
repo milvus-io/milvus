@@ -3150,88 +3150,12 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 // CalcDistance calculates the distances between vectors.
 func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	if !node.checkHealthy() {
-		return &milvuspb.CalcDistanceResults{
-			Status: unhealthyStatus(),
-		}, nil
-	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CalcDistance")
-	defer sp.End()
-
-	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {
-		outputFields := []string{ids.FieldName}
-
-		queryRequest := &milvuspb.QueryRequest{
-			DbName:         "",
-			CollectionName: ids.CollectionName,
-			PartitionNames: ids.PartitionNames,
-			OutputFields:   outputFields,
-		}
-
-		qt := &queryTask{
-			ctx:       ctx,
-			Condition: NewTaskCondition(ctx),
-			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				ReqID: paramtable.GetNodeID(),
-			},
-			request: queryRequest,
-			qc:      node.queryCoord,
-			ids:     ids.IdArray,
-		}
-
-		log := log.Ctx(ctx).With(
-			zap.String("collection", queryRequest.CollectionName),
-			zap.Any("partitions", queryRequest.PartitionNames),
-			zap.Any("OutputFields", queryRequest.OutputFields))
-
-		err := node.sched.dqQueue.Enqueue(qt)
-		if err != nil {
-			log.Error("CalcDistance queryTask failed to enqueue",
-				zap.Error(err))
-
-			return &milvuspb.QueryResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, err
-		}
-
-		log.Debug("CalcDistance queryTask enqueued")
-
-		err = qt.WaitToFinish()
-		if err != nil {
-			log.Error("CalcDistance queryTask failed to WaitToFinish",
-				zap.Error(err))
-
-			return &milvuspb.QueryResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, err
-		}
-
-		log.Debug("CalcDistance queryTask Done")
-
-		return &milvuspb.QueryResults{
-			Status:     qt.result.Status,
-			FieldsData: qt.result.FieldsData,
-		}, nil
-	}
-
-	// calcDistanceTask is not a standard task, no need to enqueue
-	task := &calcDistanceTask{
-		traceID:   sp.SpanContext().TraceID().String(),
-		queryFunc: query,
-	}
-
-	return task.Execute(ctx, request)
+	return &milvuspb.CalcDistanceResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "interface obsolete",
+		},
+	}, nil
 }
 
 // FlushAll notifies Proxy to flush all collection's DML messages.

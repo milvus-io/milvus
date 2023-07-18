@@ -36,8 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -164,7 +164,7 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 		CollectionName: collectionName,
 		FieldName:      "embeddings",
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, distance.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -192,9 +192,9 @@ func (s *BulkInsertSuite) TestBulkInsert() {
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexHNSW, distance.L2)
+	params := integration.GetSearchParams(integration.IndexHNSW, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		"embeddings", schemapb.DataType_FloatVector, nil, distance.L2, params, nq, dim, topk, roundDecimal)
+		"embeddings", schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 

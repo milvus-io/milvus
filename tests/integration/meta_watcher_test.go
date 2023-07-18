@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 type MetaWatcherSuite struct {
@@ -271,7 +271,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 			},
 			{
 				Key:   common.MetricTypeKey,
-				Value: distance.L2,
+				Value: metric.L2,
 			},
 			{
 				Key:   common.IndexTypeKey,

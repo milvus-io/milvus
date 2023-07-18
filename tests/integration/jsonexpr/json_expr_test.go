@@ -26,7 +26,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/stretchr/testify/suite"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"go.uber.org/zap"
 )
 
@@ -776,7 +776,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 			},
 			{
 				Key:   common.MetricTypeKey,
-				Value: distance.L2,
+				Value: metric.L2,
 			},
 			{
 				Key:   common.IndexTypeKey,
@@ -824,9 +824,9 @@ func (s *JSONExprSuite) doSearch(collectionName string, outputField []string, ex
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.L2)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, distance.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := s.Cluster.Proxy.Search(context.Background(), searchReq)
 
@@ -899,9 +899,9 @@ func (s *JSONExprSuite) doSearchWithInvalidExpr(collectionName string, outputFie
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, distance.L2)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, distance.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, metric.L2, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := s.Cluster.Proxy.Search(context.Background(), searchReq)
 

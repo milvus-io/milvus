@@ -2667,6 +2667,7 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
@@ -2706,6 +2707,7 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("substructure obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
     def test_search_binary_substructure_flat_index(self, auto_id, _async, index, is_flush):
         """
@@ -2742,6 +2744,7 @@ class TestCollectionSearch(TestcaseBase):
         assert len(res) <= default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("superstructure obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
     def test_search_binary_superstructure_flat_index(self, auto_id, _async, index, is_flush):
         """
@@ -6656,6 +6659,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_range_search_binary_tanimoto_flat_index(self, dim, auto_id, _async, index, is_flush):
         """
@@ -6711,6 +6715,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("tanimoto obsolete")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_range_search_binary_tanimoto_invalid_params(self, index):
         """

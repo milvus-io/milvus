@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,7 +16,7 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         L2,
+		Metric:         metric.L2,
 	}
 
 	invalidEfParamsMin := copyParams(validParams)
@@ -34,50 +35,50 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         L2,
+		Metric:         metric.L2,
 	}
 	p2 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         IP,
+		Metric:         metric.IP,
 	}
 	p3 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         COSINE,
+		Metric:         metric.COSINE,
 	}
 
 	p4 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         HAMMING,
+		Metric:         metric.HAMMING,
 	}
 	p5 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         JACCARD,
+		Metric:         metric.JACCARD,
 	}
 	p6 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         TANIMOTO,
+		Metric:         metric.TANIMOTO,
 	}
 	p7 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         SUBSTRUCTURE,
+		Metric:         metric.SUBSTRUCTURE,
 	}
 	p8 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
-		Metric:         SUPERSTRUCTURE,
+		Metric:         metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {

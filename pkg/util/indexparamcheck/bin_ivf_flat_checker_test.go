@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,24 +16,24 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 	paramsWithoutDim := map[string]string{
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 
 	invalidParams := copyParams(validParams)
-	invalidParams[Metric] = L2
+	invalidParams[Metric] = metric.L2
 
 	paramsWithLargeNlist := map[string]string{
 		DIM:    strconv.Itoa(128),
 		NLIST:  strconv.Itoa(MaxNList + 1),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 
 	paramsWithSmallNlist := map[string]string{
@@ -40,26 +41,26 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 		NLIST:  strconv.Itoa(MinNList - 1),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 	}
 
 	p1 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: L2,
+		Metric: metric.L2,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
 	p2 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: IP,
+		Metric: metric.IP,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
 	p3 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: COSINE,
+		Metric: metric.COSINE,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
@@ -67,21 +68,21 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: HAMMING,
+		Metric: metric.HAMMING,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: JACCARD,
+		Metric: metric.JACCARD,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
 	p6 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: TANIMOTO,
+		Metric: metric.TANIMOTO,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
@@ -89,14 +90,14 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 
 	p7 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: SUBSTRUCTURE,
+		Metric: metric.SUBSTRUCTURE,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
 	p8 := map[string]string{
 		DIM:    strconv.Itoa(128),
-		Metric: SUPERSTRUCTURE,
+		Metric: metric.SUPERSTRUCTURE,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
