@@ -590,10 +590,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 	if err := m.catalog.AlterSegments(m.ctx, segments,
 		metastore.BinlogsIncrement{
-			Segment:    clonedSegment.SegmentInfo,
-			Insertlogs: binlogs,
-			Statslogs:  statslogs,
-			Deltalogs:  deltalogs,
+			Segment: clonedSegment.SegmentInfo,
 		}); err != nil {
 		log.Error("meta update: update flush segments info - failed to store flush segment info into Etcd",
 			zap.Error(err))
@@ -1107,10 +1104,7 @@ func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segm
 		zap.Int64("compact to segment", newSegment.GetID()))
 
 	err := m.catalog.AlterSegments(m.ctx, append(modInfos, newSegment), metastore.BinlogsIncrement{
-		Segment:    newSegment,
-		Insertlogs: newSegment.GetBinlogs(),
-		Deltalogs:  newSegment.GetDeltalogs(),
-		Statslogs:  newSegment.GetStatslogs(),
+		Segment: newSegment,
 	})
 	if err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))

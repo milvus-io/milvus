@@ -329,10 +329,7 @@ func Test_AlterSegments(t *testing.T) {
 		catalog := NewCatalog(metakv, rootPath, "")
 		assert.Panics(t, func() {
 			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
-				Segment:    invalidSegment,
-				Insertlogs: invalidSegment.Binlogs,
-				Statslogs:  invalidSegment.Statslogs,
-				Deltalogs:  invalidSegment.Deltalogs,
+				Segment: invalidSegment,
 			})
 		})
 	})
@@ -360,10 +357,7 @@ func Test_AlterSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1}, metastore.BinlogsIncrement{
-			Segment:    segment1,
-			Insertlogs: segment1.Binlogs,
-			Statslogs:  segment1.Statslogs,
-			Deltalogs:  segment1.Deltalogs,
+			Segment: segment1,
 		})
 		assert.NoError(t, err)
 
@@ -423,10 +417,7 @@ func Test_AlterSegments(t *testing.T) {
 
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL},
 			metastore.BinlogsIncrement{
-				Segment:    segmentXL,
-				Insertlogs: segmentXL.Binlogs,
-				Statslogs:  segmentXL.Statslogs,
-				Deltalogs:  segmentXL.Deltalogs,
+				Segment: segmentXL,
 			})
 		assert.NoError(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
