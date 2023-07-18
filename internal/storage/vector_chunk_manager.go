@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,7 +82,8 @@ func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vecto
 			if err != nil {
 				log.Error("Unmmap file failed", zap.Any("file", k))
 			}
-			err = cacheStorage.Remove(ctx, k)
+			localPath := path.Join(cacheStorage.RootPath(), k)
+			err = cacheStorage.Remove(ctx, localPath)
 			if err != nil {
 				log.Error("cache storage remove file failed", zap.Any("file", k))
 			}
@@ -161,15 +163,16 @@ func (vcm *VectorChunkManager) readWithCache(ctx context.Context, filePath strin
 		if err != nil {
 			return nil, err
 		}
-		err = vcm.cacheStorage.Write(ctx, filePath, results)
+		localPath := path.Join(vcm.cacheStorage.RootPath(), filePath)
+		err = vcm.cacheStorage.Write(ctx, localPath, results)
 		if err != nil {
 			return nil, err
 		}
-		r, err := vcm.cacheStorage.Mmap(ctx, filePath)
+		r, err := vcm.cacheStorage.Mmap(ctx, localPath)
 		if err != nil {
 			return nil, err
 		}
-		size, err := vcm.cacheStorage.Size(ctx, filePath)
+		size, err := vcm.cacheStorage.Size(ctx, localPath)
 		if err != nil {
 			return nil, err
 		}

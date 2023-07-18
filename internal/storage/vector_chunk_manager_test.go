@@ -114,24 +114,22 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 	return blobs
 }
 
-func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorChunkManager, context.CancelFunc, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
+func buildVectorChunkManager(ctx context.Context, localPath string, localCacheEnable bool) (*VectorChunkManager, error) {
 	bucketName := "vector-chunk-manager"
 
 	rcm, err := newMinIOChunkManager(ctx, bucketName, "")
 	if err != nil {
-		return nil, cancel, err
+		return nil, err
 	}
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
 	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, meta, 16, localCacheEnable)
 	if err != nil {
-		return nil, cancel, err
+		return nil, err
 	}
 
-	return vcm, cancel, nil
+	return vcm, nil
 }
 
 var Params paramtable.BaseTable
@@ -172,7 +170,7 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 	defer cancel()
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, err := buildVectorChunkManager(ctx, localPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -191,7 +189,6 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 
 		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
-		cancel()
 		vcm.Close()
 	}
 }
@@ -201,7 +198,7 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 	defer cancel()
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, err := buildVectorChunkManager(ctx, localPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -220,7 +217,6 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 
 		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
-		cancel()
 		vcm.Close()
 	}
 }
@@ -231,7 +227,7 @@ func TestVectorChunkManager_Write(t *testing.T) {
 
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, err := buildVectorChunkManager(ctx, localPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -260,7 +256,6 @@ func TestVectorChunkManager_Write(t *testing.T) {
 
 		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
-		cancel()
 		vcm.Close()
 	}
 }
@@ -271,7 +266,7 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, err := buildVectorChunkManager(ctx, localPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -306,7 +301,6 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 
 		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
-		cancel()
 		vcm.Close()
 	}
 }
@@ -349,13 +343,44 @@ func TestVectorChunkManager_Remove_Fail(t *testing.T) {
 	assert.Error(t, vcm.RemoveWithPrefix(ctx, "test"))
 }
 
+func TestVectorChunkManager_LocalPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	vcm, err := buildVectorChunkManager(ctx, localPath, true)
+	assert.NotNil(t, vcm)
+	assert.NoError(t, err)
+
+	binlogs := initBinlogFile(vcm.insertCodec.Schema)
+	keys := make([]string, len(binlogs))
+	for i, binlog := range binlogs {
+		err = vcm.vectorStorage.Write(ctx, binlog.Key, binlog.Value)
+		assert.Nil(t, err)
+		keys[i] = binlog.Key
+	}
+
+	// cache file to cacheStorage
+	_, err = vcm.Read(ctx, keys[0])
+	assert.NoError(t, err)
+
+	// check file under cacheStorage.rootPath
+	absLocalPath := path.Join(vcm.cacheStorage.RootPath(), keys[0])
+	exit, err := vcm.cacheStorage.Exist(ctx, absLocalPath)
+	assert.NoError(t, err)
+	assert.True(t, exit)
+
+	err = vcm.RemoveWithPrefix(ctx, localPath)
+	assert.NoError(t, err)
+
+	vcm.Close()
+}
+
 func TestVectorChunkManager_Read(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, err := buildVectorChunkManager(ctx, localPath, localCache)
 		assert.NotNil(t, vcm)
 		assert.NoError(t, err)
 
@@ -454,7 +479,6 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 
-		cancel()
 		vcm.Close()
 	}
 }
