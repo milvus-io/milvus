@@ -61,7 +61,8 @@ ExtractTermExprImpl(FieldId field_id, DataType data_type, const planpb::TermExpr
         }
     }
     std::sort(terms.begin(), terms.end());
-    return std::make_unique<TermExprImpl<T>>(ColumnInfo(expr_proto.column_info()), terms, val_case);
+    return std::make_unique<TermExprImpl<T>>(ColumnInfo(expr_proto.column_info()), terms, val_case,
+                                             expr_proto.is_in_field());
 }
 
 template <typename T>

@@ -220,6 +220,7 @@ ExprPtr
 Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     Assert(body.is_object());
     auto values = body["values"];
+    auto is_in_field = body["is_in_field"];
 
     std::vector<T> terms(values.size());
     auto val_case = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
@@ -241,7 +242,7 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     }
     std::sort(terms.begin(), terms.end());
     return std::make_unique<TermExprImpl<T>>(
-        ColumnInfo(schema.get_field_id(field_name), schema[field_name].get_data_type()), terms, val_case);
+        ColumnInfo(schema.get_field_id(field_name), schema[field_name].get_data_type()), terms, val_case, is_in_field);
 }
 
 template <typename T>

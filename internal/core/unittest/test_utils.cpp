@@ -78,7 +78,7 @@ TEST(Util, GetDeleteBitmap) {
     delete_ts = {uint64_t(N)};
     delete_pk = {1};
     delete_record.push(delete_pk, delete_ts.data());
-    
+
     del_barrier = get_barrier(delete_record, query_timestamp);
     res_bitmap = get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N);

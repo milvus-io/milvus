@@ -612,8 +612,7 @@ TEST(Sealed, Delete) {
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
     std::vector<idx_t> new_timestamps{10, 10, 10};
-    segment->Delete(0, new_count, new_ids.get(),
-                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+    segment->Delete(0, new_count, new_ids.get(), reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 }
 
 auto

@@ -1779,6 +1779,7 @@ class TermExpr :
   enum : int {
     kValuesFieldNumber = 2,
     kColumnInfoFieldNumber = 1,
+    kIsInFieldFieldNumber = 3,
   };
   // repeated .milvus.proto.plan.GenericValue values = 2;
   int values_size() const;
@@ -1799,6 +1800,11 @@ class TermExpr :
   ::milvus::proto::plan::ColumnInfo* mutable_column_info();
   void set_allocated_column_info(::milvus::proto::plan::ColumnInfo* column_info);
 
+  // bool is_in_field = 3;
+  void clear_is_in_field();
+  bool is_in_field() const;
+  void set_is_in_field(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.TermExpr)
  private:
   class _Internal;
@@ -1806,6 +1812,7 @@ class TermExpr :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::plan::GenericValue > values_;
   ::milvus::proto::plan::ColumnInfo* column_info_;
+  bool is_in_field_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -4393,6 +4400,20 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::plan::G
 TermExpr::values() const {
   // @@protoc_insertion_point(field_list:milvus.proto.plan.TermExpr.values)
   return values_;
+}
+
+// bool is_in_field = 3;
+inline void TermExpr::clear_is_in_field() {
+  is_in_field_ = false;
+}
+inline bool TermExpr::is_in_field() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.TermExpr.is_in_field)
+  return is_in_field_;
+}
+inline void TermExpr::set_is_in_field(bool value) {
+  
+  is_in_field_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.TermExpr.is_in_field)
 }
 
 // -------------------------------------------------------------------
