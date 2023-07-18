@@ -1090,10 +1090,10 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_normal: searching collection %s" % collection_w.name)
         search_params = {"metric_type": "", "params": {"nprobe": 10}}
-        collection_w.search(vectors[:dedault_nq], default_search_field,
+        collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": dedault_nq,
+                            check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit})
 
