@@ -124,6 +124,10 @@ rocksmq:
   retentionTimeInMinutes: 4320 # 3 days, 3 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+  # compaction compression type, only support use 0,7.
+  # 0 means not compress, 7 will use zstd
+  # len of types means num of rocksdb level.
+  compressionTypes: [0, 0, 7, 7, 7]
 
 # natsmq configuration.
 natsmq:

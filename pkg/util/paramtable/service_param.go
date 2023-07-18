@@ -588,6 +588,11 @@ type RocksmqConfig struct {
 	CompactionInterval ParamItem `refreshable:"false"`
 	// TickerTimeInSeconds is the time of expired check, default 10 minutes
 	TickerTimeInSeconds ParamItem `refreshable:"false"`
+	// CompressionTypes is compression type of each level
+	// len of CompressionTypes means num of rocksdb level.
+	// only support {0,7}, 0 means no compress, 7 means zstd
+	// default [0,7].
+	CompressionTypes ParamItem `refreshable:"false"`
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
@@ -651,6 +656,13 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Version:      "2.2.2",
 	}
 	r.TickerTimeInSeconds.Init(base.mgr)
+
+	r.CompressionTypes = ParamItem{
+		Key:          "rocksmq.compressionTypes",
+		DefaultValue: "0,0,7,7,7",
+		Version:      "2.2.12",
+	}
+	r.CompressionTypes.Init(base.mgr)
 }
 
 // NatsmqConfig describes the configuration options for the Nats message queue

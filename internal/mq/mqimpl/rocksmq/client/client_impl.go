@@ -136,27 +136,25 @@ func (c *client) consume(consumer *consumer) {
 			if !ok {
 				return
 			}
-			c.deliver(consumer, 100)
+			c.deliver(consumer)
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
 				log.Debug("Consumer MsgMutex closed")
 				return
 			}
-			c.deliver(consumer, 100)
+			c.deliver(consumer)
 		}
 	}
 }
 
-func (c *client) deliver(consumer *consumer, batchMax int) {
+func (c *client) deliver(consumer *consumer) {
 	for {
 		n := cap(consumer.messageCh) - len(consumer.messageCh)
 		if n == 0 {
 			return
 		}
-		if n > batchMax { // batch min size
-			n = batchMax
-		}
+
 		msgs, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, n)
 		if err != nil {
 			log.Warn("Consumer's goroutine cannot consume from (" + consumer.topic + "," + consumer.consumerName + "): " + err.Error())
