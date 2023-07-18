@@ -121,6 +121,13 @@ func (lim *Limiter) SetLimit(newLimit Limit) {
 	}
 }
 
+// Cancel the AllowN operation and refund the tokens that have already been deducted by the limiter.
+func (lim *Limiter) Cancel(n int) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.tokens += float64(n)
+}
+
 // advance calculates and returns an updated state for lim resulting from the passage of time.
 // lim is not changed. advance requires that lim.mu is held.
 func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time, newTokens float64) {
