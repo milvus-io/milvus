@@ -12,7 +12,7 @@ const (
 	VectorQueryPath               = "/vector/query"
 	VectorDeletePath              = "/vector/delete"
 
-	ShardNumDefault = 2
+	ShardNumDefault = 1
 
 	EnableDynamic = true
 	EnableAutoID  = true
