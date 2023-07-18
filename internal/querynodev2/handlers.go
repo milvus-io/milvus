@@ -105,6 +105,39 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 	return util.SuccessStatus()
 }
 
+func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+	)
+
+	status := util.SuccessStatus()
+	log.Info("start to load index")
+
+	for _, info := range req.GetInfos() {
+		log := log.With(zap.Int64("segmentID", info.GetSegmentID()))
+		segment := node.manager.Segment.GetSealed(info.GetSegmentID())
+		if segment == nil {
+			log.Warn("segment not found for load index operation")
+			continue
+		}
+		localSegment, ok := segment.(*segments.LocalSegment)
+		if !ok {
+			log.Warn("segment not local for load index opeartion")
+			continue
+		}
+
+		err := node.loader.LoadIndex(ctx, localSegment, info)
+		if err != nil {
+			log.Warn("failed to load index", zap.Error(err))
+			status = merr.Status(err)
+			break
+		}
+	}
+
+	return status
+}
+
 func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryRequest, channel string) (*internalpb.RetrieveResults, error) {
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()

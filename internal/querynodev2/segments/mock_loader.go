@@ -65,14 +65,14 @@ type MockLoader_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segmentType commonpb.SegmentState
-//   - version int64
-//   - infos ...*querypb.SegmentLoadInfo
-func (_e *MockLoader_Expecter) Load(ctx interface{}, collectionID interface{}, segmentType interface{}, version interface{}, infos ...interface{}) *MockLoader_Load_Call {
+//  - ctx context.Context
+//  - collectionID int64
+//  - segmentType commonpb.SegmentState
+//  - version int64
+//  - segments ...*querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) Load(ctx interface{}, collectionID interface{}, segmentType interface{}, version interface{}, segments ...interface{}) *MockLoader_Load_Call {
 	return &MockLoader_Load_Call{Call: _e.mock.On("Load",
-		append([]interface{}{ctx, collectionID, segmentType, version}, infos...)...)}
+		append([]interface{}{ctx, collectionID, segmentType, version}, segments...)...)}
 }
 
 func (_c *MockLoader_Load_Call) Run(run func(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, segments ...*querypb.SegmentLoadInfo)) *MockLoader_Load_Call {
@@ -129,10 +129,10 @@ type MockLoader_LoadBloomFilterSet_Call struct {
 }
 
 // LoadBloomFilterSet is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - version int64
-//   - infos ...*querypb.SegmentLoadInfo
+//  - ctx context.Context
+//  - collectionID int64
+//  - version int64
+//  - infos ...*querypb.SegmentLoadInfo
 func (_e *MockLoader_Expecter) LoadBloomFilterSet(ctx interface{}, collectionID interface{}, version interface{}, infos ...interface{}) *MockLoader_LoadBloomFilterSet_Call {
 	return &MockLoader_LoadBloomFilterSet_Call{Call: _e.mock.On("LoadBloomFilterSet",
 		append([]interface{}{ctx, collectionID, version}, infos...)...)}
@@ -176,9 +176,9 @@ type MockLoader_LoadDeltaLogs_Call struct {
 }
 
 // LoadDeltaLogs is a helper method to define mock.On call
-//   - ctx context.Context
-//   - segment *LocalSegment
-//   - deltaLogs []*datapb.FieldBinlog
+//  - ctx context.Context
+//  - segment *LocalSegment
+//  - deltaLogs []*datapb.FieldBinlog
 func (_e *MockLoader_Expecter) LoadDeltaLogs(ctx interface{}, segment interface{}, deltaLogs interface{}) *MockLoader_LoadDeltaLogs_Call {
 	return &MockLoader_LoadDeltaLogs_Call{Call: _e.mock.On("LoadDeltaLogs", ctx, segment, deltaLogs)}
 }
@@ -191,6 +191,45 @@ func (_c *MockLoader_LoadDeltaLogs_Call) Run(run func(ctx context.Context, segme
 }
 
 func (_c *MockLoader_LoadDeltaLogs_Call) Return(_a0 error) *MockLoader_LoadDeltaLogs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+// LoadIndex provides a mock function with given fields: ctx, segment, info
+func (_m *MockLoader) LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, segment, info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, segment, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_LoadIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadIndex'
+type MockLoader_LoadIndex_Call struct {
+	*mock.Call
+}
+
+// LoadIndex is a helper method to define mock.On call
+//  - ctx context.Context
+//  - segment *LocalSegment
+//  - info *querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) LoadIndex(ctx interface{}, segment interface{}, info interface{}) *MockLoader_LoadIndex_Call {
+	return &MockLoader_LoadIndex_Call{Call: _e.mock.On("LoadIndex", ctx, segment, info)}
+}
+
+func (_c *MockLoader_LoadIndex_Call) Run(run func(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo)) *MockLoader_LoadIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].(*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadIndex_Call) Return(_a0 error) *MockLoader_LoadIndex_Call {
 	_c.Call.Return(_a0)
 	return _c
 }

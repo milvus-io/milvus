@@ -347,6 +347,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Info("work loads segments done")
 
+	// load index need no stream delete and distribution change
+	if req.GetLoadScope() == querypb.LoadScope_Index {
+		return nil
+	}
+
 	log.Info("load delete...")
 	err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker)
 	if err != nil {
