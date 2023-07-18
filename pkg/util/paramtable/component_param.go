@@ -1874,6 +1874,8 @@ type dataCoordConfig struct {
 	EnableCompaction     ParamItem `refreshable:"false"`
 	EnableAutoCompaction ParamItem `refreshable:"true"`
 
+	CompactionRPCTimeout              ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
 	MinSegmentToMerge                 ParamItem `refreshable:"true"`
 	MaxSegmentToMerge                 ParamItem `refreshable:"true"`
 	SegmentSmallProportion            ParamItem `refreshable:"true"`
@@ -2021,6 +2023,22 @@ the number of binlog file reaches to max value.`,
 		Export:       true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
+
+	p.CompactionRPCTimeout = ParamItem{
+		Key:          "dataCoord.compaction.rpcTimeout",
+		Version:      "2.2.12",
+		DefaultValue: "10",
+		Export:       true,
+	}
+	p.CompactionRPCTimeout.Init(base.mgr)
+
+	p.CompactionMaxParallelTasks = ParamItem{
+		Key:          "dataCoord.compaction.maxParallelTaskNum",
+		Version:      "2.2.12",
+		DefaultValue: "100",
+		Export:       true,
+	}
+	p.CompactionMaxParallelTasks.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",

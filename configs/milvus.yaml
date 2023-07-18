@@ -332,6 +332,8 @@ dataCoord:
   enableCompaction: true # Enable data segment compaction
   compaction:
     enableAutoCompaction: true
+    rpcTimeout: 10 # compaction rpc request timeout in seconds
+    maxParallelTaskNum: 100 # max parallel compaction task number
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
