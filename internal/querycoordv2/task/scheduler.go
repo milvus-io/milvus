@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -680,7 +681,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
-		if task.Err() != nil {
+		if task.Err() != nil && !errors.Is(task.Err(), merr.ErrChannelNotFound) {
 			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.err))
 			scheduler.recordSegmentTaskError(task)
 		}
