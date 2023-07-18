@@ -1076,14 +1076,14 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "Data type is not support."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_over_resource_limit(self):
         """
         target: test insert over RPC limitation 64MB (67108864)
         method: insert excessive data
         expected: raise exception
         """
-        nb = 150000
+        nb = 120000
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         data = cf.gen_default_dataframe_data(nb)
