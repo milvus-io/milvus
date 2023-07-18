@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-var Producer *kafka.Producer
+var producer *kafka.Producer
 
 var once sync.Once
 
@@ -85,13 +85,15 @@ func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {
 }
 
 func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
-	var err error
+	config := kc.newProducerConfig()
+	producer, err := kafka.NewProducer(config)
+	if err != nil {
+		log.Error("create sync kafka producer failed", zap.Error(err))
+		return nil, err
+	}
 	once.Do(func() {
-		config := kc.newProducerConfig()
-		Producer, err = kafka.NewProducer(config)
-
 		go func() {
-			for e := range Producer.Events() {
+			for e := range producer.Events() {
 				switch ev := e.(type) {
 				case kafka.Error:
 					// Generic client instance-level errors, such as broker connection failures,
@@ -109,12 +111,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 		}()
 	})
 
-	if err != nil {
-		log.Error("create sync kafka producer failed", zap.Error(err))
-		return nil, err
-	}
-
-	return Producer, nil
+	return producer, nil
 }
 
 func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {

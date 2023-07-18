@@ -150,7 +150,7 @@ type dmlChannels struct {
 }
 
 func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
-	params := paramtable.Get().CommonCfg
+	params := &paramtable.Get().CommonCfg
 	var (
 		chanNamePrefix string
 		chanNum        int64
@@ -347,7 +347,7 @@ func (d *dmlChannels) removeChannels(names ...string) {
 }
 
 func getChannelName(prefix string, idx int64) string {
-	params := paramtable.Get().CommonCfg
+	params := &paramtable.Get().CommonCfg
 	if params.PreCreatedTopicEnabled.GetAsBool() {
 		return params.TopicNames.GetAsStrings()[idx]
 	}
