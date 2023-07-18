@@ -468,6 +468,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
 		return node.loadDeltaLogs(ctx, req), nil
 	}
+	if req.GetLoadScope() == querypb.LoadScope_Index {
+		return node.loadIndex(ctx, req), nil
+	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())

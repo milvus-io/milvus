@@ -68,8 +68,11 @@ type Loader interface {
 
 	LoadDeltaLogs(ctx context.Context, segment *LocalSegment, deltaLogs []*datapb.FieldBinlog) error
 
-	// LoadRemote loads needed binlogs/statslog for RemoteSegment.
+	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
+
+	// LoadIndex append index for segment and remove vector binlogs.
+	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo) error
 }
 
 func NewLoader(
@@ -147,13 +150,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		loader.mut.Lock()
-		defer loader.mut.Unlock()
-
-		loader.committedMemSize -= memUsage
-		loader.committedDiskSize -= diskUsage
-	}()
+	defer loader.freeRequest(memUsage, diskUsage)
 
 	newSegments := make(map[int64]*LocalSegment, len(infos))
 	clearAll := func() {
@@ -207,13 +204,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return err
 		}
 		log.Info("load segment done", zap.Int64("segmentID", segmentID))
+		loader.notifyLoadFinish(loadInfo)
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		waitCh, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID())
-		if ok {
-			close(waitCh)
-		}
-
 		return nil
 	}
 
@@ -231,24 +224,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	}
 
 	// Wait for all segments loaded
-	for _, segment := range segments {
-		if loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil {
-			continue
-		}
-
-		waitCh, ok := loader.loadingSegments.Get(segment.GetSegmentID())
-		if !ok {
-			log.Warn("segment was removed from the loading map early", zap.Int64("segmentID", segment.GetSegmentID()))
-			return nil, errors.New("segment was removed from the loading map early")
-		}
-
-		log.Info("wait segment loaded...", zap.Int64("segmentID", segment.GetSegmentID()))
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-waitCh:
-		}
-		log.Info("segment loaded...", zap.Int64("segmentID", segment.GetSegmentID()))
+	if err := loader.waitSegmentLoadDone(ctx, segmentType, lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })...); err != nil {
+		return nil, err
 	}
 
 	loaded := make([]Segment, 0, len(newSegments))
@@ -298,6 +275,16 @@ func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
 	}
 }
 
+func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadInfo) {
+
+	for _, loadInfo := range segments {
+		waitCh, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID())
+		if ok {
+			close(waitCh)
+		}
+	}
+}
+
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
 func (loader *segmentLoader) requestResource(infos ...*querypb.SegmentLoadInfo) (uint64, uint64, int, error) {
@@ -338,6 +325,38 @@ func (loader *segmentLoader) requestResource(infos ...*querypb.SegmentLoadInfo) 
 	loader.committedDiskSize += diskUsage
 
 	return memUsage, diskUsage, concurrencyLevel, nil
+}
+
+// freeRequest returns request memory & storage usage request.
+func (loader *segmentLoader) freeRequest(memUsage, diskUsage uint64) {
+	loader.mut.Lock()
+	defer loader.mut.Unlock()
+
+	loader.committedMemSize -= memUsage
+	loader.committedDiskSize -= diskUsage
+}
+
+func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs ...int64) error {
+	for _, segmentID := range segmentIDs {
+		if loader.manager.Segment.GetWithType(segmentID, segmentType) != nil {
+			continue
+		}
+
+		waitCh, ok := loader.loadingSegments.Get(segmentID)
+		if !ok {
+			log.Warn("segment was removed from the loading map early", zap.Int64("segmentID", segmentID))
+			return errors.New("segment was removed from the loading map early")
+		}
+
+		log.Info("wait segment loaded...", zap.Int64("segmentID", segmentID))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-waitCh:
+		}
+		log.Info("segment loaded...", zap.Int64("segmentID", segmentID))
+	}
+	return nil
 }
 
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
@@ -583,7 +602,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 
 	// 2. use index path to update segment
 	indexInfo.IndexFilePaths = filteredPaths
-	fieldType, err := loader.getFieldType(segment, indexInfo.FieldID)
+	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
 	if err != nil {
 		return err
 	}
@@ -919,10 +938,10 @@ func (loader *segmentLoader) checkSegmentSize(segmentLoadInfos []*querypb.Segmen
 	return memLoadingUsage - usedMem, usedLocalSizeAfterLoad - diskUsed, nil
 }
 
-func (loader *segmentLoader) getFieldType(segment *LocalSegment, fieldID int64) (schemapb.DataType, error) {
-	collection := loader.manager.Collection.Get(segment.collectionID)
+func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {
+	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
-		return 0, merr.WrapErrCollectionNotFound(segment.Collection())
+		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	for _, field := range collection.Schema().GetFields() {
@@ -931,6 +950,58 @@ func (loader *segmentLoader) getFieldType(segment *LocalSegment, fieldID int64) 
 		}
 	}
 	return 0, merr.WrapErrFieldNotFound(fieldID)
+}
+
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collection", segment.Collection()),
+		zap.Int64("segment", segment.ID()),
+	)
+
+	// Filter out LOADING segments only
+	// use None to avoid loaded check
+	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, loadInfo)
+	defer loader.unregister(infos...)
+
+	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		info = typeutil.Clone(info)
+		info.BinlogPaths = nil
+		info.Deltalogs = nil
+		info.Statslogs = nil
+		return info
+	})
+	memUsage, diskUsage, _, err := loader.requestResource(indexInfo...)
+	if err != nil {
+		return err
+	}
+	defer loader.freeRequest(memUsage, diskUsage)
+
+	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
+
+	for _, loadInfo := range infos {
+		fieldIDs := typeutil.NewSet(lo.Map(loadInfo.GetIndexInfos(), func(info *querypb.FieldIndexInfo, _ int) int64 { return info.GetFieldID() })...)
+		fieldInfos := lo.SliceToMap(lo.Filter(loadInfo.GetBinlogPaths(), func(info *datapb.FieldBinlog, _ int) bool { return fieldIDs.Contain(info.GetFieldID()) }),
+			func(info *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) { return info.GetFieldID(), info })
+
+		for _, info := range loadInfo.GetIndexInfos() {
+			fieldInfo, ok := fieldInfos[info.GetFieldID()]
+			if !ok {
+				return merr.WrapErrParameterInvalid("index info with corresponding  field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+			}
+			err := loader.loadFieldIndex(ctx, segment, info)
+			if err != nil {
+				log.Warn("failed to load index for segment", zap.Error(err))
+				return err
+			}
+			segment.AddIndex(info.FieldID, &IndexedFieldInfo{
+				IndexInfo:   info,
+				FieldBinlog: fieldInfo,
+			})
+		}
+		loader.notifyLoadFinish(loadInfo)
+	}
+
+	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo.GetSegmentID())
 }
 
 func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {

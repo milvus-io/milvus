@@ -851,32 +851,7 @@ func (s *LocalSegment) LoadIndex(bytesIndex [][]byte, indexInfo *querypb.FieldIn
 		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
 		return errors.New(errMsg)
 	}
-	s.mut.RLock()
-	defer s.mut.RUnlock()
-
-	if s.ptr == nil {
-		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
-	}
-
-	log := log.With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-	)
-
-	var status C.CStatus
-	GetPool().Submit(func() (any, error) {
-		status = C.UpdateSealedSegmentIndex(s.ptr, loadIndexInfo.cLoadIndexInfo)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
-		return err
-	}
-
-	log.Info("updateSegmentIndex done", zap.Int64("fieldID", indexInfo.FieldID))
-
-	return nil
+	return s.LoadIndexInfo(indexInfo, loadIndexInfo)
 }
 
 func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
@@ -899,6 +874,17 @@ func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldTyp
 		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
 		return errors.New(errMsg)
 	}
+
+	return s.LoadIndexInfo(indexInfo, loadIndexInfo)
+}
+
+func (s *LocalSegment) LoadIndexInfo(indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
+	log := log.With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.FieldID),
+	)
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
@@ -906,23 +892,16 @@ func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldTyp
 		return merr.WrapErrSegmentNotLoaded(s.segmentID, "segment released")
 	}
 
-	log := log.With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-	)
-
 	var status C.CStatus
 	GetPool().Submit(func() (any, error) {
-		status = C.UpdateSealedSegmentIndex(s.ptr, loadIndexInfo.cLoadIndexInfo)
+		status = C.UpdateSealedSegmentIndex(s.ptr, info.cLoadIndexInfo)
 		return nil, nil
 	}).Await()
 
 	if err := HandleCStatus(&status, "UpdateSealedSegmentIndex failed"); err != nil {
 		return err
 	}
-
-	log.Info("updateSegmentIndex done", zap.Int64("fieldID", indexInfo.FieldID))
+	log.Info("updateSegmentIndex done")
 
 	return nil
 }
