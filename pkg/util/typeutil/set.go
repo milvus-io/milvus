@@ -149,6 +149,13 @@ func (set *ConcurrentSet[T]) Remove(elements ...T) {
 	}
 }
 
+// Try remove element from set,
+// return false if not exist
+func (set *ConcurrentSet[T]) TryRemove(element T) bool {
+	_, exist := set.inner.LoadAndDelete(element)
+	return exist
+}
+
 // Get all elements in the set
 func (set *ConcurrentSet[T]) Collect() []T {
 	elements := make([]T, 0)

@@ -194,34 +194,38 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 						ctx, cancel := context.WithTimeout(context.Background(), checkInterval)
 						defer cancel()
 
-						checkHealthFailed := func(err error) bool {
-							log.RatedWarn(5, "query node check health failed, add it to unreachable nodes list",
-								zap.Int64("nodeID", node),
-								zap.Error(err))
-							b.unreachableQueryNodes.Insert(node)
-							return true
+						setUnreachable := func() bool {
+							return b.unreachableQueryNodes.Insert(node)
 						}
 
 						qn, err := b.clientMgr.GetClient(ctx, node)
 						if err != nil {
-							checkHealthFailed(err)
+							if setUnreachable() {
+								log.Warn("get client failed, set node unreachable", zap.Int64("node", node), zap.Error(err))
+							}
 							return struct{}{}, nil
 						}
 
 						resp, err := qn.GetComponentStates(ctx)
 						if err != nil {
-							checkHealthFailed(err)
+							if setUnreachable() {
+								log.Warn("get component status failed,set node unreachable", zap.Int64("node", node), zap.Error(err))
+							}
 							return struct{}{}, nil
 						}
 
 						if resp.GetState().GetStateCode() != commonpb.StateCode_Healthy {
-							checkHealthFailed(merr.WrapErrNodeOffline(node))
+							if setUnreachable() {
+								log.Warn("component status unhealthy,set node unreachable", zap.Int64("node", node), zap.Error(err))
+							}
 							return struct{}{}, nil
 						}
 
 						// check health successfully, update check health ts
 						b.metricsUpdateTs.Insert(node, time.Now().Local().UnixMilli())
-						b.unreachableQueryNodes.Remove(node)
+						if b.unreachableQueryNodes.TryRemove(node) {
+							log.Info("component recuperated, set node reachable", zap.Int64("node", node), zap.Error(err))
+						}
 
 						return struct{}{}, nil
 					}))

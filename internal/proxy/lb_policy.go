@@ -128,6 +128,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 		targetNode, err = lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
 		if err != nil {
 			log.Warn("failed to select shard",
+				zap.Int64s("availableNodes", availableNodes),
 				zap.Error(err))
 			return -1, err
 		}
