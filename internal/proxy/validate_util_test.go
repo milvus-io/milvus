@@ -143,6 +143,37 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 		err := v.checkVarCharFieldData(f, fs)
 		assert.NoError(t, err)
 	})
+
+	t.Run("when autoID is true, no need to do max length check", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType:     schemapb.DataType_VarChar,
+			IsPrimaryKey: true,
+			AutoID:       true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "2",
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkVarCharFieldData(f, fs)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
