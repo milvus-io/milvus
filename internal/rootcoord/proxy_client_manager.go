@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -74,6 +75,7 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 	}
 
 	p.connect(session)
+	p.updateProxyNumMetric()
 }
 
 // GetProxyNumber returns number of proxy clients.
@@ -82,6 +84,11 @@ func (p *proxyClientManager) GetProxyNumber() int {
 	defer p.lock.Unlock()
 
 	return len(p.proxyClient)
+}
+
+// mutex.Lock is required before calling this method.
+func (p *proxyClientManager) updateProxyNumMetric() {
+	metrics.RootCoordProxyCounter.WithLabelValues().Set(float64(len(p.proxyClient)))
 }
 
 func (p *proxyClientManager) connect(session *sessionutil.Session) {
@@ -114,6 +121,7 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	}
 
 	delete(p.proxyClient, s.ServerID)
+	p.updateProxyNumMetric()
 	log.Info("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
 
