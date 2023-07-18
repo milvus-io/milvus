@@ -384,6 +384,45 @@ func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 	})
 }
 
+func TestCatalog_AlterSegmentMultiIndexes(t *testing.T) {
+	segIdx := make([]*model.SegmentIndex, 100)
+	for i := 0; i < 100; i++ {
+		segIdx[i] = &model.SegmentIndex{
+			SegmentID:     int64(i),
+			CollectionID:  0,
+			PartitionID:   0,
+			NumRows:       0,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexState:    0,
+			FailReason:    "",
+			IndexVersion:  0,
+			IsDeleted:     false,
+			CreateTime:    0,
+			IndexFileKeys: nil,
+			IndexSize:     0,
+		}
+	}
+
+	t.Run("batchAdd", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			multiSave: func(kvs map[string]string) error {
+				if len(kvs) >= 128 {
+					return errors.New("txn too large")
+				}
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.AlterSegmentIndexes(context.Background(), segIdx)
+		assert.NoError(t, err)
+	})
+}
+
 func TestCatalog_DropSegmentIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		txn := &MockedTxnKV{

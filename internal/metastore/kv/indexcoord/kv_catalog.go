@@ -149,8 +149,19 @@ func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.Se
 			return err
 		}
 		kvs[key] = string(value)
+		// TODO when we have better txn kv we should make this as a transaction
+		if len(kvs) >= 64 {
+			err := kc.Txn.MultiSave(kvs)
+			if err != nil {
+				return err
+			}
+			kvs = make(map[string]string)
+		}
 	}
-	return kc.Txn.MultiSave(kvs)
+	if len(kvs) != 0 {
+		return kc.Txn.MultiSave(kvs)
+	}
+	return nil
 }
 
 func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error {
