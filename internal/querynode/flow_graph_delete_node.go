@@ -121,6 +121,12 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		segments, err := dNode.metaReplica.getSegmentIDsByVChannel(nil, dNode.dmlVchannel, segmentTypeSealed)
+		if err != nil {
+			log.Error("failed to get sealed segment ids", zap.Error(err))
+			panic(err)
+		}
+
 		log.Debug("delete in historical replica",
 			zap.String("vchannel", dNode.deltaVchannel),
 			zap.Int64("collectionID", delMsg.CollectionID),
@@ -129,7 +135,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			zap.Int("numTS", len(delMsg.Timestamps)),
 			zap.Uint64("timestampBegin", delMsg.BeginTs()),
 			zap.Uint64("timestampEnd", delMsg.EndTs()),
-			zap.Int("segmentNum", dNode.metaReplica.getSegmentNum(segmentTypeSealed)),
+			zap.Int("segmentNum", len(segments)),
 			zap.String("traceID", traceID),
 		)
 
