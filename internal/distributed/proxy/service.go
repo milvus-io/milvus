@@ -1029,3 +1029,7 @@ func (s *Server) Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*mi
 func (s *Server) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
 	return s.proxy.ListClientInfos(ctx, req)
 }
+
+func (s *Server) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	return s.proxy.AllocTimestamp(ctx, req)
+}
