@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -307,9 +308,10 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 		if GetTaskType(task) == TaskTypeGrow {
-			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
-			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
-			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
+			if lo.Contains(leaderSegmentDist, task.Actions()[0].Node()) &&
+				lo.Contains(nodeSegmentDist, task.Actions()[0].Node()) {
 				return merr.WrapErrServiceInternal("segment loaded, it can be only balanced")
 			}
 		}
