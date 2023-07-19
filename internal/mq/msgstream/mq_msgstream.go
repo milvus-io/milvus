@@ -54,7 +54,7 @@ type mqMsgStream struct {
 	closeRWMutex *sync.RWMutex
 	streamCancel func()
 	bufSize      int64
-	producerLock *sync.Mutex
+	producerLock *sync.RWMutex
 	consumerLock *sync.Mutex
 	closed       int32
 	onceChan     sync.Once
@@ -86,7 +86,7 @@ func NewMqMsgStream(ctx context.Context,
 		bufSize:      bufSize,
 		receiveBuf:   receiveBuf,
 		streamCancel: streamCancel,
-		producerLock: &sync.Mutex{},
+		producerLock: &sync.RWMutex{},
 		consumerLock: &sync.Mutex{},
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
@@ -277,18 +277,18 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-			ms.producerLock.Lock()
+			ms.producerLock.RLock()
 			if _, err := ms.producers[channel].Send(
 				spanCtx,
 				msg,
 			); err != nil {
-				ms.producerLock.Unlock()
+				ms.producerLock.RUnlock()
 				trace.LogError(sp, err)
 				sp.Finish()
 				return err
 			}
 			sp.Finish()
-			ms.producerLock.Unlock()
+			ms.producerLock.RUnlock()
 		}
 	}
 	return nil
@@ -343,20 +343,20 @@ func (ms *mqMsgStream) ProduceMark(msgPack *MsgPack) (map[string][]MessageID, er
 
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-			ms.producerLock.Lock()
+			ms.producerLock.RLock()
 			id, err := ms.producers[channel].Send(
 				spanCtx,
 				msg,
 			)
 			if err != nil {
-				ms.producerLock.Unlock()
+				ms.producerLock.RUnlock()
 				trace.LogError(sp, err)
 				sp.Finish()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 			sp.Finish()
-			ms.producerLock.Unlock()
+			ms.producerLock.RUnlock()
 		}
 	}
 	return ids, nil
@@ -386,19 +386,19 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-		ms.producerLock.Lock()
+		ms.producerLock.RLock()
 		for _, producer := range ms.producers {
 			if _, err := producer.Send(
 				spanCtx,
 				msg,
 			); err != nil {
-				ms.producerLock.Unlock()
+				ms.producerLock.RUnlock()
 				trace.LogError(sp, err)
 				sp.Finish()
 				return err
 			}
 		}
-		ms.producerLock.Unlock()
+		ms.producerLock.RUnlock()
 		sp.Finish()
 	}
 	return nil
@@ -428,18 +428,18 @@ func (ms *mqMsgStream) BroadcastMark(msgPack *MsgPack) (map[string][]MessageID, 
 
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-		ms.producerLock.Lock()
+		ms.producerLock.RLock()
 		for channel, producer := range ms.producers {
 			id, err := producer.Send(spanCtx, msg)
 			if err != nil {
-				ms.producerLock.Unlock()
+				ms.producerLock.RUnlock()
 				trace.LogError(sp, err)
 				sp.Finish()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 		}
-		ms.producerLock.Unlock()
+		ms.producerLock.RUnlock()
 		sp.Finish()
 	}
 	return ids, nil
