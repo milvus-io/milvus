@@ -19,6 +19,7 @@ package querynode
 import (
 	"context"
 	"io/ioutil"
+	"math/rand"
 	"net/url"
 	"os"
 	"sync"
@@ -28,6 +29,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -290,4 +294,80 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 
 	})
 	wg.Wait()
+}
+
+func TestQueryNodeStopTimeout(t *testing.T) {
+	Params.Init()
+	Params.QueryNodeCfg.GracefulStopTimeout = 1
+
+	ctx := context.Background()
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	schema := genTestCollectionSchema()
+	{
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchQueryChannels,
+				MsgID:    rand.Int63(),
+				TargetID: node.session.ServerID,
+			},
+			DstNodeID: 0,
+			Schema:    schema,
+		}
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	}
+
+	{
+		req := &querypb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: node.session.ServerID,
+			},
+			NodeID:       0,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       schema,
+			Infos: []*datapb.VchannelInfo{
+				{
+					CollectionID: 1000,
+					ChannelName:  "1000-dmc0",
+				},
+			},
+			LoadMeta: &querypb.LoadMetaInfo{
+				MetricType: defaultMetricType,
+			},
+		}
+
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	}
+
+	err = node.Stop()
+	assert.NoError(t, err)
+	growing := node.metaReplica.getGrowingSegments()
+	sealed := node.metaReplica.getSealedSegments()
+	channelNum := node.queryShardService.Num()
+
+	assert.Equal(t, 0, len(growing)+len(sealed)+channelNum)
+}
+
+func TestQueryNodeStop(t *testing.T) {
+	Params.Init()
+
+	ctx := context.Background()
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	err = node.Stop()
+	assert.NoError(t, err)
+	growing := node.metaReplica.getGrowingSegments()
+	sealed := node.metaReplica.getSealedSegments()
+	channelNum := node.queryShardService.Num()
+
+	assert.Equal(t, 0, len(growing)+len(sealed)+channelNum)
 }

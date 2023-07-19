@@ -768,6 +768,9 @@ func (replica *metaReplica) sendNoSegmentSignal() {
 }
 
 func (replica *metaReplica) getNoSegmentChan() <-chan struct{} {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+
 	replica.noSegmentChan = make(chan struct{})
 	replica.sendNoSegmentSignal()
 	return replica.noSegmentChan

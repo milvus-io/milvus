@@ -110,6 +110,7 @@ func (s *ShardClusterService) close() error {
 		}
 
 		cs.Close()
+		s.clusters.Delete(key)
 		return true
 	})
 
