@@ -74,13 +74,17 @@ func SetReason(reason string, tasks ...Task) {
 // - only 1 reduce action -> Reduce
 // - 1 grow action, and ends with 1 reduce action -> Move
 func GetTaskType(task Task) Type {
-	if len(task.Actions()) > 1 {
+	switch {
+	case len(task.Actions()) > 1:
 		return TaskTypeMove
-	} else if task.Actions()[0].Type() == ActionTypeGrow {
+	case task.Actions()[0].Type() == ActionTypeGrow:
 		return TaskTypeGrow
-	} else {
+	case task.Actions()[0].Type() == ActionTypeReduce:
 		return TaskTypeReduce
+	case task.Actions()[0].Type() == ActionTypeUpdate:
+		return TaskTypeUpdate
 	}
+	return 0
 }
 
 func packLoadSegmentRequest(
@@ -91,6 +95,10 @@ func packLoadSegmentRequest(
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.LoadSegmentsRequest {
+	loadScope := querypb.LoadScope_Full
+	if action.Type() == ActionTypeUpdate {
+		loadScope = querypb.LoadScope_Index
+	}
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
@@ -106,6 +114,7 @@ func packLoadSegmentRequest(
 		Version:        time.Now().UnixNano(),
 		NeedTransfer:   true,
 		IndexInfoList:  indexInfo,
+		LoadScope:      loadScope,
 	}
 }
 

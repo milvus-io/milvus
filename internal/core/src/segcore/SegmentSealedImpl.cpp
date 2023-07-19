@@ -80,7 +80,6 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(row_count > 0, "Index count is 0");
 
     std::unique_lock lck(mutex_);
-    // Don't allow vector raw data and index exist at the same time
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
@@ -115,10 +114,6 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     AssertInfo(row_count > 0, "Index count is 0");
 
     std::unique_lock lck(mutex_);
-    // Don't allow scalar raw data and index exist at the same time
-    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
-               "scalar index can't be loaded when raw data exists at field " +
-                   std::to_string(field_id.get()));
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
@@ -166,6 +161,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
+    // release field column
+    fields_.erase(field_id);
+    set_bit(field_data_ready_bitset_, field_id, false);
+
     lck.unlock();
 }
 

@@ -44,6 +44,7 @@ const (
 	TaskTypeGrow Type = iota + 1
 	TaskTypeReduce
 	TaskTypeMove
+	TaskTypeUpdate
 )
 
 type Type = int32
@@ -549,7 +550,7 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 		if task, ok := task.(*SegmentTask); ok {
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
-			if taskType == TaskTypeMove {
+			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
@@ -748,7 +749,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 		case ActionTypeGrow:
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
-			if taskType == TaskTypeMove {
+			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
 				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)

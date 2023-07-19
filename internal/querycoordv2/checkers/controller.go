@@ -38,6 +38,7 @@ var (
 	Segment_Checker = "segment_checker"
 	Channel_Checker = "channel_checker"
 	Balance_Checker = "balance_checker"
+	Index_Checker   = "index_checker"
 )
 
 type CheckerController struct {
@@ -46,7 +47,7 @@ type CheckerController struct {
 	meta           *meta.Meta
 	dist           *meta.DistributionManager
 	targetMgr      *meta.TargetManager
-	broker         *meta.CoordinatorBroker
+	broker         meta.Broker
 	nodeMgr        *session.NodeManager
 	balancer       balance.Balance
 
@@ -62,7 +63,9 @@ func NewCheckerController(
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
-	scheduler task.Scheduler) *CheckerController {
+	scheduler task.Scheduler,
+	broker meta.Broker,
+) *CheckerController {
 
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
@@ -70,6 +73,7 @@ func NewCheckerController(
 		Channel_Checker: NewChannelChecker(meta, dist, targetMgr, balancer),
 		Segment_Checker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
 		Balance_Checker: NewBalanceChecker(meta, balancer, nodeMgr, scheduler),
+		Index_Checker:   NewIndexChecker(meta, dist, broker),
 	}
 
 	id := 0
@@ -91,6 +95,7 @@ func NewCheckerController(
 		targetMgr:      targetMgr,
 		scheduler:      scheduler,
 		checkers:       checkers,
+		broker:         broker,
 	}
 }
 
@@ -108,6 +113,8 @@ func getCheckerInterval(checkerType string) time.Duration {
 		return Params.QueryCoordCfg.ChannelCheckInterval.GetAsDuration(time.Millisecond)
 	case Balance_Checker:
 		return Params.QueryCoordCfg.BalanceCheckInterval.GetAsDuration(time.Millisecond)
+	case Index_Checker:
+		return Params.QueryCoordCfg.IndexCheckInterval.GetAsDuration(time.Millisecond)
 	default:
 		return Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond)
 	}
