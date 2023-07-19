@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -438,7 +439,11 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
+	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
+		return meta.SegmentFromInfo(info)
+	})
 	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -483,9 +488,9 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segmentInfos := make([]*datapb.SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+		segments = append(segments, &datapb.SegmentInfo{
 			ID:            segment,
 			PartitionID:   1,
 			InsertChannel: channel.ChannelName,
@@ -503,7 +508,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -734,7 +739,12 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	for _, segment := range suite.moveSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
+	distSegments := lo.Map(segmentInfos, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
+		return meta.SegmentFromInfo(info)
+	})
+
 	suite.dist.LeaderViewManager.Update(leader, view)
+	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	// First action done, execute the second action
 	suite.dispatchAndWait(leader)
 	// Check second action
@@ -873,9 +883,9 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		ChannelName:  channel.ChannelName,
 	}))
 	tasks := []Task{}
-	segmentInfos := make([]*datapb.SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+		segments = append(segments, &datapb.SegmentInfo{
 			ID:            segment,
 			PartitionID:   1,
 			InsertChannel: channel.GetChannelName(),
@@ -893,7 +903,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -912,10 +922,14 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	for _, segment := range suite.loadSegments[1:] {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
+	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
+		return meta.SegmentFromInfo(info)
+	})
 	suite.dist.LeaderViewManager.Update(targetNode, view)
-	segmentInfos = make([]*datapb.SegmentInfo, 0)
+	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
+	segments = make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments[1:] {
-		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+		segments = append(segments, &datapb.SegmentInfo{
 			ID:            segment,
 			PartitionID:   2,
 			InsertChannel: channel.GetChannelName(),
@@ -924,7 +938,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	bakExpectations := suite.broker.ExpectedCalls
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(nil, segments, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(2))
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -1147,7 +1161,11 @@ func (suite *TaskSuite) TestNoExecutor() {
 	for _, segment := range suite.loadSegments {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
+	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
+		return meta.SegmentFromInfo(info)
+	})
 	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 }
