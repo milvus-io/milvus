@@ -699,7 +699,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			// block here until all channels reach same timetick
 			currTs, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
 			if !ok || currTs <= ms.lastTimeStamp {
-				//log.Printf("All timeTick's timestamps are inconsistent")
+				if currTs <= ms.lastTimeStamp {
+					log.Info("All timeTick's timestamps are inconsistent", zap.Strings("channels", ms.consumerChannels), zap.Any("currts", currTs), zap.Any("last", ms.lastTimeStamp), zap.Any("less", currTs < ms.lastTimeStamp))
+				}
 				ms.consumerLock.Unlock()
 				continue
 			}
@@ -831,7 +833,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 	}
 }
 
-// return true only when all channels reach same timetick
+// return true only when  nmsall channels reach same timetick
 func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consumer]bool) (Timestamp, bool) {
 	tsMap := make(map[Timestamp]int)
 	var maxTime Timestamp

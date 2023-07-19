@@ -73,7 +73,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 	rateCol.updateTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	p, _ := tsoutil.ParseTS(serviceTimeMsg.timeRange.timestampMax)
-	log.RatedDebug(10.0, "update tSafe:",
+	log.Info("update tSafe:",
 		zap.Int64("collectionID", stNode.collectionID),
 		zap.Uint64("tSafe", serviceTimeMsg.timeRange.timestampMax),
 		zap.Time("tSafe_p", p),

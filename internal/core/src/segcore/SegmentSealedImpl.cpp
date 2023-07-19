@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentSealedImpl.h"
+#include <algorithm>
 
 #include "Utils.h"
 #include "common/Consts.h"
@@ -734,7 +735,24 @@ SegmentSealedImpl::Delete(int64_t reserved_offset, int64_t size, const IdArray* 
         sort_pks[i] = pk;
     }
 
+    if (deleted_record_.num() > 0) {
+        LOG_SEGCORE_INFO_ << "before segment delete: " << id_
+                          << " isSorted: " << std::is_sorted(sort_timestamps.begin(), sort_timestamps.end())
+                          << " size:" << size << " before: " << deleted_record_.num()
+                          << " last: " << deleted_record_.timestamps_[deleted_record_.num() - 1];
+    } else {
+        LOG_SEGCORE_INFO_ << "before segment delete: " << id_
+                          << " isSorted: " << std::is_sorted(sort_timestamps.begin(), sort_timestamps.end())
+                          << " size:" << size << " before: " << deleted_record_.num();
+    }
+
     deleted_record_.push(sort_pks, sort_timestamps.data());
+    if (deleted_record_.num() > 0) {
+        LOG_SEGCORE_INFO_ << "after segment delete: " << id_ << " size:" << size << " after: " << deleted_record_.num()
+                          << " last: " << deleted_record_.timestamps_[deleted_record_.num() - 1];
+    } else {
+        LOG_SEGCORE_INFO_ << "after segment delete: " << id_ << " size:" << size << " after: " << deleted_record_.num();
+    }
     return Status::OK();
 }
 

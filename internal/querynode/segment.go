@@ -133,6 +133,7 @@ func (r *DeleteRecords) Flush(handler func([]primaryKey, []Timestamp) error) err
 
 // Segment is a wrapper of the underlying C-structure segment.
 type Segment struct {
+	n          int
 	mut        sync.RWMutex // protects segmentPtr
 	segmentPtr C.CSegmentInterface
 
@@ -806,6 +807,7 @@ func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) 
 	}
 
 	if s.deleteBuffer.TryAppend(entityIDs, timestamps) {
+		log.Info("[sunby] write delete to buffer", zap.Any("segment", s.ID()), zap.Any("num", len(timestamps)), zap.Bool("isSorted", sort.SliceIsSorted(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })))
 		return nil
 	}
 
@@ -815,6 +817,8 @@ func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) 
 func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
+	s.n++
+	log := log.With(zap.Any("segment delete n", s.n))
 	if !s.healthy() {
 		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
@@ -822,6 +826,7 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	start := sort.Search(len(timestamps), func(i int) bool {
 		return timestamps[i] >= s.flushedDeletedTimestamp+1
 	})
+	log.Info("[sunby] delete impl", zap.Any("segment", s.ID()), zap.Any("num", len(timestamps)), zap.Any("start", start), zap.Any("flush deleted ts", s.flushedDeletedTimestamp))
 	// all delete records have been applied, skip them
 	if start == len(timestamps) {
 		return nil
@@ -832,6 +837,7 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 	offset := C.int64_t(0)
+	log.Info("[sunby] delete to cpp", zap.Any("segment", s.ID()), zap.Any("size", cSize), zap.Any("deleted count", s.getDeletedCount()))
 
 	ids := &schemapb.IDs{}
 	pkType := pks[0].Type()
@@ -871,11 +877,13 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 		return err
 	}
 
+	log.Info("[sunby] delete to cpp finish", zap.Any("segment", s.ID()), zap.Any("size", cSize), zap.Any("deleted count", s.getDeletedCount()))
 	return nil
 }
 
 func (s *Segment) FlushDelete() error {
 	return s.deleteBuffer.Flush(func(pks []primaryKey, tss []Timestamp) error {
+		log.Info("[sunby] flush handler", zap.Any("segment", s.ID()), zap.Any("num", len(tss)), zap.Bool("isSorted", sort.SliceIsSorted(tss, func(i, j int) bool { return tss[i] < tss[j] })))
 		if len(pks) == 0 {
 			return nil
 		}

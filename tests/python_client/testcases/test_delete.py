@@ -905,6 +905,33 @@ class TestDeleteOperation(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {ids}'
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_string_multi_times(self):
+        """
+        target: test delete all entities one by one in a loop
+        method: delete data one by one for a loop
+        expected: No exception
+        """
+        fail_times = 0
+        for _ in range(10):
+            # init an auto_id collection and insert tmp_nb data, flush and load
+            collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
+                                                                   primary_field=ct.default_string_field_name)[0:4]
+
+            for del_id in ids:
+                expr = f'{ct.default_string_field_name} in {[del_id]}'
+                expr = expr.replace("'", "\"")
+                collection_w.delete(expr)
+
+            # query with all ids
+            expr = f'{ct.default_string_field_name} in {ids}'
+            expr = expr.replace("'", "\"")
+            res = collection_w.query(expr)[0]
+            if len(res) > 0:
+                fail_times += 1
+            time.sleep(0.1)
+        assert fail_times == 0
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_loop(self):
         """

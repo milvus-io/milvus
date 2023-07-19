@@ -298,6 +298,7 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 }
 
 func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
+	log.Info("forward delete msg", zap.String("channel", ddn.vChannelName), zap.Any("ts", maxTs), zap.Any("len", len(msgs)))
 	tr := timerecord.NewTimeRecorder("forwardDeleteMsg")
 
 	if len(msgs) != 0 {
@@ -345,7 +346,7 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 		return err
 	}
 	p, _ := tsoutil.ParseTS(ts)
-	log.RatedDebug(10.0, "DDNode sent delta timeTick",
+	log.Info("DDNode sent delta timeTick",
 		zap.Any("collectionID", ddn.collectionID),
 		zap.Any("ts", ts),
 		zap.Any("ts_p", p),
