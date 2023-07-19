@@ -10,6 +10,9 @@ class Channel {
     // unbounded channel
     Channel() = default;
 
+    Channel(Channel<T>&& other) noexcept : inner_(std::move(other.inner_)) {
+    }
+
     // bounded channel
     explicit Channel(size_t capacity) {
         inner_.set_capacity(capacity);

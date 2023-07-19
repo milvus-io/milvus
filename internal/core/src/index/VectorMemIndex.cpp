@@ -17,6 +17,10 @@
 #include "index/VectorMemIndex.h"
 
 #include <cmath>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include "fmt/format.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "exceptions/EasyAssert.h"
@@ -29,6 +33,9 @@
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
+#include "storage/FieldData.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::index {
 
@@ -95,10 +102,24 @@ VectorMemIndex::Load(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-    AssembleIndexDatas(index_datas);
+
+    std::map<std::string, storage::FieldDataChannelPtr> channels;
+    for (const auto& file : index_files.value()) {
+        auto key = file.substr(file.find_last_of('/') + 1);
+        if (channels.find(key) == channels.end()) {
+            channels.emplace(std::move(key),
+                             std::make_shared<storage::FieldDataChannel>());
+        }
+    }
+
+    auto& pool = ThreadPool::GetInstance();
+    auto future = pool.Submit(
+        [&] { file_manager_->LoadFileStream(index_files.value(), channels); });
+
+    std::unordered_map<std::string, storage::FieldDataPtr> result;
+    AssembleIndexDatas(channels, result);
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
+    for (auto& [key, data] : result) {
         auto size = data->Size();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(

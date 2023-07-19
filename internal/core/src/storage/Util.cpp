@@ -15,11 +15,13 @@
 // limitations under the License.
 
 #include "storage/Util.h"
+#include <memory>
 #include "arrow/array/builder_binary.h"
 #include "arrow/type_fwd.h"
 #include "exceptions/EasyAssert.h"
 #include "common/Consts.h"
 #include "storage/FieldData.h"
+#include "storage/FieldDataInterface.h"
 #include "storage/ThreadPool.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MinioChunkManager.h"
@@ -563,6 +565,39 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
             throw NotSupportedDataTypeException(
                 "CreateFieldData not support data type " + datatype_name(type));
     }
+}
+
+std::vector<storage::FieldDataPtr>
+CollectFieldDataChannel(storage::FieldDataChannelPtr& channel) {
+    std::vector<storage::FieldDataPtr> result;
+    storage::FieldDataPtr field_data;
+    while (channel->pop(field_data)) {
+        result.push_back(field_data);
+    }
+    return result;
+}
+
+storage::FieldDataPtr
+MergeFieldData(std::vector<storage::FieldDataPtr>& data_array) {
+    if (data_array.size() == 0) {
+        return nullptr;
+    }
+
+    if (data_array.size() == 1) {
+        return data_array[0];
+    }
+
+    size_t total_length = 0;
+    for (const auto& data : data_array) {
+        total_length += data->Length();
+    }
+
+    auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type());
+    merged_data->Reserve(total_length);
+    for (const auto& data : data_array) {
+        merged_data->FillFieldData(data->Data(), data->Length());
+    }
+    return merged_data;
 }
 
 }  // namespace milvus::storage
