@@ -1453,6 +1453,7 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction     bool
 	EnableAutoCompaction atomic.Value
+	IndexBasedCompaction atomic.Value
 
 	CompactionRPCTimeout              int64
 	CompactionMaxParallelTasks        int
@@ -1497,6 +1498,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
+	p.initBasedIndexedSegments()
 
 	p.initCompactionRPCTimeout()
 	p.initCompactionMaxParalellTask()
@@ -1597,6 +1599,10 @@ func (p *dataCoordConfig) initEnableAutoCompaction() {
 	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", true))
 }
 
+func (p *dataCoordConfig) initBasedIndexedSegments() {
+	p.IndexBasedCompaction.Store(p.Base.ParseBool("dataCoord.compaction.indexBasedCompaction", true))
+}
+
 func (p *dataCoordConfig) initCompactionMinSegment() {
 	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 3)
 }
@@ -1667,11 +1673,11 @@ func (p *dataCoordConfig) initGCInterval() {
 }
 
 func (p *dataCoordConfig) initGCMissingTolerance() {
-	p.GCMissingTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 24*60*60)) * time.Second
+	p.GCMissingTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 60*60)) * time.Second
 }
 
 func (p *dataCoordConfig) initGCDropTolerance() {
-	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 3600)) * time.Second
+	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 3*60*60)) * time.Second
 }
 
 func (p *dataCoordConfig) SetEnableAutoCompaction(enable bool) {
@@ -1682,6 +1688,18 @@ func (p *dataCoordConfig) GetEnableAutoCompaction() bool {
 	enable := p.EnableAutoCompaction.Load()
 	if enable != nil {
 		return enable.(bool)
+	}
+	return false
+}
+
+func (p *dataCoordConfig) SetIndexBasedCompaction(enable bool) {
+	p.IndexBasedCompaction.Store(enable)
+}
+
+func (p *dataCoordConfig) GetIndexBasedCompaction() bool {
+	based := p.IndexBasedCompaction.Load()
+	if based != nil {
+		return based.(bool)
 	}
 	return false
 }

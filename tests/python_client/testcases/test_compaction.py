@@ -229,6 +229,7 @@ class TestCompactionParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(tmp_nb)
         insert_res, _ = collection_w.insert(df)
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         # delete 20% entities
         ratio_expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:tmp_nb // ct.compact_delta_ratio_reciprocal]}'
         collection_w.delete(ratio_expr)
@@ -246,7 +247,6 @@ class TestCompactionParams(TestcaseBase):
                 raise MilvusException(1, "Auto delete ratio compaction cost more than 180s")
             sleep(1)
 
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(ratio_expr, check_items=CheckTasks.check_query_empty)
 
