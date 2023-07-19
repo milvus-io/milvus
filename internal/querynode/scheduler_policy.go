@@ -30,7 +30,7 @@ type scheduleReadPolicy interface {
 	mergeTask(rt readTask) bool
 
 	// Schedule new task to run.
-	schedule(targetCPUUsage int32, maxNum int32) ([]readTask, int32)
+	schedule(targetCPUUsage int32, maxNum int32, minNum int32) ([]readTask, int32)
 }
 
 // Create a new schedule policy.
@@ -197,7 +197,9 @@ func (p *userTaskPollingScheduleReadPolicy) mergeTask(rt readTask) bool {
 	return false
 }
 
-func (p *userTaskPollingScheduleReadPolicy) schedule(targetCPUUsage int32, maxNum int32) (result []readTask, usage int32) {
+func (p *userTaskPollingScheduleReadPolicy) schedule(targetCPUUsage int32, maxNum int32, minNum int32) (result []readTask, usage int32) {
+	// ignoring minNum for userTaskPollingScheduleReadPolicy
+
 	// Return directly if there's no task ready.
 	if p.taskCount == 0 {
 		return
@@ -297,16 +299,18 @@ func (p *fifoScheduleReadPolicy) mergeTask(rt readTask) bool {
 }
 
 // Schedule a new task.
-func (p *fifoScheduleReadPolicy) schedule(targetCPUUsage int32, maxNum int32) (result []readTask, usage int32) {
+func (p *fifoScheduleReadPolicy) schedule(targetCPUUsage int32, maxNum int32, minNum int32) (result []readTask, usage int32) {
 	var ret []readTask
 	var next *list.Element
+	var added int32
 	for e := p.ready.Front(); e != nil && maxNum > 0; e = next {
 		next = e.Next()
 		t, _ := e.Value.(readTask)
 		tUsage := t.CPUUsage()
-		if usage+tUsage > targetCPUUsage {
+		if added >= minNum && usage+tUsage > targetCPUUsage {
 			break
 		}
+		added++
 		usage += tUsage
 		p.ready.Remove(e)
 		rateCol.rtCounter.sub(t, readyQueueType)

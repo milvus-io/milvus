@@ -56,6 +56,9 @@ type taskScheduler struct {
 	cpuUsage        int32 // 1200 means 1200% 12 cores
 	readConcurrency int32 // 1200 means 1200% 12 cores
 
+	// ignore cpu usage limit when concurrency is below minReadConcurrency
+	minReadConcurrency int32
+
 	// for other tasks
 	queue       taskQueue
 	maxCPUUsage int32
@@ -83,6 +86,14 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		tSafeReplica:        tSafeReplica,
 		maxCPUUsage:         int32(getNumCPU() * 100),
 		readySchedulePolicy: newReadScheduleTaskPolicy(Params.QueryNodeCfg.ScheduleReadPolicy.Name),
+	}
+	if Params.QueryNodeCfg.MinCPUParallelTaskNumRatio <= 0 {
+		s.minReadConcurrency = 0
+	} else {
+		s.minReadConcurrency = int32(getNumCPU()) / Params.QueryNodeCfg.MinCPUParallelTaskNumRatio
+	}
+	if s.minReadConcurrency >= Params.QueryNodeCfg.MaxReadConcurrency {
+		s.minReadConcurrency = Params.QueryNodeCfg.MaxReadConcurrency
 	}
 	s.queue = newQueryNodeTaskQueue(s)
 	return s
@@ -256,7 +267,11 @@ func (s *taskScheduler) popAndAddToExecute() {
 	}
 	metrics.QueryNodeEstimateCPUUsage.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(curUsage))
 	targetUsage := s.maxCPUUsage - curUsage
-	if targetUsage <= 0 {
+	minNum := s.minReadConcurrency - readConcurrency
+	if minNum < 0 {
+		minNum = 0
+	}
+	if targetUsage <= 0 && minNum == 0 {
 		return
 	}
 
@@ -265,7 +280,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 		return
 	}
 
-	tasks, deltaUsage := s.readySchedulePolicy.schedule(targetUsage, remain)
+	tasks, deltaUsage := s.readySchedulePolicy.schedule(targetUsage, remain, minNum)
 	atomic.AddInt32(&s.cpuUsage, deltaUsage)
 	for _, t := range tasks {
 		s.executeReadTaskChan <- t

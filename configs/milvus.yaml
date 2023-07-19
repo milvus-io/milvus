@@ -239,6 +239,13 @@ queryNode:
     # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
     maxReadConcurrentRatio: 2.0 # (0, 100]
     cpuRatio: 10.0 # ratio used to estimate read task cpu usage.
+    # To allow better parallelism when the estimated cpu usage of a few tasks exceeds the total cpu usage,
+    # querynode task scheduler allows concurrent tasks when concurrent task num is less than
+    # runtime.NumCPU / minCPUParallelTaskNumRatio. For example: on a node with 16 cores and minCPUParallelTaskNumRatio
+    # set to 4, querynode task scheduler will send new tasks to knowhere if there are less than 4 running
+    # tasks, even if that'll cause the total estimated cpu usage of all running tasks to exceed max cpu usage.
+    # This config will be effective only when fifo scheduleReadPolicy is used.
+    minCPUParallelTaskNumRatio: 4
     # maxTimestampLag is the max ts lag between serviceable and guarantee timestamp.
     # if the lag is larger than this config, scheduler will return error without waiting.
     # the valid value is [3600, infinite)

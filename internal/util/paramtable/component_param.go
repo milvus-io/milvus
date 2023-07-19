@@ -1132,14 +1132,15 @@ type queryNodeConfig struct {
 	CacheEnabled     bool
 	CacheMemoryLimit int64
 
-	GroupEnabled         bool
-	MaxReceiveChanSize   int32
-	MaxUnsolvedQueueSize int32
-	MaxReadConcurrency   int32
-	MaxGroupNQ           int64
-	TopKMergeRatio       float64
-	CPURatio             float64
-	MaxTimestampLag      time.Duration
+	GroupEnabled               bool
+	MaxReceiveChanSize         int32
+	MaxUnsolvedQueueSize       int32
+	MaxReadConcurrency         int32
+	MaxGroupNQ                 int64
+	TopKMergeRatio             float64
+	CPURatio                   float64
+	MinCPUParallelTaskNumRatio int32
+	MaxTimestampLag            time.Duration
 
 	// schedule
 	ScheduleReadPolicy queryNodeConfigScheduleReadPolicy
@@ -1185,6 +1186,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initMaxGroupNQ()
 	p.initTopKMergeRatio()
 	p.initCPURatio()
+	p.initMinCPUParallelTaskNumRatio()
 	p.initEnableDisk()
 	p.initDiskCapacity()
 	p.initMaxDiskUsagePercentage()
@@ -1305,6 +1307,10 @@ func (p *queryNodeConfig) initMaxUnsolvedQueueSize() {
 
 func (p *queryNodeConfig) initCPURatio() {
 	p.CPURatio = p.Base.ParseFloatWithDefault("queryNode.scheduler.cpuRatio", 10.0)
+}
+
+func (p *queryNodeConfig) initMinCPUParallelTaskNumRatio() {
+	p.MinCPUParallelTaskNumRatio = p.Base.ParseInt32WithDefault("queryNode.scheduler.minCPUParallelTaskNumRatio", 4)
 }
 
 func (p *queryNodeConfig) initKnowhereThreadPoolSize() {
