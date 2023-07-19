@@ -165,9 +165,8 @@ func (job *ReleasePartitionJob) Execute() error {
 	}
 	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
-	// If all partitions are released and LoadType is LoadPartition, clear all
-	if len(toRelease) == len(loadedPartitions) &&
-		job.meta.GetLoadType(req.GetCollectionID()) == querypb.LoadType_LoadPartition {
+	// If all partitions are released, clear all
+	if len(toRelease) == len(loadedPartitions) {
 		log.Info("release partitions covers all partitions, will remove the whole collection")
 		err := job.meta.CollectionManager.RemoveCollection(req.GetCollectionID())
 		if err != nil {
