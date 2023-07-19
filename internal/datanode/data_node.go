@@ -918,19 +918,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		oneSegment int64
 		channel    Channel
 		err        error
-		ds         *dataSyncService
-		ok         bool
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
 			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
-			continue
-		}
-		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
-		if !ok {
-			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
 			continue
 		}
 		oneSegment = fromSegment
@@ -959,23 +952,15 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return status, nil
 	}
 
-	// block all flow graph, so it's safe to remove segment
-	if !ds.fg.TryBlockAll(ctx) {
-		log.Ctx(ctx).Error("Cannot block flowGraph for sync segments, "+
-			"release generated segment meta and stats log", zap.Int64("planID", req.GetPlanID()),
-			zap.Int64("target segmentID", req.GetCompactedTo()))
-		targetSeg.historyStats = nil
-		status.Reason = "failed to block flowgraph"
-		node.compactionExecutor.injectDone(req.GetPlanID(), false)
-		return status, errors.New("failed to block flowgraph")
-	}
-	defer ds.fg.Unblock()
 	if err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
 		status.Reason = err.Error()
-		node.compactionExecutor.injectDone(req.GetPlanID(), false)
 		return status, nil
 	}
+	log.Ctx(ctx).Info("DataNode SyncSegments success", zap.Int64("planID", req.GetPlanID()),
+		zap.Int64("target segmentID", req.GetCompactedTo()),
+		zap.Int64s("compacted from", req.GetCompactedFrom()),
+		zap.Int64("numOfRows", req.GetNumOfRows()))
 	node.compactionExecutor.injectDone(req.GetPlanID(), true)
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
