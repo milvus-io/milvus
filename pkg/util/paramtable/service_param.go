@@ -677,6 +677,9 @@ type NatsmqConfig struct {
 	ServerMonitorLogTime      ParamItem `refreshable:"false"`
 	ServerMonitorLogFile      ParamItem `refreshable:"false"`
 	ServerMonitorLogSizeLimit ParamItem `refreshable:"false"`
+	ServerRetentionMaxAge     ParamItem `refreshable:"true"`
+	ServerRetentionMaxBytes   ParamItem `refreshable:"true"`
+	ServerRetentionMaxMsgs    ParamItem `refreshable:"true"`
 }
 
 // Init sets up a new NatsmqConfig instance using the provided BaseTable
@@ -761,6 +764,31 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	r.ServerMonitorLogSizeLimit.Init(base.mgr)
+
+	r.ServerRetentionMaxAge = ParamItem{
+		Key:          "natsmq.server.retention.maxAge",
+		Version:      "2.3.0",
+		DefaultValue: "4320",
+		Doc:          `Maximum age of any message in the P-channel`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxAge.Init(base.mgr)
+	r.ServerRetentionMaxBytes = ParamItem{
+		Key:          "natsmq.server.retention.maxBytes",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          `How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxBytes.Init(base.mgr)
+	r.ServerRetentionMaxMsgs = ParamItem{
+		Key:          "natsmq.server.retention.maxMsgs",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          `How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit`,
+		Export:       true,
+	}
+	r.ServerRetentionMaxMsgs.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

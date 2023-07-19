@@ -143,6 +143,10 @@ natsmq:
       logTime: true # true by default, If set to false, log without timestamps.
       logFile: # no log file by default, Log file path relative to.. .
       logSizeLimit: 0 # (B) 0, unlimited by default, Size in bytes after the log file rolls over to a new one.
+    retention:
+      maxAge: 4320 # (min) 3 days by default, Maximum age of any message in the P-channel.
+      maxBytes: # (B) None by default, How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size.
+      maxMsgs: # None by default, How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit.
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
