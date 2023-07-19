@@ -1152,15 +1152,22 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
 	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
 	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
-	CheckInterval                       ParamItem `refreshable:"true"`
-	ChannelTaskTimeout                  ParamItem `refreshable:"true"`
-	SegmentTaskTimeout                  ParamItem `refreshable:"true"`
-	DistPullInterval                    ParamItem `refreshable:"false"`
-	HeartbeatAvailableInterval          ParamItem `refreshable:"true"`
-	LoadTimeoutSeconds                  ParamItem `refreshable:"true"`
+
+	SegmentCheckInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval       ParamItem `refreshable:"true"`
+	BalanceCheckInterval       ParamItem `refreshable:"true"`
+	ChannelTaskTimeout         ParamItem `refreshable:"true"`
+	SegmentTaskTimeout         ParamItem `refreshable:"true"`
+	DistPullInterval           ParamItem `refreshable:"false"`
+	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
+	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
+
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
+
+	// Deprecated: Since 2.2.2, use different interval for different checker
+	CheckInterval ParamItem `refreshable:"true"`
 
 	NextTargetSurviveTime      ParamItem `refreshable:"true"`
 	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
@@ -1299,6 +1306,33 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckInterval.Init(base.mgr)
+
+	p.SegmentCheckInterval = ParamItem{
+		Key:          "queryCoord.checkSegmentInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.SegmentCheckInterval.Init(base.mgr)
+
+	p.ChannelCheckInterval = ParamItem{
+		Key:          "queryCoord.checkChannelInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.ChannelCheckInterval.Init(base.mgr)
+
+	p.BalanceCheckInterval = ParamItem{
+		Key:          "queryCoord.checkChannelInterval",
+		Version:      "2.3.0",
+		DefaultValue: "10000",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.BalanceCheckInterval.Init(base.mgr)
 
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
