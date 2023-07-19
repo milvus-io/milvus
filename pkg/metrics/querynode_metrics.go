@@ -47,6 +47,29 @@ var (
 			collectionIDLabelName,
 		})
 
+	QueryNodeProcessCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "process_insert_or_delete_ms",
+			Help:      "process insert or delete cost in ms",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			msgTypeLabelName,
+		})
+
+	QueryNodeWaitProcessingMsgCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "wait_processing_msg_count",
+			Help:      "count of wait processing msg",
+		}, []string{
+			nodeIDLabelName,
+			msgTypeLabelName,
+		})
+
 	QueryNodeConsumerMsgCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,

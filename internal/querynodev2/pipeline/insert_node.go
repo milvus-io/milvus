@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -85,6 +87,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 
 // Insert task
 func (iNode *insertNode) Operate(in Msg) Msg {
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Dec()
 	nodeMsg := in.(*insertNodeMsg)
 
 	sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
@@ -104,6 +107,8 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 	}
 
 	iNode.delegator.ProcessInsert(insertDatas)
+
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Inc()
 
 	return &deleteNodeMsg{
 		deleteMsgs: nodeMsg.deleteMsgs,
