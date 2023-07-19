@@ -254,6 +254,9 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 		deleteIDs:        make(map[UniqueID][]primaryKey),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 	}
+	sort.Slice(iMsg.deleteMessages, func(i, j int) bool {
+		return iMsg.deleteMessages[i].BeginTs() < iMsg.deleteMessages[j].BeginTs()
+	})
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
 		if iNode.metaReplica.getSegmentNum(segmentTypeGrowing) != 0 {
