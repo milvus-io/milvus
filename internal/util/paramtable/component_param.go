@@ -1769,6 +1769,9 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     bool
 	MemoryForceSyncSegmentNum int
 	MemoryWatermark           float64
+
+	// timeout for bulkinsert
+	BulkInsertTimeoutSeconds time.Duration
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1793,6 +1796,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initChannelWatchPath()
 	p.initMemoryForceSyncEnable()
 	p.initMemoryWatermark()
+	p.initBulkInsertTimeout()
 	p.initMemoryForceSyncSegmentNum()
 }
 
@@ -1889,6 +1893,11 @@ func (p *dataNodeConfig) GetNodeID() UniqueID {
 
 func (p *dataNodeConfig) initMemoryForceSyncEnable() {
 	p.MemoryForceSyncEnable = p.Base.ParseBool("datanode.memory.forceSyncEnable", true)
+}
+
+func (p *dataNodeConfig) initBulkInsertTimeout() {
+	bulkInsertTimeoutSeconds := p.Base.ParseIntWithDefault("datanode.bulkinsert.timeout.seconds", 18000)
+	p.BulkInsertTimeoutSeconds = time.Duration(bulkInsertTimeoutSeconds) * time.Second
 }
 
 func (p *dataNodeConfig) initMemoryWatermark() {
