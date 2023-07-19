@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentSealedImpl.h"
+#include <sstream>
 
 #include "Utils.h"
 #include "common/Consts.h"
@@ -341,7 +342,10 @@ SegmentSealedImpl::get_schema() const {
 
 void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
+    std::stringstream ss;
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
+    ss << "del_barrier: " << del_barrier << ", ins_barrier: " << ins_barrier;
+    LOG_SEGCORE_ERROR_ << ss.str();
     if (del_barrier == 0) {
         return;
     }

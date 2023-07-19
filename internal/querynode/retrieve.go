@@ -48,7 +48,7 @@ func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType s
 		}
 		// record retrieve time
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-		result, err := seg.retrieve(plan)
+		result, err := seg.retrieve(ctx, plan)
 		if err != nil {
 			return nil, err
 		}

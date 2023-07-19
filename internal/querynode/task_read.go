@@ -141,6 +141,7 @@ func (b *baseReadTask) TimeoutError() error {
 }
 
 func (b *baseReadTask) Ready() (bool, error) {
+	log := log.Ctx(b.ctx)
 	if b.waitTSafeTr == nil {
 		b.waitTSafeTr = timerecord.NewTimeRecorder("waitTSafeTimeRecorder")
 	}

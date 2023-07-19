@@ -66,6 +66,20 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
+	{
+		currentTs, err := stNode.tSafeReplica.getTSafe(stNode.vChannel)
+		if err != nil {
+			log.Warn("serviceTimeNode getTSafe timeout", zap.Error(err))
+		}
+		if currentTs >= serviceTimeMsg.timeRange.timestampMax {
+			log.Warn("currentTs >= serviceTimeMsg.timeRange.timestampMax",
+				zap.Int64("collectionID", stNode.collectionID),
+				zap.Uint64("tSafe", serviceTimeMsg.timeRange.timestampMax),
+				zap.String("channel", stNode.vChannel),
+				zap.Uint64("currentTs", currentTs),
+			)
+		}
+	}
 	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	if err != nil {
 		// should not happen, QueryNode should addTSafe before start flow graph

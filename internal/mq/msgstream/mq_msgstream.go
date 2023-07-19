@@ -758,7 +758,15 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			uniqueMsgs := make([]TsMsg, 0, len(timeTickBuf))
 			for _, msg := range timeTickBuf {
 				if isDMLMsg(msg) && idset.Contain(msg.ID()) {
-					log.Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.ID()))
+					for _, uniqueMsg := range uniqueMsgs {
+						if uniqueMsg.ID() == msg.ID() {
+							log.Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.ID()),
+								zap.Any("message", msg),
+								zap.Any("origin_message", uniqueMsg),
+							)
+							break
+						}
+					}
 					continue
 				}
 				idset.Insert(msg.ID())

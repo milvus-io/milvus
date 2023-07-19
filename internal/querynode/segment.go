@@ -417,7 +417,7 @@ func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*Search
 	return &searchResult, nil
 }
 
-func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *Segment) retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
@@ -431,9 +431,13 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Debug("do retrieve on segment",
+	log.Ctx(ctx).Debug("do retrieve on segment",
 		zap.Int64("msgID", plan.msgID),
-		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
+		zap.Int64("segmentID", s.segmentID),
+		zap.String("segmentType", s.segmentType.String()),
+		zap.Int64("all_count", s.getRowCount()),
+		zap.Int64("deleted_count", s.getDeletedCount()),
+	)
 
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
@@ -777,6 +781,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
+	log.Info("segment insert done", zap.Any("segmentID", s.segmentID), zap.Any("entityIDs", entityIDs), zap.Any("timestamps", timestamps))
 	metrics.QueryNodeNumEntities.WithLabelValues(
 		fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		fmt.Sprint(s.collectionID),
@@ -805,10 +810,13 @@ func (s *Segment) segmentDelete(entityIDs []primaryKey, timestamps []Timestamp) 
 		return errors.New("length of entityIDs not equal to length of timestamps")
 	}
 
+	log.Info("segmentDelete", zap.Any("segmentID", s.segmentID), zap.Any("entityIDs", entityIDs), zap.Any("timestamps", timestamps))
 	if s.deleteBuffer.TryAppend(entityIDs, timestamps) {
+		log.Info("segmentDelete append to delete buffer", zap.Any("entityIDs", entityIDs), zap.Any("timestamps", timestamps))
 		return nil
 	}
 
+	log.Info("segmentDelete append to delete buffer failed, do delete now", zap.Any("segmentID", s.segmentID), zap.Any("entityIDs", entityIDs), zap.Any("timestamps", timestamps))
 	return s.deleteImpl(entityIDs, timestamps)
 }
 

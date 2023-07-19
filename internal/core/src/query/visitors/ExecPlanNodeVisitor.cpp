@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <utility>
+#include <sstream>
 
 #include "query/PlanImpl.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
@@ -17,6 +18,7 @@
 #include "query/SubSearchResult.h"
 #include "segcore/SegmentGrowing.h"
 #include "utils/Json.h"
+#include "log/Log.h"
 
 namespace milvus::query {
 
@@ -113,8 +115,36 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
 void
 ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
-    assert(!retrieve_result_opt_.has_value());
     auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+
+    {
+        std::stringstream ss;
+        ss << "[DEBUG RETRIEVE]" << std::endl;
+        auto pk_field_id = segment->get_schema().get_primary_field_id();
+        auto pk_field = segment->get_schema()[pk_field_id.value()];
+        auto num_chunk = segment->num_chunk_data(pk_field_id.value());
+        int64_t offset = 0;
+        if (pk_field.is_string()) {
+            for (auto i = 0; i < num_chunk; i++) {
+                const auto& chunk = segment->chunk_data<std::string_view>(pk_field_id.value(), i);
+                auto cnt = chunk.row_count();
+                for (auto j = 0; j < cnt; j++) {
+                    ss << "offset: " << offset++ << ", data: " << chunk[j] << std::endl;
+                }
+            }
+        } else {
+            for (auto i = 0; i < num_chunk; i++) {
+                const auto& chunk = segment->chunk_data<int64_t>(pk_field_id.value(), i);
+                auto cnt = chunk.row_count();
+                for (auto j = 0; j < cnt; j++) {
+                    ss << "offset: " << offset++ << ", data: " << chunk[j] << std::endl;
+                }
+            }
+        }
+        LOG_SEGCORE_ERROR_ << ss.str();
+    }
+
+    assert(!retrieve_result_opt_.has_value());
     AssertInfo(segment, "Support SegmentSmallIndex Only");
     RetrieveResult retrieve_result;
 
@@ -131,9 +161,19 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         bitset_holder.flip();
     }
 
+    std::stringstream ss;
+
+    ss << "count before mask_with_timestamps: " << bitset_holder.count() << std::endl;
+
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 
+    ss << "count after mask_with_timestamps: " << bitset_holder.count() << std::endl;
+
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
+
+    ss << "count after mask_with_delete: " << bitset_holder.count() << std::endl;
+
+    LOG_SEGCORE_ERROR_ << ss.str();
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder.all()) {
         retrieve_result_opt_ = std::move(retrieve_result);

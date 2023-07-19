@@ -341,6 +341,15 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 		if err != nil {
 			return err
 		}
+		log.Info("filter processDeleteMessages debug fubang",
+			zap.Any("pks", pks),
+			zap.Any("tss", tss),
+			zap.Int64("segmentID", segmentID),
+			zap.Int64("collectionID", msg.CollectionID),
+			zap.String("vchannel", vchannelName),
+			zap.Any("segmentType", segType),
+			zap.Any("segments", resultSegmentIDs),
+		)
 		if len(pks) > 0 {
 			delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
 			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], tss...)

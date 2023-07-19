@@ -138,7 +138,16 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // filterInvalidDeleteMessage would filter out invalid delete messages
-func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg, loadType loadType) (*msgstream.DeleteMsg, error) {
+func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg, loadType loadType) (returnMsg *msgstream.DeleteMsg, returnErr error) {
+	defer func() {
+		if returnMsg == nil && returnErr == nil {
+			log.Info("filter invalid insert message, no message",
+				zap.String("vchannel", fdmNode.vchannel),
+				zap.Any("message", msg),
+			)
+		}
+	}()
+
 	if err := msg.CheckAligned(); err != nil {
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
@@ -171,7 +180,15 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 }
 
 // filterInvalidInsertMessage would filter out invalid insert messages
-func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg, loadType loadType) (*msgstream.InsertMsg, error) {
+func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg, loadType loadType) (returnMsg *msgstream.InsertMsg, returnErr error) {
+	defer func() {
+		if returnMsg == nil && returnErr == nil {
+			log.Info("filter invalid insert message, no message",
+				zap.String("vchannel", fdmNode.vchannel),
+				zap.Any("message", msg),
+			)
+		}
+	}()
 	if err := msg.CheckAligned(); err != nil {
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
