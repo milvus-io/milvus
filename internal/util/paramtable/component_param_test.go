@@ -423,6 +423,10 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("SyncPeriod: %v", period)
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod)
 
+		bulkinsertTimeout := Params.BulkInsertTimeoutSeconds
+		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
+		assert.Equal(t, int64(18000), int64(bulkinsertTimeout.Seconds()))
+
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
 
