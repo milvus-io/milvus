@@ -42,14 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
-var (
-	ErrNoSuchKey = errors.New("NoSuchKey")
-)
-
-func WrapErrNoSuchKey(key string) error {
-	return fmt.Errorf("%w(key=%s)", ErrNoSuchKey, key)
-}
-
 var CheckBucketRetryAttempts uint = 20
 
 // MinioChunkManager is responsible for read and write data stored in minio.

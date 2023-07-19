@@ -22,6 +22,8 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -226,7 +228,8 @@ func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 		sr.SetBuffer(blob.Value)
 		stats, err := sr.GetPrimaryKeyStats()
 		if err != nil {
-			return nil, err
+			log.Warn("failed to deserialize stats", zap.Error(err))
+			return nil, WrapErrCorrupted(blob.GetKey())
 		}
 		results = append(results, stats)
 	}
