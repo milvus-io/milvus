@@ -288,8 +288,9 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 
 	for _, b := range binlogs {
 		segment := b.Segment
-		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(),
-			segment.GetID(), cloneLogs(b.Insertlogs), cloneLogs(b.Deltalogs), cloneLogs(b.Statslogs), len(segment.GetCompactionFrom()) > 0)
+		binlogKvs, err := buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
+			cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()),
+			len(segment.GetCompactionFrom()) > 0)
 		if err != nil {
 			return err
 		}

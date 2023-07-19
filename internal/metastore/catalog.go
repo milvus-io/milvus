@@ -103,10 +103,7 @@ func (t AlterType) String() string {
 }
 
 type BinlogsIncrement struct {
-	Segment    *datapb.SegmentInfo
-	Insertlogs []*datapb.FieldBinlog
-	Statslogs  []*datapb.FieldBinlog
-	Deltalogs  []*datapb.FieldBinlog
+	Segment *datapb.SegmentInfo
 }
 
 //go:generate mockery --name=DataCoordCatalog --with-expecter
