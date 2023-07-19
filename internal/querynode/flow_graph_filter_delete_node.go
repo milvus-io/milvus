@@ -19,6 +19,7 @@ package querynode
 import (
 	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -113,6 +114,9 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
+	sort.Slice(dMsg.deleteMessages, func(i, j int) bool {
+		return dMsg.deleteMessages[i].BeginTs() < dMsg.deleteMessages[j].BeginTs()
+	})
 	return []Msg{&dMsg}
 }
 
