@@ -1042,7 +1042,7 @@ func (suite *JobSuite) TestDynamicRelease() {
 	err = job.Wait()
 	suite.NoError(err)
 	suite.assertPartitionReleased(col0, p0, p1, p2)
-	suite.True(suite.meta.Exist(col0))
+	suite.False(suite.meta.Exist(col0))
 
 	// loaded: p0, p1, p2
 	// action: release col
