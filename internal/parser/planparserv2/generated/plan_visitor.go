@@ -58,6 +58,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Term.
 	VisitTerm(ctx *TermContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#JSONContains.
+	VisitJSONContains(ctx *JSONContainsContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Range.
 	VisitRange(ctx *RangeContext) interface{}
 

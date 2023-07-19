@@ -359,7 +359,8 @@ TEST(Query, ExecTerm) {
             {
                 "term": {
                     "age": {
-                        "values": []
+                        "values": [],
+                        "is_in_field": false
                     }
                 }
             },

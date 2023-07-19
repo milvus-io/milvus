@@ -1023,3 +1023,42 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 		dataType: schemapb.DataType_Bool,
 	}
 }
+
+func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) interface{} {
+	field := ctx.Expr(0).Accept(v)
+	if err := getError(field); err != nil {
+		return err
+	}
+
+	columnInfo := toColumnInfo(field.(*ExprWithType))
+	if columnInfo == nil || !typeutil.IsJSONType(columnInfo.GetDataType()) {
+		return fmt.Errorf(
+			"json_contains operation are only supported on json fields now, got: %s", ctx.Expr(0).GetText())
+	}
+
+	element := ctx.Expr(1).Accept(v)
+	if err := getError(element); err != nil {
+		return err
+	}
+	elementValue := getGenericValue(element)
+	if elementValue == nil {
+		return fmt.Errorf(
+			"json_contains operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
+	}
+
+	values := make([]*planpb.GenericValue, 1)
+	values[0] = elementValue
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_TermExpr{
+			TermExpr: &planpb.TermExpr{
+				ColumnInfo: columnInfo,
+				Values:     values,
+				IsInField:  true,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
