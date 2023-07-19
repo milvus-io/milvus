@@ -28,12 +28,8 @@ func TestPositivelyRelated(t *testing.T) {
 			true,
 		},
 		{
-			JACCARD,
-			false,
-		},
-		{
-			TANIMOTO,
-			false,
+			COSINE,
+			true,
 		},
 		{
 			L2,
@@ -44,11 +40,7 @@ func TestPositivelyRelated(t *testing.T) {
 			false,
 		},
 		{
-			SUPERSTRUCTURE,
-			false,
-		},
-		{
-			SUBSTRUCTURE,
+			JACCARD,
 			false,
 		},
 	}

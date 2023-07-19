@@ -13,8 +13,8 @@ type binaryVectorBaseChecker struct {
 }
 
 func (c binaryVectorBaseChecker) staticCheck(params map[string]string) error {
-	if !CheckStrByValues(params, Metric, BinIDMapMetrics) {
-		return fmt.Errorf("metric type not found or not supported, supported: %v", BinIDMapMetrics)
+	if !CheckStrByValues(params, Metric, BinMetrics) {
+		return fmt.Errorf("metric type not found or not supported, supported: %v", BinMetrics)
 	}
 
 	return nil

@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -117,7 +118,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: "TANIMOTO",
+						Value: metric.JACCARD,
 					},
 				},
 			},

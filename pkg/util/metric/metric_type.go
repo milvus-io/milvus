@@ -30,13 +30,4 @@ const (
 
 	// JACCARD represents jaccard distance
 	JACCARD MetricType = "JACCARD"
-
-	// TANIMOTO represents tanimoto distance
-	TANIMOTO MetricType = "TANIMOTO"
-
-	// SUBSTRUCTURE represents substructure distance
-	SUBSTRUCTURE MetricType = "SUBSTRUCTURE"
-
-	// SUPERSTRUCTURE represents superstructure distance
-	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
 )

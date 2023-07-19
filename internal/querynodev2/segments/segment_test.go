@@ -12,6 +12,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -187,7 +188,7 @@ func (suite *SegmentSuite) TestValidateIndexedFieldsData() {
 
 	// with index but doesn't have raw data
 	index := suite.sealed.GetIndex(101)
-	_, indexParams := genIndexParams(IndexHNSW, L2)
+	_, indexParams := genIndexParams(IndexHNSW, metric.L2)
 	index.IndexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
 	DeleteSegment(suite.sealed)
 	suite.True(suite.sealed.ExistIndex(101))

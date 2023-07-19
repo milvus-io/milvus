@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 type indexTestCase struct {
@@ -201,7 +202,7 @@ func genFloatVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 			typeParams: nil,
 			indexParams: map[string]string{
 				common.IndexTypeKey:  IndexFaissIVFPQ,
-				common.MetricTypeKey: L2,
+				common.MetricTypeKey: metric.L2,
 				common.DimKey:        strconv.Itoa(dim),
 				"nlist":              strconv.Itoa(nlist),
 				"m":                  strconv.Itoa(m),
@@ -213,7 +214,7 @@ func genFloatVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 			typeParams: nil,
 			indexParams: map[string]string{
 				common.IndexTypeKey:  IndexFaissIVFFlat,
-				common.MetricTypeKey: L2,
+				common.MetricTypeKey: metric.L2,
 				common.DimKey:        strconv.Itoa(dim),
 				"nlist":              strconv.Itoa(nlist),
 			},
@@ -228,7 +229,7 @@ func genBinaryVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 			typeParams: nil,
 			indexParams: map[string]string{
 				common.IndexTypeKey:  IndexFaissBinIVFFlat,
-				common.MetricTypeKey: Jaccard,
+				common.MetricTypeKey: metric.JACCARD,
 				common.DimKey:        strconv.Itoa(dim),
 				"nlist":              strconv.Itoa(nlist),
 				"nbits":              strconv.Itoa(nbits),

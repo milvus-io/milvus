@@ -362,8 +362,7 @@ ValidateIndexMetricType(const std::string_view metric_type,
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         // binary
         if (metric_type != knowhere::Metric::HAMMING &&
-            metric_type != knowhere::Metric::JACCARD &&
-            metric_type != knowhere::Metric::TANIMOTO) {
+            metric_type != knowhere::Metric::JACCARD) {
             std::string msg = "Index metric type " + metric_type +
                               " does not match index type " + index_type;
             LOG_SERVER_ERROR_ << msg;
@@ -398,8 +397,7 @@ ValidateSearchMetricType(const std::string_view metric_type, bool is_binary) {
     } else {
         // float
         if (metric_type == knowhere::Metric::HAMMING ||
-            metric_type == knowhere::Metric::JACCARD ||
-            metric_type == knowhere::Metric::TANIMOTO) {
+            metric_type == knowhere::Metric::JACCARD) {
             std::string msg =
                 "Cannot search float entities with index metric type " +
                 metric_type;

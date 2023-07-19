@@ -31,7 +31,6 @@ func Test_binFlatChecker_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(128),
 		Metric: metric.COSINE,
 	}
-
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.HAMMING,
@@ -39,18 +38,6 @@ func Test_binFlatChecker_CheckTrain(t *testing.T) {
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.JACCARD,
-	}
-	p6 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.TANIMOTO,
-	}
-	p7 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.SUBSTRUCTURE,
-	}
-	p8 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {
@@ -64,9 +51,6 @@ func Test_binFlatChecker_CheckTrain(t *testing.T) {
 		{p3, false},
 		{p4, true},
 		{p5, true},
-		{p6, true},
-		{p7, true},
-		{p8, true},
 	}
 
 	c := newBinFlatChecker()

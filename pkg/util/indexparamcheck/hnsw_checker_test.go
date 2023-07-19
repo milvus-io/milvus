@@ -49,7 +49,6 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		EFConstruction: strconv.Itoa(200),
 		Metric:         metric.COSINE,
 	}
-
 	p4 := map[string]string{
 		DIM:            strconv.Itoa(128),
 		HNSWM:          strconv.Itoa(16),
@@ -61,24 +60,6 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		HNSWM:          strconv.Itoa(16),
 		EFConstruction: strconv.Itoa(200),
 		Metric:         metric.JACCARD,
-	}
-	p6 := map[string]string{
-		DIM:            strconv.Itoa(128),
-		HNSWM:          strconv.Itoa(16),
-		EFConstruction: strconv.Itoa(200),
-		Metric:         metric.TANIMOTO,
-	}
-	p7 := map[string]string{
-		DIM:            strconv.Itoa(128),
-		HNSWM:          strconv.Itoa(16),
-		EFConstruction: strconv.Itoa(200),
-		Metric:         metric.SUBSTRUCTURE,
-	}
-	p8 := map[string]string{
-		DIM:            strconv.Itoa(128),
-		HNSWM:          strconv.Itoa(16),
-		EFConstruction: strconv.Itoa(200),
-		Metric:         metric.SUPERSTRUCTURE,
 	}
 
 	cases := []struct {
@@ -95,9 +76,6 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		{p3, true},
 		{p4, true},
 		{p5, true},
-		{p6, false},
-		{p7, false},
-		{p8, false},
 	}
 
 	c := newHnswChecker()

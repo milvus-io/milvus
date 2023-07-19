@@ -65,7 +65,6 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
 	}
-
 	p4 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.HAMMING,
@@ -76,28 +75,6 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 	p5 := map[string]string{
 		DIM:    strconv.Itoa(128),
 		Metric: metric.JACCARD,
-		NLIST:  strconv.Itoa(100),
-		IVFM:   strconv.Itoa(4),
-		NBITS:  strconv.Itoa(8),
-	}
-	p6 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.TANIMOTO,
-		NLIST:  strconv.Itoa(100),
-		IVFM:   strconv.Itoa(4),
-		NBITS:  strconv.Itoa(8),
-	}
-
-	p7 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.SUBSTRUCTURE,
-		NLIST:  strconv.Itoa(100),
-		IVFM:   strconv.Itoa(4),
-		NBITS:  strconv.Itoa(8),
-	}
-	p8 := map[string]string{
-		DIM:    strconv.Itoa(128),
-		Metric: metric.SUPERSTRUCTURE,
 		NLIST:  strconv.Itoa(100),
 		IVFM:   strconv.Itoa(4),
 		NBITS:  strconv.Itoa(8),
@@ -119,10 +96,6 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 
 		{p4, true},
 		{p5, true},
-		{p6, true},
-
-		{p7, false},
-		{p8, false},
 	}
 
 	c := newBinIVFFlatChecker()

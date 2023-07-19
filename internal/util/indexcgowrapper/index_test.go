@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -21,13 +22,6 @@ const (
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 
 	IndexHNSW = "HNSW"
-
-	// metric type
-	L2       = "L2"
-	IP       = "IP"
-	hamming  = "HAMMING"
-	Jaccard  = "JACCARD"
-	tanimoto = "TANIMOTO"
 
 	dim            = 8
 	nlist          = 100
@@ -50,26 +44,25 @@ type vecTestCase struct {
 
 func generateFloatVectorTestCases() []vecTestCase {
 	return []vecTestCase{
-		{IndexFaissIDMap, L2, false, schemapb.DataType_FloatVector},
-		{IndexFaissIDMap, IP, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFFlat, L2, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFFlat, IP, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFPQ, L2, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFPQ, IP, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFSQ8, L2, false, schemapb.DataType_FloatVector},
-		{IndexFaissIVFSQ8, IP, false, schemapb.DataType_FloatVector},
-		{IndexHNSW, L2, false, schemapb.DataType_FloatVector},
-		{IndexHNSW, IP, false, schemapb.DataType_FloatVector},
+		{IndexFaissIDMap, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexFaissIDMap, metric.IP, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFFlat, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFFlat, metric.IP, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFPQ, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFPQ, metric.IP, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFSQ8, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexFaissIVFSQ8, metric.IP, false, schemapb.DataType_FloatVector},
+		{IndexHNSW, metric.L2, false, schemapb.DataType_FloatVector},
+		{IndexHNSW, metric.IP, false, schemapb.DataType_FloatVector},
 	}
 }
 
 func generateBinaryVectorTestCases() []vecTestCase {
 	return []vecTestCase{
-		{IndexFaissBinIVFFlat, Jaccard, true, schemapb.DataType_BinaryVector},
-		{IndexFaissBinIVFFlat, hamming, true, schemapb.DataType_BinaryVector},
-		{IndexFaissBinIVFFlat, tanimoto, true, schemapb.DataType_BinaryVector},
-		{IndexFaissBinIDMap, Jaccard, true, schemapb.DataType_BinaryVector},
-		{IndexFaissBinIDMap, hamming, true, schemapb.DataType_BinaryVector},
+		{IndexFaissBinIVFFlat, metric.JACCARD, true, schemapb.DataType_BinaryVector},
+		{IndexFaissBinIVFFlat, metric.HAMMING, true, schemapb.DataType_BinaryVector},
+		{IndexFaissBinIDMap, metric.JACCARD, true, schemapb.DataType_BinaryVector},
+		{IndexFaissBinIDMap, metric.HAMMING, true, schemapb.DataType_BinaryVector},
 	}
 }
 
