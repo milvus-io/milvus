@@ -48,7 +48,8 @@ get_google_cloud_storage_config() {
     auto iamEndPoint = "";
     auto bucketName = "gcp-zilliz-infra-test";
 
-    return StorageConfig{endpoint, bucketName, accessKey, accessValue, rootPath, "minio", iamEndPoint, useSSL, useIam};
+    return StorageConfig{endpoint, bucketName,  accessKey, accessValue, rootPath,
+                         "minio",  iamEndPoint, "error",   useSSL,      useIam};
 }
 
 class GoogleChunkManagerTest : public testing::Test {

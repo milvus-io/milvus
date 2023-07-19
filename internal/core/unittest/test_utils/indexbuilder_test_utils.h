@@ -93,9 +93,11 @@ get_default_storage_config() {
     auto useSSL = minioConfig["useSSL"].as<bool>();
     auto useIam = minioConfig["useIAM"].as<bool>();
     auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
+    auto logLevel = minioConfig["logLevel"].as<std::string>();
     auto bucketName = minioConfig["bucketName"].as<std::string>();
 
-    return StorageConfig{endpoint, bucketName, accessKey, accessValue, rootPath, "minio", iamEndPoint, useSSL, useIam};
+    return StorageConfig{endpoint, bucketName,  accessKey, accessValue, rootPath,
+                         "minio",  iamEndPoint, logLevel,  useSSL,      useIam};
 }
 
 void

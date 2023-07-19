@@ -84,6 +84,7 @@ typedef struct CStorageConfig {
     const char* remote_root_path;
     const char* storage_type;
     const char* iam_endpoint;
+    const char* log_level;
     bool useSSL;
     bool useIAM;
 } CStorageConfig;
