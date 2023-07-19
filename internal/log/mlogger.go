@@ -60,7 +60,7 @@ func (l *MLogger) r() utils.RateLimiter {
 // RatedDebug calls log.Debug with RateLimiter.
 func (l *MLogger) RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 	if l.r().CheckCredit(cost) {
-		l.Debug(msg, fields...)
+		l.WithOptions(zap.AddCallerSkip(1)).Debug(msg, fields...)
 		return true
 	}
 	return false
@@ -69,7 +69,7 @@ func (l *MLogger) RatedDebug(cost float64, msg string, fields ...zap.Field) bool
 // RatedInfo calls log.Info with RateLimiter.
 func (l *MLogger) RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 	if l.r().CheckCredit(cost) {
-		l.Info(msg, fields...)
+		l.WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
 		return true
 	}
 	return false
@@ -78,7 +78,7 @@ func (l *MLogger) RatedInfo(cost float64, msg string, fields ...zap.Field) bool 
 // RatedWarn calls log.Warn with RateLimiter.
 func (l *MLogger) RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 	if l.r().CheckCredit(cost) {
-		l.Warn(msg, fields...)
+		l.WithOptions(zap.AddCallerSkip(1)).Warn(msg, fields...)
 		return true
 	}
 	return false
