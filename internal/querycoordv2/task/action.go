@@ -31,6 +31,7 @@ type ActionType = int32
 const (
 	ActionTypeGrow ActionType = iota + 1
 	ActionTypeReduce
+	ActionTypeUpdate
 )
 
 type Action interface {
@@ -71,7 +72,7 @@ type SegmentAction struct {
 	segmentID UniqueID
 	scope     querypb.DataScope
 
-	isReleaseCommitted atomic.Bool
+	rpcReturned atomic.Bool
 }
 
 func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID) *SegmentAction {
@@ -81,10 +82,10 @@ func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID U
 func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID, scope querypb.DataScope) *SegmentAction {
 	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{
-		BaseAction:         base,
-		segmentID:          segmentID,
-		scope:              scope,
-		isReleaseCommitted: *atomic.NewBool(false),
+		BaseAction:  base,
+		segmentID:   segmentID,
+		scope:       scope,
+		rpcReturned: *atomic.NewBool(false),
 	}
 }
 
@@ -119,7 +120,9 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		if !funcutil.SliceContain(segments, action.SegmentID()) {
 			return true
 		}
-		return action.isReleaseCommitted.Load()
+		return action.rpcReturned.Load()
+	} else if action.Type() == ActionTypeUpdate {
+		return action.rpcReturned.Load()
 	}
 
 	return true

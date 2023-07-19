@@ -213,7 +213,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow:
+	case ActionTypeGrow, ActionTypeUpdate:
 		ex.loadSegment(task, step)
 
 	case ActionTypeReduce:
@@ -225,6 +225,7 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
+	defer action.rpcReturned.Store(true)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -276,7 +277,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	switch GetTaskType(task) {
 	case TaskTypeGrow:
 		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.NextTarget)
-	case TaskTypeMove:
+	case TaskTypeMove, TaskTypeUpdate:
 		readableVersion = ex.targetMgr.GetCollectionTargetVersion(task.CollectionID(), meta.CurrentTarget)
 	}
 	loadInfo := utils.PackSegmentLoadInfo(resp, indexes, readableVersion)
@@ -309,7 +310,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.isReleaseCommitted.Store(true)
+	defer action.rpcReturned.Store(true)
 
 	log := log.With(
 		zap.Int64("taskID", task.ID()),

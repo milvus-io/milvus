@@ -199,24 +199,16 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionIDs ..
 	for retrieveUnIndexed() {
 	}
 
-	for segId := range unIndexedIDs {
-		segInfo := segmentInfos[segId]
-		if segInfo.GetState() == commonpb.SegmentState_Dropped {
-			unIndexedIDs.Remove(segId)
-			indexedIDs.Insert(segId)
-		}
-	}
-
-	unIndexedIDs.Insert(growingIDs.Collect()...)
+	// unindexed is flushed segments as well
+	indexedIDs.Insert(unIndexedIDs.Collect()...)
 
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
 		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
 		FlushedSegmentIds:   indexedIDs.Collect(),
-		UnflushedSegmentIds: unIndexedIDs.Collect(),
+		UnflushedSegmentIds: growingIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
-		// IndexedSegmentIds: indexed.Collect(),
 	}
 }
 
