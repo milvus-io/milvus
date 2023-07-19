@@ -29,14 +29,15 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 const (
@@ -469,7 +470,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				// since here we always return task list to client no matter something missed.
 				// We make the method setCollectionPartitionName() returns error
 				// because we need to make sure coverage all the code branch in unittest case.
-				_ = m.setCollectionPartitionName("", cID, pID, newTask)
+				_ = m.setCollectionPartitionName(req.GetDbName(), cID, pID, newTask)
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
 				log.Info("new task created as pending task",
@@ -484,7 +485,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			}
 			log.Info("row-based import request processed", zap.Any("task IDs", taskList))
 		} else {
-			// TODO: Merge duplicated code :(
+			// qTODO: Merge duplicated code :(
 			// for column-based, all files is a task
 			tID, _, err := m.idAllocator(1)
 			if err != nil {
