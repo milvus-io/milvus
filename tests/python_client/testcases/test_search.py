@@ -3263,6 +3263,12 @@ class TestCollectionSearch(TestcaseBase):
                 4. check the result vectors should be equal to the inserted
         expected: search success
         """
+        if index in ["IVF_SQ8", "IVF_PQ"]:
+            pytest.skip("IVF_SQ8 and IVF_PQ do not support output vector now")
+        if index == "DISKANN" and metrics == "IP":
+            pytest.skip("DISKANN(IP) does not support output vector now")
+        if metrics == "COSINE":
+            pytest.skip("COSINE does not support output vector now")
         # 1. create a collection and insert data
         collection_w, _vectors = self.init_collection_general(prefix, True, is_index=False)[:2]
 
@@ -3428,7 +3434,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_int64_field_name],
                                                         ["*", default_search_field]])
-    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async, enable_dynamic_field):
+    def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async):
         """
         target: test search with output fields using wildcard
         method: search with one output_field (wildcard)
@@ -3436,9 +3442,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      auto_id=auto_id,
-                                                                      enable_dynamic_field=
-                                                                      enable_dynamic_field)[0:4]
+                                                                      auto_id=auto_id)[0:4]
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
         output_fields = cf.get_wildcard_output_field_names(collection_w, wildcard_output_fields)
