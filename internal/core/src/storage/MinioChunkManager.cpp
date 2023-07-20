@@ -89,7 +89,7 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 }
 
 void
-MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
+MinioChunkManager::InitSDKAPI(RemoteStorageType type, bool useIAM) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
@@ -103,9 +103,8 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
         sigemptyset(&psa.sa_mask);
         sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
-        if (type == RemoteStorageType::GOOGLE_CLOUD) {
+        if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
-                // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
                 auto credentials = std::make_shared<
                     google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
                         ComputeEngineCredentials>();
@@ -149,19 +148,26 @@ MinioChunkManager::BuildS3Client(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             false);
     } else {
-        AssertInfo(!storage_config.access_key_id.empty(),
-                   "if not use iam, access key should not be empty");
-        AssertInfo(!storage_config.access_key_value.empty(),
-                   "if not use iam, access value should not be empty");
-
-        client_ = std::make_shared<Aws::S3::S3Client>(
-            Aws::Auth::AWSCredentials(
-                ConvertToAwsString(storage_config.access_key_id),
-                ConvertToAwsString(storage_config.access_key_value)),
-            config,
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            false);
+        BuildAccessKeyClient(storage_config, config);
     }
+}
+
+void
+MinioChunkManager::BuildAccessKeyClient(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
+    AssertInfo(!storage_config.access_key_id.empty(),
+               "if not use iam, access key should not be empty");
+    AssertInfo(!storage_config.access_key_value.empty(),
+               "if not use iam, access value should not be empty");
+
+    client_ = std::make_shared<Aws::S3::S3Client>(
+        Aws::Auth::AWSCredentials(
+            ConvertToAwsString(storage_config.access_key_id),
+            ConvertToAwsString(storage_config.access_key_value)),
+        config,
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+        false);
 }
 
 void
@@ -185,7 +191,7 @@ MinioChunkManager::BuildAliyunCloudClient(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             true);
     } else {
-        throw std::runtime_error("aliyun cloud only support iam mode now");
+        BuildAccessKeyClient(storage_config, config);
     }
 }
 
@@ -200,7 +206,7 @@ MinioChunkManager::BuildGoogleCloudClient(
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             false);
     } else {
-        throw std::runtime_error("google cloud only support iam mode now");
+        BuildAccessKeyClient(storage_config, config);
     }
 }
 
@@ -216,7 +222,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         storageType = RemoteStorageType::S3;
     }
 
-    InitSDKAPI(storageType);
+    InitSDKAPI(storageType, storage_config.useIAM);
 
     // The ClientConfiguration default constructor will take a long time.
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
