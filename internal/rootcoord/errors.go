@@ -19,12 +19,15 @@
 package rootcoord
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var errSegmentNotExist = errors.New("segment not exist")
 
 func setNotServingStatus(status *commonpb.Status, stateCode commonpb.StateCode) {
 	reason := fmt.Sprintf("sate code: %s", stateCode.String())
