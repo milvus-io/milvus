@@ -123,12 +123,6 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 		return fmt.Errorf("set tSafe failed, err = %w", err)
 	}
 	ts.set(timestamp)
-	log := log.With().WithOptions(zap.AddCallerSkip(1))
-	log.Info("yah01: set tsafe",
-		zap.String("channel", vChannel),
-		zap.Uint64("timestamp", timestamp),
-		zap.Stack("stack"),
-	)
 	t.notifyAll(vChannel)
 	return nil
 }
