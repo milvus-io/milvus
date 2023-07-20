@@ -2318,6 +2318,9 @@ type dataNodeConfig struct {
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
+	// timeout for bulkinsert
+	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
+
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
 }
@@ -2477,6 +2480,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 	}
 	p.SkipBFStatsLoad.Init(base.mgr)
+
+	p.BulkInsertTimeoutSeconds = ParamItem{
+		Key:          "datanode.bulkinsert.timeout.seconds",
+		Version:      "2.3.0",
+		PanicIfEmpty: false,
+		DefaultValue: "18000",
+	}
+	p.BulkInsertTimeoutSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
