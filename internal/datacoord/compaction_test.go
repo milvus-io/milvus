@@ -623,6 +623,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		}
 
 		err := c.completeCompaction(&compactionResult)
+		assert.NoError(t, err)
 
 		segID, ok := <-flushCh
 		assert.True(t, ok)
