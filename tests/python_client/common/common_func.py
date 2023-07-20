@@ -165,6 +165,27 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     return schema
 
 
+def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                      auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
+    if enable_dynamic_field:
+        if primary_field is ct.default_int64_field_name:
+            fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
+        elif primary_field is ct.default_string_field_name:
+            fields = [gen_string_field(), gen_float_vec_field(dim=dim)]
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+    else:
+        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
+                  gen_float_vec_field(dim=dim)]
+        if with_json is False:
+            fields.remove(gen_json_field())
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    enable_dynamic_field=enable_dynamic_field)
+    return schema
+
+
 def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, is_binary=False, dim=ct.default_dim, **kwargs):
     if is_binary:
@@ -457,13 +478,56 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return data
 
 
-def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
+def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000):
+    str_value = gen_str_by_length(length=varchar_len)
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    string_values = [str(i) for i in range(nb)]
+    string_values = [f"{str(i)}_{str_value}" for i in range(nb)]
     float_vec_values = []  # placeholder for float_vec
     data = [int_values, float_values, string_values, float_vec_values]
     return data
+ 
+
+def get_list_data_by_schema(nb=ct.default_nb, schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    fields_not_auto_id = []
+    for field in fields:
+        if not field.auto_id:
+            fields_not_auto_id.append(field)
+    data = []
+    for i in range(nb):
+        tmp = {}
+        for field in fields_not_auto_id:
+            tmp[field.name] = gen_data_by_type(field)
+        data.append(tmp)
+    return data
+
+def gen_data_by_type(field):
+    data_type = field.dtype
+    if data_type == DataType.BOOL:
+        return random.choice([True, False])
+    if data_type == DataType.INT8:
+        return random.randint(-128, 127)
+    if data_type == DataType.INT16:
+        return random.randint(-32768, 32767)
+    if data_type == DataType.INT32:
+        return random.randint(-2147483648, 2147483647)
+    if data_type == DataType.INT64:
+        return random.randint(-9223372036854775808, 9223372036854775807)
+    if data_type == DataType.FLOAT:
+        return np.float64(random.random())  # Object of type float32 is not JSON serializable, so set it as float64
+    if data_type == DataType.DOUBLE:
+        return np.float64(random.random())
+    if data_type == DataType.VARCHAR:
+        max_length = field.params['max_length']
+        length = random.randint(0, max_length)
+        return "".join([chr(random.randint(97, 122)) for _ in range(length)])
+    if data_type == DataType.FLOAT_VECTOR:
+        dim = field.params['dim']
+        return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+    return None
 
 
 def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
