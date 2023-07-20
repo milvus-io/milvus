@@ -438,8 +438,10 @@ func genStorageConfig() *indexpb.StorageConfig {
 		BucketName:      Params.MinioCfg.BucketName,
 		RootPath:        Params.MinioCfg.RootPath,
 		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
+		Region:          Params.MinioCfg.Region,
 		UseSSL:          Params.MinioCfg.UseSSL,
 		UseIAM:          Params.MinioCfg.UseIAM,
+		UseVirtualHost:  Params.MinioCfg.UseVirtualHost,
 		StorageType:     Params.CommonCfg.StorageType,
 	}
 }

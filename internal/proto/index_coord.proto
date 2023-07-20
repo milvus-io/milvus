@@ -208,6 +208,8 @@ message StorageConfig {
   bool useIAM = 7;
   string IAMEndpoint = 8;
   string storage_type = 9;
+  bool use_virtual_host = 10;
+  string region = 11;
 }
 
 message CreateJobRequest {
