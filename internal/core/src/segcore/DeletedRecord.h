@@ -80,7 +80,7 @@ struct DeletedRecord {
         // Truncate the overlapping prefix
         if (n > 0) {
             auto last = timestamps_[n - 1];
-            divide_point = std::lower_bound(timestamps, timestamps + size, last) - timestamps;
+            divide_point = std::lower_bound(timestamps, timestamps + size, last + 1) - timestamps;
         }
 
         // All these delete records have been applied

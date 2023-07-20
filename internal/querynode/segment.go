@@ -142,11 +142,10 @@ type Segment struct {
 	version       UniqueID
 	startPosition *internalpb.MsgPosition // for growing segment release
 
-	vChannelID              Channel
-	lastMemSize             int64
-	lastRowCount            int64
-	deleteBuffer            DeleteRecords
-	flushedDeletedTimestamp Timestamp
+	vChannelID   Channel
+	lastMemSize  int64
+	lastRowCount int64
+	deleteBuffer DeleteRecords
 
 	recentlyModified  *atomic.Bool
 	segmentType       *atomic.Int32
@@ -819,16 +818,6 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
-	start := sort.Search(len(timestamps), func(i int) bool {
-		return timestamps[i] >= s.flushedDeletedTimestamp+1
-	})
-	// all delete records have been applied, skip them
-	if start == len(timestamps) {
-		return nil
-	}
-	pks = pks[start:]
-	timestamps = timestamps[start:]
-
 	var cSize = C.int64_t(len(pks))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 	offset := C.int64_t(0)
@@ -885,7 +874,6 @@ func (s *Segment) FlushDelete() error {
 			return err
 		}
 
-		s.flushedDeletedTimestamp = tss[len(pks)-1]
 		return nil
 	})
 }
