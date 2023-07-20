@@ -353,9 +353,9 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	metricMutation := &segMetricMutation{
 		stateChange: make(map[string]int),
 	}
-	// Update segment state and prepare segment metric update.
-	updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
+		// Update segment state and prepare segment metric update.
+		updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
 		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
 			log.Error("meta update: setting segment state - failed to alter segments",
 				zap.Int64("segment ID", segmentID),
@@ -365,9 +365,9 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		}
 		// Apply segment metric update after successful meta update.
 		metricMutation.commit()
+		// Update in-memory meta.
+		m.segments.SetState(segmentID, targetState)
 	}
-	// Update in-memory meta.
-	m.segments.SetState(segmentID, targetState)
 	log.Info("meta update: setting segment state - complete",
 		zap.Int64("segment ID", segmentID),
 		zap.String("target state", targetState.String()))
