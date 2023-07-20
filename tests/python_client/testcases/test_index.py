@@ -1156,6 +1156,26 @@ class TestNewIndexBinary(TestcaseBase):
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "Invalid metric_type: L2, which does not match the index type: BIN_IVF_FLAT"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE", "JACCARD", "HAMMING", "TANIMOTO"])
+    def test_create_binary_index_HNSW(self, metric_type):
+        """
+        target: test create binary index hnsw
+        method: create binary index hnsw
+        expected: succeed
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
+        if metric_type == "TANIMOTO":
+            collection_w.create_index(default_binary_vec_field_name, binary_index_params,
+                                      check_task=CheckTasks.err_res,
+                                      check_items={ct.err_code: 1,
+                                                   ct.err_msg: "metric type not found or not supported"})
+        else:
+            collection_w.create_index(default_binary_vec_field_name, binary_index_params)
+            assert collection_w.index()[0].params == binary_index_params
+
     """
         ******************************************************************
           The following cases are used to test `drop_index` function
