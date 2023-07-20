@@ -33,7 +33,7 @@ macro(build_aws_sdk_s3)
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
     if (APPLE)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -Wno-error=strict-prototypes")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -Wmissing-braces -Wmissing-field-initializers -Wno-error=strict-prototypes")
         if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
             set(CPU_ARCH "x86_64")
         elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")

@@ -650,13 +650,13 @@ func (_m *IMetaTable) RemovePartition(ctx context.Context, dbID int64, collectio
 	return r0
 }
 
-// RenameCollection provides a mock function with given fields: ctx, dbName, oldName, newName, ts
-func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newName string, ts uint64) error {
-	ret := _m.Called(ctx, dbName, oldName, newName, ts)
+// RenameCollection provides a mock function with given fields: ctx, dbName, oldName, newDBName, newName, ts
+func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts uint64) error {
+	ret := _m.Called(ctx, dbName, oldName, newDBName, newName, ts)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, uint64) error); ok {
-		r0 = rf(ctx, dbName, oldName, newName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string, uint64) error); ok {
+		r0 = rf(ctx, dbName, oldName, newDBName, newName, ts)
 	} else {
 		r0 = ret.Error(0)
 	}

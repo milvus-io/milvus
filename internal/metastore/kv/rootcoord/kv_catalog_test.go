@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1008,6 +1009,24 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		newC := &model.Collection{TenantID: "2", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
 		assert.Error(t, err)
+	})
+
+	t.Run("modify db name", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := kv.NewMockSnapshotKV()
+		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+			assert.ElementsMatch(t, []string{BuildCollectionKey(0, collectionID)}, removals)
+			assert.Equal(t, len(saves), 1)
+			assert.Contains(t, maps.Keys(saves), BuildCollectionKey(1, collectionID))
+			return nil
+		}
+
+		kc := &Catalog{Snapshot: snapshot}
+		ctx := context.Background()
+		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
+		newC := &model.Collection{DBID: 1, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
+		assert.NoError(t, err)
 	})
 }
 
