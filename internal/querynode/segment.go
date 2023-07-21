@@ -875,6 +875,8 @@ func (s *Segment) deleteImpl(pks []primaryKey, timestamps []Timestamp) error {
 
 	status := C.Delete(s.segmentPtr, offset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
 
+	log.Info("cgo segmentDelete", zap.Any("segmentID", s.segmentID), zap.Any("pks", pks), zap.Any("timestamps", timestamps))
+
 	if err := HandleCStatus(&status, "flush delete records failed"); err != nil {
 		return err
 	}

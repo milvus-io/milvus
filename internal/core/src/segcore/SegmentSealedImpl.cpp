@@ -351,12 +351,21 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Tim
     }
 
     auto bitmap_holder = get_deleted_bitmap(del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+
+    std::stringstream ss2;
+    ss2 << "stringstream2 bitset: " << bitset << ", ins_barrier: " << ins_barrier << ", bitbitmap_holder: " << bitmap_holder;
+    LOG_SEGCORE_ERROR_ << ss2.str();
+
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
     auto& delete_bitset = *bitmap_holder->bitmap_ptr;
     AssertInfo(delete_bitset.size() == bitset.size(), "Deleted bitmap size not equal to filtered bitmap size");
     bitset |= delete_bitset;
+
+    std::stringstream ss2;
+    ss3 << "stringstream3 bitset: " << bitset << ", ins_barrier: " << ins_barrier << ", delete_bitset: " << delete_bitset;
+    LOG_SEGCORE_ERROR_ << ss3.str();
 }
 
 void
