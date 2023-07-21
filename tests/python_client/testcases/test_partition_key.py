@@ -25,6 +25,7 @@ class TestPartitionKeyParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=[pk_field, int64_field, string_field, vector_field], auto_id=True)
         c_name = cf.gen_unique_str("par_key")
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema)
+        assert len(collection_w.partitions) == ct.default_partition_num
 
         # insert
         nb = 1000
