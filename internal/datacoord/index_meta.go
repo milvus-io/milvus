@@ -545,6 +545,30 @@ func (m *meta) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	return nil
 }
 
+func (m *meta) DeleteTask(buildID int64) error {
+	m.Lock()
+	defer m.Unlock()
+
+	segIdx, ok := m.buildID2SegmentIndex[buildID]
+	if !ok {
+		log.Warn("there is no index with buildID", zap.Int64("buildID", buildID))
+		return nil
+	}
+
+	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.IsDeleted = true
+		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
+	}
+
+	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+
+	log.Info("delete index task success", zap.Int64("buildID", buildID))
+	m.updateIndexTasksMetrics()
+	return nil
+}
+
 // BuildIndex set the index state to be InProgress. It means IndexNode is building the index.
 func (m *meta) BuildIndex(buildID UniqueID) error {
 	m.Lock()

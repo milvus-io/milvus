@@ -1263,3 +1263,29 @@ func TestUpdateSegmentIndexNotExists(t *testing.T) {
 		})
 	})
 }
+
+func TestMeta_DeleteTask_Error(t *testing.T) {
+	m := &meta{buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex)}
+	t.Run("segment index not found", func(t *testing.T) {
+		err := m.DeleteTask(buildID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("segment update failed", func(t *testing.T) {
+		ec := catalogmocks.NewDataCoordCatalog(t)
+		ec.On("AlterSegmentIndexes",
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
+		m.catalog = ec
+
+		m.buildID2SegmentIndex[buildID] = &model.SegmentIndex{
+			SegmentID:    segID,
+			PartitionID:  partID,
+			CollectionID: collID,
+		}
+
+		err := m.DeleteTask(buildID)
+		assert.Error(t, err)
+	})
+}
