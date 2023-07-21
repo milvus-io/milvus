@@ -164,7 +164,7 @@ require (
 	go.opentelemetry.io/proto/otlp v0.9.0 // indirect
 	go.uber.org/multierr v1.6.0
 	golang.org/x/mod v0.8.0 // indirect
-	golang.org/x/net v0.10.0 // indirect
+	golang.org/x/net v0.10.0
 	golang.org/x/oauth2 v0.0.0-20210402161424-2e8d93401602
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/term v0.8.0 // indirect
@@ -185,7 +185,7 @@ require github.com/cockroachdb/errors v1.9.1
 
 require (
 	github.com/aliyun/credentials-go v1.2.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.2.12-0.20230716112826-24039be1d5f9
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.2.12-0.20230720100152-c9e2bb810f38
 	github.com/tidwall/gjson v1.14.4
 )
 
