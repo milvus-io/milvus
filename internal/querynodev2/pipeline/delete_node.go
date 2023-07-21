@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type deleteNode struct {
@@ -61,6 +63,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Dec()
 	nodeMsg := in.(*deleteNodeMsg)
 
 	// partition id = > DeleteData
