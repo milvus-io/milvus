@@ -44,9 +44,10 @@ const (
 	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
 
-	DefaultLogFormat       = "text"
-	DefaultLogLevelForBase = "debug"
-	DefaultRootPath        = ""
+	DefaultLogFormat                         = "text"
+	DefaultLogLevelForBase                   = "debug"
+	DefaultRootPath                          = ""
+	DefaultKnowhereThreadPoolNumRatioInBuild = 1
 )
 
 // Const of Global Config List
