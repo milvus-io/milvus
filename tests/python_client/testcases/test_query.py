@@ -557,6 +557,131 @@ class TestQueryParams(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_query_expr_json_contains(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = 99
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
+        for expression in expressions:
+            res = collection_w.query(expression)[0]
+            assert len(res) == limit
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_list_json_contains(self):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=True)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 4
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_json_field_name: [str(m) for m in range(i, i + limit)],
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field, '1000')", "JSON_CONTAINS(json_field, '1000')"]
+        for expression in expressions:
+            res = collection_w.query(expression, output_fields=["count(*)"])[0]
+            assert res[0]["count(*)"] == limit
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 3
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        tar = 1000
+        expressions = [f"json_contains(json_field['list'], {tar}) && float > {tar - limit // 2}",
+                       f"JSON_CONTAINS(json_field['list'], {tar}) && float > {tar - limit // 2}"]
+        for expression in expressions:
+            res = collection_w.query(expression)[0]
+            assert len(res) == limit // 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_json_contains_pagination(self, enable_dynamic_field):
+        """
+        target: test query with expression using json_contains
+        method: query with expression using json_contains
+        expected: succeed
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
+
+        # 2. insert data
+        limit = ct.default_nb // 3
+        array = []
+        for i in range(ct.default_nb):
+            data = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": [m for m in range(i, i + limit)]},
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0]
+            }
+            array.append(data)
+        collection_w.insert(array)
+
+        # 3. query
+        collection_w.load()
+        expressions = ["json_contains(json_field['list'], 1000)", "JSON_CONTAINS(json_field['list'], 1000)"]
+        offset = random.randint(1, limit)
+        for expression in expressions:
+            res = collection_w.query(expression, limit=limit, offset=offset)[0]
+            assert len(res) == limit - offset
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_field_none_or_empty(self, enable_dynamic_field):
         """
         target: test query with none and empty output field
