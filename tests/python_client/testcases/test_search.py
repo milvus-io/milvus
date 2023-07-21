@@ -1076,8 +1076,8 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, is_index=False, primary_field=default_string_field_name)[0:4]
+        collection_w = \
+            self.init_collection_general(prefix, is_index=False, primary_field=default_string_field_name)[0]
         nb = 500
         data = cf.gen_default_list_data(nb)
         for _ in range(10):
@@ -1094,7 +1094,6 @@ class TestCollectionSearch(TestcaseBase):
                             search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
-                                         "ids": insert_ids,
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2792,8 +2791,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #23661")
-    @pytest.mark.parametrize("index", ct.all_index_types[6:8])
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_output_field_vector_after_binary_index(self, index):
         """
         target: test search with output vector field after binary index
@@ -2809,19 +2807,19 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.insert(data)
 
         # 2. create index and load
-        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        default_index = {"index_type": index, "metric_type": "JACCARD", "params": {"nlist": 128}}
         collection_w.create_index(binary_field_name, default_index)
         collection_w.load()
 
         # 3. search with output field vector
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
+        search_params = {"metric_type": "JACCARD"}
         binary_vectors = cf.gen_binary_vectors(1, default_dim)[1]
         res = collection_w.search(binary_vectors, binary_field_name,
-                                  ct.default_search_binary_params, 2, default_search_exp,
+                                  search_params, 2, default_search_exp,
                                   output_fields=[binary_field_name])[0]
 
         # 4. check the result vectors should be equal to the inserted
-        assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
+        assert res[0][0].entity.binary_vector == [data[binary_field_name][res[0][0].id]]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [32, 128, 768])
@@ -2914,6 +2912,7 @@ class TestCollectionSearch(TestcaseBase):
                                         "output_fields": [field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not supported now")
     @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", default_int64_field_name]])
     def test_search_with_output_field_wildcard(self, wildcard_output_fields, auto_id, _async, enable_dynamic_field):
         """

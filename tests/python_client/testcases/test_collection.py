@@ -1207,7 +1207,7 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Dataframe can not be None."}
+        error = {ct.err_code: 1, ct.err_msg: "Dataframe can not be None."}
         self.collection_wrap.construct_from_dataframe(c_name, None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
