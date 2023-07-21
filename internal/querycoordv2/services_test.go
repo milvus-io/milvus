@@ -1533,6 +1533,19 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 	}
 
+	// channel not subscribed
+	for _, node := range suite.nodes {
+		suite.dist.LeaderViewManager.Update(node)
+	}
+	for _, collection := range suite.collections {
+		req := &querypb.GetShardLeadersRequest{
+			CollectionID: collection,
+		}
+		resp, err := server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotAvailable)
+	}
+
 	// collection not loaded
 	req := &querypb.GetShardLeadersRequest{
 		CollectionID: -1,

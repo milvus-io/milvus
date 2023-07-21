@@ -894,6 +894,9 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		addrs := make([]string, 0, len(leaders))
 
 		var channelErr error
+		if len(leaders) == 0 {
+			channelErr = merr.WrapErrChannelLack("channel not subscribed")
+		}
 
 		// In a replica, a shard is available, if and only if:
 		// 1. The leader is online
