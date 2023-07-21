@@ -220,13 +220,13 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
-			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
+			forwardMsgs = append(forwardMsgs, dmsg)
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
