@@ -445,6 +445,27 @@ func (mgr *TargetManager) GetHistoricalSegmentsByChannel(collectionID int64,
 	return ret
 }
 
+func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
+	channelName string,
+	scope TargetScope) []int64 {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targetMap := mgr.getTarget(scope)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+
+	if collectionTarget == nil {
+		return nil
+	}
+
+	channel := collectionTarget.dmChannels[channelName]
+	if channel == nil {
+		return nil
+	}
+
+	return channel.GetDroppedSegmentIds()
+}
+
 func (mgr *TargetManager) GetHistoricalSegmentsByPartition(collectionID int64,
 	partitionID int64, scope TargetScope) map[int64]*datapb.SegmentInfo {
 	mgr.rwMutex.RLock()

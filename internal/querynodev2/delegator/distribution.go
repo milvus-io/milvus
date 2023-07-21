@@ -29,8 +29,12 @@ import (
 
 const (
 	// wildcardNodeID matches any nodeID, used for force distribution correction.
-	wildcardNodeID       = int64(-1)
+	wildcardNodeID = int64(-1)
+	// for growing segment consumed from channel
 	initialTargetVersion = int64(0)
+
+	// for growing segment which not exist in target, and it's start position < max sealed dml position
+	redundantTargetVersion = int64(-1)
 )
 
 var (
@@ -207,7 +211,7 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 }
 
 // UpdateTargetVersion update readable segment version
-func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
+func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, redundantGrowings []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
@@ -219,6 +223,15 @@ func (d *distribution) SyncTargetVersion(newVersion int64, growingInTarget []int
 			continue
 		}
 		entry.TargetVersion = newVersion
+		d.growingSegments[segmentID] = entry
+	}
+
+	for _, segmentID := range redundantGrowings {
+		entry, ok := d.growingSegments[segmentID]
+		if !ok {
+			continue
+		}
+		entry.TargetVersion = redundantTargetVersion
 		d.growingSegments[segmentID] = entry
 	}
 

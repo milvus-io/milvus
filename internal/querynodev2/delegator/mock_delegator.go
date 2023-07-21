@@ -678,9 +678,9 @@ func (_c *MockShardDelegator_SyncDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// SyncTargetVersion provides a mock function with given fields: newVersion, growingInTarget, sealedInTarget
-func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
-	_m.Called(newVersion, growingInTarget, sealedInTarget)
+// SyncTargetVersion provides a mock function with given fields: newVersion, growingInTarget, sealedInTarget, droppedInTarget
+func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64) {
+	_m.Called(newVersion, growingInTarget, sealedInTarget, droppedInTarget)
 }
 
 // MockShardDelegator_SyncTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncTargetVersion'
@@ -692,13 +692,14 @@ type MockShardDelegator_SyncTargetVersion_Call struct {
 //   - newVersion int64
 //   - growingInTarget []int64
 //   - sealedInTarget []int64
-func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, growingInTarget interface{}, sealedInTarget interface{}) *MockShardDelegator_SyncTargetVersion_Call {
-	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, growingInTarget, sealedInTarget)}
+//   - droppedInTarget []int64
+func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, growingInTarget interface{}, sealedInTarget interface{}, droppedInTarget interface{}) *MockShardDelegator_SyncTargetVersion_Call {
+	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, growingInTarget, sealedInTarget, droppedInTarget)}
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, growingInTarget []int64, sealedInTarget []int64)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]int64), args[2].([]int64))
+		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64))
 	})
 	return _c
 }
@@ -708,7 +709,7 @@ func (_c *MockShardDelegator_SyncTargetVersion_Call) Return() *MockShardDelegato
 	return _c
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
