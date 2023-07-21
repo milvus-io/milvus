@@ -17,11 +17,12 @@
 package indexnode
 
 /*
-#cgo pkg-config: milvus_common milvus_indexbuilder
+#cgo pkg-config: milvus_common milvus_indexbuilder milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>
 #include "common/init_c.h"
+#include "segcore/segcore_init_c.h"
 #include "indexbuilder/init_c.h"
 */
 import "C"
@@ -161,6 +162,9 @@ func (i *IndexNode) initSegcore() {
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
+
+	cKnowhereThreadPoolSize := C.uint32_t(hardware.GetCPUNum() * paramtable.DefaultKnowhereThreadPoolNumRatioInBuild)
+	C.SegcoreSetKnowhereThreadPoolNum(cKnowhereThreadPoolSize)
 
 	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
