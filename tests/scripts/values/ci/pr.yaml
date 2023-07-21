@@ -134,6 +134,7 @@ pulsar:
         memory: "512Mi"
 
   zookeeper:
+    replicaCount: 1
     configData:
       PULSAR_MEM: >
         -Xms1024m
