@@ -1418,6 +1418,8 @@ type ProxyComponent interface {
 	DescribeResourceGroup(ctx context.Context, req *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error)
 
 	Connect(ctx context.Context, req *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error)
+
+	AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error)
 }
 
 // QueryNode is the interface `querynode` package implements

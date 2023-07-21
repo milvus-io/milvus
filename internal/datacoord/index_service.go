@@ -272,7 +272,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
-	}), false)
+	}), false, indexes[0].CreateTime)
 	ret.State = indexInfo.State
 	ret.FailReason = indexInfo.IndexStateFailReason
 
@@ -379,7 +379,7 @@ func (s *Server) countIndexedRows(indexInfo *indexpb.IndexInfo, segments []*Segm
 // completeIndexInfo get the index row count and index task state
 // if realTime, calculate current statistics
 // if not realTime, which means get info of the prior `CreateIndex` action, skip segments created after index's create time
-func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segments []*SegmentInfo, realTime bool) {
+func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.Index, segments []*SegmentInfo, realTime bool, ts Timestamp) {
 	var (
 		cntNone          = 0
 		cntUnissued      = 0
@@ -397,7 +397,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		segIdx, ok := seg.segmentIndexes[index.IndexID]
 
 		if !ok {
-			if seg.GetStartPosition().GetTimestamp() <= index.CreateTime {
+			if seg.GetStartPosition().GetTimestamp() <= ts {
 				cntUnissued++
 			}
 			pendingIndexRows += seg.GetNumOfRows()
@@ -409,7 +409,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 
 		// if realTime, calculate current statistics
 		// if not realTime, skip segments created after index create
-		if !realTime && seg.GetStartPosition().GetTimestamp() > index.CreateTime {
+		if !realTime && seg.GetStartPosition().GetTimestamp() > ts {
 			continue
 		}
 
@@ -506,8 +506,9 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
 		return isFlush(info) && info.CollectionID == req.GetCollectionID()
-	}), false)
-	log.Info("GetIndexBuildProgress success", zap.String("indexName", req.GetIndexName()))
+	}), false, indexes[0].CreateTime)
+	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()))
 	return &indexpb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -523,7 +524,8 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.CollectionID),
 	)
-	log.Info("receive DescribeIndex request", zap.String("indexName", req.GetIndexName()))
+	log.Info("receive DescribeIndex request", zap.String("indexName", req.GetIndexName()),
+		zap.Uint64("timestamp", req.GetTimestamp()))
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -569,7 +571,11 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 			IsAutoIndex:          index.IsAutoIndex,
 			UserIndexParams:      index.UserIndexParams,
 		}
-		s.completeIndexInfo(indexInfo, index, segments, false)
+		createTs := index.CreateTime
+		if req.GetTimestamp() != 0 {
+			createTs = req.GetTimestamp()
+		}
+		s.completeIndexInfo(indexInfo, index, segments, false, createTs)
 		indexInfos = append(indexInfos, indexInfo)
 	}
 	log.Info("DescribeIndex success", zap.String("indexName", req.GetIndexName()))
@@ -628,7 +634,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 			IsAutoIndex:          index.IsAutoIndex,
 			UserIndexParams:      index.UserIndexParams,
 		}
-		s.completeIndexInfo(indexInfo, index, segments, true)
+		s.completeIndexInfo(indexInfo, index, segments, true, index.CreateTime)
 		indexInfos = append(indexInfos, indexInfo)
 	}
 	log.Debug("GetIndexStatisticsResponse success",

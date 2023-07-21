@@ -815,3 +815,52 @@ func TestProxyListDatabase(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
+
+func TestProxy_AllocTimestamp(t *testing.T) {
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.AllocTimestamp(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+
+		resp, err := node.AllocTimestamp(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		m := newMockTimestampAllocator(t)
+		m.On("AllocTimestamp",
+			mock.Anything,
+			mock.Anything,
+		).Return(&rootcoordpb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "failed",
+			},
+			Timestamp: 20230518,
+			Count:     1,
+		}, nil)
+
+		alloc, _ := newTimestampAllocator(m, 199)
+		node := Proxy{
+			tsoAllocator: alloc,
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.AllocTimestamp(context.TODO(), nil)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+}
