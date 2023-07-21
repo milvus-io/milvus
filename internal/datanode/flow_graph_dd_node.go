@@ -216,7 +216,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			dmsg := msg.(*msgstream.DeleteMsg)
 			log.Debug("DDNode receive delete messages",
 				zap.Int64("numRows", dmsg.NumRows),
-				zap.String("vChannelName", ddn.vChannelName))
+				zap.String("vChannelName", ddn.vChannelName), zap.Any("ts", dmsg.EndTimestamp))
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
