@@ -742,3 +742,4 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": 1, "limit": 1},
         )
+
