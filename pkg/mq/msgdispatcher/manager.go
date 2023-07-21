@@ -54,7 +54,7 @@ type dispatcherManager struct {
 	pchannel string
 
 	lagNotifyChan chan struct{}
-	lagTargets    *sync.Map // vchannel -> *target
+	lagTargets    *typeutil.ConcurrentMap[string, *target] // vchannel -> *target
 
 	mu              sync.RWMutex // guards mainDispatcher and soloDispatchers
 	mainDispatcher  *Dispatcher
@@ -73,7 +73,7 @@ func NewDispatcherManager(pchannel string, role string, nodeID int64, factory ms
 		nodeID:          nodeID,
 		pchannel:        pchannel,
 		lagNotifyChan:   make(chan struct{}, 1),
-		lagTargets:      &sync.Map{},
+		lagTargets:      typeutil.NewConcurrentMap[string, *target](),
 		soloDispatchers: make(map[string]*Dispatcher),
 		factory:         factory,
 		closeChan:       make(chan struct{}),
@@ -132,7 +132,7 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		c.deleteMetric(vchannel)
 		log.Info("remove soloDispatcher done")
 	}
-	c.lagTargets.Delete(vchannel)
+	c.lagTargets.GetAndRemove(vchannel)
 }
 
 func (c *dispatcherManager) Num() int {
@@ -170,9 +170,9 @@ func (c *dispatcherManager) Run() {
 			c.tryMerge()
 		case <-c.lagNotifyChan:
 			c.mu.Lock()
-			c.lagTargets.Range(func(vchannel, t any) bool {
-				c.split(t.(*target))
-				c.lagTargets.Delete(vchannel)
+			c.lagTargets.Range(func(vchannel string, t *target) bool {
+				c.split(t)
+				c.lagTargets.GetAndRemove(vchannel)
 				return true
 			})
 			c.mu.Unlock()

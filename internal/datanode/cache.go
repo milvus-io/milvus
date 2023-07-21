@@ -16,9 +16,7 @@
 
 package datanode
 
-import (
-	"sync"
-)
+import "github.com/milvus-io/milvus/pkg/util/typeutil"
 
 // Cache stores flushing segments' ids to prevent flushing the same segment again and again.
 //
@@ -28,37 +26,33 @@ import (
 //	 After the flush procedure, whether the segment successfully flushed or not,
 //	 it'll be removed from the cache. So if flush failed, the secondary flush can be triggered.
 type Cache struct {
-	cacheMap sync.Map
+	*typeutil.ConcurrentSet[UniqueID]
 }
 
 // newCache returns a new Cache
 func newCache() *Cache {
 	return &Cache{
-		cacheMap: sync.Map{},
+		ConcurrentSet: typeutil.NewConcurrentSet[UniqueID](),
 	}
 }
 
 // checkIfCached returns whether unique id is in cache
 func (c *Cache) checkIfCached(key UniqueID) bool {
-	_, ok := c.cacheMap.Load(key)
-	return ok
+	return c.Contain(key)
 }
 
 // Cache caches a specific ID into the cache
 func (c *Cache) Cache(ID UniqueID) {
-	c.cacheMap.Store(ID, struct{}{})
+	c.Insert(ID)
 }
 
 // checkOrCache returns true if `key` is present.
 // Otherwise, it returns false and stores `key` into cache.
 func (c *Cache) checkOrCache(key UniqueID) bool {
-	_, exist := c.cacheMap.LoadOrStore(key, struct{}{})
-	return exist
+	return !c.Insert(key)
 }
 
 // Remove removes a set of IDs from the cache
 func (c *Cache) Remove(IDs ...UniqueID) {
-	for _, id := range IDs {
-		c.cacheMap.Delete(id)
-	}
+	c.ConcurrentSet.Remove(IDs...)
 }

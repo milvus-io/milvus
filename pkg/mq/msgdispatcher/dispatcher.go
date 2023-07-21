@@ -69,7 +69,7 @@ type Dispatcher struct {
 	curTs    atomic.Uint64
 
 	lagNotifyChan chan struct{}
-	lagTargets    *sync.Map // vchannel -> *target
+	lagTargets    *typeutil.ConcurrentMap[string, *target] // vchannel -> *target
 
 	// vchannel -> *target, lock free since we guarantee that
 	// it's modified only after dispatcher paused or terminated
@@ -85,7 +85,7 @@ func NewDispatcher(factory msgstream.Factory,
 	subName string,
 	subPos SubPos,
 	lagNotifyChan chan struct{},
-	lagTargets *sync.Map,
+	lagTargets *typeutil.ConcurrentMap[string, *target],
 ) (*Dispatcher, error) {
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
@@ -227,7 +227,7 @@ func (d *Dispatcher) work() {
 					t.pos = pack.StartPositions[0]
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
-					d.lagTargets.LoadOrStore(t.vchannel, t)
+					d.lagTargets.Insert(t.vchannel, t)
 					d.nonBlockingNotify()
 					delete(d.targets, vchannel)
 					log.Warn("lag target notified", zap.Error(err))

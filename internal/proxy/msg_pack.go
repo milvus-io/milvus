@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"sync"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -247,7 +246,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 		}
 
 		errGroup, _ := errgroup.WithContext(ctx)
-		partition2Msgs := sync.Map{}
+		partition2Msgs := typeutil.NewConcurrentMap[string, []msgstream.TsMsg]()
 		for partitionName, offsets := range partition2RowOffsets {
 			partitionName := partitionName
 			offsets := offsets
@@ -257,7 +256,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 					return err
 				}
 
-				partition2Msgs.Store(partitionName, msgs)
+				partition2Msgs.Insert(partitionName, msgs)
 				return nil
 			})
 		}
@@ -271,8 +270,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 			return nil, err
 		}
 
-		partition2Msgs.Range(func(k, v interface{}) bool {
-			msgs := v.([]msgstream.TsMsg)
+		partition2Msgs.Range(func(name string, msgs []msgstream.TsMsg) bool {
 			msgPack.Msgs = append(msgPack.Msgs, msgs...)
 			return true
 		})

@@ -103,7 +103,7 @@ func TestCompactionExecutor(t *testing.T) {
 		// wait for task enqueued
 		found := false
 		for !found {
-			_, found = ex.executing.Load(mc.getPlanID())
+			found = ex.executing.Contain(mc.getPlanID())
 		}
 
 		ex.stopExecutingtaskByVChannelName("mock")

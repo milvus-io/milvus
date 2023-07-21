@@ -7,9 +7,10 @@ import "C"
 
 import (
 	"math"
-	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const maxByteArrayLen = math.MaxInt32
@@ -17,20 +18,20 @@ const maxByteArrayLen = math.MaxInt32
 var globalConverter = NewBytesConverter()
 
 type BytesConverter struct {
-	pointers  sync.Map // leaseId -> unsafe.Pointer
+	pointers  *typeutil.ConcurrentMap[int32, unsafe.Pointer] // leaseId -> unsafe.Pointer
 	nextLease int32
 }
 
 func NewBytesConverter() *BytesConverter {
 	return &BytesConverter{
-		pointers:  sync.Map{},
+		pointers:  typeutil.NewConcurrentMap[int32, unsafe.Pointer](),
 		nextLease: 0,
 	}
 }
 
 func (converter *BytesConverter) add(p unsafe.Pointer) int32 {
 	lease := atomic.AddInt32(&converter.nextLease, 1)
-	converter.pointers.Store(lease, p)
+	converter.pointers.Insert(lease, p)
 
 	return lease
 }
@@ -63,14 +64,9 @@ func (converter *BytesConverter) Release(lease int32) {
 }
 
 func (converter *BytesConverter) Extract(lease int32) unsafe.Pointer {
-	pI, ok := converter.pointers.LoadAndDelete(lease)
+	p, ok := converter.pointers.GetAndRemove(lease)
 	if !ok {
 		panic("try to release the resource that doesn't exist")
-	}
-
-	p, ok := pI.(unsafe.Pointer)
-	if !ok {
-		panic("incorrect value type")
 	}
 
 	return p
@@ -79,10 +75,8 @@ func (converter *BytesConverter) Extract(lease int32) unsafe.Pointer {
 // Make sure only the caller own the converter
 // or this would release someone's memory
 func (converter *BytesConverter) ReleaseAll() {
-	converter.pointers.Range(func(key, value interface{}) bool {
-		pointer := value.(unsafe.Pointer)
-
-		converter.pointers.Delete(key)
+	converter.pointers.Range(func(lease int32, pointer unsafe.Pointer) bool {
+		converter.pointers.GetAndRemove(lease)
 		C.free(pointer)
 
 		return true

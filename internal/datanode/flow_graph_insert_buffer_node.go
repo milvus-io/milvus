@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -54,7 +53,6 @@ type insertBufferNode struct {
 	channel          Channel
 	idAllocator      allocator.Allocator
 
-	flushMap         sync.Map
 	flushChan        <-chan flushMsg
 	resendTTChan     <-chan resendTTMsg
 	flushingSegCache *Cache
@@ -700,7 +698,6 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 			ctx:      ctx,
 			BaseNode: baseNode,
 
-			flushMap:         sync.Map{},
 			flushChan:        flushCh,
 			resendTTChan:     resendTTCh,
 			flushingSegCache: flushingSegCache,
@@ -767,7 +764,6 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 		BaseNode: baseNode,
 
 		timeTickStream:   wTtMsgStream,
-		flushMap:         sync.Map{},
 		flushChan:        flushCh,
 		resendTTChan:     resendTTCh,
 		flushingSegCache: flushingSegCache,

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -251,7 +252,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 
-	plans := sync.Map{}
+	plans := typeutil.NewConcurrentMap[int64, *datapb.CompactionStateResult]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
 		wg.Add(1)
@@ -280,7 +281,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 				return
 			}
 			for _, rst := range resp.GetResults() {
-				plans.Store(rst.PlanID, rst)
+				plans.Insert(rst.PlanID, rst)
 			}
 		}(nodeID, s)
 	}
@@ -288,8 +289,8 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	wg.Wait()
 
 	rst := make(map[int64]*datapb.CompactionStateResult)
-	plans.Range(func(key, value any) bool {
-		rst[key.(int64)] = value.(*datapb.CompactionStateResult)
+	plans.Range(func(planID int64, result *datapb.CompactionStateResult) bool {
+		rst[planID] = result
 		return true
 	})
 

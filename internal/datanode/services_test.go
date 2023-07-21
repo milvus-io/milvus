@@ -146,9 +146,9 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
-		s.node.compactionExecutor.executing.Store(int64(3), 0)
-		s.node.compactionExecutor.executing.Store(int64(2), 0)
-		s.node.compactionExecutor.completed.Store(int64(1), &datapb.CompactionResult{
+		s.node.compactionExecutor.executing.Insert(int64(3), newMockCompactor(true))
+		s.node.compactionExecutor.executing.Insert(int64(2), newMockCompactor(true))
+		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionResult{
 			PlanID:    1,
 			SegmentID: 10,
 		})
@@ -169,16 +169,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		s.Assert().Equal(1, cnt)
 		mu.Unlock()
 
-		mu.Lock()
-		cnt = 0
-		mu.Unlock()
-		s.node.compactionExecutor.completed.Range(func(k, v any) bool {
-			mu.Lock()
-			cnt++
-			mu.Unlock()
-			return true
-		})
-		s.Assert().Equal(1, cnt)
+		s.Assert().Equal(1, s.node.compactionExecutor.completed.Len())
 	})
 
 	s.Run("unhealthy", func() {

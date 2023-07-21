@@ -19,20 +19,22 @@ package timerecord
 import (
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // groups maintains string to GroupChecker
-var groups sync.Map
+var groups = typeutil.NewConcurrentMap[string, *GroupChecker]()
 
 // GroupChecker checks members in same group silent for certain period of time
 // print warning msg if there are item(s) that not reported
 type GroupChecker struct {
 	groupName string
 
-	d        time.Duration // check duration
-	t        *time.Ticker  // internal ticker
-	ch       chan struct{} // closing signal
-	lastest  sync.Map      // map member name => lastest report time
+	d        time.Duration                              // check duration
+	t        *time.Ticker                               // internal ticker
+	ch       chan struct{}                              // closing signal
+	lastest  *typeutil.ConcurrentMap[string, time.Time] // map member name => lastest report time
 	initOnce sync.Once
 	stopOnce sync.Once
 
@@ -52,8 +54,6 @@ func (gc *GroupChecker) init() {
 func (gc *GroupChecker) work() {
 	gc.t = time.NewTicker(gc.d)
 	defer gc.t.Stop()
-	var name string
-	var ts time.Time
 
 	for {
 		select {
@@ -63,9 +63,7 @@ func (gc *GroupChecker) work() {
 		}
 
 		var list []string
-		gc.lastest.Range(func(k, v interface{}) bool {
-			name = k.(string)
-			ts = v.(time.Time)
+		gc.lastest.Range(func(name string, ts time.Time) bool {
 			if time.Since(ts) > gc.d {
 				list = append(list, name)
 			}
@@ -79,19 +77,19 @@ func (gc *GroupChecker) work() {
 
 // Check updates the latest timestamp for provided name
 func (gc *GroupChecker) Check(name string) {
-	gc.lastest.Store(name, time.Now())
+	gc.lastest.Insert(name, time.Now())
 }
 
 // Remove deletes name from watch list
 func (gc *GroupChecker) Remove(name string) {
-	gc.lastest.Delete(name)
+	gc.lastest.GetAndRemove(name)
 }
 
 // Stop closes the GroupChecker
 func (gc *GroupChecker) Stop() {
 	gc.stopOnce.Do(func() {
 		close(gc.ch)
-		groups.Delete(gc.groupName)
+		groups.GetAndRemove(gc.groupName)
 	})
 }
 
@@ -103,12 +101,12 @@ func GetGroupChecker(groupName string, duration time.Duration, fn func([]string)
 		groupName: groupName,
 		d:         duration,
 		fn:        fn,
+		lastest:   typeutil.NewConcurrentMap[string, time.Time](),
 	}
-	actual, loaded := groups.LoadOrStore(groupName, gc)
+	gc, loaded := groups.GetOrInsert(groupName, gc)
 	if !loaded {
 		gc.init()
 	}
 
-	gc = actual.(*GroupChecker)
 	return gc
 }

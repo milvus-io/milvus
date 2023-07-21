@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -48,7 +49,7 @@ type Executor struct {
 	// Merge load segment requests
 	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
 
-	executingTasks   sync.Map
+	executingTasks   *typeutil.ConcurrentSet[int64] // taskID
 	executingTaskNum atomic.Int32
 }
 
@@ -68,7 +69,7 @@ func NewExecutor(meta *meta.Meta,
 		nodeMgr:   nodeMgr,
 		merger:    NewMerger[segmentIndex, *querypb.LoadSegmentsRequest](),
 
-		executingTasks: sync.Map{},
+		executingTasks: typeutil.NewConcurrentSet[int64](),
 	}
 }
 
@@ -86,12 +87,12 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})
+	exist := !ex.executingTasks.Insert(task.ID())
 	if exist {
 		return false
 	}
 	if ex.executingTaskNum.Inc() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
-		ex.executingTasks.Delete(task.ID())
+		ex.executingTasks.Remove(task.ID())
 		ex.executingTaskNum.Dec()
 		return false
 	}
@@ -119,8 +120,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 }
 
 func (ex *Executor) Exist(taskID int64) bool {
-	_, ok := ex.executingTasks.Load(taskID)
-	return ok
+	return ex.executingTasks.Contain(taskID)
 }
 
 func (ex *Executor) scheduleRequests() {
@@ -207,7 +207,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 			zap.Error(task.Err()))
 	}
 
-	ex.executingTasks.Delete(task.ID())
+	ex.executingTasks.Remove(task.ID())
 	ex.executingTaskNum.Dec()
 }
 
