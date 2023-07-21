@@ -3,15 +3,20 @@ package httpserver
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
+
+	"github.com/cockroachdb/errors"
+
+	"github.com/gin-gonic/gin"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -100,9 +105,9 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 		return func(c *gin.Context) {
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{"code": http.StatusProxyAuthRequired, "message": proxy.ErrUnauthenticated().Error()})
+				c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else if username == util.UserRoot && password != util.DefaultRootPassword {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{"code": http.StatusProxyAuthRequired, "message": proxy.ErrUnauthenticated().Error()})
+				c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{HTTPReturnCode: Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else {
 				c.Set(ContextUsername, username)
 			}
@@ -111,6 +116,14 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(ContextUsername, util.UserRoot)
 	}
+}
+
+func Print(code int32, message string) string {
+	return fmt.Sprintf("{\"%s\":%d,\"%s\":\"%s\"}", HTTPReturnCode, code, HTTPReturnMessage, message)
+}
+
+func PrintErr(err error) string {
+	return Print(Code(err), err.Error())
 }
 
 func TestVectorAuthenticate(t *testing.T) {
@@ -126,8 +139,8 @@ func TestVectorAuthenticate(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/vector/collections", nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":407,\"message\":\"auth check failure, please check username and password are correct\"}")
+		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
+		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrNeedAuthenticate))
 	})
 
 	t.Run("username or password incorrect", func(t *testing.T) {
@@ -135,8 +148,8 @@ func TestVectorAuthenticate(t *testing.T) {
 		req.SetBasicAuth(util.UserRoot, util.UserRoot)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":407,\"message\":\"auth check failure, please check username and password are correct\"}")
+		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
+		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrNeedAuthenticate))
 	})
 
 	t.Run("root's password correct", func(t *testing.T) {
@@ -166,7 +179,7 @@ func TestVectorListCollection(t *testing.T) {
 		name:         "show collections fail",
 		mp:           mp0,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"show collections fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := "cannot create folder"
@@ -181,7 +194,7 @@ func TestVectorListCollection(t *testing.T) {
 		name:         "show collections fail",
 		mp:           mp1,
 		exceptCode:   200,
-		expectedBody: "{\"code\":17,\"error\":\"" + reason + "\",\"message\":\"show collections fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CannotCreateFolder), reason),
 	})
 
 	mp := mocks.NewProxy(t)
@@ -269,7 +282,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, 200)
-		assert.Equal(t, w.Body.String(), "{\"code\":400,\"message\":\"collectionName is required.\"}")
+		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrMissingRequiredParameters))
 	})
 }
 
@@ -282,7 +295,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		name:         "create collection fail",
 		mp:           mp1,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"create collection " + DefaultCollectionName + " fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := "collection " + DefaultCollectionName + " already exists"
@@ -295,7 +308,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		name:         "create collection fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":18,\"error\":\"" + reason + "\",\"message\":\"create collection " + DefaultCollectionName + " fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CannotCreateFile), reason),
 	})
 
 	mp3 := mocks.NewProxy(t)
@@ -305,7 +318,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		name:         "create index fail",
 		mp:           mp3,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"create index for collection " + DefaultCollectionName + " fail, after the collection was created\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	mp4 := mocks.NewProxy(t)
@@ -316,7 +329,7 @@ func TestVectorCreateCollection(t *testing.T) {
 		name:         "load collection fail",
 		mp:           mp4,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"load collection " + DefaultCollectionName + " fail, after the index was created\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	mp5 := mocks.NewProxy(t)
@@ -355,13 +368,13 @@ func TestVectorDropCollection(t *testing.T) {
 	mp1, _ = wrapWithHasCollection(t, mp1, ReturnTrue, 1, nil)
 	mp1.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
 	testCases = append(testCases, testCase{
-		name:         "create collection fail",
+		name:         "drop collection fail",
 		mp:           mp1,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"drop collection " + DefaultCollectionName + " fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
-	reason := "collection " + DefaultCollectionName + " already exists"
+	reason := "cannot find collection " + DefaultCollectionName
 	mp2 := mocks.NewProxy(t)
 	mp2, _ = wrapWithHasCollection(t, mp2, ReturnTrue, 1, nil)
 	mp2.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(&commonpb.Status{
@@ -369,10 +382,10 @@ func TestVectorDropCollection(t *testing.T) {
 		Reason:    reason,
 	}, nil).Once()
 	testCases = append(testCases, testCase{
-		name:         "create collection fail",
+		name:         "drop collection fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":4,\"error\":\"" + reason + "\",\"message\":\"drop collection " + DefaultCollectionName + " fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CollectionNotExists), reason),
 	})
 
 	mp3 := mocks.NewProxy(t)
@@ -404,39 +417,39 @@ func TestQuery(t *testing.T) {
 	testCases := []testCase{}
 
 	mp2 := mocks.NewProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, ErrDefault).Twice()
+	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 2, nil)
+	mp2.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, ErrDefault).Times(3)
 	testCases = append(testCases, testCase{
 		name:         "query fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"query fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := DefaultCollectionName + " name not found"
 	mp3 := mocks.NewProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
+	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 2, nil)
 	mp3.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNameNotFound, // 28
 			Reason:    reason,
 		},
-	}, nil).Twice()
+	}, nil).Times(3)
 	testCases = append(testCases, testCase{
 		name:         "query fail",
 		mp:           mp3,
 		exceptCode:   200,
-		expectedBody: "{\"code\":28,\"message\":\"" + reason + "\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CollectionNameNotFound), reason),
 	})
 
 	mp4 := mocks.NewProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
+	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 2, nil)
 	mp4.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
 		Status:         &StatusSuccess,
 		FieldsData:     generateFieldData(),
 		CollectionName: DefaultCollectionName,
 		OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
-	}, nil).Twice()
+	}, nil).Times(3)
 	testCases = append(testCases, testCase{
 		name:         "query success",
 		mp:           mp4,
@@ -445,7 +458,34 @@ func TestQuery(t *testing.T) {
 	})
 
 	for _, tt := range testCases {
-		reqs := []*http.Request{genQueryRequest(), genGetRequest()}
+		reqs := []*http.Request{genQueryRequest(true), genQueryRequest(false), genGetRequest()}
+		t.Run(tt.name, func(t *testing.T) {
+			testEngine := initHTTPServer(tt.mp, true)
+			for _, req := range reqs {
+				req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
+				w := httptest.NewRecorder()
+				testEngine.ServeHTTP(w, req)
+				assert.Equal(t, w.Code, tt.exceptCode)
+				assert.Equal(t, w.Body.String(), tt.expectedBody)
+				resp := map[string]interface{}{}
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				assert.Equal(t, err, nil)
+				if resp[HTTPReturnCode] == float64(200) {
+					data := resp[HTTPReturnData].([]interface{})
+					rows := generateQueryResult64(false)
+					for i, row := range data {
+						assert.Equal(t, compareRow64(row.(map[string]interface{}), rows[i]), true)
+					}
+				}
+			}
+		})
+	}
+
+	testCases = []testCase{}
+	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 2, testCases)
+	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 2, testCases)
+	for _, tt := range testCases {
+		reqs := []*http.Request{genQueryRequest(false), genGetRequest()}
 		t.Run(tt.name, func(t *testing.T) {
 			testEngine := initHTTPServer(tt.mp, true)
 			for _, req := range reqs {
@@ -469,8 +509,13 @@ func TestQuery(t *testing.T) {
 	}
 }
 
-func genQueryRequest() *http.Request {
-	jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "book_id in [1,2,3]"}`)
+func genQueryRequest(withOutputFields bool) *http.Request {
+	var jsonBody []byte
+	if withOutputFields {
+		jsonBody = []byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "book_id in [1,2,3]", "outputFields": ["*"]}`)
+	} else {
+		jsonBody = []byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "book_id in [1,2,3]"}`)
+	}
 	bodyReader := bytes.NewReader(jsonBody)
 	req := httptest.NewRequest(http.MethodPost, "/v1/vector/query", bodyReader)
 	return req
@@ -495,7 +540,7 @@ func TestDelete(t *testing.T) {
 		name:         "delete fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"delete fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := DefaultCollectionName + " name not found"
@@ -511,7 +556,7 @@ func TestDelete(t *testing.T) {
 		name:         "delete fail",
 		mp:           mp3,
 		exceptCode:   200,
-		expectedBody: "{\"code\":28,\"error\":\"" + reason + "\",\"message\":\"delete fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CollectionNameNotFound), reason),
 	})
 
 	mp4 := mocks.NewProxy(t)
@@ -556,7 +601,7 @@ func TestInsert(t *testing.T) {
 		name:         "insert fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"insert fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := DefaultCollectionName + " name not found"
@@ -572,7 +617,7 @@ func TestInsert(t *testing.T) {
 		name:         "insert fail",
 		mp:           mp3,
 		exceptCode:   200,
-		expectedBody: "{\"code\":28,\"error\":\"" + reason + "\",\"message\":\"insert fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CollectionNameNotFound), reason),
 	})
 
 	mp4 := mocks.NewProxy(t)
@@ -584,7 +629,7 @@ func TestInsert(t *testing.T) {
 		name:         "id type invalid",
 		mp:           mp4,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"message\":\"ids' type neither int or string\"}",
+		expectedBody: PrintErr(merr.ErrCheckPrimaryKey),
 	})
 
 	mp5 := mocks.NewProxy(t)
@@ -646,7 +691,7 @@ func TestInsert(t *testing.T) {
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, 200)
-		assert.Equal(t, w.Body.String(), "{\"code\":400,\"error\":\"data is required\",\"message\":\"checkout your params\"}")
+		assert.Equal(t, w.Body.String(), PrintErr(merr.ErrInvalidInsertData))
 		resp := map[string]interface{}{}
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Equal(t, err, nil)
@@ -712,7 +757,7 @@ func TestInsertForDataType(t *testing.T) {
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, w.Code, 200)
-			assert.Equal(t, w.Body.String(), "{\"code\":400,\"error\":\"not support fieldName field-array dataType Array\",\"message\":\"checkout your params\"}")
+			assert.Equal(t, w.Body.String(), PrintErr(merr.ErrInvalidInsertData))
 		})
 	}
 }
@@ -748,7 +793,7 @@ func TestSearch(t *testing.T) {
 		name:         "search fail",
 		mp:           mp2,
 		exceptCode:   200,
-		expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"search fail\"}",
+		expectedBody: PrintErr(ErrDefault),
 	})
 
 	reason := DefaultCollectionName + " name not found"
@@ -763,7 +808,7 @@ func TestSearch(t *testing.T) {
 		name:         "search fail",
 		mp:           mp3,
 		exceptCode:   200,
-		expectedBody: "{\"code\":28,\"error\":\"" + reason + "\",\"message\":\"search fail\"}",
+		expectedBody: Print(int32(commonpb.ErrorCode_CollectionNameNotFound), reason),
 	})
 
 	mp4 := mocks.NewProxy(t)
@@ -834,7 +879,7 @@ func wrapWithDescribeColl(t *testing.T, mp *mocks.Proxy, returnType ReturnType, 
 			name:         "[share] describe coll fail",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"describe collection " + DefaultCollectionName + " fail\"}",
+			expectedBody: PrintErr(ErrDefault),
 		}
 	case ReturnWrongStatus:
 		call = mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -882,7 +927,7 @@ func wrapWithHasCollection(t *testing.T, mp *mocks.Proxy, returnType ReturnType,
 			name:         "[share] collection not found",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":400,\"message\":\"can't find collection: " + DefaultCollectionName + "\"}",
+			expectedBody: PrintErr(merr.ErrCollectionNotFound),
 		}
 	case ReturnFail:
 		call = mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault)
@@ -890,7 +935,7 @@ func wrapWithHasCollection(t *testing.T, mp *mocks.Proxy, returnType ReturnType,
 			name:         "[share] check collection fail",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"check collections " + DefaultCollectionName + " exists fail\"}",
+			expectedBody: PrintErr(ErrDefault),
 		}
 	case ReturnWrongStatus:
 		reason := "can't find collection: " + DefaultCollectionName
@@ -904,7 +949,7 @@ func wrapWithHasCollection(t *testing.T, mp *mocks.Proxy, returnType ReturnType,
 			name:         "[share] unexpected error",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":1,\"error\":\"" + reason + "\",\"message\":\"check collections book exists fail\"}",
+			expectedBody: Print(int32(commonpb.ErrorCode_UnexpectedError), reason),
 		}
 	}
 	if times == 2 {
@@ -919,9 +964,9 @@ func wrapWithHasCollection(t *testing.T, mp *mocks.Proxy, returnType ReturnType,
 }
 
 func TestHttpRequestFormat(t *testing.T) {
-	parseErrStr := "{\"code\":400,\"error\":\"invalid character ',' after object key\",\"message\":\"check your parameters conform to the json format\"}"
-	collnameErrStr := "{\"code\":400,\"message\":\"collectionName is required.\"}"
-	collnameDimErrStr := "{\"code\":400,\"message\":\"collectionName and dimension are both required.\"}"
+	parseErrStr := PrintErr(merr.ErrIncorrectParameterFormat)
+	collnameErrStr := PrintErr(merr.ErrMissingRequiredParameters)
+	collnameDimErrStr := PrintErr(merr.ErrMissingRequiredParameters)
 	dataErrStr := "check and set data"
 	jsons := map[string][]byte{
 		parseErrStr:       []byte(`{"collectionName": {"` + DefaultCollectionName + `", "dimension": 2}`),
@@ -969,7 +1014,7 @@ func TestHttpRequestFormat(t *testing.T) {
 
 func TestAuthorization(t *testing.T) {
 	proxy.Params.CommonCfg.AuthorizationEnabled = true
-	errorStr := "{\"code\":401,\"message\":\"rpc error: code = Unavailable desc = internal: Milvus Proxy is not ready yet. please wait\"}"
+	errorStr := Print(int32(65535), "rpc error: code = Unavailable desc = internal: Milvus Proxy is not ready yet. please wait")
 	jsons := map[string][]byte{
 		errorStr: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "data":[{"book_id":1,"book_intro":[0.1,0.11],"distance":0.01,"word_count":1000},{"book_id":2,"book_intro":[0.2,0.22],"distance":0.04,"word_count":2000},{"book_id":3,"book_intro":[0.3,0.33],"distance":0.09,"word_count":3000}]}`),
 	}
@@ -984,14 +1029,13 @@ func TestAuthorization(t *testing.T) {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
 				mp := mocks.NewProxy(t)
-				mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, 200)
+				assert.Equal(t, w.Code, http.StatusUnauthorized)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1012,7 +1056,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, 200)
+				assert.Equal(t, w.Code, http.StatusUnauthorized)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1027,14 +1071,13 @@ func TestAuthorization(t *testing.T) {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
 				mp := mocks.NewProxy(t)
-				mp, _ = wrapWithHasCollection(t, mp, ReturnTrue, 1, nil)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, 200)
+				assert.Equal(t, w.Code, http.StatusUnauthorized)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1055,7 +1098,7 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, 200)
+				assert.Equal(t, w.Code, http.StatusUnauthorized)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
@@ -1077,12 +1120,122 @@ func TestAuthorization(t *testing.T) {
 				req.Header.Set("authorization", "Bearer test:test")
 				w := httptest.NewRecorder()
 				testEngine.ServeHTTP(w, req)
-				assert.Equal(t, w.Code, 200)
+				assert.Equal(t, w.Code, http.StatusUnauthorized)
 				assert.Equal(t, w.Body.String(), res)
 			})
 		}
 	}
 
+}
+
+func TestDatabaseNotFound(t *testing.T) {
+	t.Run("list database fail", func(t *testing.T) {
+		mp := mocks.NewProxy(t)
+		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+		testEngine := initHTTPServer(mp, true)
+		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req.Header.Set("authorization", "Bearer root:Milvus")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Equal(t, w.Body.String(), PrintErr(ErrDefault))
+	})
+
+	t.Run("list database without success code", func(t *testing.T) {
+		mp := mocks.NewProxy(t)
+		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, nil).Once()
+		testEngine := initHTTPServer(mp, true)
+		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req.Header.Set("authorization", "Bearer root:Milvus")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Equal(t, w.Body.String(), Print(int32(commonpb.ErrorCode_UnexpectedError), ""))
+	})
+
+	t.Run("list database success", func(t *testing.T) {
+		mp := mocks.NewProxy(t)
+		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			Status:  &StatusSuccess,
+			DbNames: []string{"default", "test"},
+		}, nil).Once()
+		mp.EXPECT().
+			ShowCollections(mock.Anything, mock.Anything).
+			Return(&milvuspb.ShowCollectionsResponse{
+				Status:          &StatusSuccess,
+				CollectionNames: nil,
+			}, nil).Once()
+		testEngine := initHTTPServer(mp, true)
+		req := httptest.NewRequest(http.MethodGet, URIPrefix+VectorCollectionsPath+"?dbName=test", nil)
+		req.Header.Set("authorization", "Bearer root:Milvus")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Equal(t, w.Body.String(), "{\"code\":200,\"data\":[]}")
+	})
+
+	errorStr := PrintErr(merr.ErrDatabaseNotfound)
+	paths := map[string][]string{
+		errorStr: {
+			URIPrefix + VectorCollectionsPath + "?dbName=test",
+			URIPrefix + VectorCollectionsDescribePath + "?dbName=test&collectionName=" + DefaultCollectionName,
+		},
+	}
+	for res, pathArr := range paths {
+		for _, path := range pathArr {
+			t.Run("GET dbName", func(t *testing.T) {
+				mp := mocks.NewProxy(t)
+				mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+					Status:  &StatusSuccess,
+					DbNames: []string{"default"},
+				}, nil).Once()
+				testEngine := initHTTPServer(mp, true)
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				req.Header.Set("authorization", "Bearer root:Milvus")
+				w := httptest.NewRecorder()
+				testEngine.ServeHTTP(w, req)
+				assert.Equal(t, w.Code, http.StatusOK)
+				assert.Equal(t, w.Body.String(), res)
+			})
+		}
+	}
+
+	requestBody := `{"dbName": "test", "collectionName": "` + DefaultCollectionName + `", "dimension": 2}`
+	paths = map[string][]string{
+		requestBody: {
+			URIPrefix + VectorCollectionsCreatePath,
+			URIPrefix + VectorCollectionsDropPath,
+			URIPrefix + VectorInsertPath,
+			URIPrefix + VectorDeletePath,
+			URIPrefix + VectorQueryPath,
+			URIPrefix + VectorGetPath,
+			URIPrefix + VectorSearchPath,
+		},
+	}
+	for res, pathArr := range paths {
+		for _, path := range pathArr {
+			t.Run("POST dbName", func(t *testing.T) {
+				mp := mocks.NewProxy(t)
+				mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+					Status:  &StatusSuccess,
+					DbNames: []string{"default"},
+				}, nil).Once()
+				testEngine := initHTTPServer(mp, true)
+				bodyReader := bytes.NewReader([]byte(res))
+				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
+				req.Header.Set("authorization", "Bearer root:Milvus")
+				w := httptest.NewRecorder()
+				testEngine.ServeHTTP(w, req)
+				assert.Equal(t, w.Code, http.StatusOK)
+				assert.Equal(t, w.Body.String(), errorStr)
+			})
+		}
+	}
 }
 
 func wrapWithDescribeIndex(t *testing.T, mp *mocks.Proxy, returnType int, times int, testCases []testCase) (*mocks.Proxy, []testCase) {
@@ -1106,7 +1259,7 @@ func wrapWithDescribeIndex(t *testing.T, mp *mocks.Proxy, returnType int, times 
 			name:         "[share] describe index fail",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":400,\"error\":\"" + DefaultErrorMessage + "\",\"message\":\"find index of collection " + DefaultCollectionName + " fail\"}",
+			expectedBody: PrintErr(ErrDefault),
 		}
 	case ReturnWrongStatus:
 		reason := "index is not exists"
@@ -1118,7 +1271,7 @@ func wrapWithDescribeIndex(t *testing.T, mp *mocks.Proxy, returnType int, times 
 			name:         "[share] describe index fail",
 			mp:           mp,
 			exceptCode:   200,
-			expectedBody: "{\"code\":400,\"error\":\"" + reason + "\",\"message\":\"find index of collection " + DefaultCollectionName + " fail\"}",
+			expectedBody: Print(int32(commonpb.ErrorCode_IndexNotExist), reason),
 		}
 	}
 	if times == 2 {
@@ -1215,7 +1368,7 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusOK)
+		assert.Equal(t, w.Code, http.StatusProxyAuthRequired)
 	})
 
 	t.Run("auth fail", func(t *testing.T) {
@@ -1224,22 +1377,22 @@ func Test_Handles_VectorCollectionsDescribe(t *testing.T) {
 		req.SetBasicAuth("test", util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":401,\"message\":\"rpc error: code = Unavailable desc = internal: Milvus Proxy is not ready yet. please wait\"}")
+		assert.Equal(t, w.Code, http.StatusUnauthorized)
+		assert.Equal(t, w.Body.String(), Print(int32(65535), "rpc error: code = Unavailable desc = internal: Milvus Proxy is not ready yet. please wait"))
 	})
 
 	t.Run("describe collection fail with error", func(t *testing.T) {
 		proxy.Params.CommonCfg.AuthorizationEnabled = false
 		mp.EXPECT().
 			DescribeCollection(mock.Anything, mock.Anything).
-			Return(nil, errors.New("error")).
+			Return(nil, ErrDefault).
 			Once()
 		req := httptest.NewRequest(http.MethodGet, "/vector/collections/describe?collectionName=book", nil)
 		req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, w.Code, http.StatusOK)
-		assert.Equal(t, w.Body.String(), "{\"code\":400,\"error\":\"error\",\"message\":\"describe collection book fail\"}")
+		assert.Equal(t, w.Body.String(), PrintErr(ErrDefault))
 	})
 
 	t.Run("describe collection fail with status code", func(t *testing.T) {
