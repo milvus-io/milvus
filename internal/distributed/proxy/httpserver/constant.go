@@ -25,7 +25,6 @@ const (
 
 	HTTPReturnCode    = "code"
 	HTTPReturnMessage = "message"
-	HTTPReturnError   = "error"
 	HTTPReturnData    = "data"
 
 	HTTPReturnFieldName       = "name"

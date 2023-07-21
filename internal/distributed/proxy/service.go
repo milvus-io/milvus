@@ -30,6 +30,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/merr"
+
 	"google.golang.org/grpc/credentials"
 
 	"github.com/milvus-io/milvus/internal/management"
@@ -130,7 +132,7 @@ func authenticate(c *gin.Context) {
 			return
 		}
 	}
-	c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{"code": http.StatusProxyAuthRequired, "message": proxy.ErrUnauthenticated().Error()})
+	c.AbortWithStatusJSON(http.StatusProxyAuthRequired, gin.H{httpserver.HTTPReturnCode: httpserver.Code(merr.ErrNeedAuthenticate), httpserver.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
 // registerHTTPServer register the http server, panic when failed
