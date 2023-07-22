@@ -1435,7 +1435,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	if !hasVecIndex {
-		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", lct.LoadCollectionRequest.CollectionName)
+		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index first", lct.LoadCollectionRequest.CollectionName)
 		log.Error(errMsg)
 		return errors.New(errMsg)
 	}
@@ -1663,7 +1663,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		}
 	}
 	if !hasVecIndex {
-		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", lpt.LoadPartitionsRequest.CollectionName)
+		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index first", lpt.LoadPartitionsRequest.CollectionName)
 		log.Ctx(ctx).Error(errMsg)
 		return errors.New(errMsg)
 	}
