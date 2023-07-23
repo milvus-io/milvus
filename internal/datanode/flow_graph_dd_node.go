@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -29,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -220,13 +222,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
-			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
+			dmsg.ShardName = ddn.vChannelName
+			forwardMsgs = append(forwardMsgs, dmsg)
+
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
@@ -300,24 +304,46 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
 	tr := timerecord.NewTimeRecorder("forwardDeleteMsg")
 
-	if len(msgs) != 0 {
-		var msgPack = msgstream.MsgPack{
-			Msgs:    msgs,
-			BeginTs: minTs,
-			EndTs:   maxTs,
-		}
-		if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
-			return err
-		}
-	}
-	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
-		return err
+	if len(msgs) == 0 {
+		msgs = []msgstream.TsMsg{ddn.composeEmptyDeleteMsg(maxTs)}
 	}
 
+	// produce in timestamp order
+	sort.Slice(msgs, func(i, j int) bool {
+		return msgs[i].EndTs() < msgs[j].EndTs()
+	})
+
+	var msgPack = msgstream.MsgPack{
+		Msgs:    msgs,
+		BeginTs: minTs,
+		EndTs:   maxTs,
+	}
+	if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
+		return err
+	}
 	metrics.DataNodeForwardDeleteMsgTimeTaken.
 		WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
+}
+
+func (ddn *ddNode) composeEmptyDeleteMsg(ts Timestamp) *msgstream.DeleteMsg {
+	return &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{1},
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     commonpbutil.MsgIDNeedFill,
+				Timestamp: ts, // use msg pack end ts
+				SourceID:  1,
+			},
+			CollectionID: ddn.collectionID,
+			ShardName:    ddn.vChannelName,
+			PrimaryKeys:  &schemapb.IDs{},
+		},
+	}
 }
 
 func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {

@@ -378,6 +378,12 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 		}
 	}
 
+	// empty delete message, use msg base specified timestamp
+	if deleteMsg.GetNumRows() == 0 {
+		deleteMsg.BeginTimestamp = deleteMsg.GetBase().GetTimestamp()
+		deleteMsg.EndTimestamp = deleteMsg.GetBase().GetTimestamp()
+	}
+
 	return deleteMsg, nil
 }
 

@@ -131,11 +131,14 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx),
 	}
 
-	dmStreamNode, err := q.newDmInputNode(ctx, factory, collectionID, vchannel, metrics.DeleteLabel)
+	dmStreamNode, err := q.newDeltaInputNode(ctx, factory, collectionID, vchannel, metrics.DeleteLabel)
 	if err != nil {
 		return nil, err
 	}
-	var filterDeleteNode node = newFilteredDeleteNode(metaReplica, collectionID, vchannel)
+	filterDeleteNode, err := newFilteredDeleteNode(metaReplica, collectionID, vchannel)
+	if err != nil {
+		return nil, err
+	}
 	deleteNode, err := newDeleteNode(metaReplica, collectionID, vchannel)
 	if err != nil {
 		return nil, err
@@ -196,6 +199,22 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 	name := fmt.Sprintf("dmInputNode-query-%d-%s", collectionID, vchannel)
 	node := flowgraph.NewInputNode(insertStream, name, maxQueueLength, maxParallelism, typeutil.QueryNodeRole,
+		Params.QueryNodeCfg.GetNodeID(), collectionID, dataType)
+	return node, nil
+}
+
+func (q *queryNodeFlowGraph) newDeltaInputNode(ctx context.Context, factory msgstream.Factory, collectionID UniqueID, deltaChannel Channel, dataType string) (*flowgraph.InputNode, error) {
+	deltaStream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	q.dmlStream = deltaStream
+
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
+	name := fmt.Sprintf("dmInputNode-query-%d-%s", collectionID, deltaChannel)
+	node := flowgraph.NewInputNode(deltaStream, name, maxQueueLength, maxParallelism, typeutil.QueryNodeRole,
 		Params.QueryNodeCfg.GetNodeID(), collectionID, dataType)
 	return node, nil
 }
