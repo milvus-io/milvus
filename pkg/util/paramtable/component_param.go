@@ -1917,6 +1917,7 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
 	EnableAutoCompaction ParamItem `refreshable:"true"`
+	IndexBasedCompaction ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -2068,6 +2069,14 @@ the number of binlog file reaches to max value.`,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
 
+	p.IndexBasedCompaction = ParamItem{
+		Key:          "dataCoord.compaction.indexBasedCompaction",
+		Version:      "2.0.0",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.IndexBasedCompaction.Init(base.mgr)
+
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
 		Version:      "2.2.12",
@@ -2199,7 +2208,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "10800",
+		DefaultValue: "3600",
 		Doc:          "file meta missing tolerance duration in seconds, 60*60*3",
 		Export:       true,
 	}
@@ -2208,7 +2217,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCDropTolerance = ParamItem{
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "3600",
+		DefaultValue: "10800",
 		Doc:          "file belongs to dropped entity tolerance duration in seconds. 3600",
 		Export:       true,
 	}

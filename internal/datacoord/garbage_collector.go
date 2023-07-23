@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -236,7 +237,18 @@ func (gc *garbageCollector) clearEtcd() {
 		channelCPs[channel] = pos.GetTimestamp()
 	}
 
-	for _, segment := range drops {
+	dropIDs := lo.Keys(drops)
+	sort.Slice(dropIDs, func(i, j int) bool {
+		return dropIDs[i] < dropIDs[j]
+	})
+
+	for _, segmentID := range dropIDs {
+		segment, ok := drops[segmentID]
+		if !ok {
+			log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
+			// can't to here
+			continue
+		}
 		log := log.With(zap.Int64("segmentID", segment.ID))
 		to, isCompacted := compactTo[segment.GetID()]
 		// for compacted segment, try to clean up the files as long as target segment is there
