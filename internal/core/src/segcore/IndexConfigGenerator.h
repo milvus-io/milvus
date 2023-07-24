@@ -33,6 +33,9 @@ class VecIndexConfig {
     inline static const std::map<std::string, double> index_build_ratio = {
         {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1}};
 
+    inline static const std::unordered_set<std::string> maintain_params = {
+        "radius", "range_filter"};
+
  public:
     VecIndexConfig(const int64_t max_index_row_count,
                    const FieldIndexMeta& index_meta_,
