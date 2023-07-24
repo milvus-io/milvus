@@ -219,6 +219,7 @@ queryCoord:
   taskMergeCap: 1
   taskExecutionCap: 256
   enableActiveStandby: false # Enable active-standby
+  brokerTimeout: 5000 # broker rpc timeout in milliseconds
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:

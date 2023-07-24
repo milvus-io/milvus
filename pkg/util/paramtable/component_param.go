@@ -1177,6 +1177,7 @@ type queryCoordConfig struct {
 	EnableRGAutoRecover        ParamItem `refreshable:"true"`
 	CheckHealthInterval        ParamItem `refreshable:"false"`
 	CheckHealthRPCTimeout      ParamItem `refreshable:"true"`
+	BrokerTimeout              ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1468,6 +1469,16 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CheckHealthRPCTimeout.Init(base.mgr)
+
+	p.BrokerTimeout = ParamItem{
+		Key:          "queryCoord.brokerTimeout",
+		Version:      "2.3.0",
+		DefaultValue: "5000",
+		PanicIfEmpty: true,
+		Doc:          "5000ms, querycoord broker rpc timeout",
+		Export:       true,
+	}
+	p.BrokerTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
