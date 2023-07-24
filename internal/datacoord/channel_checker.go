@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"path"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -31,15 +30,17 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type channelStateTimer struct {
 	watchkv kv.WatchKV
 
-	runningTimers     sync.Map
-	runningTimerStops sync.Map // channel name to timer stop channels
-	etcdWatcher       clientv3.WatchChan
-	timeoutWatcher    chan *ackEvent
+	runningTimers     *typeutil.ConcurrentMap[string, *time.Timer]
+	runningTimerStops *typeutil.ConcurrentMap[string, chan struct{}] // channel name to timer stop channels
+
+	etcdWatcher    clientv3.WatchChan
+	timeoutWatcher chan *ackEvent
 	//Modifies afterwards must guarantee that runningTimerCount is updated synchronized with runningTimers
 	//in order to keep consistency
 	runningTimerCount atomic.Int32
@@ -47,8 +48,10 @@ type channelStateTimer struct {
 
 func newChannelStateTimer(kv kv.WatchKV) *channelStateTimer {
 	return &channelStateTimer{
-		watchkv:        kv,
-		timeoutWatcher: make(chan *ackEvent, 20),
+		watchkv:           kv,
+		timeoutWatcher:    make(chan *ackEvent, 20),
+		runningTimers:     typeutil.NewConcurrentMap[string, *time.Timer](),
+		runningTimerStops: typeutil.NewConcurrentMap[string, chan struct{}](),
 	}
 }
 
@@ -103,8 +106,8 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 	stop := make(chan struct{})
 	ticker := time.NewTimer(timeout)
 	c.removeTimers([]string{channelName})
-	c.runningTimerStops.Store(channelName, stop)
-	c.runningTimers.Store(channelName, ticker)
+	c.runningTimerStops.Insert(channelName, stop)
+	c.runningTimers.Insert(channelName, ticker)
 	c.runningTimerCount.Inc()
 	go func() {
 		log.Info("timer started",
@@ -145,9 +148,9 @@ func (c *channelStateTimer) notifyTimeoutWatcher(e *ackEvent) {
 
 func (c *channelStateTimer) removeTimers(channels []string) {
 	for _, channel := range channels {
-		if stop, ok := c.runningTimerStops.LoadAndDelete(channel); ok {
-			close(stop.(chan struct{}))
-			c.runningTimers.Delete(channel)
+		if stop, ok := c.runningTimerStops.GetAndRemove(channel); ok {
+			close(stop)
+			c.runningTimers.GetAndRemove(channel)
 			c.runningTimerCount.Dec()
 			log.Info("remove timer for channel", zap.String("channel", channel),
 				zap.Int32("timerCount", c.runningTimerCount.Load()))
@@ -156,10 +159,10 @@ func (c *channelStateTimer) removeTimers(channels []string) {
 }
 
 func (c *channelStateTimer) stopIfExist(e *ackEvent) {
-	stop, ok := c.runningTimerStops.LoadAndDelete(e.channelName)
+	stop, ok := c.runningTimerStops.GetAndRemove(e.channelName)
 	if ok && e.ackType != watchTimeoutAck && e.ackType != releaseTimeoutAck {
-		close(stop.(chan struct{}))
-		c.runningTimers.Delete(e.channelName)
+		close(stop)
+		c.runningTimers.GetAndRemove(e.channelName)
 		c.runningTimerCount.Dec()
 		log.Info("stop timer for channel", zap.String("channel", e.channelName),
 			zap.Int32("timerCount", c.runningTimerCount.Load()))
@@ -167,8 +170,7 @@ func (c *channelStateTimer) stopIfExist(e *ackEvent) {
 }
 
 func (c *channelStateTimer) resetIfExist(channel string, interval time.Duration) {
-	if value, ok := c.runningTimers.Load(channel); ok {
-		timer := value.(*time.Timer)
+	if timer, ok := c.runningTimers.Get(channel); ok {
 		timer.Reset(interval)
 	}
 }

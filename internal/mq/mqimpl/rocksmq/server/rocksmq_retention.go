@@ -34,7 +34,7 @@ const (
 
 type retentionInfo struct {
 	// key is topic name, value is last retention time
-	topicRetetionTime sync.Map
+	topicRetetionTime *typeutil.ConcurrentMap[string, int64]
 	mutex             sync.RWMutex
 
 	kv *rocksdbkv.RocksdbKV
@@ -47,7 +47,7 @@ type retentionInfo struct {
 
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
 	ri := &retentionInfo{
-		topicRetetionTime: sync.Map{},
+		topicRetetionTime: typeutil.NewConcurrentMap[string, int64](),
 		mutex:             sync.RWMutex{},
 		kv:                kv,
 		db:                db,
@@ -61,7 +61,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	}
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
-		ri.topicRetetionTime.Store(topic, time.Now().Unix())
+		ri.topicRetetionTime.Insert(topic, time.Now().Unix())
 		topicMu.Store(topic, new(sync.Mutex))
 	}
 	return ri, nil
@@ -99,19 +99,13 @@ func (ri *retentionInfo) retention() error {
 			timeNow := t.Unix()
 			checkTime := int64(params.RocksmqCfg.RetentionTimeInMinutes.GetAsFloat() * 60 / 10)
 			ri.mutex.RLock()
-			ri.topicRetetionTime.Range(func(k, v interface{}) bool {
-				topic, _ := k.(string)
-				lastRetentionTs, ok := v.(int64)
-				if !ok {
-					log.Warn("Can't parse lastRetention to int64", zap.String("topic", topic), zap.Any("value", v))
-					return true
-				}
+			ri.topicRetetionTime.Range(func(topic string, lastRetentionTs int64) bool {
 				if lastRetentionTs+checkTime < timeNow {
 					err := ri.expiredCleanUp(topic)
 					if err != nil {
-						log.Warn("Retention expired clean failed", zap.Any("error", err))
+						log.Warn("Retention expired clean failed", zap.Error(err))
 					}
-					ri.topicRetetionTime.Store(topic, timeNow)
+					ri.topicRetetionTime.Insert(topic, timeNow)
 				}
 				return true
 			})

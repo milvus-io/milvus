@@ -417,7 +417,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
-	rmq.retentionInfo.topicRetetionTime.Store(topicName, time.Now().Unix())
+	rmq.retentionInfo.topicRetetionTime.Insert(topicName, time.Now().Unix())
 	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -480,7 +480,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 	// clean up retention info
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.topicRetetionTime.Delete(topicName)
+	rmq.retentionInfo.topicRetetionTime.GetAndRemove(topicName)
 
 	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil

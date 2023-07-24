@@ -18,12 +18,12 @@ package datanode
 
 import (
 	"context"
-	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -31,17 +31,20 @@ const (
 )
 
 type compactionExecutor struct {
-	executing          sync.Map // planID to compactor
-	completedCompactor sync.Map // planID to compactor
-	completed          sync.Map // planID to CompactionResult
+	executing          *typeutil.ConcurrentMap[int64, compactor]                // planID to compactor
+	completedCompactor *typeutil.ConcurrentMap[int64, compactor]                // planID to compactor
+	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionResult] // planID to CompactionResult
 	taskCh             chan compactor
-	dropped            sync.Map // vchannel dropped
+	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 }
 
 func newCompactionExecutor() *compactionExecutor {
 	return &compactionExecutor{
-		executing: sync.Map{},
-		taskCh:    make(chan compactor, maxTaskNum),
+		executing:          typeutil.NewConcurrentMap[int64, compactor](),
+		completedCompactor: typeutil.NewConcurrentMap[int64, compactor](),
+		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionResult](),
+		taskCh:             make(chan compactor, maxTaskNum),
+		dropped:            typeutil.NewConcurrentSet[string](),
 	}
 }
 
@@ -51,19 +54,19 @@ func (c *compactionExecutor) execute(task compactor) {
 }
 
 func (c *compactionExecutor) toExecutingState(task compactor) {
-	c.executing.Store(task.getPlanID(), task)
+	c.executing.Insert(task.getPlanID(), task)
 }
 
 func (c *compactionExecutor) toCompleteState(task compactor) {
 	task.complete()
-	c.executing.Delete(task.getPlanID())
+	c.executing.GetAndRemove(task.getPlanID())
 }
 
 func (c *compactionExecutor) injectDone(planID UniqueID, success bool) {
-	c.completed.Delete(planID)
-	task, loaded := c.completedCompactor.LoadAndDelete(planID)
+	c.completed.GetAndRemove(planID)
+	task, loaded := c.completedCompactor.GetAndRemove(planID)
 	if loaded {
-		task.(compactor).injectDone(success)
+		task.injectDone(success)
 	}
 }
 
@@ -97,42 +100,41 @@ func (c *compactionExecutor) executeTask(task compactor) {
 			zap.Error(err),
 		)
 	} else {
-		c.completed.Store(task.getPlanID(), result)
-		c.completedCompactor.Store(task.getPlanID(), task)
+		c.completed.Insert(task.getPlanID(), result)
+		c.completedCompactor.Insert(task.getPlanID(), task)
 	}
 
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
 }
 
 func (c *compactionExecutor) stopTask(planID UniqueID) {
-	task, loaded := c.executing.LoadAndDelete(planID)
+	task, loaded := c.executing.GetAndRemove(planID)
 	if loaded {
-		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.(compactor).getChannelName()))
-		task.(compactor).stop()
+		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.getChannelName()))
+		task.stop()
 	}
 }
 
 func (c *compactionExecutor) channelValidateForCompaction(vChannelName string) bool {
 	// if vchannel marked dropped, compaction should not proceed
-	_, loaded := c.dropped.Load(vChannelName)
-	return !loaded
+	return !c.dropped.Contain(vChannelName)
 }
 
 func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string) {
-	c.dropped.Store(vChannelName, struct{}{})
-	c.executing.Range(func(key interface{}, value interface{}) bool {
-		if value.(compactor).getChannelName() == vChannelName {
-			c.stopTask(key.(UniqueID))
+	c.dropped.Insert(vChannelName)
+	c.executing.Range(func(planID int64, task compactor) bool {
+		if task.getChannelName() == vChannelName {
+			c.stopTask(planID)
 		}
 		return true
 	})
 	// remove all completed plans for vChannelName
-	c.completed.Range(func(key interface{}, value interface{}) bool {
-		if value.(*datapb.CompactionResult).GetChannel() == vChannelName {
-			c.injectDone(key.(UniqueID), true)
+	c.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
+		if result.GetChannel() == vChannelName {
+			c.injectDone(planID, true)
 			log.Info("remove compaction results for dropped channel",
 				zap.String("channel", vChannelName),
-				zap.Int64("planID", key.(UniqueID)))
+				zap.Int64("planID", planID))
 		}
 		return true
 	})

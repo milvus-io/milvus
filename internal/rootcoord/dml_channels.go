@@ -142,7 +142,7 @@ type dmlChannels struct {
 	namePrefix string
 	capacity   int64
 	// pool maintains channelName => dmlMsgStream mapping, stable
-	pool sync.Map
+	pool *typeutil.ConcurrentMap[string, *dmlMsgStream]
 	// mut protects channelsHeap only
 	mut sync.Mutex
 	// channelsHeap is the heap to pop next dms for use
@@ -174,6 +174,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 		namePrefix:   chanNamePrefix,
 		capacity:     chanNum,
 		channelsHeap: make([]*dmlMsgStream, 0, chanNum),
+		pool:         typeutil.NewConcurrentMap[string, *dmlMsgStream](),
 	}
 
 	for i, name := range names {
@@ -206,7 +207,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			idx:    int64(i),
 			pos:    i,
 		}
-		d.pool.Store(name, dms)
+		d.pool.Insert(name, dms)
 		d.channelsHeap = append(d.channelsHeap, dms)
 	}
 
@@ -247,8 +248,7 @@ func (d *dmlChannels) listChannels() []string {
 	var chanNames []string
 
 	d.pool.Range(
-		func(k, v interface{}) bool {
-			dms := v.(*dmlMsgStream)
+		func(channel string, dms *dmlMsgStream) bool {
 			if dms.RefCnt() > 0 {
 				chanNames = append(chanNames, getChannelName(d.namePrefix, dms.idx))
 			}
@@ -262,12 +262,12 @@ func (d *dmlChannels) getChannelNum() int {
 }
 
 func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
-	v, ok := d.pool.Load(chanName)
+	dms, ok := d.pool.Get(chanName)
 	if !ok {
 		log.Error("invalid channelName", zap.String("chanName", chanName))
 		return nil, errors.Newf("invalid channel name: %s", chanName)
 	}
-	return v.(*dmlMsgStream), nil
+	return dms, nil
 }
 
 func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) error {
