@@ -75,6 +75,8 @@ func (t *QueryTask) PreExecute() error {
 
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
+	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
+
 	retrievePlan, err := segments.NewRetrievePlan(
 		t.collection,
 		t.req.Req.GetSerializedExprPlan(),
@@ -124,6 +126,9 @@ func (t *QueryTask) Execute() error {
 		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Ids:        reducedResult.Ids,
 		FieldsData: reducedResult.FieldsData,
+		CostAggregation: &internalpb.CostAggregation{
+			ServiceTime: tr.ElapseSpan().Milliseconds(),
+		},
 	}
 	return nil
 }

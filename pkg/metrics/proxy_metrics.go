@@ -258,6 +258,16 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	ProxyExecutingTotalNq = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "executing_total_nq",
+			Help:      "total nq of executing search/query",
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 // RegisterProxy registers Proxy metrics
