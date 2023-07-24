@@ -302,8 +302,7 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
                 ct.default_float_field_name: i*1.0,
                 ct.default_string_field_name: str(i),
                 ct.default_json_field_name: {"number": i},
-                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]
-                }
+                ct.default_float_vec_field_name: gen_vectors(1, dim)[0]}
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
         array.append(dict)
