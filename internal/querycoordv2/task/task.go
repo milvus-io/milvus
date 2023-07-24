@@ -30,7 +30,7 @@ import (
 )
 
 type Status = int32
-type Priority = int32
+type Priority int32
 
 const (
 	TaskStatusCreated Status = iota + 1
@@ -40,10 +40,20 @@ const (
 )
 
 const (
-	TaskPriorityLow    int32 = iota // for balance checker
-	TaskPriorityNormal              // for segment checker
-	TaskPriorityHigh                // for channel checker
+	TaskPriorityLow    Priority = iota // for balance checker
+	TaskPriorityNormal                 // for segment checker
+	TaskPriorityHigh                   // for channel checker
 )
+
+var TaskPriorityName = map[Priority]string{
+	TaskPriorityLow:    "Low",
+	TaskPriorityNormal: "Normal",
+	TaskPriorityHigh:   "Hight",
+}
+
+func (p Priority) String() string {
+	return TaskPriorityName[p]
+}
 
 var (
 	// All task priorities from low to high
@@ -218,13 +228,13 @@ func (task *baseTask) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%v] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%d] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
-		GetTaskType(task),
+		GetTaskType(task).String(),
 		task.reason,
 		task.collectionID,
 		task.replicaID,
-		task.priority,
+		task.priority.String(),
 		len(task.actions),
 		actionsStr,
 	)

@@ -47,7 +47,18 @@ const (
 	TaskTypeUpdate
 )
 
-type Type = int32
+var TaskTypeName = map[Type]string{
+	TaskTypeGrow:   "Grow",
+	TaskTypeReduce: "Reduce",
+	TaskTypeMove:   "Move",
+	TaskTypeUpdate: "Update",
+}
+
+type Type int32
+
+func (t Type) String() string {
+	return TaskTypeName[t]
+}
 
 type replicaSegmentIndex struct {
 	ReplicaID int64
@@ -296,9 +307,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
-					zap.Int32("oldPriority", old.Priority()),
+					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
-					zap.Int32("newPriority", task.Priority()),
+					zap.String("newPriority", task.Priority().String()),
 				)
 				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
@@ -323,9 +334,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
-					zap.Int32("oldPriority", old.Priority()),
+					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
-					zap.Int32("newPriority", task.Priority()),
+					zap.String("newPriority", task.Priority().String()),
 				)
 				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
@@ -607,7 +618,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int32("type", GetTaskType(task)),
+		zap.String("type", GetTaskType(task).String()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -757,7 +768,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 			if segment == nil {
 				log.Warn("task stale due to the segment to load not exists in targets",
 					zap.Int64("segment", task.segmentID),
-					zap.Int32("taskType", taskType),
+					zap.String("taskType", taskType.String()),
 				)
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}

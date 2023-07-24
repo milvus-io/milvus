@@ -26,13 +26,23 @@ import (
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ActionType = int32
+type ActionType int32
 
 const (
 	ActionTypeGrow ActionType = iota + 1
 	ActionTypeReduce
 	ActionTypeUpdate
 )
+
+var ActionTypeName = map[ActionType]string{
+	ActionTypeGrow:   "Grow",
+	ActionTypeReduce: "Reduce",
+	ActionTypeUpdate: "Update",
+}
+
+func (t ActionType) String() string {
+	return ActionTypeName[t]
+}
 
 type Action interface {
 	Node() int64
