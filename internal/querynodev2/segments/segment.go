@@ -831,37 +831,14 @@ func (s *LocalSegment) LoadDeltaData(deltaData *storage.DeleteData) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+func (s *LocalSegment) LoadIndex(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadIndexInfo.appendLoadIndexInfo(bytesIndex, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
-	if err != nil {
-		if loadIndexInfo.cleanLocalData() != nil {
-			log.Warn("failed to clean cached data on disk after append index failed",
-				zap.Int64("buildID", indexInfo.BuildID),
-				zap.Int64("index version", indexInfo.IndexVersion))
-		}
-		return err
-	}
-	if s.Type() != SegmentTypeSealed {
-		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.typ, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
-	return s.LoadIndexInfo(indexInfo, loadIndexInfo)
-}
-
-func (s *LocalSegment) LoadIndexData(indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
-	loadIndexInfo, err := newLoadIndexInfo()
-	defer deleteLoadIndexInfo(loadIndexInfo)
-	if err != nil {
-		return err
-	}
-
-	err = loadIndexInfo.appendLoadIndexInfo(nil, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
+	err = loadIndexInfo.appendLoadIndexInfo(indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData() != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",

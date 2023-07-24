@@ -607,7 +607,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		return err
 	}
 
-	return segment.LoadIndexData(indexInfo, fieldType)
+	return segment.LoadIndex(indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) insertIntoSegment(segment *LocalSegment,
