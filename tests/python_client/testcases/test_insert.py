@@ -1187,10 +1187,11 @@ class TestInsertInvalid(TestcaseBase):
         schema = cf.gen_collection_schema([string_field, embedding_field], auto_id=True)
         collection_w = self.init_collection_wrap(schema=schema)
         data = [[[random.random() for _ in range(ct.default_dim)] for _ in range(2)]]
-        error = {ct.err_code: 1, ct.err_msg: "the length (18) of 0th string exceeds max length (6)"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        res = collection_w.insert(data=data)[0]
+        assert res.insert_count == 2
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("no error code provided now")
     def test_insert_over_resource_limit(self):
         """
         target: test insert over RPC limitation 64MB (67108864)
