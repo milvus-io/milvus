@@ -4,8 +4,9 @@ import pytest
 def pytest_addoption(parser):
     parser.addoption("--file_type", action="store", default="json", help="filetype")
     parser.addoption("--create_index", action="store",  default="create_index", help="whether creating index")
-    parser.addoption("--nb", action="store", default="", help="nb")
-    parser.addoption("--dim", action="store",  default="2048", help="whether creating index")
+    parser.addoption("--nb", action="store", default=50000, help="nb")
+    parser.addoption("--dim", action="store",  default=768, help="dim")
+    parser.addoption("--varchar_len", action="store", default=2000, help="varchar_len")
 
 @pytest.fixture
 def file_type(request):
@@ -22,4 +23,8 @@ def nb(request):
 
 @pytest.fixture
 def dim(request):
-    return request.config.getoption("--dim")    
+    return request.config.getoption("--dim")
+
+@pytest.fixture
+def varchar_len(request):
+    return request.config.getoption("--varchar_len")
