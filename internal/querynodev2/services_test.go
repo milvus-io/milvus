@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gogo/protobuf/proto"
@@ -1473,6 +1474,18 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	syncVersionAction := &querypb.SyncAction{
+		Type:            querypb.SyncType_UpdateVersion,
+		SealedInTarget:  []int64{3},
+		GrowingInTarget: []int64{4},
+		DroppedInTarget: []int64{1, 2},
+		TargetVersion:   time.Now().UnixMilli(),
+	}
+
+	req.Actions = []*querypb.SyncAction{syncVersionAction}
+	status, err = suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

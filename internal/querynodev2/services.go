@@ -1271,7 +1271,20 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		case querypb.SyncType_Set:
 			addSegments[action.GetNodeID()] = append(addSegments[action.GetNodeID()], action.GetInfo())
 		case querypb.SyncType_UpdateVersion:
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(), action.GetSealedInTarget())
+			pipeline := node.pipelineManager.Get(req.GetChannel())
+			if pipeline != nil {
+				droppedInfos := lo.Map(action.GetDroppedInTarget(), func(id int64, _ int) *datapb.SegmentInfo {
+					return &datapb.SegmentInfo{
+						ID: id,
+						DmlPosition: &msgpb.MsgPosition{
+							Timestamp: typeutil.MaxTimestamp,
+						},
+					}
+				})
+				pipeline.ExcludedSegments(droppedInfos...)
+			}
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
+				action.GetSealedInTarget(), action.GetDroppedInTarget())
 		default:
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

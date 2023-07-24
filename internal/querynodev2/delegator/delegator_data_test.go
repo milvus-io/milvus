@@ -714,8 +714,22 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.NoError(err)
 }
 
-func (s *DelegatorSuite) TestSyncTargetVersion() {
-	s.delegator.SyncTargetVersion(int64(5), []int64{}, []int64{})
+func (s *DelegatorDataSuite) TestSyncTargetVersion() {
+	for i := int64(0); i < 5; i++ {
+		ms := &segments.MockSegment{}
+		ms.EXPECT().ID().Return(i)
+		ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
+			Timestamp: uint64(i),
+		})
+		ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+		ms.EXPECT().Collection().Return(1)
+		ms.EXPECT().Partition().Return(1)
+		ms.EXPECT().RowNum().Return(0)
+		ms.EXPECT().Indexes().Return(nil)
+		s.manager.Segment.Put(segments.SegmentTypeGrowing, ms)
+	}
+
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 

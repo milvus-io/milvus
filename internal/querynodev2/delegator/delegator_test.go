@@ -242,7 +242,7 @@ func (s *DelegatorSuite) TestSearch() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -495,7 +495,7 @@ func (s *DelegatorSuite) TestQuery() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
@@ -716,7 +716,7 @@ func (s *DelegatorSuite) TestGetStats() {
 		},
 	)
 
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003})
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{})
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil

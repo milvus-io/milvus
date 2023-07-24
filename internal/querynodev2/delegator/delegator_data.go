@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
@@ -616,8 +617,34 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64) {
-	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget)
+func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
+	sealedInTarget []int64, droppedInTarget []int64) {
+	growings := sd.segmentManager.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+
+	sealedSet := typeutil.NewUniqueSet(sealedInTarget...)
+	growingSet := typeutil.NewUniqueSet(growingInTarget...)
+	droppedSet := typeutil.NewUniqueSet(droppedInTarget...)
+	redundantGrowing := make([]int64, 0)
+	for _, s := range growings {
+		if growingSet.Contain(s.ID()) {
+			continue
+		}
+
+		// sealed segment already exists, make growing segment redundant
+		if sealedSet.Contain(s.ID()) {
+			redundantGrowing = append(redundantGrowing, s.ID())
+		}
+
+		// sealed segment already dropped, make growing segment redundant
+		if droppedSet.Contain(s.ID()) {
+			redundantGrowing = append(redundantGrowing, s.ID())
+		}
+	}
+	if len(redundantGrowing) > 0 {
+		log.Warn("found redundant growing segments",
+			zap.Int64s("growingSegments", redundantGrowing))
+	}
+	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowing)
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
