@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -37,6 +38,7 @@ type filterDeleteNode struct {
 	collectionID UniqueID
 	metaReplica  ReplicaInterface
 	vchannel     Channel
+	dmlChannel   Channel
 }
 
 // Name returns the name of filterDeleteNode
@@ -93,6 +95,12 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel = %s", fddNode.Name(), fddNode.collectionID, fddNode.vchannel))
 	}
 
+	// before 2.2.12 Mqtt Msgstream
+	// MsgPack => (Ts1 Del1 Del2 Del3 Ts2)
+	// Empty MsgPack => (Ts1 Ts2)
+	// After 2.2.12 MqMsgStream
+	// MsgPack => DeleteMsg(del1) DeleteMsg(del2) DeleteMsg(del3)
+	// Empty MsgPack => DeleteMsg(empty)
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_Delete:
@@ -105,13 +113,26 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			if resMsg != nil {
 				dMsg.deleteMessages = append(dMsg.deleteMessages, resMsg)
+				// Use delete msg ts to update
+				dMsg.timeRange.timestampMin = resMsg.BeginTs()
+				dMsg.timeRange.timestampMax = resMsg.EndTs()
 			}
+		case commonpb.MsgType_TimeTick:
+			// Legacy data, tt, delmsg(valid), delmsg(invalid) tt
+			// advance tsafe directly
+			log.Warn("legacy timetick message received, advance timetick")
+			return []Msg{&dMsg}
 		default:
 			log.Warn("invalid message type in filterDeleteNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fddNode.collectionID),
 				zap.String("vchannel", fddNode.vchannel))
 		}
+	}
+
+	// all delete message do not belong this flowgraph, skip
+	if len(dMsg.deleteMessages) == 0 {
+		return []Msg{}
 	}
 
 	sort.Slice(dMsg.deleteMessages, func(i, j int) bool {
@@ -134,13 +155,23 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 		return nil, nil
 	}
 
-	if len(msg.Timestamps) <= 0 {
-		log.Debug("filter invalid delete message, no message",
-			zap.String("vchannel", fddNode.vchannel),
-			zap.Int64("collectionID", msg.CollectionID),
-			zap.Int64("partitionID", msg.PartitionID))
+	if msg.GetShardName() != "" && msg.GetShardName() != fddNode.dmlChannel {
+		log.Debug("filter delete message belong to other channel", zap.String("msgChannel", msg.GetShardName()), zap.String("fgChannel", fddNode.vchannel))
 		return nil, nil
 	}
+
+	// allow empty delete and by pass partition check
+	if len(msg.Timestamps) <= 0 {
+		return msg, nil
+	}
+	/*
+		if len(msg.Timestamps) <= 0 {
+			log.Debug("filter invalid delete message, no message",
+				zap.String("vchannel", fddNode.vchannel),
+				zap.Int64("collectionID", msg.CollectionID),
+				zap.Int64("partitionID", msg.PartitionID))
+			return nil, nil
+		}*/
 
 	if loadType == loadTypePartition {
 		if !fddNode.metaReplica.hasPartition(msg.PartitionID) {
@@ -152,7 +183,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 }
 
 // newFilteredDeleteNode returns a new filterDeleteNode
-func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDeleteNode {
+func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) (*filterDeleteNode, error) {
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
@@ -160,10 +191,16 @@ func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, 
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
+	dmlChannelName, err := funcutil.ConvertChannelName(vchannel, Params.CommonCfg.RootCoordDelta, Params.CommonCfg.RootCoordDml)
+	if err != nil {
+		return nil, err
+	}
+
 	return &filterDeleteNode{
 		baseNode:     baseNode,
 		collectionID: collectionID,
 		metaReplica:  metaReplica,
 		vchannel:     vchannel,
-	}
+		dmlChannel:   dmlChannelName,
+	}, nil
 }

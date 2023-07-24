@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -310,6 +311,39 @@ func TestDeleteMsg(t *testing.T) {
 	assert.Equal(t, int64(1), deleteMsg2.ID())
 	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg2.Type())
 	assert.Equal(t, int64(3), deleteMsg2.SourceID())
+}
+
+func TestDeleteMsg_Unmarshal_empty(t *testing.T) {
+	deleteMsg := &DeleteMsg{
+		BaseMsg: generateBaseMsg(),
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+
+			CollectionName:   "test_collection",
+			ShardName:        "test-channel",
+			Timestamps:       []uint64{},
+			Int64PrimaryKeys: []int64{},
+			NumRows:          0,
+		},
+	}
+	bytes, err := deleteMsg.Marshal(deleteMsg)
+	require.NoError(t, err)
+
+	tsMsg, err := deleteMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	deleteMsg2, ok := tsMsg.(*DeleteMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), deleteMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_Delete, deleteMsg2.Type())
+	assert.Equal(t, int64(3), deleteMsg2.SourceID())
+	assert.Equal(t, uint64(2), deleteMsg2.BeginTimestamp)
+	assert.Equal(t, uint64(2), deleteMsg2.EndTimestamp)
 }
 
 func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {

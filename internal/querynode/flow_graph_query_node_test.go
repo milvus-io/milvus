@@ -20,8 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
@@ -79,4 +82,63 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	assert.Error(t, err)
 
 	fg.close()
+}
+
+type DeltaFlowGraphSuite struct {
+	suite.Suite
+
+	replica ReplicaInterface
+	tsafe   TSafeReplicaInterface
+}
+
+func (s *DeltaFlowGraphSuite) SetupTest() {
+	var err error
+	s.replica, err = genSimpleReplica()
+	s.Require().NoError(err)
+
+	s.tsafe = newTSafeReplica()
+}
+
+func (s *DeltaFlowGraphSuite) TestNewFgFailed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockFactory := msgstream.NewMockMqFactory()
+	mockFactory.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
+		return nil, errors.New("mock error")
+	}
+
+	_, err := newQueryNodeDeltaFlowGraph(ctx,
+		defaultCollectionID,
+		s.replica,
+		s.tsafe,
+		defaultDeltaChannel,
+		mockFactory,
+	)
+
+	s.Error(err)
+}
+
+func (s *DeltaFlowGraphSuite) TestConsumeFlowGraph() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fac := genFactory()
+
+	fg, err := newQueryNodeDeltaFlowGraph(ctx,
+		defaultCollectionID,
+		s.replica,
+		s.tsafe,
+		defaultDeltaChannel,
+		fac,
+	)
+	s.Require().NoError(err)
+
+	defer fg.close()
+
+	err = fg.consumeFlowGraph(defaultDeltaChannel, defaultSubName)
+	s.NoError(err)
+}
+
+func TestDeltaFlowGraph(t *testing.T) {
+	suite.Run(t, new(DeltaFlowGraphSuite))
 }
