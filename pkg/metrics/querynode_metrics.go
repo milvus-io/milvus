@@ -51,7 +51,7 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "process_insert_or_delete_ms",
+			Name:      "process_insert_or_delete_latency",
 			Help:      "process insert or delete cost in ms",
 			Buckets:   buckets,
 		}, []string{
@@ -470,6 +470,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
 	registry.MustRegister(QueryNodeWatchDmlChannelLatency)
+	registry.MustRegister(QueryNodeProcessCost)
+	registry.MustRegister(QueryNodeWaitProcessingMsgCount)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
