@@ -370,10 +370,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName)
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Error(err2))
+			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),
+			zap.Error(err2))
 		return err2
 	}
 
@@ -417,10 +418,11 @@ func (t *queryTask) Execute(ctx context.Context) error {
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:         t.request.GetDbName(),
-		collection: t.collectionName,
-		nq:         1,
-		exec:       t.queryShard,
+		db:             t.request.GetDbName(),
+		collectionID:   t.CollectionID,
+		collectionName: t.collectionName,
+		nq:             1,
+		exec:           t.queryShard,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))

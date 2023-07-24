@@ -57,8 +57,8 @@ type Cache interface {
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
 	// GetDatabaseAndCollectionName get collection's name and database by id
 	GetDatabaseAndCollectionName(ctx context.Context, collectionID int64) (string, string, error)
-	// GetCollectionInfo get collection's information by name, such as collection id, schema, and etc.
-	GetCollectionInfo(ctx context.Context, database, collectionName string) (*collectionInfo, error)
+	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
+	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -67,7 +67,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemapb.CollectionSchema, error)
-	GetShards(ctx context.Context, withCache bool, database, collectionName string) (map[string][]nodeInfo, error)
+	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
 	DeprecateShardCache(database, collectionName string)
 	expireShardLeaderCache(ctx context.Context)
 	RemoveCollection(ctx context.Context, database, collectionName string)
@@ -229,7 +229,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 		collInfo, ok = db[collectionName]
 	}
 
-	method := "GeCollectionID"
+	method := "GetCollectionID"
 	if !ok || !collInfo.isCollectionCached() {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
@@ -289,7 +289,7 @@ func (m *MetaCache) GetDatabaseAndCollectionName(ctx context.Context, collection
 
 // GetCollectionInfo returns the collection information related to provided collection name
 // If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
-func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
 	var ok bool
@@ -301,10 +301,17 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 	m.mu.RUnlock()
 
 	method := "GetCollectionInfo"
-	if !ok || !collInfo.isCollectionCached() {
+	// if collInfo.collID != collectionID, means that the cache is not trustable
+	// try to get collection according to collectionID
+	if !ok || !collInfo.isCollectionCached() || collInfo.collID != collectionID {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-		coll, err := m.describeCollection(ctx, database, collectionName, 0)
+		var coll *milvuspb.DescribeCollectionResponse
+		var err error
+
+		// collectionName maybe not trustable, get collection according to id
+		coll, err = m.describeCollection(ctx, database, "", collectionID)
+
 		if err != nil {
 			return nil, err
 		}
@@ -695,8 +702,12 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 }
 
 // GetShards update cache if withCache == false
-func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, collectionName string) (map[string][]nodeInfo, error) {
-	info, err := m.GetCollectionInfo(ctx, database, collectionName)
+func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("collectionName", collectionName),
+		zap.Int64("collectionID", collectionID))
+
+	info, err := m.GetCollectionInfo(ctx, database, collectionName, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -715,8 +726,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		}
 
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
-			zap.String("collectionName", collectionName))
+		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord")
 	}
 	req := &querypb.GetShardLeadersRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -754,9 +764,9 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
-	info, err = m.GetCollectionInfo(ctx, database, collectionName)
+	info, err = m.GetCollectionInfo(ctx, database, collectionName, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get shards, collection %s not found", collectionName)
+		return nil, fmt.Errorf("failed to get shards, collectionName %s, colectionID %d not found", collectionName, collectionID)
 	}
 	// lock leader
 	info.leaderMutex.Lock()

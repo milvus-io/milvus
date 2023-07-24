@@ -34,20 +34,22 @@ import (
 type executeFunc func(context.Context, UniqueID, types.QueryNode, ...string) error
 
 type ChannelWorkload struct {
-	db           string
-	collection   string
-	channel      string
-	shardLeaders []int64
-	nq           int64
-	exec         executeFunc
-	retryTimes   uint
+	db             string
+	collectionName string
+	collectionID   int64
+	channel        string
+	shardLeaders   []int64
+	nq             int64
+	exec           executeFunc
+	retryTimes     uint
 }
 
 type CollectionWorkLoad struct {
-	db         string
-	collection string
-	nq         int64
-	exec       executeFunc
+	db             string
+	collectionName string
+	collectionID   int64
+	nq             int64
+	exec           executeFunc
 }
 
 type LBPolicy interface {
@@ -89,7 +91,8 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (int64, error) {
 	log := log.With(
-		zap.String("collectionName", workload.collection),
+		zap.Int64("collectionID", workload.collectionID),
+		zap.String("collectionName", workload.collectionName),
 		zap.String("channelName", workload.channel),
 	)
 
@@ -98,7 +101,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 	}
 
 	getShardLeaders := func() ([]int64, error) {
-		shardLeaders, err := globalMetaCache.GetShards(ctx, false, workload.db, workload.collection)
+		shardLeaders, err := globalMetaCache.GetShards(ctx, false, workload.db, workload.collectionName, workload.collectionID)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +112,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 	availableNodes := lo.Filter(workload.shardLeaders, filterAvailableNodes)
 	targetNode, err := lb.balancer.SelectNode(ctx, availableNodes, workload.nq)
 	if err != nil {
-		globalMetaCache.DeprecateShardCache(workload.db, workload.collection)
+		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 		nodes, err := getShardLeaders()
 		if err != nil || len(nodes) == 0 {
 			log.Warn("failed to get shard delegator",
@@ -141,7 +144,8 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, workload ChannelWorkload
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
 	excludeNodes := typeutil.NewUniqueSet()
 	log := log.Ctx(ctx).With(
-		zap.String("collectionName", workload.collection),
+		zap.Int64("collectionID", workload.collectionID),
+		zap.String("collectionName", workload.collectionName),
 		zap.String("channelName", workload.channel),
 	)
 
@@ -185,7 +189,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
-	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collection)
+	dml2leaders, err := globalMetaCache.GetShards(ctx, true, workload.db, workload.collectionName, workload.collectionID)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
 		return err
@@ -197,13 +201,14 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		nodes := lo.Map(nodes, func(node nodeInfo, _ int) int64 { return node.nodeID })
 		wg.Go(func() error {
 			err := lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				db:           workload.db,
-				collection:   workload.collection,
-				channel:      channel,
-				shardLeaders: nodes,
-				nq:           workload.nq,
-				exec:         workload.exec,
-				retryTimes:   uint(len(nodes)),
+				db:             workload.db,
+				collectionName: workload.collectionName,
+				collectionID:   workload.collectionID,
+				channel:        channel,
+				shardLeaders:   nodes,
+				nq:             workload.nq,
+				exec:           workload.exec,
+				retryTimes:     uint(len(nodes)),
 			})
 			return err
 		})

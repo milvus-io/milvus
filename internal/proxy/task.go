@@ -709,7 +709,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				continue
 			}
-			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, sct.GetDbName(), collectionName)
+			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, sct.GetDbName(), collectionName, id)
 			if err != nil {
 				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
