@@ -83,7 +83,21 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 }
 
 func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+	log := log.Ctx(ctx).WithRateGroup("qcv2.SegmentChecker", 1, 60).With(
+		zap.Int64("collectionID", replica.CollectionID),
+		zap.Int64("replicaID", replica.ID))
 	ret := make([]task.Task, 0)
+
+	// get channel dist by replica (ch -> node list), cause more then one delegator may exists during channel balance.
+	// if more than one delegator exist, load/release segment may causes chaos, so we can skip it until channel balance finished.
+	dist := c.dist.ChannelDistManager.GetChannelDistByReplica(replica)
+	for ch, nodes := range dist {
+		if len(nodes) > 1 {
+			log.Info("skip check segment due to two shard leader exists",
+				zap.String("channelName", ch))
+			return ret
+		}
+	}
 
 	// compare with targets to find the lack and redundancy of segments
 	lacks, redundancies := c.getHistoricalSegmentDiff(c.targetMgr, c.dist, c.meta, replica.GetCollectionID(), replica.GetID())
@@ -124,7 +138,7 @@ func (c *SegmentChecker) getStreamingSegmentDiff(targetMgr *meta.TargetManager,
 		return
 	}
 
-	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.SegmentChecker", 60, 1).With(
+	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.SegmentChecker", 1, 60).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replica.ID))
 
