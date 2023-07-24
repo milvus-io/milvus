@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -436,7 +437,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.ProgressPercent, Value: "0"})
 
 	// Spawn a new context to ignore cancellation from parental context.
-	newCtx, cancel := context.WithTimeout(context.TODO(), ImportCallTimeout)
+	newCtx, cancel := context.WithTimeout(context.TODO(), paramtable.Get().DataNodeCfg.BulkInsertTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 
 	// function to report import state to RootCoord.

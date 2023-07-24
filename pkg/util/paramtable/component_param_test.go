@@ -389,6 +389,10 @@ func TestComponentParam(t *testing.T) {
 		period := Params.SyncPeriod
 		t.Logf("SyncPeriod: %v", period)
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod.GetAsDuration(time.Second))
+
+		bulkinsertTimeout := Params.BulkInsertTimeoutSeconds
+		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
+		assert.Equal(t, "18000", Params.BulkInsertTimeoutSeconds.GetValue())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
