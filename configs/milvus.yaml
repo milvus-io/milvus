@@ -316,7 +316,12 @@ dataCoord:
     maxSize: 512 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     sealProportion: 0.23
-    assignmentExpiration: 2000 # The time of the assignment expiration in ms
+    # The time of the assignment expiration in ms
+    # Warning! this parameter is an expert variable and closely related to data integrity. Without specific
+    # target and solid understanding of the scenarios, it should not be changed. If it's necessary to alter
+    # this parameter, make sure that the newly changed value is larger than the previous value used before restart
+    # otherwise there could be a large possibility of data loss
+    assignmentExpiration: 2000
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
     # minSizeFromIdleToSealed, Milvus will automatically seal it.

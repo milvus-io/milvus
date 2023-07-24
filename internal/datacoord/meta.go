@@ -913,24 +913,13 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		// TODO: Error handling.
-		log.Warn("meta update: add allocation failed - segment not found",
-			zap.Int64("segmentID", segmentID))
+		log.Warn("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
 		return nil
 	}
-	// Persist segment updates first.
-	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
-	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
-			log.Error("meta update: add allocation failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err))
-			return err
-		}
-	}
-	// Update in-memory meta.
+	// As we use global segment lastExpire to guarantee data correctness after restart
+	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
 	m.segments.AddAllocation(segmentID, allocation)
-	log.Info("meta update: add allocation - complete",
-		zap.Int64("segmentID", segmentID))
+	log.Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
 	return nil
 }
 
@@ -948,6 +937,16 @@ func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetCurrentRows(segmentID, rows)
+}
+
+// SetLastExpire set lastExpire time for segment
+// Note that last is not necessary to store in KV meta
+func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
+	m.Lock()
+	defer m.Unlock()
+	clonedSegment := m.segments.GetSegment(segmentID).Clone()
+	clonedSegment.LastExpireTime = lastExpire
+	m.segments.SetSegment(segmentID, clonedSegment)
 }
 
 // SetLastFlushTime set LastFlushTime for segment with provided `segmentID`

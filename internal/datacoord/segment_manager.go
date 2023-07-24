@@ -29,8 +29,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -113,7 +113,6 @@ type SegmentManager struct {
 	segmentSealPolicies []segmentSealPolicy
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
-	rcc                 types.RootCoord
 }
 
 type allocHelper struct {
@@ -198,7 +197,7 @@ func defaultFlushPolicy() flushPolicy {
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) *SegmentManager {
+func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) (*SegmentManager, error) {
 	manager := &SegmentManager{
 		meta:                meta,
 		allocator:           allocator,
@@ -209,13 +208,15 @@ func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opt
 		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
 		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),
-		rcc:                 rcc,
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
 	}
 	manager.loadSegmentsFromMeta()
-	return manager
+	if err := manager.maybeResetLastExpireForSegments(); err != nil {
+		return nil, err
+	}
+	return manager, nil
 }
 
 // loadSegmentsFromMeta generate corresponding segment status for each segment from meta
@@ -226,6 +227,32 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 		segmentsID = append(segmentsID, segment.GetID())
 	}
 	s.segments = segmentsID
+}
+
+func (s *SegmentManager) maybeResetLastExpireForSegments() error {
+	//for all sealed and growing segments, need to reset last expire
+	if len(s.segments) > 0 {
+		var latestTs uint64
+		allocateErr := retry.Do(context.Background(), func() error {
+			ts, tryErr := s.genExpireTs(context.Background(), false)
+			log.Warn("failed to get ts from rootCoord for globalLastExpire", zap.Error(tryErr))
+			if tryErr != nil {
+				return tryErr
+			}
+			latestTs = ts
+			return nil
+		}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
+		if allocateErr != nil {
+			log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
+			return errors.New("global max expire ts is unavailable for segment manager")
+		}
+		for _, sID := range s.segments {
+			if segment := s.meta.GetSegment(sID); segment != nil && segment.GetState() == commonpb.SegmentState_Growing {
+				s.meta.SetLastExpire(sID, latestTs)
+			}
+		}
+	}
+	return nil
 }
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
@@ -307,12 +334,6 @@ func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID
 	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing)
 	if err != nil {
 		return nil, err
-	}
-	// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
-	// TODO: This is a hack and will be removed once the whole ImportManager is migrated from RootCoord to DataCoord.
-	if s.rcc == nil {
-		log.Error("RootCoord client not set")
-		return nil, errors.New("RootCoord client not set")
 	}
 
 	allocation.ExpireTime = expireTs

@@ -1919,7 +1919,8 @@ type dataCoordConfig struct {
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
-	SegAssignmentExpiration        ParamItem `refreshable:"true"`
+	SegAssignmentExpiration        ParamItem `refreshable:"false"`
+	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
@@ -2024,6 +2025,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SegAssignmentExpiration.Init(base.mgr)
+
+	p.AllocLatestExpireAttempt = ParamItem{
+		Key:          "dataCoord.segment.allocLatestExpireAttempt",
+		Version:      "2.2.0",
+		DefaultValue: "200",
+		Doc:          "The time attempting to alloc latest lastExpire from rootCoord after restart",
+		Export:       true,
+	}
+	p.AllocLatestExpireAttempt.Init(base.mgr)
 
 	p.SegmentMaxLifetime = ParamItem{
 		Key:          "dataCoord.segment.maxLife",
