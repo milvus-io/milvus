@@ -18,13 +18,18 @@
 
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
+#include "exceptions/EasyAssert.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "common/Types.h"
+
+const std::string kMmapFilepath = "mmap_filepath";
 
 namespace milvus::index {
 
 class IndexBase {
  public:
+    IndexBase() = default;
     virtual ~IndexBase() = default;
 
     virtual BinarySet
@@ -53,7 +58,28 @@ class IndexBase {
     virtual BinarySet
     Upload(const Config& config = {}) = 0;
 
+    bool
+    IsMmapSupported() const {
+        return index_type_ == knowhere::IndexEnum::INDEX_HNSW ||
+               //    index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||    IVF_FLAT is not supported as it doesn't stores the vectors
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC ||
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQ ||
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
+    }
+
+    const IndexType&
+    Type() const {
+        return index_type_;
+    }
+
  protected:
+    explicit IndexBase(IndexType index_type)
+        : index_type_(std::move(index_type)) {
+    }
+
     IndexType index_type_ = "";
 };
 

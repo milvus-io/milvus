@@ -27,6 +27,7 @@
 #include "common/FieldMeta.h"
 #include "mmap/Types.h"
 #include "storage/Util.h"
+#include "utils/File.h"
 
 namespace milvus {
 
@@ -77,7 +78,9 @@ FillField(DataType data_type, const storage::FieldDataPtr data, void* dst) {
 }
 
 inline size_t
-WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr& data) {
+WriteFieldData(File& file,
+               DataType data_type,
+               const storage::FieldDataPtr& data) {
     size_t total_written{0};
     if (datatype_is_variable(data_type)) {
         switch (data_type) {
@@ -86,7 +89,7 @@ WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr& data) {
                 for (auto i = 0; i < data->get_num_rows(); ++i) {
                     auto str =
                         static_cast<const std::string*>(data->RawValue(i));
-                    ssize_t written = write(fd, str->data(), str->size());
+                    ssize_t written = file.Write(str->data(), str->size());
                     if (written < str->size()) {
                         break;
                     }
@@ -99,7 +102,7 @@ WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr& data) {
                     auto padded_string =
                         static_cast<const Json*>(data->RawValue(i))->data();
                     ssize_t written =
-                        write(fd, padded_string.data(), padded_string.size());
+                        file.Write(padded_string.data(), padded_string.size());
                     if (written < padded_string.size()) {
                         break;
                     }
@@ -112,7 +115,7 @@ WriteFieldData(int fd, DataType data_type, const storage::FieldDataPtr& data) {
                                       datatype_name(data_type)));
         }
     } else {
-        total_written += write(fd, data->Data(), data->Size());
+        total_written += file.Write(data->Data(), data->Size());
     }
 
     return total_written;

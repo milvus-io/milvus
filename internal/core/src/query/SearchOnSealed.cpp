@@ -13,6 +13,7 @@
 #include <string>
 
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"

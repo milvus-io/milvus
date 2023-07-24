@@ -12,9 +12,12 @@
 #include "segcore/load_index_c.h"
 
 #include "common/FieldMeta.h"
+#include "exceptions/EasyAssert.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "log/Log.h"
 #include "segcore/Types.h"
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -74,7 +77,8 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t partition_id,
                 int64_t segment_id,
                 int64_t field_id,
-                enum CDataType field_type) {
+                enum CDataType field_type,
+                const char* mmap_dir_path) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -83,6 +87,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
         load_index_info->segment_id = segment_id;
         load_index_info->field_id = field_id;
         load_index_info->field_type = milvus::DataType(field_type);
+        load_index_info->mmap_dir_path = std::string(mmap_dir_path);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -250,6 +255,18 @@ AppendIndexV2(CLoadIndexInfo c_load_index_info) {
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
                 index_info, file_manager);
+
+        if (!load_index_info->mmap_dir_path.empty() &&
+            load_index_info->index->IsMmapSupported()) {
+            auto filepath =
+                std::filesystem::path(load_index_info->mmap_dir_path) /
+                std::to_string(load_index_info->segment_id) /
+                std::to_string(load_index_info->field_id) /
+                std::to_string(load_index_info->index_id);
+
+            config[kMmapFilepath] = filepath.string();
+        }
+
         load_index_info->index->Load(config);
         auto status = CStatus();
         status.error_code = Success;

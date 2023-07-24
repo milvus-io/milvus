@@ -311,7 +311,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
-	poolCap := runtime.NumCPU() * paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
+	poolCap := runtime.NumCPU() * paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt()
 	if loader.committedResource.WorkNum >= poolCap {
 		return resource, 0, merr.WrapErrServiceRequestLimitExceeded(int32(poolCap))
 	} else if loader.committedResource.MemorySize+memoryUsage >= totalMemory {

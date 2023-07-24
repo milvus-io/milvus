@@ -223,11 +223,6 @@ func (node *QueryNode) InitSegcore() error {
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
-	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDirPath) > 0 {
-		log.Info("mmap enabled", zap.String("dir", mmapDirPath))
-	}
-
 	initcore.InitTraceConfig(paramtable.Get())
 	return initcore.InitRemoteChunkManager(paramtable.Get())
 }
@@ -366,12 +361,6 @@ func (node *QueryNode) Start() error {
 		paramtable.SetUpdateTime(time.Now())
 		mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
 		mmapEnabled := len(mmapDirPath) > 0
-		if mmapEnabled {
-			err := os.MkdirAll(mmapDirPath, 0666)
-			if err != nil {
-				panic(err)
-			}
-		}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("query node start successfully",
 			zap.Int64("queryNodeID", paramtable.GetNodeID()),
