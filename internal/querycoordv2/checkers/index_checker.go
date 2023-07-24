@@ -157,5 +157,6 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		)
 		return nil, false
 	}
+	task.SetReason("missing index")
 	return task, true
 }

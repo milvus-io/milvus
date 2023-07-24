@@ -148,9 +148,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)
+	task.SetReason("segment unbalanced", tasks...)
 	ret = append(ret, tasks...)
 
 	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), channelPlans)
+	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret
 }
