@@ -129,6 +129,9 @@ func (m *Manager) GetConfigs() map[string]string {
 		}
 		config[key] = sValue
 	}
+	for key, value := range m.overlays {
+		config[key] = value
+	}
 
 	return config
 }

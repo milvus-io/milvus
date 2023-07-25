@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -492,6 +494,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		newPartition.Status = querypb.LoadStatus_Loaded
 		elapsed := time.Since(newPartition.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
+		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Partition %d loaded", partitionID)))
 	}
 	err := m.putPartition([]*Partition{newPartition}, savePartition)
 	if err != nil {
@@ -520,6 +523,7 @@ func (m *CollectionManager) UpdateLoadPercent(partitionID int64, loadPercent int
 		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
+		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
 	}
 	return collectionPercent, m.putCollection(saveCollection, newCollection)
 }
