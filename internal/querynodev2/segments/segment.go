@@ -28,7 +28,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"unsafe"
 
@@ -459,7 +458,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		zap.Int("resultNum", len(result.Offset)),
 	)
 
-	sort.Sort(&byPK{result})
+	// Sort was done by the segcore.
+	// sort.Sort(&byPK{result})
 	return result, nil
 }
 

@@ -321,6 +321,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlan(ctx); err != nil {
 		return err
 	}
+	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
 
 	partitionNames := t.request.GetPartitionNames()
 	if t.partitionKeyMode {

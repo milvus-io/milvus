@@ -183,19 +183,19 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
 
-    virtual std::vector<SegOffset>
-    search_ids(const BitsetType& view, Timestamp timestamp) const = 0;
-
-    virtual std::vector<SegOffset>
-    search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
-
-    virtual std::vector<SegOffset>
-    search_ids(const BitsetView& view,
-               const std::vector<int64_t>& offsets,
-               Timestamp timestamp) const = 0;
-
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+
+    void
+    search_ids_filter(BitsetType& bitset, Timestamp timestamp) const;
+
+    void
+    search_ids_filter(BitsetType& bitset,
+                      const std::vector<int64_t>& offsets,
+                      Timestamp timestamp) const;
+
+    virtual std::vector<OffsetMap::OffsetType>
+    find_first(int64_t limit, const BitsetType& bitset) const = 0;
 
  protected:
     // internal API: return chunk_data in span
@@ -221,6 +221,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
+
+    virtual const ConcurrentVector<Timestamp>&
+    get_timestamps() const = 0;
 
  protected:
     mutable std::shared_mutex mutex_;
