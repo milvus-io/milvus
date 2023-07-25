@@ -1162,17 +1162,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                            dim=dim, is_index=False)[0:5]
         # 2. create index
         default_index = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metric}
-        collection_w.create_index("binary_vector", default_index)
-        collection_w.load()
-        # 3. generate search vectors
-        binary_vectors = cf.gen_binary_vectors(nq, dim)[1]
-        # 4. search and compare the distance
-        search_params = {"metric_type": metric, "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
-        collection_w.search(binary_vectors[:nq], "binary_vector",
-                            search_params, default_limit,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": f"invalid metric type"})[0]
+        collection_w.create_index("binary_vector", default_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1,
+                                               "err_msg": "metric type not found or not supported, "
+                                                          "supported: [HAMMING JACCARD]"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_dynamic_compare_two_fields(self):
@@ -1232,6 +1226,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
     def metrics(self, request):
+        if request.param == "TANIMOTO":
+            pytest.skip("TANIMOTO not supported now")
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -6007,6 +6003,8 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
     def metrics(self, request):
+        if request.param == "TANIMOTO":
+            pytest.skip("TANIMOTO not supported now")
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -8364,8 +8362,9 @@ class TestCollectionLoadOperation(TestcaseBase):
         partition_w2.release()
         # search on collection
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 0})
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "fail to get shard leaders from QueryCoord: collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue #24446")
