@@ -279,8 +279,9 @@ func (gc *garbageCollector) clearEtcd() {
 		logs := getLogs(segment)
 		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
 		if gc.removeLogs(logs) {
-			err := gc.meta.DropSegment(segment.GetID())
-			log.Warn("failed to drop segment", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			if err := gc.meta.DropSegment(segment.GetID()); err != nil {
+				log.Warn("failed to drop segment", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			}
 		}
 		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
 			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
