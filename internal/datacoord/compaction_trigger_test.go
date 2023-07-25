@@ -1156,8 +1156,8 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
 			case val := <-spy.spyChan:
-				// 5 segments in the final pick list
-				assert.Equal(t, len(val.SegmentBinlogs), 5)
+				// 6 segments in the final pick list
+				assert.Equal(t, len(val.SegmentBinlogs), 6)
 				return
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "failed to get plan")

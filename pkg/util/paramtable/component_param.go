@@ -2149,7 +2149,7 @@ the number of binlog file reaches to max value.`,
 	p.SegmentCompactableProportion = ParamItem{
 		Key:          "dataCoord.segment.compactableProportion",
 		Version:      "2.2.1",
-		DefaultValue: "0.5",
+		DefaultValue: "0.85",
 		Doc: `(smallProportion * segment max # of rows).
 A compaction will happen on small segments if the segment after compaction will have`,
 		Export: true,

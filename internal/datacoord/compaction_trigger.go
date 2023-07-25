@@ -654,8 +654,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 		}
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
 		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() ||
-			len(bucket) > 1 &&
-				targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()) {
+			len(bucket) > 1 && t.isCompactableSegment(targetRow, segment) {
 			plan := segmentsToPlan(bucket, compactTime)
 			log.Info("generate a plan for small candidates",
 				zap.Int64s("plan segmentIDs", lo.Map(bucket, getSegmentIDs)),
@@ -796,6 +795,18 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 
 func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo) bool {
 	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
+}
+
+func (t *compactionTrigger) isCompactableSegment(targetRow int64, segment *SegmentInfo) bool {
+	smallProportion := Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat()
+	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
+
+	// avoid invalid single segment compaction
+	if compactableProportion < smallProportion {
+		compactableProportion = smallProportion
+	}
+
+	return targetRow > int64(float64(segment.GetMaxRowNum())*compactableProportion)
 }
 
 func isExpandableSmallSegment(segment *SegmentInfo) bool {
