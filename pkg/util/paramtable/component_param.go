@@ -222,6 +222,8 @@ type commonConfig struct {
 	JSONMaxLength ParamItem `refreshable:"false"`
 
 	ImportMaxFileSize ParamItem `refreshable:"true"`
+
+	MetricsPort ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -645,6 +647,13 @@ like the old password verification when updating the credential`,
 		DefaultValue: fmt.Sprint(16 << 30),
 	}
 	p.ImportMaxFileSize.Init(base.mgr)
+
+	p.MetricsPort = ParamItem{
+		Key:          "common.MetricsPort",
+		Version:      "2.3.0",
+		DefaultValue: "9091",
+	}
+	p.MetricsPort.Init(base.mgr)
 }
 
 type traceConfig struct {

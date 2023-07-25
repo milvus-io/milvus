@@ -32,7 +32,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+func TestMain(t *testing.M) {
+	paramtable.Init()
+}
 
 func TestGetHTTPAddr(t *testing.T) {
 	assert.Equal(t, getHTTPAddr(), ":"+DefaultListenPort)

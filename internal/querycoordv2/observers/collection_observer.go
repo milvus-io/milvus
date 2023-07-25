@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -224,4 +226,5 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 		zap.Int32("partitionLoadPercentage", loadPercentage),
 		zap.Int32("collectionLoadPercentage", collectionPercentage),
 	)
+	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", partition.CollectionID, loadPercentage)))
 }

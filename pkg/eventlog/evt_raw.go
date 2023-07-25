@@ -14,13 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package http
+package eventlog
 
-// HealthzRouterPath is default path for check health state.
-const HealthzRouterPath = "/healthz"
+// rawEvt implement `Evt` interface with plain event msg.
+type rawEvt struct {
+	level Level
+	tp    int32
+	data  []byte
+}
 
-// LogLevelRouterPath is path for Get and Update log level at runtime.
-const LogLevelRouterPath = "/log/level"
+func (l *rawEvt) Level() Level {
+	return l.level
+}
 
-// EventLogRouterPath is path for eventlog control.
-const EventLogRouterPath = "/eventlog"
+func (l *rawEvt) Type() int32 {
+	return l.tp
+}
+
+func (l *rawEvt) Raw() []byte {
+	return l.data
+}
+
+func NewRawEvt(level Level, data string) Evt {
+	return &rawEvt{
+		level: level,
+		data:  []byte(data),
+	}
+}

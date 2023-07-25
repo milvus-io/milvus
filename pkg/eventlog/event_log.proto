@@ -1,0 +1,26 @@
+syntax = "proto3";
+package milvus.proto.eventlog;
+
+option go_package = "github.com/milvus-io/milvus/pkg/eventlog";
+
+service EventLogService {
+    rpc Listen(ListenRequest) returns(stream Event) {}
+}
+
+message ListenRequest {
+}
+
+message Event {
+    Level level = 1;
+    int32 type = 2;
+    bytes data = 3;
+    int64 ts = 4;
+}
+
+enum Level {
+    Undefined = 0;
+    Debug = 1;
+    Info = 2;
+    Warn = 3;
+    Error = 4;
+}

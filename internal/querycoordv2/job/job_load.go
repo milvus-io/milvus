@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -203,6 +204,8 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Error(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
+
+	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
 	return nil

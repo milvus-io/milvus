@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -134,7 +135,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 		if _, ok := targetMap[segment.ID()]; ok {
 			continue
 		}
-
+		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Segment %d[%d] loaded", segment.ID(), segment.Collection())))
 		targetMap[segment.ID()] = segment
 		metrics.QueryNodeNumSegments.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
