@@ -436,6 +436,75 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestRunOutMemory() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")
+
+	msgLength := 4
+
+	// Load sealed
+	binlogs, statsLogs, err := SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
+	})
+	suite.Error(err)
+
+	// Load growing
+	binlogs, statsLogs, err = SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID+1,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID + 1,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
+	})
+	suite.Error(err)
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapDirPath.Key, "./mmap")
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
+	})
+	suite.Error(err)
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID + 1,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		BinlogPaths:  binlogs,
+		Statslogs:    statsLogs,
+		NumOfRows:    int64(msgLength),
+	})
+	suite.Error(err)
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 }
