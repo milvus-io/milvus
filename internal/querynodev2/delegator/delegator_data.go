@@ -132,7 +132,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		)
 	}
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
-		Observe(float64(tr.ElapseSpan()))
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
 // ProcessDelete handles delete data in delegator.
@@ -234,7 +234,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	}
 
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-		Observe(float64(tr.ElapseSpan()))
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
