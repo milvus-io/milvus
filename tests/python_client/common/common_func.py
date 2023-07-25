@@ -165,7 +165,7 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     return schema
 
 
-def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, with_varchar_field=True,
                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
@@ -180,6 +180,8 @@ def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field
                   gen_float_vec_field(dim=dim)]
         if with_json is False:
             fields.remove(gen_json_field())
+        if with_varchar_field is False:
+            fields.remove(gen_string_field())
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field)
@@ -478,13 +480,15 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return data
 
 
-def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000):
+def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000, with_varchar_field=True):
     str_value = gen_str_by_length(length=varchar_len)
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
     string_values = [f"{str(i)}_{str_value}" for i in range(nb)]
     float_vec_values = []  # placeholder for float_vec
     data = [int_values, float_values, string_values, float_vec_values]
+    if with_varchar_field is False:
+        data = [int_values, float_values, float_vec_values]
     return data
  
 
