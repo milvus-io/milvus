@@ -742,10 +742,8 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
 	result := task.Result()
-	if result.CostAggregation != nil {
-		// update channel's response time
-		result.CostAggregation.ResponseTime = latency.Milliseconds()
-	}
+	result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
 	return result, nil
 }
 
@@ -766,6 +764,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
@@ -844,7 +844,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return failRet, nil
 	}
 
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "searchRequestReduce")
+	tr.RecordSpan()
 	result, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
@@ -852,18 +852,17 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
 	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
-	if result.CostAggregation != nil {
-		// update channel's response time
-		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
-		result.CostAggregation.TotalNQ = currentTotalNQ
+	if result.GetCostAggregation() != nil {
+		result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return result, nil
 }
@@ -904,7 +903,18 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer cancel()
 
 	tr := timerecord.NewTimeRecorder("querySegments")
-	results, err := node.querySegments(queryCtx, req)
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	if collection == nil {
+		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+	}
+
+	// Send task to scheduler and wait until it finished.
+	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to add query task into scheduler", zap.Error(err))
+		return nil, err
+	}
+	err := task.Wait()
 	if err != nil {
 		log.Warn("failed to query channel", zap.Error(err))
 		failRet.Status.Reason = err.Error()
@@ -923,19 +933,17 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
-	results.CostAggregation = &internalpb.CostAggregation{
-		ServiceTime:  latency.Milliseconds(),
-		ResponseTime: latency.Milliseconds(),
-		TotalNQ:      0,
-	}
-	return results, nil
+	result := task.Result()
+	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
+	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return result, nil
 }
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	if req.FromShardLeader {
 		// for compatible with rolling upgrade from version before v2.2.9
-		return node.querySegments(ctx, req)
+		return node.QuerySegments(ctx, req)
 	}
 
 	log := log.Ctx(ctx).With(
@@ -950,6 +958,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Uint64("travelTimestamp", req.GetReq().GetTravelTimestamp()),
 		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
 
 	if !node.lifetime.Add(commonpbutil.IsHealthy) {
 		msg := fmt.Sprintf("query node %d is not ready", paramtable.GetNodeID())
@@ -1000,24 +1009,23 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
 
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "queryRequestReduce")
+	tr.RecordSpan()
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
 	ret, err := reducer.Reduce(ctx, toMergeResults)
 	if err != nil {
 		return WrapRetrieveResult(commonpb.ErrorCode_UnexpectedError, "failed to query channel", err), nil
 	}
+	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+		Observe(float64(reduceLatency.Milliseconds()))
 
 	if !req.FromShardLeader {
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
 
-	if ret.CostAggregation != nil {
-		// update channel's response time
-		currentTotalNQ := node.scheduler.GetWaitingTaskTotalNQ()
-		ret.CostAggregation.TotalNQ = currentTotalNQ
+	if ret.GetCostAggregation() != nil {
+		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return ret, nil
 }

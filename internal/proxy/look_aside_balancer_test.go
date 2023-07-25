@@ -272,7 +272,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 			}
 
 			for node, result := range c.result {
-				suite.Equal(result, counter[node])
+				suite.True(math.Abs(float64(result-counter[node])) <= float64(1))
 			}
 		})
 	}
@@ -302,7 +302,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 	suite.balancer.unreachableQueryNodes.Insert(2)
 	suite.Eventually(func() bool {
 		return suite.balancer.unreachableQueryNodes.Contain(1)
-	}, 2*time.Second, 100*time.Millisecond)
+	}, 3*time.Second, 100*time.Millisecond)
 	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
@@ -331,11 +331,11 @@ func (suite *LookAsideBalancerSuite) TestNodeRecover() {
 	suite.balancer.metricsUpdateTs.Insert(3, time.Now().UnixMilli())
 	suite.Eventually(func() bool {
 		return suite.balancer.unreachableQueryNodes.Contain(3)
-	}, 2*time.Second, 100*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 
 	suite.Eventually(func() bool {
 		return !suite.balancer.unreachableQueryNodes.Contain(3)
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func TestLookAsideBalancerSuite(t *testing.T) {

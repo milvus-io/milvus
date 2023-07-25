@@ -892,23 +892,25 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval         ParamItem `refreshable:"false"`
-	HealthCheckTimetout      ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize ParamItem `refreshable:"true"`
-	MaxNameLength            ParamItem `refreshable:"true"`
-	MaxUsernameLength        ParamItem `refreshable:"true"`
-	MinPasswordLength        ParamItem `refreshable:"true"`
-	MaxPasswordLength        ParamItem `refreshable:"true"`
-	MaxFieldNum              ParamItem `refreshable:"true"`
-	MaxShardNum              ParamItem `refreshable:"true"`
-	MaxDimension             ParamItem `refreshable:"true"`
-	GinLogging               ParamItem `refreshable:"false"`
-	MaxUserNum               ParamItem `refreshable:"true"`
-	MaxRoleNum               ParamItem `refreshable:"true"`
-	MaxTaskNum               ParamItem `refreshable:"false"`
-	AccessLog                AccessLogConfig
-	ShardLeaderCacheInterval ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy   ParamItem `refreshable:"false"`
+	TimeTickInterval             ParamItem `refreshable:"false"`
+	HealthCheckTimetout          ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize     ParamItem `refreshable:"true"`
+	MaxNameLength                ParamItem `refreshable:"true"`
+	MaxUsernameLength            ParamItem `refreshable:"true"`
+	MinPasswordLength            ParamItem `refreshable:"true"`
+	MaxPasswordLength            ParamItem `refreshable:"true"`
+	MaxFieldNum                  ParamItem `refreshable:"true"`
+	MaxShardNum                  ParamItem `refreshable:"true"`
+	MaxDimension                 ParamItem `refreshable:"true"`
+	GinLogging                   ParamItem `refreshable:"false"`
+	MaxUserNum                   ParamItem `refreshable:"true"`
+	MaxRoleNum                   ParamItem `refreshable:"true"`
+	MaxTaskNum                   ParamItem `refreshable:"false"`
+	AccessLog                    AccessLogConfig
+	ShardLeaderCacheInterval     ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy       ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval ParamItem `refreshable:"false"`
+	CostMetricsExpireTime        ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1124,7 +1126,7 @@ please adjust in embedded Milvus: false`,
 	p.ShardLeaderCacheInterval = ParamItem{
 		Key:          "proxy.shardLeaderCacheInterval",
 		Version:      "2.2.4",
-		DefaultValue: "30",
+		DefaultValue: "10",
 		Doc:          "time interval to update shard leader cache, in seconds",
 	}
 	p.ShardLeaderCacheInterval.Init(base.mgr)
@@ -1136,6 +1138,23 @@ please adjust in embedded Milvus: false`,
 		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.CheckQueryNodeHealthInterval = ParamItem{
+		Key:          "proxy.checkQueryNodeHealthInterval",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		Doc:          "time interval to check health for query node, in ms",
+	}
+	p.CheckQueryNodeHealthInterval.Init(base.mgr)
+
+	p.CostMetricsExpireTime = ParamItem{
+		Key:          "proxy.costMetricsExpireTime",
+		Version:      "2.3.0",
+		DefaultValue: "1000",
+		Doc:          "expire time for query node cost metrics, in ms",
+	}
+	p.CostMetricsExpireTime.Init(base.mgr)
+
 }
 
 // /////////////////////////////////////////////////////////////////////////////

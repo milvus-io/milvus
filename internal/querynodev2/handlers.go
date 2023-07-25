@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -225,27 +224,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.Leader).Inc()
 	return ret, nil
-}
-
-func (node *QueryNode) querySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		return nil, merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
-	}
-
-	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryTask(ctx, collection, node.manager, req)
-	if err := node.scheduler.Add(task); err != nil {
-		log.Warn("failed to add query task into scheduler", zap.Error(err))
-		return nil, err
-	}
-	err := task.Wait()
-	if err != nil {
-		log.Warn("failed to execute task by node scheduler", zap.Error(err))
-		return nil, err
-	}
-
-	return task.Result(), nil
 }
 
 func (node *QueryNode) optimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, deleg delegator.ShardDelegator) (*querypb.SearchRequest, error) {

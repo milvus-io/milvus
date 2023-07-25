@@ -102,7 +102,7 @@ func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchReq
 }
 
 func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	return w.node.querySegments(ctx, req)
+	return w.node.QuerySegments(ctx, req)
 }
 
 func (w *LocalWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
