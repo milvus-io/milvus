@@ -486,7 +486,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 
 	// Random the subname in case we trying to load same delta at the same time
 	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("subName", subName), zap.Time("positionTs", ts))
+	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
 	stream.AsConsumer([]string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
 
 	err = stream.Seek([]*msgpb.MsgPosition{position})

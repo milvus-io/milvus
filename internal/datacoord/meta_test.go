@@ -905,7 +905,7 @@ func TestChannelCP(t *testing.T) {
 
 	pos := &msgpb.MsgPosition{
 		ChannelName: mockPChannel,
-		MsgID:       []byte{},
+		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		Timestamp:   1000,
 	}
 

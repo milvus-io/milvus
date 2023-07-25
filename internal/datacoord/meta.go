@@ -1253,7 +1253,7 @@ func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) error {
-	if pos == nil {
+	if pos == nil || pos.GetMsgID() == nil {
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
 
@@ -1268,9 +1268,10 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		}
 		m.channelCPs[vChannel] = pos
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		log.Debug("UpdateChannelCheckpoint done",
+		log.Info("UpdateChannelCheckpoint done",
 			zap.String("vChannel", vChannel),
-			zap.Uint64("ts", pos.Timestamp),
+			zap.Uint64("ts", pos.GetTimestamp()),
+			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Time("time", ts))
 	}
 	return nil
