@@ -5201,3 +5201,28 @@ func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientI
 		ClientInfos: clients,
 	}, nil
 }
+
+func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.AllocTimestampResponse{Status: unhealthyStatus()}, nil
+	}
+
+	log.Info("AllocTimestamp request receive")
+	ts, err := node.tsoAllocator.AllocOne(ctx)
+	if err != nil {
+		log.Info("AllocTimestamp failed", zap.Error(err))
+		return &milvuspb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Info("AllocTimestamp request success", zap.Uint64("timestamp", ts))
+
+	return &milvuspb.AllocTimestampResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Timestamp: ts,
+	}, nil
+}
