@@ -64,6 +64,11 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
     SearchInfo searchParam(searchInfo);
     searchParam.metric_type_ = metric_type_;
     searchParam.search_params_ = search_params_;
+    for (auto& key : maintain_params) {
+        if (searchInfo.search_params_.contains(key)) {
+            searchParam.search_params_[key] = searchInfo.search_params_[key];
+        }
+    }
     return searchParam;
 }
 
