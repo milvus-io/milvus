@@ -621,7 +621,7 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
-	expr = `str1 like 'abc\"def-%'`
+	expr = `str1 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		s.Equal(1, len(result.Results.FieldsData))
 		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
@@ -640,7 +640,7 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	log.Info("like expression run successfully")
 
-	expr = `str2 like 'abc\"def-%'`
+	expr = `str2 like 'abc\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		for _, f := range result.Results.GetFieldsData() {
 			s.Nil(f)
@@ -858,6 +858,8 @@ func newJSONData(fieldName string, rowNum int) *schemapb.FieldData {
 			},
 			"str1": `abc\"def-` + string(rune(i)),
 			"str2": fmt.Sprintf("abc\"def-%d", i),
+			"str3": fmt.Sprintf("abc\ndef-%d", i),
+			"str4": fmt.Sprintf("abc\367-%d", i),
 		}
 		if i%2 == 0 {
 			data = map[string]interface{}{
@@ -910,6 +912,126 @@ func (s *JSONExprSuite) doSearchWithInvalidExpr(collectionName string, outputFie
 	}
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+}
+
+func (s *JSONExprSuite) TestJsonWithEscapeString() {
+	c := s.Cluster
+	ctx, cancel := context.WithCancel(c.GetContext())
+	defer cancel()
+
+	prefix := "TestHelloMilvus"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	dim := 128
+	rowNum := 100
+
+	constructCollectionSchema := func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         integration.Int64Field,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_Int64,
+			TypeParams:   nil,
+			IndexParams:  nil,
+			AutoID:       true,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      0,
+			Name:         integration.FloatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		return &schemapb.CollectionSchema{
+			Name:               collectionName,
+			Description:        "",
+			AutoID:             true,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+			},
+		}
+	}
+	schema := constructCollectionSchema()
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      2,
+	})
+	s.NoError(err)
+	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+	}
+	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+
+	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	s.NoError(err)
+	s.True(describeCollectionResp.Schema.EnableDynamicField)
+	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
+
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	dynamicData := newJSONData(common.MetaFieldName, rowNum)
+	dynamicData.IsDynamic = true
+	s.insertFlushIndexLoad(ctx, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, dynamicData})
+
+	expr := ""
+	// search
+	expr = `str1 like "abc\\\"%"`
+	checkFunc := func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
+
+	expr = `str2 like "abc\"def-%"`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
+
+	expr = `str3 like "abc\ndef-%"`
+	checkFunc = func(result *milvuspb.SearchResults) {
+		s.Equal(1, len(result.Results.FieldsData))
+		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+		s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+		s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	}
+	s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
+
+	// search fail reason: "string field contains invalid UTF-8"
+	//expr = `str4 like "abc\367-%"`
+	//checkFunc = func(result *milvuspb.SearchResults) {
+	//	s.Equal(1, len(result.Results.FieldsData))
+	//	s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())
+	//	s.Equal(schemapb.DataType_JSON, result.Results.FieldsData[0].GetType())
+	//	s.Equal(10, len(result.Results.FieldsData[0].GetScalars().GetJsonData().GetData()))
+	//}
+	//s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
 }
 
 func TestJsonExpr(t *testing.T) {
