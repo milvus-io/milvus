@@ -84,6 +84,7 @@ class TestOperations(TestBase):
             v.pause()
         for k, v in self.health_checkers.items():
             v.check_result()
+        for k, v in self.health_checkers.items():    
             log.info(f"{k} rto: {v.get_rto()}")
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
@@ -92,7 +93,7 @@ class TestOperations(TestBase):
             for k, v in self.health_checkers.items():
                 log.info(f"{k} rto: {v.get_rto()}")
                 rto = v.get_rto()
-                assert rto < 30,  f"expect 30s but get {rto}s"  # rto should be less than 30s
+                pytest.assume(rto < 30,  f"{k} rto expect 30s but get {rto}s") # rto should be less than 30s
 
             if Op.insert in self.health_checkers:
                 # verify the no insert data loss
