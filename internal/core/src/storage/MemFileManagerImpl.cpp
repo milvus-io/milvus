@@ -125,9 +125,6 @@ MemFileManagerImpl::LoadFileStream(
     std::map<std::string, storage::FieldDataChannelPtr>& channels) {
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    for (auto& [_, channel] : channels) {
-        channel->set_capacity(parallel_degree * 2);
-    }
 
     std::vector<std::string> batch_files;
     auto LoadBatchIndexFiles = [&]() {

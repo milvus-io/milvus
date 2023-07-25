@@ -386,27 +386,21 @@ TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
-    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        // TODO ::diskann.query need load first, ugly
-        auto binary_set = index->Serialize(milvus::Config{});
-        index.reset();
+    auto binary_set = index->Upload();
+    index.reset();
 
-        new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, file_manager);
-        vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager);
+    vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-        std::vector<std::string> index_files;
-        for (auto& binary : binary_set.binary_map_) {
-            index_files.emplace_back(binary.first);
-        }
-        load_conf["index_files"] = index_files;
-        ASSERT_NO_THROW(vec_index->Load(binary_set, load_conf));
-        EXPECT_EQ(vec_index->Count(), NB);
-    } else {
-        vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    std::vector<std::string> index_files;
+    for (auto& binary : binary_set.binary_map_) {
+        index_files.emplace_back(binary.first);
     }
-    EXPECT_EQ(vec_index->GetDim(), DIM);
+    load_conf["index_files"] = index_files;
+    ASSERT_NO_THROW(vec_index->Load(load_conf));
     EXPECT_EQ(vec_index->Count(), NB);
+    EXPECT_EQ(vec_index->GetDim(), DIM);
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;
