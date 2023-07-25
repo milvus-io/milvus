@@ -299,8 +299,12 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
+                               random_primary_key=False):
+    if not random_primary_key:
+        int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    else:
+        int_values = pd.Series(data=random.sample(range(start, start + nb), nb))
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
@@ -399,8 +403,11 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     return df
 
 
-def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-    int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, random_primary_key=False):
+    if not random_primary_key:
+        int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+    else:
+        int64_values = pd.Series(data=random.sample(range(start, start + nb), nb)) 
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
@@ -1001,7 +1008,8 @@ def gen_partitions(collection_w, partition_num=1):
 
 
 def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True):
+                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True,
+                random_primary_key=False):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -1016,14 +1024,16 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
     log.info(f"inserted {nb} data into collection {collection_w.name}")
     for i in range(num):
         log.debug("Dynamic field is enabled: %s" % enable_dynamic_field)
-        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json,
+                                                  random_primary_key=random_primary_key)
         if enable_dynamic_field:
             default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
+                                                       random_primary_key=random_primary_key)
             if enable_dynamic_field:
                 default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start, with_json=with_json)
         if auto_id:

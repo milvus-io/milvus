@@ -228,7 +228,7 @@ class TestcaseBase(Base):
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=True,
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
-                                enable_dynamic_field=False, with_json=True, **kwargs):
+                                enable_dynamic_field=False, with_json=True, random_primary_key=False, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -268,7 +268,8 @@ class TestcaseBase(Base):
         if insert_data:
             collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, 
-                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json)
+                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json, 
+                               random_primary_key=random_primary_key)
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb

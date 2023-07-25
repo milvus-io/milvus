@@ -5,6 +5,9 @@ import numpy
 import threading
 import pytest
 import pandas as pd
+pd.set_option("expand_frame_repr", False)
+import decimal
+from decimal import Decimal, getcontext
 from time import sleep
 import heapq
 
@@ -1242,6 +1245,10 @@ class TestCollectionSearch(TestcaseBase):
     def metric_type(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=[True, False])
+    def random_primary_key(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -1384,6 +1391,35 @@ class TestCollectionSearch(TestcaseBase):
         for hits in search_res:
             # verify that top 1 hit is itself,so min distance is 0
             assert 1.0 - hits.distances[0] <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_random_primary_key(self, random_primary_key):
+        """
+        target: test search for collection with random primary keys
+        method: create connection, collection, insert and search
+        expected: Search without errors and data consistency
+        """
+        # 1. initialize collection with random primary key
+
+        collection_w, _vectors, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, 10, random_primary_key=random_primary_key)[0:5]
+        # 2. search
+        log.info("test_search_random_primary_key: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            output_fields=[default_int64_field_name,
+                                           default_float_field_name,
+                                           default_json_field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 10,
+                                         "original_entities": _vectors,
+                                         "output_fields": [default_int64_field_name,
+                                                           default_float_field_name,
+                                                           default_json_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2, 3])

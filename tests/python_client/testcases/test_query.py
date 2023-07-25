@@ -5,6 +5,7 @@ import pytest
 import random
 import numpy as np
 import pandas as pd
+pd.set_option("expand_frame_repr", False)
 from pymilvus import DefaultConfig
 import threading
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
@@ -44,6 +45,10 @@ class TestQueryParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[True, False])
+    def random_primary_key(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -708,18 +713,17 @@ class TestQueryParams(TestcaseBase):
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
-    def test_query_output_all_fields(self, enable_dynamic_field):
+    def test_query_output_all_fields(self, enable_dynamic_field, random_primary_key):
         """
         target: test query with none output field
         method: query with output field=None
         expected: return all fields
         """
         # 1. initialize with data
-        collection_w, df, _, insert_ids = self.init_collection_general(prefix, True, nb=10,
-                                                                       is_all_data_type=True,
-                                                                       enable_dynamic_field=
-                                                                       enable_dynamic_field)[0:4]
+        collection_w, df, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb=10, is_all_data_type=True,
+                                         enable_dynamic_field=enable_dynamic_field,
+                                         random_primary_key=random_primary_key)[0:4]
         all_fields = [ct.default_int64_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
                       ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
                       ct.default_double_field_name, ct.default_string_field_name, ct.default_json_field_name,
@@ -727,7 +731,10 @@ class TestQueryParams(TestcaseBase):
         if enable_dynamic_field:
             res = df[0][:2]
         else:
-            res = df[0].iloc[:2].to_dict('records')
+            res = []
+            for id in range(2):
+                num = df[0][df[0][ct.default_int64_field_name] == id].index.to_list()[0]
+                res.append(df[0].iloc[num].to_dict())
         log.info(res)
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,
