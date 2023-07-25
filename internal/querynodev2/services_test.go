@@ -72,6 +72,7 @@ type ServiceSuite struct {
 	// Dependency
 	node                *QueryNode
 	etcdClient          *clientv3.Client
+	rootPath            string
 	chunkManagerFactory *storage.ChunkManagerFactory
 
 	// Mock
@@ -86,6 +87,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GCEnabled.Key, "false")
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CacheEnabled.Key, "false")
 
+	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
 	suite.collectionName = "test-collection"
 	suite.partitionIDs = []int64{222}
@@ -109,7 +111,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
 	//suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
-	suite.chunkManagerFactory = storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.chunkManagerFactory = segments.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(ctx))
 
@@ -152,7 +154,7 @@ func (suite *ServiceSuite) TearDownTest() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	suite.node.vectorStorage.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	suite.node.vectorStorage.RemoveWithPrefix(ctx, suite.rootPath)
 
 	suite.node.Stop()
 	suite.etcdClient.Close()

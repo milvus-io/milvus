@@ -39,6 +39,7 @@ import (
 type ReduceSuite struct {
 	suite.Suite
 	chunkManager storage.ChunkManager
+	rootPath     string
 
 	collectionID int64
 	partitionID  int64
@@ -56,7 +57,8 @@ func (suite *ReduceSuite) SetupTest() {
 	ctx := context.Background()
 	msgLength := 100
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.rootPath = suite.T().Name()
+	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
@@ -100,7 +102,7 @@ func (suite *ReduceSuite) TearDownTest() {
 	DeleteSegment(suite.segment)
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
 func (suite *ReduceSuite) TestReduceParseSliceInfo() {

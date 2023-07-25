@@ -18,6 +18,7 @@ import (
 
 type SegmentSuite struct {
 	suite.Suite
+	rootPath     string
 	chunkManager storage.ChunkManager
 
 	// Data
@@ -39,7 +40,8 @@ func (suite *SegmentSuite) SetupTest() {
 	ctx := context.Background()
 	msgLength := 100
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
+	suite.rootPath = suite.T().Name()
+	chunkManagerFactory := NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
@@ -115,7 +117,7 @@ func (suite *SegmentSuite) TearDownTest() {
 	DeleteSegment(suite.sealed)
 	DeleteSegment(suite.growing)
 	DeleteCollection(suite.collection)
-	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
+	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
 func (suite *SegmentSuite) TestDelete() {
