@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"go.uber.org/atomic"
@@ -269,8 +270,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	segment := resp.GetInfos()[0]
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
-		log.Warn("failed to get index of segment", zap.Error(err))
-		return err
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			log.Warn("failed to get index of segment", zap.Error(err))
+			return err
+		}
+		indexes = nil
 	}
 
 	readableVersion := int64(0)
