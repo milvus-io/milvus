@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
@@ -238,33 +237,15 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func newTestConsumer(topic string, fromEarliest bool, fromLatest bool) (mqwrapper.Consumer, error) {
-	conn, err := nats.Connect(natsServerAddress)
-	if err != nil {
-		return nil, err
-	}
-	js, err := conn.JetStream()
-	if err != nil {
-		return nil, err
-	}
-	groupName := topic
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:     groupName,
-		Subjects: []string{topic},
+func newTestConsumer(t *testing.T, topic string, position mqwrapper.SubscriptionInitialPosition) (mqwrapper.Consumer, error) {
+	client, err := createNmqClient()
+	assert.NoError(t, err)
+	return client.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            topic,
+		SubscriptionInitialPosition: position,
+		BufSize:                     1024,
 	})
-	if err != nil {
-		return nil, err
-	}
-	natsChan := make(chan *nats.Msg, 8192)
-	closeChan := make(chan struct{})
-	return &Consumer{
-		js:        js,
-		topic:     topic,
-		groupName: groupName,
-		natsChan:  natsChan,
-		closeChan: closeChan,
-		skip:      false,
-	}, nil
 }
 
 func newProducer(t *testing.T, topic string) (*nmqClient, mqwrapper.Producer) {
@@ -401,7 +382,7 @@ func TestNatsConsumer_SeekExclusive(t *testing.T) {
 	process(t, msgs, p)
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(topic, false, false)
+	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, false)
@@ -420,10 +401,11 @@ func TestNatsConsumer_SeekInclusive(t *testing.T) {
 	defer p.Close()
 
 	msgs := []string{"111", "222", "333", "444", "555"}
+
 	process(t, msgs, p)
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(topic, false, false)
+	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, true)
@@ -442,7 +424,7 @@ func TestNatsConsumer_NoDoubleSeek(t *testing.T) {
 	defer p.Close()
 
 	msgID := &nmqID{messageID: 2}
-	consumer, err := newTestConsumer(topic, false, false)
+	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 	err = consumer.Seek(msgID, true)
@@ -460,7 +442,7 @@ func TestNatsConsumer_ChanWithNoAssign(t *testing.T) {
 	msgs := []string{"111", "222", "333", "444", "555"}
 	process(t, msgs, p)
 
-	consumer, err := newTestConsumer(topic, false, false)
+	consumer, err := newTestConsumer(t, topic, mqwrapper.SubscriptionPositionUnknown)
 	assert.NoError(t, err)
 	defer consumer.Close()
 
