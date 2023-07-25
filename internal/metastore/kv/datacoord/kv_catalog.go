@@ -406,84 +406,6 @@ func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
 	return hasBinlogPrefix || hasDeltaPrefix || hasStatsPrefix, nil
 }
 
-func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error {
-	kvs := make(map[string]string)
-
-	for _, s := range segments {
-		noBinlogsSegment, binlogs, deltalogs, statslogs := CloneSegmentWithExcludeBinlogs(s)
-		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
-		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
-		// for compacted segments
-		if noBinlogsSegment.State == commonpb.SegmentState_Dropped {
-			hasBinlogkeys, err := kc.hasBinlogPrefix(s)
-			if err != nil {
-				return err
-			}
-
-			// In order to guarantee back compatibility, the old format segments need
-			// convert to new format that include segment key and three binlog keys,
-			// or GC can not find data path on the storage.
-			if !hasBinlogkeys {
-				binlogsKvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, true)
-				if err != nil {
-					return err
-				}
-				maps.Copy(kvs, binlogsKvs)
-			}
-		}
-
-		k, v, err := buildSegmentKv(noBinlogsSegment)
-		if err != nil {
-			return err
-		}
-		kvs[k] = v
-	}
-
-	if newSegment != nil {
-		segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
-		if err != nil {
-			return err
-		}
-		maps.Copy(kvs, segmentKvs)
-		if newSegment.NumOfRows > 0 {
-			kc.collectMetrics(newSegment)
-		}
-	}
-	return kc.MetaKv.MultiSave(kvs)
-}
-
-// RevertAlterSegmentsAndAddNewSegment reverts the metastore operation of AlterSegmentsAndAddNewSegment
-func (kc *Catalog) RevertAlterSegmentsAndAddNewSegment(ctx context.Context, oldSegments []*datapb.SegmentInfo, removeSegment *datapb.SegmentInfo) error {
-	var (
-		kvs      = make(map[string]string)
-		removals []string
-	)
-
-	for _, s := range oldSegments {
-		segmentKvs, err := buildSegmentAndBinlogsKvs(s)
-		if err != nil {
-			return err
-		}
-
-		maps.Copy(kvs, segmentKvs)
-	}
-
-	if removeSegment != nil {
-		segKey := buildSegmentPath(removeSegment.GetCollectionID(), removeSegment.GetPartitionID(), removeSegment.GetID())
-		removals = append(removals, segKey)
-		binlogKeys := buildBinlogKeys(removeSegment)
-		removals = append(removals, binlogKeys...)
-	}
-
-	err := kc.MetaKv.MultiSaveAndRemove(kvs, removals)
-	if err != nil {
-		log.Warn("batch save and remove segments failed", zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
 func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
 	if len(segments) == 0 {
 		return nil
@@ -685,10 +607,6 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 	return indexes, nil
 }
 
-func (kc *Catalog) AlterIndex(ctx context.Context, index *model.Index) error {
-	return kc.CreateIndex(ctx, index)
-}
-
 func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {
 	kvs := make(map[string]string)
 	for _, index := range indexes {
@@ -753,10 +671,6 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 	}
 
 	return segIndexes, nil
-}
-
-func (kc *Catalog) AlterSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
-	return kc.CreateSegmentIndex(ctx, segIdx)
 }
 
 func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.SegmentIndex) error {
