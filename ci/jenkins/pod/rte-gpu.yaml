@@ -15,9 +15,9 @@ spec:
     - name: DOCKER_VOLUME_DIRECTORY
       value: "/mnt/disk/.docker-gpu"
     - name: DOCKER_CLIENT_TIMEOUT
-      value: 120
+      value: 240
     - name: COMPOSE_HTTP_TIMEOUT
-      value: 120
+      value: 240
     tty: true
     securityContext:
       privileged: true
