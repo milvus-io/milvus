@@ -18,6 +18,8 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -28,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -119,7 +123,9 @@ func repackInsertDataByPartition(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	beforeAssign := time.Now()
 	assignedSegmentInfos, err := segIDAssigner.GetSegmentID(insertMsg.CollectionID, partitionID, channelName, uint32(len(rowOffsets)), maxTs)
+	metrics.ProxyAssignSegmentIDLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(time.Since(beforeAssign).Milliseconds()))
 	if err != nil {
 		log.Error("allocate segmentID for insert data failed",
 			zap.String("collectionName", insertMsg.CollectionName),

@@ -138,6 +138,26 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
+	// ProxyAssignSegmentIDLatency record the latency that Proxy get segmentID from dataCoord.
+	ProxyAssignSegmentIDLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "assign_segmentID_latency",
+			Help:      "latency that proxy get segmentID from dataCoord",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName})
+
+	// ProxySyncSegmentRequestLength the length of SegmentIDRequests when assigning segments for insert.
+	ProxySyncSegmentRequestLength = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "sync_segment_request_length",
+			Help:      "the length of SegmentIDRequests when assigning segments for insert",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName})
+
 	// ProxyCacheStatsCounter record the number of Proxy cache hits or miss.
 	ProxyCacheStatsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -288,6 +308,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
 
 	registry.MustRegister(ProxySendMutationReqLatency)
+
+	registry.MustRegister(ProxyAssignSegmentIDLatency)
+	registry.MustRegister(ProxySyncSegmentRequestLength)
 
 	registry.MustRegister(ProxyCacheStatsCounter)
 	registry.MustRegister(ProxyUpdateCacheLatency)
