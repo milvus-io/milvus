@@ -499,7 +499,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				// since here we always return task list to client no matter something missed.
 				// We make the method setCollectionPartitionName() returns error
 				// because we need to make sure coverage all the code branch in unittest case.
-				_ = m.setCollectionPartitionName("", cID, pID, newTask)
+				_ = m.setCollectionPartitionName(req.GetDbName(), cID, pID, newTask)
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
 				log.Info("new task created as pending task",
