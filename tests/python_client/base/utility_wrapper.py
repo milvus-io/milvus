@@ -95,8 +95,7 @@ class ApiUtilityWrapper:
                  unknown, "unknown")
 
     def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
-                                           timeout=None, using="default", **kwargs):
-        start = time.time()
+                                             timeout=None, using="default", **kwargs):
         tasks_state_distribution = {
             "success": set(),
             "failed": set(),
