@@ -592,7 +592,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context, segment *Local
 }
 
 func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	log.Warn("CQX load segment index", zap.Int64("segmentID", segment.ID()))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
 
 	for _, indexPath := range indexInfo.IndexFilePaths {
