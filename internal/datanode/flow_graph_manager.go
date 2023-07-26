@@ -61,7 +61,8 @@ func (fm *flowgraphManager) start() {
 	}
 }
 
-func (fm *flowgraphManager) stop() {
+func (fm *flowgraphManager) close() {
+	fm.dropAll()
 	fm.closeOnce.Do(func() {
 		close(fm.closeCh)
 	})
