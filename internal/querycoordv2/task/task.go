@@ -72,6 +72,7 @@ type Task interface {
 	Err() error
 	Priority() Priority
 	SetPriority(priority Priority)
+	Index() string // dedup indexing string
 
 	Cancel(err error)
 	Wait() error
@@ -164,6 +165,10 @@ func (task *baseTask) Priority() Priority {
 
 func (task *baseTask) SetPriority(priority Priority) {
 	task.priority = priority
+}
+
+func (task *baseTask) Index() string {
+	return fmt.Sprintf("[replica=%d]", task.replicaID)
 }
 
 func (task *baseTask) Err() error {
@@ -290,6 +295,10 @@ func (task *SegmentTask) SegmentID() UniqueID {
 	return task.segmentID
 }
 
+func (task *SegmentTask) Index() string {
+	return fmt.Sprintf("%s[segment=%d][growing=%t]", task.baseTask.Index(), task.segmentID, task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Streaming)
+}
+
 func (task *SegmentTask) String() string {
 	return fmt.Sprintf("%s [segmentID=%d]", task.baseTask.String(), task.segmentID)
 }
@@ -333,6 +342,10 @@ func NewChannelTask(ctx context.Context,
 
 func (task *ChannelTask) Channel() string {
 	return task.shard
+}
+
+func (task *ChannelTask) Index() string {
+	return fmt.Sprintf("%s[channel=%s]", task.baseTask.Index(), task.shard)
 }
 
 func (task *ChannelTask) String() string {

@@ -1286,8 +1286,8 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 		keys = make([]any, 0)
 
 		for _, executor := range suite.scheduler.executors {
-			executor.executingTasks.Range(func(taskID int64) bool {
-				keys = append(keys, taskID)
+			executor.executingTasks.Range(func(taskIndex string) bool {
+				keys = append(keys, taskIndex)
 				count++
 				return true
 			})
