@@ -417,19 +417,11 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
 std::vector<FieldDataPtr>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files) {
-    auto& pool = ThreadPool::GetInstance();
-    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
-    for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDecodeRemoteFile, remote_chunk_manager, file));
-    }
-
     std::vector<FieldDataPtr> datas;
-    for (int i = 0; i < futures.size(); ++i) {
-        auto res = futures[i].get();
+    for (auto& file : remote_files) {
+        auto res = DownloadAndDecodeRemoteFile(remote_chunk_manager, file);
         datas.emplace_back(res->GetFieldData());
     }
-
     ReleaseArrowUnused();
     return datas;
 }
