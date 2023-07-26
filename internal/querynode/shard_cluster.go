@@ -599,7 +599,11 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 
 	sc.mut.RLock()
 	defer sc.mut.RUnlock()
-	sc.distribution.RemoveDistributions(releaseFn, entries...)
+
+	// ReleasSemgnets maybe called before SetupFirstVersion. which means sc.distribution is nil
+	if sc.distribution != nil {
+		sc.distribution.RemoveDistributions(releaseFn, entries...)
+	}
 
 	return err
 }
