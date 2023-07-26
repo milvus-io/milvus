@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -85,6 +86,7 @@ func (c *SessionManager) AddSession(node *NodeInfo) {
 
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // DeleteSession removes the node session
@@ -96,6 +98,7 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 		session.Dispose()
 		delete(c.sessions.data, node.NodeID)
 	}
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(len(c.sessions.data)))
 }
 
 // getLiveNodeIDs returns IDs of all live DataNodes.
