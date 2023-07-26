@@ -555,10 +555,6 @@ LoadFieldDatasFromRemote(std::vector<std::string>& remote_files,
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-    // set the capacity to 2x parallel_degree, so the memory usage will not be greater than 2x DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-    // which is 128 MiB
-    channel->set_capacity(parallel_degree * 2);
-
     auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
     std::sort(remote_files.begin(),

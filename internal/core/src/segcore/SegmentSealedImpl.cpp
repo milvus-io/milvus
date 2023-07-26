@@ -182,6 +182,10 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
 
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        field_data_info.channel->set_capacity(parallel_degree * 2);
+
         auto& pool = ThreadPool::GetInstance();
         auto load_future = pool.Submit(
             LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
