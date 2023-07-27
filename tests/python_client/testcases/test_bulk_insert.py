@@ -910,13 +910,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert len(res) == nb
 
     @pytest.mark.parametrize("auto_id", [True, False])
-    def test_dynamic_schema_with_numpy(self, auto_id):
+    @pytest.mark.parametrize("miss_meta_file", [True, False])
+    @pytest.mark.parametrize("dim", [128, 768, 1536])
+    def test_dynamic_schema_with_numpy(self, auto_id, miss_meta_file, dim):
         """
         """
         import json
         self._connect()
         c_name = cf.gen_unique_str("dynamic_schema")
-        dim = 128
+        dim = dim
         nb = 100
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
@@ -958,6 +960,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # load collection
         self.collection_wrap.load()
         t0 = time.time()
+        if miss_meta_file is True:
+            # meta file is an optional file, so we can remove it
+            files = [f for f in files if f != "$meta.npy"]
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name, files=files
         )
