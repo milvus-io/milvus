@@ -513,6 +513,8 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				Msgs:           []TsMsg{tsMsg},
 				StartPositions: []*internalpb.MsgPosition{tsMsg.Position()},
 				EndPositions:   []*internalpb.MsgPosition{tsMsg.Position()},
+				BeginTs:        tsMsg.BeginTs(),
+				EndTs:          tsMsg.EndTs(),
 			}
 			select {
 			case ms.receiveBuf <- &msgPack:
