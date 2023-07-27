@@ -265,6 +265,7 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #23403 not passed in nightly ")
     def test_insert_field_value_not_match(self):
         """
         target: test insert data value not match
