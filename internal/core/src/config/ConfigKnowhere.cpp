@@ -34,6 +34,14 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::ShowVersion();
         google::InitGoogleLogging("milvus");
+
+#ifdef EMBEDDED_MILVUS
+        // always disable all logs for embedded milvus
+        google::SetCommandLineOption("minloglevel", "4");
+#endif
+        if (conf_file != nullptr) {
+            gflags::SetCommandLineOption("flagfile", conf_file);
+        }
     };
 
     std::call_once(init_knowhere_once_, init);

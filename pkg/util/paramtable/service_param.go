@@ -804,6 +804,7 @@ type MinioConfig struct {
 	UseIAM          ParamItem `refreshable:"false"`
 	CloudProvider   ParamItem `refreshable:"false"`
 	IAMEndpoint     ParamItem `refreshable:"false"`
+	LogLevel        ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -920,4 +921,12 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.IAMEndpoint.Init(base.mgr)
+	p.LogLevel = ParamItem{
+		Key:          "minio.logLevel",
+		DefaultValue: DefaultMinioLogLevel,
+		Version:      "2.3.0",
+		Doc:          `Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace`,
+		Export:       true,
+	}
+	p.LogLevel.Init(base.mgr)
 }
