@@ -385,3 +385,11 @@ func (s *Server) AddImportSegment(ctx context.Context, request *datapb.AddImport
 func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	return s.datanode.SyncSegments(ctx, request)
 }
+
+func (s *Server) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperations) (*commonpb.Status, error) {
+	return s.datanode.NotifyChannelOperation(ctx, req)
+}
+
+func (s *Server) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+	return s.datanode.CheckChannelOperationProgress(ctx, req)
+}

@@ -403,13 +403,14 @@ func (s *Server) initCluster() error {
 		return nil
 	}
 
+	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
+
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.factory),
-		withStateChecker(), withBgChecker())
+	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, s.sessionManager, withMsgstreamFactory(s.factory),
+		withBalanceChecker(), withOperationChecker())
 	if err != nil {
 		return err
 	}
-	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
 	s.cluster = NewCluster(s.sessionManager, s.channelManager)
 	return nil
 }

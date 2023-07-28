@@ -39,6 +39,7 @@ type MetaWatcher interface {
 	ShowSessions() ([]*sessionutil.Session, error)
 	ShowSegments() ([]*datapb.SegmentInfo, error)
 	ShowReplicas() ([]*querypb.Replica, error)
+	ShowWatchInfos() ([]*datapb.ChannelWatchInfo, error)
 }
 
 type EtcdMetaWatcher struct {

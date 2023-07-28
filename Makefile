@@ -331,6 +331,7 @@ mock-tnx-kv:
 generate-mockery: getdeps
 	# internal/datanode
 	$(PWD)/bin/mockery --name=Allocator --dir=$(PWD)/internal/datanode/allocator/ --output=$(PWD)/internal/datanode/allocator --filename=mock_allocator.go --with-expecter --structname=MockAllocator  --outpkg=allocator --inpackage
+	$(PWD)/bin/mockery --name=DataNodeComponent --dir=$(PWD)/internal/types/ --output=$(PWD)/internal/mocks --filename=mock_datanode.go --with-expecter --structname=MockDataNode  --outpkg=mocks
 	# internal/querycoordv2
 	$(PWD)/bin/mockery --name=QueryNodeServer --dir=$(PWD)/internal/proto/querypb/ --output=$(PWD)/internal/querycoordv2/mocks --filename=mock_querynode.go --with-expecter --structname=MockQueryNodeServer
 	$(PWD)/bin/mockery --name=Broker --dir=$(PWD)/internal/querycoordv2/meta --output=$(PWD)/internal/querycoordv2/meta --filename=mock_broker.go --with-expecter --structname=MockBroker --outpkg=meta

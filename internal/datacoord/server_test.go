@@ -1272,9 +1272,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		ctx := context.Background()
@@ -1359,9 +1359,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		ctx := context.Background()
@@ -1437,9 +1437,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		ctx := context.Background()
@@ -1491,9 +1491,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 			ID: 0,
 		})
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		ctx := context.Background()
@@ -1539,9 +1539,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 	t.Run("with channel not matched", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 		s := &datapb.SegmentInfo{
 			ID:            1,
@@ -1585,7 +1585,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 
 			err = svr.channelManager.AddNode(0)
 			assert.NoError(t, err)
-			err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 1})
+			err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 1})
 			assert.NoError(t, err)
 
 			_, err = svr.SaveBinlogPaths(context.TODO(), &datapb.SaveBinlogPathsRequest{
@@ -1657,9 +1657,9 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		svr.meta.AddSegment(NewSegmentInfo(os))
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		ctx := context.Background()
@@ -1732,7 +1732,7 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		<-spyCh
 
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		//resend
@@ -1745,9 +1745,9 @@ func TestDropVirtualChannel(t *testing.T) {
 	t.Run("with channel not matched", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
@@ -2802,9 +2802,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
+		err = svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -3206,7 +3206,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager)
 		assert.NoError(t, err)
 
 		cluster := NewCluster(sessionManager, channelManager)
@@ -3260,9 +3260,9 @@ func TestHandleSessionEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
-	assert.NoError(t, err)
 	sessionManager := NewSessionManager()
+	channelManager, err := NewChannelManager(kv, newMockHandler(), sessionManager, withFactory(&mockPolicyFactory{}))
+	assert.NoError(t, err)
 	cluster := NewCluster(sessionManager, channelManager)
 	assert.NoError(t, err)
 
@@ -3646,9 +3646,9 @@ func TestDataCoord_Import(t *testing.T) {
 			NodeID:  0,
 			Address: "localhost:8080",
 		})
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -3665,9 +3665,9 @@ func TestDataCoord_Import(t *testing.T) {
 	t.Run("no free node", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 
-		err := svr.channelManager.AddNode(0)
+		err := svr.channelManager.RegisterNode(0)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 0})
 		assert.NoError(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -3810,9 +3810,9 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 			NodeID:  110,
 			Address: "localhost:8080",
 		})
-		err := svr.channelManager.AddNode(110)
+		err := svr.channelManager.RegisterNode(110)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
@@ -3847,9 +3847,9 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		err := svr.channelManager.AddNode(110)
+		err := svr.channelManager.RegisterNode(110)
 		assert.NoError(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
+		err = svr.channelManager.AddChannel(&channel{Name: "ch1", CollectionID: 100})
 		assert.NoError(t, err)
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
@@ -3969,9 +3969,8 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
 
-	// Stop channal watch state watcher in tests
-	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
-		svr.channelManager.stopChecker()
+	if svr.channelManager != nil {
+		svr.channelManager.Close()
 	}
 
 	return svr
@@ -4016,9 +4015,8 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	err = svr.Register()
 	assert.NoError(t, err)
 
-	// Stop channal watch state watcher in tests
-	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
-		svr.channelManager.stopChecker()
+	if svr.channelManager != nil {
+		svr.channelManager.Close()
 	}
 
 	return svr
@@ -4066,9 +4064,8 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	err = svr.Register()
 	assert.NoError(t, err)
 
-	// Stop channal watch state watcher in tests
-	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
-		svr.channelManager.stopChecker()
+	if svr.channelManager != nil {
+		svr.channelManager.Close()
 	}
 
 	return svr
@@ -4264,9 +4261,8 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, commonpb.StateCode_Healthy, resp.GetState().GetStateCode())
 
-	// stop channal watch state watcher in tests
-	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
-		svr.channelManager.stopChecker()
+	if svr.channelManager != nil {
+		svr.channelManager.Close()
 	}
 
 	return svr

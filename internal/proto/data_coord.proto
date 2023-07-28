@@ -108,6 +108,9 @@ service DataNode {
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
   rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
+
+  rpc NotifyChannelOperation(ChannelOperations) returns(common.Status) {}
+  rpc CheckChannelOperationProgress(ChannelWatchInfo) returns(ChannelOperationProgressResponse) {}
 }
 
 message FlushRequest {
@@ -424,7 +427,7 @@ message ChannelWatchInfo {
     int64 timeoutTs = 4;
     // the schema of the collection to watch, to avoid get schema rpc issues.
     schema.CollectionSchema schema = 5;
-    // watch progress
+    // watch progress, deprecated
     int32 progress = 6;
 }
 
@@ -670,4 +673,13 @@ message GcConfirmResponse {
 message ReportDataNodeTtMsgsRequest {
   common.MsgBase base = 1;
   repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}
+
+message ChannelOperations {
+  repeated ChannelWatchInfo infos = 1;
+}
+
+message ChannelOperationProgressResponse {
+  ChannelWatchState state = 1;
+  int32 progress = 2;
 }

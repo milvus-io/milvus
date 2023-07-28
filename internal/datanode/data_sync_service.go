@@ -204,11 +204,13 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 	}
 
 	//tickler will update addSegment progress to watchInfo
-	tickler.watch()
-	defer tickler.stop()
 	futures := make([]*conc.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
 
 	for _, us := range unflushedSegmentInfos {
+		if tickler.closed() {
+			return fmt.Errorf("Flowgraph init closed from outside")
+		}
+
 		if us.CollectionID != dsService.collectionID ||
 			us.GetInsertChannel() != vchanInfo.ChannelName {
 			log.Warn("Collection ID or ChannelName not match",

@@ -49,15 +49,6 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 		return nil, err
 	}
 
-	getAllCollections := func() []int64 {
-		collectionSet := typeutil.UniqueSet{}
-		node.flowgraphManager.flowgraphs.Range(func(key string, fg *dataSyncService) bool {
-			collectionSet.Insert(fg.channel.getCollectionID())
-			return true
-		})
-
-		return collectionSet.Collect()
-	}
 	minFGChannel, minFGTt := rateCol.getMinFlowGraphTt()
 	return &metricsinfo.DataNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
@@ -65,11 +56,11 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 		Fgm: metricsinfo.FlowGraphMetric{
 			MinFlowGraphChannel: minFGChannel,
 			MinFlowGraphTt:      minFGTt,
-			NumFlowGraph:        node.flowgraphManager.getFlowGraphNum(),
+			NumFlowGraph:        node.channelManager.runningFlowgraphs.getFlowGraphNum(),
 		},
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetSession().ServerID,
-			CollectionIDs: getAllCollections(),
+			CollectionIDs: node.channelManager.runningFlowgraphs.collections(),
 		},
 	}, nil
 }

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"fmt"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 
@@ -58,6 +59,41 @@ type ChannelOp struct {
 	ChannelWatchInfos []*datapb.ChannelWatchInfo
 }
 
+func (op *ChannelOp) GetSingle(channel string) *SingleChannelOp {
+	var newOp *SingleChannelOp = &SingleChannelOp{
+		Type:   op.Type,
+		NodeID: op.NodeID,
+	}
+
+	for i, ch := range op.Channels {
+		if ch.Name == channel {
+			newOp.Channel = ch
+			newOp.ChannelWatchInfo = op.ChannelWatchInfos[i]
+		}
+	}
+	return newOp
+}
+
+type SingleChannelOp struct {
+	Type             ChannelOpType
+	NodeID           int64
+	Channel          *channel
+	ChannelWatchInfo *datapb.ChannelWatchInfo
+}
+
+func (op *SingleChannelOp) Update(state datapb.ChannelWatchState) {
+	op.ChannelWatchInfo.State = state
+}
+
+func (op *SingleChannelOp) ToChannelOp() *ChannelOp {
+	return &ChannelOp{
+		Type:              op.Type,
+		NodeID:            op.NodeID,
+		Channels:          []*channel{op.Channel},
+		ChannelWatchInfos: []*datapb.ChannelWatchInfo{op.ChannelWatchInfo},
+	}
+}
+
 // ChannelOpSet is a set of channel operations.
 type ChannelOpSet []*ChannelOp
 
@@ -77,6 +113,16 @@ func (cos *ChannelOpSet) Delete(id int64, channels []*channel) {
 		Type:     Delete,
 		Channels: channels,
 	})
+}
+
+func (cos *ChannelOpSet) Append(op *ChannelOp) {
+	*cos = append(*cos, op)
+}
+
+func NewChannelOpSet(ops ...*ChannelOp) ChannelOpSet {
+	var opset ChannelOpSet
+	opset = append(opset, ops...)
+	return opset
 }
 
 // ROChannelStore is a read only channel store for channels and nodes.
@@ -106,6 +152,8 @@ type RWChannelStore interface {
 	Delete(nodeID int64) ([]*channel, error)
 	// Update applies the operations in ChannelOpSet.
 	Update(op ChannelOpSet) error
+	// Read watchinfo from meta
+	GetNodeWatchInfos(nodeID int64) ([]*datapb.ChannelWatchInfo, error)
 }
 
 // ChannelStore must satisfy RWChannelStore.
@@ -170,6 +218,37 @@ func (c *ChannelStore) Reload() error {
 	}
 	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
+}
+
+func (c *ChannelStore) GetNodeWatchInfos(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
+	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), strconv.FormatInt(nodeID, 10))
+
+	keys, values, err := c.store.LoadWithPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	var ret []*datapb.ChannelWatchInfo
+	var invalidKeys []string
+
+	for i, k := range keys {
+		watchInfo, err := parseWatchInfo(k, []byte(values[i]))
+		if err != nil {
+			log.Warn("invalid watchInfo loaded", zap.String("key", k), zap.Error(err))
+			invalidKeys = append(invalidKeys, k)
+			continue
+		}
+
+		ret = append(ret, watchInfo)
+	}
+
+	if len(invalidKeys) > 0 {
+		log.Info("attempt to remove invalid watchinfo meta", zap.Strings("keys", invalidKeys))
+		// ignore the error, try to remove it the next time.
+		c.store.MultiRemove(invalidKeys)
+	}
+
+	return ret, nil
 }
 
 // Add creates a new node-channels mapping for the given node, and assigns no channels to it.
@@ -386,6 +465,7 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 }
 
 // buildNodeChannelKey generates a key for kv store, where the key is a concatenation of ChannelWatchSubPath, nodeID and channel name.
+// ${WatchSubPath}/${nodeID}/${channelName}
 func buildNodeChannelKey(nodeID int64, chName string) string {
 	return fmt.Sprintf("%s%s%d%s%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), delimiter, nodeID, delimiter, chName)
 }
@@ -432,4 +512,19 @@ func (cos ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 		enc.AppendObject(o)
 	}
 	return nil
+}
+
+func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
+	watchInfo := datapb.ChannelWatchInfo{}
+	if err := proto.Unmarshal(data, &watchInfo); err != nil {
+		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
+
+	}
+
+	if watchInfo.Vchan == nil {
+		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo, key: %s", key)
+	}
+	reviseVChannelInfo(watchInfo.GetVchan())
+
+	return &watchInfo, nil
 }
