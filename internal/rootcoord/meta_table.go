@@ -1203,7 +1203,7 @@ func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) erro
 
 	results, err := mt.catalog.ListRole(mt.ctx, tenant, nil, false)
 	if err != nil {
-		logger.Error("fail to list roles", zap.Error(err))
+		log.Error("fail to list roles", zap.Error(err))
 		return err
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {

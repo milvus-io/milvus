@@ -639,6 +639,18 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	// refresh rbac cache
+	if err := retry.Do(c.ctx, func() error {
+		if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheRefresh),
+		}); err != nil {
+			log.Warn("fail to refresh policy info cache", zap.Error(err))
+			return err
+		}
+		return nil
+	}, retry.Attempts(100), retry.Sleep(time.Second)); err != nil {
+		log.Panic("fail to refresh policy info cache", zap.Error(err))
+	}
 	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
 
 	return nil
@@ -2012,25 +2024,23 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	method := "CreateCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", credInfo.Username))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("username", credInfo.Username))
+	ctxLog.Debug(method)
+	if code, ok := c.checkHealthy(); !ok {
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
+	}
 
 	// insert to db
 	err := c.meta.AddCredential(credInfo)
 	if err != nil {
-		log.Error("CreateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", credInfo.Username), zap.Error(err))
+		ctxLog.Warn("CreateCredential save credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_CreateCredentialFailure
-		return status, nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateCredentialFailure), nil
 	}
 	// update proxy's local cache
 	err = c.UpdateCredCache(ctx, credInfo)
 	if err != nil {
-		log.Warn("CreateCredential add cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", credInfo.Username), zap.Error(err))
+		ctxLog.Warn("CreateCredential add cache failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 	}
 	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
@@ -2047,23 +2057,21 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	method := "GetCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("username", in.Username))
+	ctxLog.Debug(method)
+	if code, ok := c.checkHealthy(); !ok {
+		return &rootcoordpb.GetCredentialResponse{Status: merr.Status(merr.WrapErrServiceNotReady(code.String()))}, nil
+	}
 
 	credInfo, err := c.meta.GetCredential(in.Username)
 	if err != nil {
-		log.Error("GetCredential query credential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
+		ctxLog.Warn("GetCredential query credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_GetCredentialFailure
 		return &rootcoordpb.GetCredentialResponse{
-			Status: status,
-		}, err
+			Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_GetCredentialFailure),
+		}, nil
 	}
-	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username))
+	ctxLog.Debug("GetCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2079,32 +2087,26 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	method := "UpdateCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", credInfo.Username))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("username", credInfo.Username))
+	ctxLog.Debug(method)
+	if code, ok := c.checkHealthy(); !ok {
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
+	}
 	// update data on storage
 	err := c.meta.AlterCredential(credInfo)
 	if err != nil {
-		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", credInfo.Username), zap.Error(err))
+		ctxLog.Warn("UpdateCredential save credential failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_UpdateCredentialFailure
-		return status, nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
 	}
 	// update proxy's local cache
 	err = c.UpdateCredCache(ctx, credInfo)
 	if err != nil {
-		log.Error("UpdateCredential update cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", credInfo.Username), zap.Error(err))
+		ctxLog.Warn("UpdateCredential update cache failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_UpdateCredentialFailure
-		return status, nil
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_UpdateCredentialFailure), nil
 	}
-	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", credInfo.Username))
+	log.Debug("UpdateCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2116,36 +2118,58 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	method := "DeleteCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("username", in.Username))
+	ctxLog.Debug(method)
+	if code, ok := c.checkHealthy(); !ok {
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
+	}
+	var status *commonpb.Status
+	defer func() {
+		if status.Code != 0 {
+			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		}
+	}()
 
-	// delete data on storage
-	err := c.meta.DeleteCredential(in.Username)
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("delete credential meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.DeleteCredential(in.Username)
+		if err != nil {
+			ctxLog.Warn("delete credential meta data failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("delete credential cache", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.ExpireCredCache(ctx, in.Username)
+		if err != nil {
+			ctxLog.Warn("delete credential cache failed", zap.Error(err))
+		}
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("delete user role cache for the user", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheDeleteUser),
+			OpKey:  in.Username,
+		})
+		if err != nil {
+			ctxLog.Warn("delete user role cache failed for the user", zap.Error(err))
+		}
+		return nil, err
+	}))
+
+	err := redoTask.Execute(ctx)
 	if err != nil {
-		log.Error("DeleteCredential remove credential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_DeleteCredentialFailure
+		errMsg := "fail to execute task when deleting the user"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		status = merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DeleteCredentialFailure)
 		return status, nil
 	}
-	// invalidate proxy's local cache
-	err = c.ExpireCredCache(ctx, in.Username)
-	if err != nil {
-		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-
-		status := merr.Status(err)
-		status.ErrorCode = commonpb.ErrorCode_DeleteCredentialFailure
-		return status, nil
-	}
-	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username))
+	ctxLog.Debug("DeleteCredential success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCredentials.Dec()
-	return merr.Status(nil), nil
+	status = merr.Status(nil)
+	return status, nil
 }
 
 // ListCredUsers list all usernames
@@ -2153,19 +2177,22 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 	method := "ListCredUsers"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole))
+	ctxLog.Debug(method)
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.ListCredUsersResponse{Status: merr.Status(merr.WrapErrServiceNotReady(code.String()))}, nil
+	}
 
 	credInfo, err := c.meta.ListCredentialUsernames()
 	if err != nil {
-		log.Ctx(ctx).Error("ListCredUsers query usernames failed",
-			zap.String("role", typeutil.RootCoordRole),
-			zap.Error(err))
+		ctxLog.Warn("ListCredUsers query usernames failed", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 
 		status := merr.Status(err)
 		status.ErrorCode = commonpb.ErrorCode_ListCredUsersFailure
 		return &milvuspb.ListCredUsersResponse{Status: status}, nil
 	}
-	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
+	ctxLog.Debug("ListCredUsers success")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2184,21 +2211,22 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	method := "CreateRole"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method + " begin")
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
 	}
 	entity := in.Entity
 
 	err := c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
 	if err != nil {
 		errMsg := "fail to create role"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_CreateRoleFailure, fmt.Sprintf("%s, error: %s", errMsg, err.Error())), nil
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_CreateRoleFailure), nil
 	}
 
-	logger.Debug(method+" success", zap.String("role_name", entity.Name))
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfRoles.Inc()
@@ -2217,15 +2245,16 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	method := "DropRole"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("role_name", in.RoleName))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
 	grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
@@ -2233,42 +2262,35 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	})
 	if len(grantEntities) != 0 {
 		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
-	roleResults, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, true)
-	if err != nil {
-		errMsg := "fail to find the role by role name, maybe the role isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
-	}
-	logger.Debug("role to user info", zap.Int("counter", len(roleResults)))
-	for _, roleResult := range roleResults {
-		for index, userEntity := range roleResult.Users {
-			if err = c.meta.OperateUserRole(util.DefaultTenant,
-				&milvuspb.UserEntity{Name: userEntity.Name},
-				&milvuspb.RoleEntity{Name: roleResult.Role.Name}, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
-				if common.IsIgnorableError(err) {
-					continue
-				}
-				errMsg := "fail to remove user from role"
-				log.Error(errMsg, zap.Any("in", in), zap.String("role_name", roleResult.Role.Name), zap.String("username", userEntity.Name), zap.Int("current_index", index), zap.Error(err))
-				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
-			}
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("drop role meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.DropRole(util.DefaultTenant, in.RoleName)
+		if err != nil {
+			ctxLog.Warn("drop role mata data failed", zap.Error(err))
 		}
-	}
-	if err = c.meta.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}); err != nil {
-		errMsg := "fail to drop the grant"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
-	}
-	if err = c.meta.DropRole(util.DefaultTenant, in.RoleName); err != nil {
-		errMsg := "fail to drop the role"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
+		return nil, err
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("drop role cache", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheDropRole),
+			OpKey:  in.RoleName,
+		})
+		if err != nil {
+			ctxLog.Warn("delete user role cache failed for the role", zap.Error(err))
+		}
+		return nil, err
+	}))
+	err = redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when dropping the role"
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 	}
 
-	logger.Debug(method+" success", zap.String("role_name", in.RoleName))
+	ctxLog.Debug(method+" success", zap.String("role_name", in.RoleName))
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfRoles.Dec()
@@ -2285,36 +2307,36 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	method := "OperateUserRole-" + in.Type.String()
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
 	}
 
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+		ctxLog.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
 	if in.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
 		if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
 			errMsg := "not found the user, maybe the user isn't existed or internal system error"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+			ctxLog.Warn(errMsg, zap.Error(err))
+			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
 		}
 	}
 
-	updateCache := true
-	if err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type); err != nil {
-		if !common.IsIgnorableError(err) {
-			errMsg := "fail to operate user to role"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate user role meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("operate user role mata data failed", zap.Error(err))
+			return nil, err
 		}
-		updateCache = false
-	}
-
-	if updateCache {
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate user role cache", func(ctx context.Context) ([]nestedStep, error) {
 		var opType int32
 		switch in.Type {
 		case milvuspb.OperateUserRoleType_AddUserToRole:
@@ -2323,20 +2345,26 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 			opType = int32(typeutil.CacheRemoveUserFromRole)
 		default:
 			errMsg := "invalid operate type for the OperateUserRole api"
-			log.Error(errMsg, zap.Any("in", in))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+			log.Warn(errMsg, zap.Any("in", in))
+			return nil, nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.EncodeUserRoleCache(in.Username, in.RoleName),
 		}); err != nil {
-			errMsg := "fail to refresh policy info cache"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
 		}
+		return nil, nil
+	}))
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operate the user and role"
+		log.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperateUserRoleFailure), nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Status(nil), nil
@@ -2350,10 +2378,11 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 	method := "SelectRole"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		return &milvuspb.SelectRoleResponse{Status: merr.Status(merr.WrapErrServiceNotReady(code.String()))}, nil
 	}
 
 	if in.Role != nil {
@@ -2364,22 +2393,22 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 				}, nil
 			}
 			errMsg := "fail to select the role to check the role name"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			ctxLog.Warn(errMsg, zap.Error(err))
 			return &milvuspb.SelectRoleResponse{
-				Status: failStatus(commonpb.ErrorCode_SelectRoleFailure, errMsg),
+				Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectRoleFailure),
 			}, nil
 		}
 	}
 	roleResults, err := c.meta.SelectRole(util.DefaultTenant, in.Role, in.IncludeUserInfo)
 	if err != nil {
 		errMsg := "fail to select the role"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
-			Status: failStatus(commonpb.ErrorCode_SelectRoleFailure, errMsg),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectRoleFailure),
 		}, nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.SelectRoleResponse{
@@ -2396,10 +2425,11 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	method := "SelectUser"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		return &milvuspb.SelectUserResponse{Status: merr.Status(merr.WrapErrServiceNotReady(code.String()))}, nil
 	}
 
 	if in.User != nil {
@@ -2410,22 +2440,22 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 				}, nil
 			}
 			errMsg := "fail to select the user to check the username"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 			return &milvuspb.SelectUserResponse{
-				Status: failStatus(commonpb.ErrorCode_SelectUserFailure, errMsg),
+				Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectUserFailure),
 			}, nil
 		}
 	}
 	userResults, err := c.meta.SelectUser(util.DefaultTenant, in.User, in.IncludeRoleInfo)
 	if err != nil {
 		errMsg := "fail to select the user"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectUserResponse{
-			Status: failStatus(commonpb.ErrorCode_SelectUserFailure, errMsg),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectUserFailure),
 		}, nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.SelectUserResponse{
@@ -2504,53 +2534,54 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	method := "OperatePrivilege"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
 	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
-		log.Error(errMsg, zap.Any("in", in))
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+		ctxLog.Warn(errMsg)
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
-		log.Error(errMsg, zap.Any("in", in))
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+		ctxLog.Error(errMsg)
+		return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 	if err := c.isValidObject(in.Entity.Object); err != nil {
-		log.Error("", zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
+		ctxLog.Warn("", zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 	if err := c.isValidRole(in.Entity.Role); err != nil {
-		log.Error("", zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
+		ctxLog.Warn("", zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 	if err := c.isValidGrantor(in.Entity.Grantor, in.Entity.Object.Name); err != nil {
-		log.Error("", zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
+		ctxLog.Error("", zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 
-	logger.Debug("before PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
+	ctxLog.Debug("before PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
 	if !util.IsAnyWord(in.Entity.Grantor.Privilege.Name) {
 		in.Entity.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(in.Entity.Grantor.Privilege.Name)
 	}
-	logger.Debug("after PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
+	ctxLog.Debug("after PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
 	if in.Entity.Object.Name == commonpb.ObjectType_Global.String() {
 		in.Entity.ObjectName = util.AnyWord
 	}
-	updateCache := true
-	if err := c.meta.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type); err != nil {
-		if !common.IsIgnorableError(err) {
-			errMsg := "fail to operate the privilege"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
-		}
-		updateCache = false
-	}
 
-	if updateCache {
+	redoTask := newBaseRedoTask(c.stepExecutor)
+	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
+		err := c.meta.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type)
+		if err != nil && !common.IsIgnorableError(err) {
+			log.Warn("fail to operate the privilege", zap.Any("in", in), zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}))
+	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
 		var opType int32
 		switch in.Type {
 		case milvuspb.OperatePrivilegeType_Grant:
@@ -2558,21 +2589,27 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		case milvuspb.OperatePrivilegeType_Revoke:
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
-			errMsg := "invalid operate type for the OperatePrivilege api"
-			log.Error(errMsg, zap.Any("in", in))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+			log.Warn("invalid operate type for the OperatePrivilege api", zap.Any("in", in))
+			return nil, nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.PolicyForPrivilege(in.Entity.Role.Name, in.Entity.Object.Name, in.Entity.ObjectName, in.Entity.Grantor.Privilege.Name, in.Entity.DbName),
 		}); err != nil {
-			errMsg := "fail to refresh policy info cache"
-			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
+			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+			return nil, err
 		}
+		return nil, nil
+	}))
+
+	err := redoTask.Execute(ctx)
+	if err != nil {
+		errMsg := "fail to execute task when operating the privilege"
+		log.Warn(errMsg, zap.Error(err))
+		return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return merr.Status(nil), nil
@@ -2587,31 +2624,32 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	method := "SelectGrant"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.SelectGrantResponse{
-			Status: errorutil.UnhealthyStatus(code),
-		}, errorutil.UnhealthyError()
+			Status: merr.Status(merr.WrapErrServiceNotReady(code.String())),
+		}, nil
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
-		log.Error(errMsg, zap.Any("in", in))
+		ctxLog.Warn(errMsg)
 		return &milvuspb.SelectGrantResponse{
-			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, errMsg),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
 	if err := c.isValidRole(in.Entity.Role); err != nil {
-		log.Error("", zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn("", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
-			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, err.Error()),
+			Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
 	if in.Entity.Object != nil {
 		if err := c.isValidObject(in.Entity.Object); err != nil {
-			log.Error("", zap.Any("in", in), zap.Error(err))
+			ctxLog.Warn("", zap.Error(err))
 			return &milvuspb.SelectGrantResponse{
-				Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, err.Error()),
+				Status: merr.StatusWithErrorCode(err, commonpb.ErrorCode_SelectGrantFailure),
 			}, nil
 		}
 	}
@@ -2624,13 +2662,13 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	}
 	if err != nil {
 		errMsg := "fail to select the grant"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
-			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, errMsg),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_SelectGrantFailure),
 		}, nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.SelectGrantResponse{
@@ -2643,32 +2681,33 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	method := "PolicyList"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	logger.Debug(method, zap.Any("in", in))
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", in))
+	ctxLog.Debug(method)
 
 	if code, ok := c.checkHealthy(); !ok {
 		return &internalpb.ListPolicyResponse{
-			Status: errorutil.UnhealthyStatus(code),
-		}, errorutil.UnhealthyError()
+			Status: merr.Status(merr.WrapErrServiceNotReady(code.String())),
+		}, nil
 	}
 
 	policies, err := c.meta.ListPolicy(util.DefaultTenant)
 	if err != nil {
 		errMsg := "fail to list policy"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: failStatus(commonpb.ErrorCode_ListPolicyFailure, errMsg),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	userRoles, err := c.meta.ListUserRole(util.DefaultTenant)
 	if err != nil {
 		errMsg := "fail to list user-role"
-		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: failStatus(commonpb.ErrorCode_ListPolicyFailure, "fail to list user-role"),
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 
-	logger.Debug(method + " success")
+	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &internalpb.ListPolicyResponse{

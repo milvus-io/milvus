@@ -58,6 +58,16 @@ func (s *ErrSuite) TestStatus() {
 	s.Nil(Error(&commonpb.Status{}))
 }
 
+func (s *ErrSuite) TestStatusWithCode() {
+	err := WrapErrCollectionNotFound(1)
+	status := StatusWithErrorCode(err, commonpb.ErrorCode_CollectionNotExists)
+	restoredErr := Error(status)
+
+	s.ErrorIs(err, restoredErr)
+	s.Equal(commonpb.ErrorCode_CollectionNotExists, status.ErrorCode)
+	s.Equal(int32(0), StatusWithErrorCode(nil, commonpb.ErrorCode_CollectionNotExists).Code)
+}
+
 func (s *ErrSuite) TestWrap() {
 	// Service related
 	s.ErrorIs(WrapErrServiceNotReady("init", "test init..."), ErrServiceNotReady)

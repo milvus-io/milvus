@@ -4276,8 +4276,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 
 	log := log.Ctx(ctx)
 
-	log.Debug("CreateRole",
-		zap.Any("req", req))
+	log.Debug("CreateRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4295,8 +4294,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 
 	result, err := node.rootCoord.CreateRole(ctx, req)
 	if err != nil {
-		log.Error("fail to create role",
-			zap.Error(err))
+		log.Warn("fail to create role", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4331,7 +4329,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	}
 	result, err := node.rootCoord.DropRole(ctx, req)
 	if err != nil {
-		log.Error("fail to drop role",
+		log.Warn("fail to drop role",
 			zap.String("role_name", req.RoleName),
 			zap.Error(err))
 		return &commonpb.Status{
@@ -4348,8 +4346,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 
 	log := log.Ctx(ctx)
 
-	log.Debug("OperateUserRole",
-		zap.Any("req", req))
+	log.Debug("OperateUserRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4368,8 +4365,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 
 	result, err := node.rootCoord.OperateUserRole(ctx, req)
 	if err != nil {
-		logger.Error("fail to operate user role",
-			zap.Error(err))
+		log.Warn("fail to operate user role", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4402,8 +4398,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 
 	result, err := node.rootCoord.SelectRole(ctx, req)
 	if err != nil {
-		log.Error("fail to select role",
-			zap.Error(err))
+		log.Warn("fail to select role", zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4420,14 +4415,14 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 	log := log.Ctx(ctx)
 
-	log.Debug("SelectUser",
-		zap.Any("req", req))
+	log.Debug("SelectUser", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, nil
 	}
 
 	if req.User != nil {
 		if err := ValidateUsername(req.User.Name); err != nil {
+			log.Warn("invalid username", zap.Error(err))
 			return &milvuspb.SelectUserResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_IllegalArgument,
@@ -4439,8 +4434,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 	result, err := node.rootCoord.SelectUser(ctx, req)
 	if err != nil {
-		log.Error("fail to select user",
-			zap.Error(err))
+		log.Warn("fail to select user", zap.Error(err))
 		return &milvuspb.SelectUserResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4502,16 +4496,16 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	}
 	curUser, err := GetCurUserFromContext(ctx)
 	if err != nil {
+		log.Warn("fail to get current user", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+			Reason:    "fail to get current user, please make sure the authorizationEnabled setting in the milvus.yaml is true",
 		}, nil
 	}
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	result, err := node.rootCoord.OperatePrivilege(ctx, req)
 	if err != nil {
-		log.Error("fail to operate privilege",
-			zap.Error(err))
+		log.Warn("fail to operate privilege", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4569,8 +4563,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 
 	result, err := node.rootCoord.SelectGrant(ctx, req)
 	if err != nil {
-		log.Error("fail to select grant",
-			zap.Error(err))
+		log.Warn("fail to select grant", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4590,7 +4583,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	log.Debug("RefreshPrivilegeInfoCache",
 		zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return merr.Status(merr.WrapErrServiceNotReady(code.String())), nil
 	}
 
 	if globalMetaCache != nil {
