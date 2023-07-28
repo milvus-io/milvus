@@ -298,14 +298,7 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 // updateSegmentsMemorySize updates segments' memory size in channel meta
 func (ibNode *insertBufferNode) updateSegmentsMemorySize(seg2Upload []UniqueID) {
 	for _, segID := range seg2Upload {
-		var memorySize int64
-		if buffer, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
-			memorySize += buffer.memorySize()
-		}
-		if buffer, ok := ibNode.channel.getCurDeleteBuffer(segID); ok {
-			memorySize += buffer.GetLogSize()
-		}
-		ibNode.channel.updateSegmentMemorySize(segID, memorySize)
+		ibNode.channel.updateSingleSegmentMemorySize(segID)
 	}
 }
 
@@ -470,19 +463,22 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			zap.Any("position", endPosition),
 			zap.String("channel", ibNode.channelName),
 		)
+		log.Info("insertBufferNode start checking sync tasks")
 		// check if task pool is full
 		if !task.dropped && !task.flushed && ibNode.flushManager.isFull() {
-			log.RatedWarn(10, "task pool is full, skip it")
+			log.Warn("task pool is full, skip it")
 			continue
 		}
 		// check if segment is syncing
+		log.Info("insertBufferNode before getting segment for sync tasks")
 		segment := ibNode.channel.getSegment(task.segmentID)
+		log.Info("insertBufferNode has got segment for sync tasks")
 		if !task.dropped && !task.flushed && segment.isSyncing() {
-			log.RatedInfo(10, "segment is syncing, skip it")
+			log.Info("segment is syncing, skip it")
 			continue
 		}
 		segment.setSyncing(true)
-		log.Info("insertBufferNode syncing BufferData")
+		log.Info("insertBufferNode start syncing bufferData")
 		// use the flushed pk stats to take current stat
 		var pkStats *storage.PrimaryKeyStats
 		// TODO, this has to be async flush, no need to block here.
@@ -519,6 +515,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
 		}
+		log.Info("insertBufferNode finish submitting syncing bufferData")
 	}
 	return segmentsToSync
 }
