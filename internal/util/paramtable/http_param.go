@@ -10,6 +10,7 @@ type HTTPConfig struct {
 	once      sync.Once
 	Enabled   bool
 	DebugMode bool
+	Port      int
 }
 
 // InitOnce initialize HTTPConfig
@@ -24,6 +25,7 @@ func (p *HTTPConfig) init() {
 
 	p.initHTTPEnabled()
 	p.initHTTPDebugMode()
+	p.initPort()
 }
 
 func (p *HTTPConfig) initHTTPEnabled() {
@@ -32,4 +34,8 @@ func (p *HTTPConfig) initHTTPEnabled() {
 
 func (p *HTTPConfig) initHTTPDebugMode() {
 	p.DebugMode = p.ParseBool("proxy.http.debug_mode", false)
+}
+
+func (p *HTTPConfig) initPort() {
+	p.Port = p.ParseIntWithDefault("proxy.http.port", -1)
 }
