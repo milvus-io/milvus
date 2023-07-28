@@ -83,7 +83,7 @@ type Channel interface {
 	setSegmentLastSyncTs(segID UniqueID, ts Timestamp)
 
 	updateSegmentRowNumber(segID UniqueID, numRows int64)
-	updateSegmentMemorySize(segID UniqueID, memorySize int64)
+	updateSingleSegmentMemorySize(segID UniqueID)
 	getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
 
@@ -274,7 +274,7 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 
 	validSegs := make([]*Segment, 0)
 	for _, seg := range c.segments {
-		if !seg.isValid() {
+		if seg.getType() == datapb.SegmentType_Flushed || seg.getType() == datapb.SegmentType_Compacted {
 			continue
 		}
 		validSegs = append(validSegs, seg)
@@ -295,6 +295,10 @@ func (c *ChannelMeta) setSegmentLastSyncTs(segID UniqueID, ts Timestamp) {
 	defer c.segMu.Unlock()
 	if _, ok := c.segments[segID]; ok {
 		c.segments[segID].lastSyncTs = ts
+		tsTime, _ := tsoutil.ParseTS(ts)
+		log.Debug("Set last syncTs for segment", zap.Int64("segmentID", segID), zap.Time("ts", tsTime))
+	} else {
+		log.Warn("Wrong! Try to set lastSync ts for non-existing segment", zap.Int64("segmentID", segID))
 	}
 }
 
@@ -601,14 +605,25 @@ func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
 	log.Warn("update segment num row not exist", zap.Int64("segmentID", segID))
 }
 
-// updateStatistics updates the number of rows of a segment in channel.
-func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) {
+func (c *ChannelMeta) calculateSegmentMemorySize(segID UniqueID) int64 {
+	var memorySize int64
+	if ibf, ok := c.getCurInsertBuffer(segID); ok {
+		memorySize += ibf.memorySize()
+	}
+	if dbf, ok := c.getCurDeleteBuffer(segID); ok {
+		memorySize += dbf.GetMemorySize()
+	}
+	return memorySize
+}
+
+func (c *ChannelMeta) updateSingleSegmentMemorySize(segID UniqueID) {
+	memorySize := c.calculateSegmentMemorySize(segID)
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
-
-	log.Info("updating segment memorySize", zap.Int64("segmentID", segID), zap.Int64("memorySize", memorySize))
+	log.Info("updating segment memorySize", zap.Int64("segmentID", segID),
+		zap.Int64("memorySize", memorySize))
 	seg, ok := c.segments[segID]
-	if ok && seg.notFlushed() {
+	if ok {
 		seg.memorySize = memorySize
 		return
 	}
