@@ -26,7 +26,7 @@ function install_linux_deps() {
   elif [[ -x "$(command -v yum)" ]]; then
       # for CentOS 7
       sudo yum install -y epel-release centos-release-scl-rh && \
-      sudo yum install -y git make lcov libtool m4 autoconf automake ccache openssl-devel zlib-devel libzstd-devel \
+      sudo yum install -y git make lcov libtool m4 autoconf automake ccache zlib-devel libzstd-devel \
           libcurl-devel python3-devel \
           devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
           llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra libuuid-devel pulseaudio-libs-devel 
@@ -49,6 +49,20 @@ function install_linux_deps() {
           ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
           sudo ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
           cd ../ && rm -rf ./boost_1_65_1*
+
+      # The version of openssl 1.0.2 that comes with centos7 is too low, which causes panic when starting milvus
+      # Install openssl 1.1
+      wget --no-check-certificate https://www.openssl.org/source/openssl-1.1.1.tar.gz && \
+          tar zxf openssl-1.1.1.tar.gz && cd openssl-1.1.1 && \
+          ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared && \
+          make -j && sudo make install && \
+          cd ../ && rm -rf openssl-1.1.1 && rm openssl-1.1.1.tar.gz && \
+
+      echo "export LD_LIBRARY_PATH=/usr/local/ssl/lib:$LD_LIBRARY_PATH" | sudo tee -a /etc/profile
+      echo "export PATH=/usr/local/ssl/bin/:$PATH" | sudo tee -a /etc/profile
+      echo "export OPENSSL_ROOT_DIR=/usr/local/ssl/" | sudo tee -a /etc/profile
+      source "/etc/profile"
+
   else
       echo "Error Install Dependencies ..."
       exit 1

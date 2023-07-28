@@ -13,7 +13,7 @@ FROM milvusdb/openblas:centos7-20210706
 
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
     wget -qO- "https://cmake.org/files/v3.18/cmake-3.18.6-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
-    yum install -y git make automake openssl-devel zlib-devel  libzstd-devel\
+    yum install -y git make automake zlib-devel libzstd-devel \
       libcurl-devel python3-devel \
       devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
       llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
@@ -42,6 +42,18 @@ RUN source /etc/profile.d/devtoolset-7.sh && \
     cd ../ && rm -rf ./boost_1_65_1*
 
 ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
+
+# Install openssl
+RUN wget --no-check-certificate https://www.openssl.org/source/openssl-1.1.1.tar.gz  && \
+    tar zxf openssl-1.1.1.tar.gz && cd openssl-1.1.1 && \
+    ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared && \
+    make -j && make install && \
+    cd ../ && rm -rf openssl-1.1.1 && rm openssl-1.1.1.tar.gz && \
+    echo "export OPENSSL_ROOT_DIR=/usr/local/ssl/" >> /etc/profile
+
+ENV LD_LIBRARY_PATH="/usr/local/ssl/lib":$LD_LIBRARY_PATH
+ENV PATH="/usr/local/ssl/bin/":$PATH
+ENV OPENSSL_ROOT_DIR="/usr/local/ssl/"
 
 # Install Go
 ENV GOPATH /go
