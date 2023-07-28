@@ -146,6 +146,7 @@ class TestCreateCollection(TestBase):
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
 
+    @pytest.mark.skip(reason="not enable auth")
     def test_create_collections_with_invalid_api_key(self):
         """
         target: test create collection with invalid api key(wrong username and password)
@@ -161,7 +162,7 @@ class TestCreateCollection(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     @pytest.mark.parametrize("name", [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"])
     def test_create_collections_with_invalid_collection_name(self, name):
@@ -208,6 +209,7 @@ class TestListCollections(TestBase):
         for name in name_list:
             assert name in all_collections
 
+    @pytest.mark.skip(reason="not enable auth")
     def test_list_collections_with_invalid_api_key(self):
         """
         target: test list collection with an invalid api key
@@ -231,7 +233,7 @@ class TestListCollections(TestBase):
         client = self.collection_client
         client.api_key = "illegal_api_key"
         rsp = client.collection_list()
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
 
 @pytest.mark.L0
@@ -262,6 +264,7 @@ class TestDescribeCollection(TestBase):
         assert rsp['data']['collectionName'] == name
         assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
+    @pytest.mark.skip(reason="not enable auth")
     def test_describe_collections_with_invalid_api_key(self):
         """
         target: test describe collection with invalid api key
@@ -284,7 +287,7 @@ class TestDescribeCollection(TestBase):
         # describe collection
         illegal_client = CollectionClient(self.url, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
 
     def test_describe_collections_with_invalid_collection_name(self):
         """
@@ -348,6 +351,7 @@ class TestDropCollection(TestBase):
         for name in clo_list:
             assert name not in all_collections
 
+    @pytest.mark.skip(reason="not enable auth")
     def test_drop_collections_with_invalid_api_key(self):
         """
         target: test drop collection with invalid api key
@@ -373,7 +377,7 @@ class TestDropCollection(TestBase):
         }
         illegal_client = CollectionClient(self.url, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
-        assert rsp['code'] == 1800
+        assert rsp['code'] == 200
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
