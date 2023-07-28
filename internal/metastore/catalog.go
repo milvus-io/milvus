@@ -112,8 +112,6 @@ type DataCoordCatalog interface {
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
-	// AlterSegmentsAndAddNewSegment for transaction
-	AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
@@ -129,31 +127,15 @@ type DataCoordCatalog interface {
 
 	CreateIndex(ctx context.Context, index *model.Index) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
-	AlterIndex(ctx context.Context, newIndex *model.Index) error
 	AlterIndexes(ctx context.Context, newIndexes []*model.Index) error
 	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
 
 	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
 	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
-	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
-}
-
-type IndexCoordCatalog interface {
-	CreateIndex(ctx context.Context, index *model.Index) error
-	ListIndexes(ctx context.Context) ([]*model.Index, error)
-	AlterIndex(ctx context.Context, newIndex *model.Index) error
-	AlterIndexes(ctx context.Context, newIndexes []*model.Index) error
-	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
-
-	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
-	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
-	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
-	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
-	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {
