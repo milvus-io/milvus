@@ -156,7 +156,7 @@ rootCoord:
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
   importTaskRetention: 86400 # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).
-  enableActiveStandby: false
+  enableActiveStandby: true 
   port: 53100
   grpc:
     serverMaxSendSize: 536870912
@@ -222,7 +222,7 @@ queryCoord:
     clientMaxRecvSize: 268435456
   taskMergeCap: 1
   taskExecutionCap: 256
-  enableActiveStandby: false # Enable active-standby
+  enableActiveStandby: true # Enable active-standby
   brokerTimeout: 5000 # broker rpc timeout in milliseconds
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
@@ -355,7 +355,7 @@ dataCoord:
     interval: 3600 # gc interval in seconds
     missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
-  enableActiveStandby: false
+  enableActiveStandby: true 
   port: 13333
   grpc:
     serverMaxSendSize: 536870912

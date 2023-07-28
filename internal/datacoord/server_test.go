@@ -77,6 +77,8 @@ func TestMain(m *testing.M) {
 
 	paramtable.Init()
 	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
+	// disable active stand-by for ut
+	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
 
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())

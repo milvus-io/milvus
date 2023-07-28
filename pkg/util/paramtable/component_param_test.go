@@ -142,7 +142,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex.GetAsInt64())
 		assert.NotEqual(t, Params.ImportTaskExpiration.GetAsFloat(), 0)
 		t.Logf("master ImportTaskRetention = %f", Params.ImportTaskRetention.GetAsFloat())
-		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
+		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), true)
 		t.Logf("rootCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
 		SetCreateTime(time.Now())
@@ -253,7 +253,7 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
 		Params := params.QueryCoordCfg
-		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
+		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), true)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
 		params.Save("queryCoord.NextTargetSurviveTime", "100")
@@ -364,7 +364,7 @@ func TestComponentParam(t *testing.T) {
 		Params := params.DataCoordCfg
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
-		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
+		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), true)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 	})
 

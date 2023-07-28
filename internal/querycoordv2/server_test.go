@@ -67,6 +67,8 @@ type ServerSuite struct {
 func (suite *ServerSuite) SetupSuite() {
 	Params.Init()
 	params.GenerateEtcdConfig()
+	// set active stand-by to false for ut
+	Params.Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "false")
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{
@@ -274,7 +276,9 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Initializing, suite.server.State())
+
 	suite.hackServer()
+
 	err = suite.server.Start()
 	suite.NoError(err)
 	err = suite.server.Register()

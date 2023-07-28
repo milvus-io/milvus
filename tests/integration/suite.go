@@ -65,6 +65,7 @@ type MiniClusterSuite struct {
 }
 
 func (s *MiniClusterSuite) SetupSuite() {
+	paramtable.Get().Init()
 	rand.Seed(time.Now().UnixNano())
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
@@ -75,6 +76,10 @@ func (s *MiniClusterSuite) TearDownSuite() {
 
 func (s *MiniClusterSuite) SetupTest() {
 	s.T().Log("Setup test...")
+
+	paramtable.Get().Save(paramtable.Get().RootCoordCfg.EnableActiveStandby.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableActiveStandby.Key, "false")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableActiveStandby.Key, "false")
 	// setup mini cluster to use embed etcd
 	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
 	val := strings.Join(endpoints, ",")

@@ -859,7 +859,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.EnableActiveStandby = ParamItem{
 		Key:          "rootCoord.enableActiveStandby",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
@@ -1433,7 +1433,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.EnableActiveStandby = ParamItem{
 		Key:          "queryCoord.enableActiveStandby",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
@@ -2284,7 +2284,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
